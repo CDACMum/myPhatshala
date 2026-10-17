@@ -51,7 +51,7 @@ def main(src, root):
     assert 'id="scenarios"' in body and body.count('class="part"') == 9, 'needs 9 parts + scenarios'
 
     course, mod, les = meta['course'], meta['module'], meta['lesson']
-    url = f"https://myphatshala.com/courses/{course}/{mod}/{les}/"
+    url = f"https://myphatshala.in/courses/{course}/{mod}/{les}/"
     e = html.escape
     ld = json.dumps({"@context":"https://schema.org","@type":"LearningResource","name":meta['title'],"learningResourceType":"Lesson",
         "educationalLevel":meta.get('level','Beginner'),"isAccessibleForFree":True,"inLanguage":"en",

@@ -133,7 +133,7 @@ class Anim:
         <span class="view__tag">{self.tag}</span>
         <svg viewBox="0 0 {self.w} {self.h}" role="img" aria-label="{_h.escape(self.label)}">
 {body}
-          <text x="{self.w - 6}" y="{self.h - 5}" text-anchor="end" class="s-wm">myphatshala.com</text>
+          <text x="{self.w - 6}" y="{self.h - 5}" text-anchor="end" class="s-wm">myphatshala.in</text>
         </svg>
         <ol class="caps" hidden>
 {caps}
@@ -156,7 +156,7 @@ def two_view(title, see, behind):
         <span class="view__tag">{tag}</span>
         <svg viewBox="0 0 {a.w} {a.h}" role="img" aria-label="{_h.escape(a.label)}">
 {body}
-          <text x="{a.w - 6}" y="{a.h - 5}" text-anchor="end" class="s-wm">myphatshala.com</text>
+          <text x="{a.w - 6}" y="{a.h - 5}" text-anchor="end" class="s-wm">myphatshala.in</text>
         </svg>
         <ol class="caps" hidden>
 {caps}

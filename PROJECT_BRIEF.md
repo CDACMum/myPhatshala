@@ -17,7 +17,7 @@ GeeksforGeeks / W3Schools / TutorialsPoint / DataFlair, but with a distinct teac
 | Login / accounts | **None.** All content is free and open. |
 | Money | **Google AdSense only.** No premium tier, no Razorpay, no paid content. |
 | Ad slots | `<div class="ad-slot" data-slot="top|mid|side|bottom">`, filled by `assets/js/ads.js` from `assets/js/config.js`. Grey placeholders on localhost; hidden on the live site until an AdSense ID is set. |
-| Watermark | Faint tiled "MyPhatshala" over every page (`body.has-watermark::after`) plus "myphatshala.com" text inside every SVG. Must stay readable. |
+| Watermark | Faint tiled "MyPhatshala" over every page (`body.has-watermark::after`) plus "myphatshala.in" text inside every SVG. Must stay readable. |
 | Code running | **Sandboxed. Nothing runs on our server.** Java uses the **OneCompiler embed** iframe, loaded only on click and filled via `postMessage({eventType:'populateCode'…})`. Docs: https://onecompiler.com/apis/embed-editor. Swappable later (CheerpJ, Pyodide for Python). |
 | Tech stack | Plain HTML + CSS + vanilla JS. No framework, no database, no npm dependencies. Node.js is only used for the build script. |
 | Hosting plan | GitHub repo → Cloudflare Pages (free). Build command `node tools/build-manifest.js`, output `/`. |
