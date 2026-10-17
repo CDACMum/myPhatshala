@@ -1,0 +1,395 @@
+<!--META {
+"course": "core-java", "module": "10-core-classes", "lesson": "02-autoboxing",
+"title": "Autoboxing and unboxing", "courseTitle": "Core Java", "number": "10.2",
+"track": "#E8772E", "trackId": "programming", "trackTitle": "Programming Languages", "level": "Intermediate",
+"minutes": 18,
+"description": "Autoboxing and unboxing in Java: how the compiler converts int to Integer and back for you, what javac really writes (valueOf and intValue, checked with javap), the NullPointerException when unboxing null, == between wrappers, list.remove(int) vs remove(Object), overloading rules, and the cost of boxing in loops. With animations, a JVM tracer, {{NPROB}} practice problems, quiz and interview scenarios.",
+"ogTitle": "Autoboxing: the conversion you don't see",
+"ogDescription": "See javac insert valueOf() and intValue() for you, catch the null-unboxing crash, and solve {{NPROB}} problems.",
+"lead": "In the last lesson you wrote <code>Integer.valueOf(85)</code> and <code>m.intValue()</code> by hand. Since Java 5 you rarely need to: the compiler does it for you. This is <b>autoboxing</b> (primitive → wrapper) and <b>unboxing</b> (wrapper → primitive). It makes code shorter, but it hides method calls, and hidden calls can throw <code>NullPointerException</code> or create millions of objects. You'll learn exactly what javac writes and where the traps are.",
+"chips": ["Module 10 · Core Classes", "⏱ 18 min", "Intermediate", "{{NPROB}} practice problems"]
+} META-->
+<part n="1" id="story" label="The story">
+  <h2>The line that crashed with no object in sight</h2>
+  <div class="story">
+    <p class="narration">Riya's canteen app keeps stock in a <code>HashMap&lt;String, Integer&gt;</code>. Adding items works beautifully: <code>stock.put("samosa", 40)</code>. Then a customer orders a “vada pav”, which was never added, and the app crashes on a line that has no dot and no object.</p>
+    <div class="scene">
+      <svg viewBox="0 0 640 170" role="img" aria-label="int left = stock.get(item) - 1 crashes with NullPointerException because get returned null and the hidden intValue call fails">
+        <g font-size="10.5">
+          <rect x="14" y="14" width="300" height="80" rx="10" class="s-board"/>
+          <text x="26" y="38" class="mono s-chalk">stock.put("samosa", 40);</text>
+          <text x="26" y="58" class="mono s-chalk">int left = stock.get(item) - 1;</text>
+          <text x="26" y="80" class="mono s-kw">// item = "vada pav"</text>
+          <rect x="14" y="104" width="300" height="52" rx="10" class="s-soft-acc" style="stroke:var(--red)"/>
+          <text x="26" y="124" font-weight="700" class="s-red">NullPointerException</text>
+          <text x="26" y="142" class="s-ink2">Cannot invoke "Integer.intValue()"</text>
+          <path d="M330 56h40" style="stroke:var(--track);stroke-width:2"/><path d="M364 51l6 5-6 5" style="stroke:var(--track);stroke-width:2;fill:none"/>
+          <rect x="384" y="14" width="242" height="142" rx="12" class="s-card2"/>
+          <text x="398" y="36" font-weight="700" class="s-ink">What javac actually wrote</text>
+          <text x="398" y="62" class="mono s-ink">stock.get(item)</text><text x="520" y="62" class="s-ink2">→ null</text>
+          <text x="398" y="86" class="mono s-kw">.intValue()</text><text x="490" y="86" class="s-red" font-weight="700">← hidden call</text>
+          <text x="398" y="112" class="mono s-ink">- 1</text>
+          <text x="398" y="140" class="s-ink2">You never typed intValue().</text>
+        </g>
+        <text x="632" y="166" text-anchor="end" class="s-wm">myphatshala.com</text>
+      </svg>
+    </div>
+    <riya>Sir, a NullPointerException needs something like <code>obj.method()</code> on null. My line is just <code>stock.get(item) - 1</code>!</riya>
+    <arjun>The method call is there; you just can't see it. <code>get</code> returns an <code>Integer</code>. To subtract 1, Java needs an <code>int</code>, so the compiler quietly writes <code>.intValue()</code> for you. That's <b>unboxing</b>.</arjun>
+    <riya>And “vada pav” isn't in the map, so <code>get</code> returned null…</riya>
+    <arjun>…and the hidden <code>null.intValue()</code> blew up. The same trick runs the other way too: when you wrote <code>put("samosa", 40)</code>, javac turned 40 into <code>Integer.valueOf(40)</code>. That's <b>autoboxing</b>. Today we'll make the invisible calls visible.</arjun>
+  </div>
+</part>
+
+<part n="2" id="definition" label="Definition">
+  <h2>What are autoboxing and unboxing?</h2>
+  <div class="def">
+    <div class="def__formal"><small>Formal definition (write this in exams)</small>
+      <p><b>Autoboxing</b> is the automatic conversion, done by the compiler, of a primitive value into an object of its corresponding wrapper class (for example <code>int</code> → <code>Integer</code>), when an object is expected. <b>Unboxing</b> is the reverse: the automatic conversion of a wrapper object into its primitive value when a primitive is expected. Introduced in Java 5, the compiler implements them with calls such as <code>Integer.valueOf(int)</code> and <code>Integer.intValue()</code>. Unboxing a <code>null</code> reference throws <code>NullPointerException</code>.</p></div>
+    <div class="def__simple"><small>In simple words</small>
+      <p>You write <code>Integer x = 5;</code> and <code>int y = x;</code>, and the compiler adds the conversion code for you. Convenient, but the conversion is still a real method call.</p></div>
+  </div>
+  <h3>Words you'll meet in this lesson</h3>
+  <div class="terms">
+    <div class="term"><b>Autoboxing</b><span>Compiler wraps a primitive: <code>Integer x = 5;</code> becomes <code>Integer.valueOf(5)</code>.</span></div>
+    <div class="term"><b>Unboxing</b><span>Compiler unwraps: <code>int y = x;</code> becomes <code>x.intValue()</code>.</span></div>
+    <div class="term"><b>Syntactic sugar</b><span>A shortcut in the language that the compiler expands into longer code.</span></div>
+    <div class="term"><b>javap -c</b><span>A JDK tool that prints the bytecode inside a .class file, so you can see the hidden calls.</span></div>
+    <div class="term"><b>Overload resolution</b><span>How javac picks between methods with the same name (Lesson 5.4). Boxing is its <i>second</i> choice.</span></div>
+  </div>
+  <h3>Where it happens</h3>
+  <table class="facts">
+    <tr><th>Assigning</th><td><code>Integer a = 10;</code> (boxing) · <code>int b = a;</code> (unboxing)</td></tr>
+    <tr><th>Passing arguments</th><td><code>list.add(7)</code> boxes 7 because <code>add</code> takes an <code>Integer</code></td></tr>
+    <tr><th>Returning</th><td>A method returning <code>Integer</code> may <code>return 0;</code></td></tr>
+    <tr><th>Arithmetic and comparison</th><td><code>a + 1</code>, <code>a &gt; 5</code>, <code>a++</code> unbox first (and <code>a++</code> boxes the result again)</td></tr>
+    <tr><th>Conditions</th><td><code>Boolean ok = true; if (ok) …</code> unboxes with <code>booleanValue()</code></td></tr>
+  </table>
+  <exam><b>Exam tip:</b> autoboxing only goes to the <b>matching</b> wrapper: <code>int</code> → <code>Integer</code>, never <code>int</code> → <code>Long</code>. <code>Long l = 5;</code> is a compile error (<i>int cannot be converted to Long</i>); write <code>Long l = 5L;</code>.</exam>
+</part>
+
+{{AD}}
+
+<part n="3" id="types" label="Types and ways to use it">
+  <h2>Boxing, unboxing, and what javac writes</h2>
+  <div class="cards">
+    <div class="card"><svg class="ic" viewBox="0 0 40 40" fill="none" stroke="var(--track)" stroke-width="2"><rect x="18" y="10" width="18" height="20" rx="3"/><path d="M4 20h12M12 16l4 4-4 4"/></svg><h4>Autoboxing</h4><p>Primitive in, object out. <code>Integer x = 5;</code> → <code>Integer.valueOf(5)</code>.</p><span class="tag">int → Integer</span></div>
+    <div class="card"><svg class="ic" viewBox="0 0 40 40" fill="none" stroke="var(--green)" stroke-width="2"><rect x="4" y="10" width="18" height="20" rx="3"/><path d="M24 20h12M32 16l4 4-4 4"/></svg><h4>Unboxing</h4><p>Object in, primitive out. <code>int y = x;</code> → <code>x.intValue()</code>.</p><span class="tag">Integer → int</span></div>
+    <div class="card"><svg class="ic" viewBox="0 0 40 40" fill="none" stroke="var(--blue)" stroke-width="2"><path d="M8 28a12 12 0 1 1 24 0"/><path d="M20 12v4M10 20h4M26 20h4"/></svg><h4>Both in one line</h4><p><code>x++</code> or <code>x += 1</code> on an Integer: unbox, add, box a <b>new</b> object.</p><span class="tag">read-modify-write</span></div>
+  </div>
+  <h3>The same code, written two ways</h3>
+  <div class="code" data-lang="java" data-file="Main.java"><pre><code>import java.util.ArrayList;
+
+public class Main {
+    public static void main(String[] args) {
+        ArrayList&lt;Integer&gt; marks = new ArrayList&lt;&gt;();
+
+        // What you write (Java 5+)
+        marks.add(85);
+        int first = marks.get(0);
+
+        // What javac writes for you
+        marks.add(Integer.valueOf(92));
+        int second = marks.get(1).intValue();
+
+        System.out.println(marks + " " + (first + second));
+    }
+}</code></pre><div class="output">[85, 92] 177</div></div>
+  <h3>Proof: the bytecode</h3>
+  <p>Compile this tiny class and run <code>javap -c B</code> to see the instructions inside <code>B.class</code>:</p>
+  <div class="code" data-lang="java" data-file="B.java" data-run="skip"><pre><code>public class B {
+    public static void main(String[] args) {
+        Integer count = 5;
+        int n = count;
+        count++;
+    }
+}</code></pre></div>
+  <div class="code" data-lang="bash" data-file="javap -c B (main only, JDK 21)"><pre><code> 0: iconst_5
+ 1: invokestatic  #7   // Method java/lang/Integer.valueOf:(I)Ljava/lang/Integer;   ← Integer count = 5
+ 4: astore_1
+ 5: aload_1
+ 6: invokevirtual #13  // Method java/lang/Integer.intValue:()I                    ← int n = count
+ 9: istore_2
+10: aload_1
+11: astore_3
+12: aload_1
+13: invokevirtual #13  // Method java/lang/Integer.intValue:()I                    ← count++ : unbox
+16: iconst_1
+17: iadd                                                                             ←           add 1
+18: invokestatic  #7   // Method java/lang/Integer.valueOf:(I)Ljava/lang/Integer;   ←           box again
+21: astore_1
+22: aload_3
+23: pop
+24: return</code></pre></div>
+  <p>There is no special “autobox” instruction. It's ordinary method calls that the compiler inserted, and because it uses <code>valueOf</code>, the Integer cache from Lesson 10.1 still applies.</p>
+
+  <h3>Trap 1: unboxing null</h3>
+  <div class="code" data-lang="java" data-file="Main.java"><pre><code>import java.util.HashMap;
+
+public class Main {
+    public static void main(String[] args) {
+        HashMap&lt;String, Integer&gt; stock = new HashMap&lt;&gt;();
+        stock.put("samosa", 40);
+
+        Integer v = stock.get("vada pav");        // null: not in the map
+        System.out.println(v);                    // printing null is fine
+        int safe = (v == null) ? 0 : v;           // check before unboxing
+        System.out.println(safe);
+        System.out.println(stock.getOrDefault("vada pav", 0));
+        // int boom = stock.get("vada pav");      // NullPointerException
+    }
+}</code></pre><div class="output">null
+0
+0</div></div>
+  <div class="code" data-lang="bash" data-file="If you uncomment the last line (javac -g)"><pre><code>Exception in thread "main" java.lang.NullPointerException: Cannot invoke "java.lang.Integer.intValue()" because the return value of "java.util.HashMap.get(Object)" is null</code></pre></div>
+
+  <h3>Trap 2: <code>==</code> between two wrappers</h3>
+  <div class="code" data-lang="java" data-file="Main.java"><pre><code>public class Main {
+    public static void main(String[] args) {
+        Integer a = 1000, b = 1000;   // autoboxing uses valueOf: two objects
+        int p = 1000;
+
+        System.out.println(a == b);   // compares references
+        System.out.println(a == p);   // one side is int, so a is unboxed
+        System.out.println(a.equals(b));
+    }
+}</code></pre><div class="output">false
+true
+true</div></div>
+
+  <h3>Trap 3: <code>remove(1)</code> on a list of Integers</h3>
+  <div class="code" data-lang="java" data-file="Main.java"><pre><code>import java.util.ArrayList;
+import java.util.List;
+
+public class Main {
+    public static void main(String[] args) {
+        List&lt;Integer&gt; ids = new ArrayList&lt;&gt;(List.of(10, 20, 30));
+
+        ids.remove(1);                    // remove(int index): removes 20
+        System.out.println(ids);
+
+        ids.remove(Integer.valueOf(10));  // remove(Object): removes the value 10
+        System.out.println(ids);
+    }
+}</code></pre><div class="output">[10, 30]
+[30]</div></div>
+  <p>javac prefers a method that needs <b>no boxing</b>, so <code>remove(1)</code> picks <code>remove(int index)</code>. Overload resolution tries, in order: exact match or widening, then boxing/unboxing, then varargs.</p>
+  <tip><b>Rule of thumb:</b> let autoboxing make collection code readable, but keep calculations in primitives, and treat every unboxing of a value that <i>might</i> be null (map lookups, database fields, method results) as a place to check for null first.</tip>
+</part>
+
+<part n="4" id="steps" label="Step by step">
+  <h2>How javac handles <code>total += price</code> with wrappers</h2>
+  <ol class="stepper">
+    <li><h4>javac sees the types</h4>
+      <div class="code" data-lang="java" data-file="Main.java"><pre><code>Integer total = 0;
+Integer price = 250;
+total += price;</code></pre></div>
+      <span class="behind">Both are <code>Integer</code>. The <code>+</code> operator works only on primitives (or Strings), so javac plans conversions.</span></li>
+    <li><h4>Box the literals</h4>
+      <span class="behind"><code>Integer total = 0;</code> becomes <code>Integer.valueOf(0)</code>, and 250 becomes <code>Integer.valueOf(250)</code>. 0 comes from the cache; 250 is a new object.</span></li>
+    <li><h4>Unbox both operands</h4>
+      <span class="behind"><code>total.intValue()</code> and <code>price.intValue()</code> copy 0 and 250 onto the operand stack. If either variable were null, this is where the <code>NullPointerException</code> would happen.</span></li>
+    <li><h4>Add as ints</h4>
+      <span class="behind">An ordinary <code>iadd</code> instruction: 0 + 250 = 250, a primitive result.</span></li>
+    <li><h4>Box the result into a new object</h4>
+      <span class="behind"><code>Integer.valueOf(250)</code> creates another Integer object (250 is outside the cache), and <code>total</code> now points to it. The old object holding 0 is untouched: wrappers are immutable. In a loop that runs a million times, that's up to a million new objects.</span></li>
+  </ol>
+</part>
+
+<part n="5" id="animation" label="See it happen">
+  <h2>Boxing in, unboxing out: both views</h2>
+  <p>Left: the code you write. Right: the calls javac inserted, and what they do to the stack and heap.</p>
+  {{ANIM}}
+</part>
+
+<part n="6" id="real-world" label="Real-world use">
+  <h2>Autoboxing in real systems</h2>
+  <p>Every time Java code puts numbers into collections, maps, streams or generic APIs, autoboxing is at work. Most of the time that's fine; a few places need care.</p>
+  {{ANIM2}}
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="14" y="18" width="92" height="54" rx="6" class="s-card" style="stroke:var(--line)"/><text x="22" y="38" font-size="9" class="mono s-ink">"samosa" → 40</text><text x="22" y="56" font-size="9" class="mono s-ink">"chai"   → 75</text></svg></div>
+    <div><h4>1. Counting with maps</h4><p>Inventory, word counts, votes and page views are kept in <code>Map&lt;String, Integer&gt;</code>. Code like <code>map.put(k, map.getOrDefault(k, 0) + 1)</code> unboxes, adds and boxes on every update.</p>
+      <div class="uc-flow"><span>getOrDefault</span><i>→</i><span class="java">unbox + 1 + box</span><i>→</i><span>put back</span></div></div>
+  </div>
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="20" y="22" width="80" height="46" rx="6" class="s-card" style="stroke:var(--line)"/><text x="60" y="42" text-anchor="middle" font-size="9" class="mono s-ink">discount</text><text x="60" y="58" text-anchor="middle" font-size="9" class="mono s-kw">NULL</text></svg></div>
+    <div><h4>2. Nullable database columns</h4><p>Entity classes map optional columns to <code>Integer</code> or <code>Double</code> fields. A business rule written as <code>int d = order.getDiscount();</code> crashes on the first order without a discount.</p>
+      <div class="uc-flow"><span>NULL column</span><i>→</i><span class="java">Integer field = null</span><i>→</i><span>check before unboxing</span></div></div>
+  </div>
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><path d="M14 70L40 40l18 14 22-30 26 20" style="stroke:var(--track);stroke-width:2;fill:none"/><text x="60" y="84" text-anchor="middle" font-size="9" class="s-ink2">millions of points</text></svg></div>
+    <div><h4>3. High-volume analytics</h4><p>Summing sensor readings or transaction amounts in a <code>Long</code> or a <code>List&lt;Double&gt;</code> creates an object per value. Performance-sensitive code uses <code>long</code>, arrays, or primitive streams like <code>IntStream</code> (Lesson 14.3).</p>
+      <div class="uc-flow"><span>Hot loop</span><i>→</i><span class="java">primitives, not wrappers</span><i>→</i><span>less garbage</span></div></div>
+  </div>
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="14" y="26" width="40" height="36" rx="6" class="s-soft-blue" style="stroke:var(--blue)"/><rect x="66" y="26" width="40" height="36" rx="6" class="s-soft-green" style="stroke:var(--green)"/><text x="34" y="48" text-anchor="middle" font-size="9" class="mono s-ink">id</text><text x="86" y="48" text-anchor="middle" font-size="9" class="mono s-ink">id</text><text x="60" y="80" text-anchor="middle" font-size="10" class="s-red" font-weight="700">==</text></svg></div>
+    <div><h4>4. Comparing IDs</h4><p>Code that compares <code>Integer</code> or <code>Long</code> IDs with <code>==</code> passes tests with small IDs and fails in production with large ones. Teams use <code>Objects.equals</code> and code-review rules to catch it.</p>
+      <div class="uc-flow"><span>Long id1, id2</span><i>→</i><span class="java">Objects.equals(id1, id2)</span><i>→</i><span>safe comparison</span></div></div>
+  </div>
+  <p class="muted">Examples are simplified. Frameworks and libraries add their own conversion layers on top.</p>
+</part>
+
+{{AD}}
+
+<part n="7" id="run" label="Run the code">
+  <h2>A canteen stock counter</h2>
+  <div class="code" data-lang="java" data-file="Main.java"><pre><code>import java.util.HashMap;
+
+public class Main {
+    static HashMap&lt;String, Integer&gt; stock = new HashMap&lt;&gt;();
+
+    static String sell(String item, int qty) {
+        Integer have = stock.get(item);           // may be null
+        if (have == null) {
+            return item + ": not on the menu";
+        }
+        if (have &lt; qty) {                         // unboxing for &lt;
+            return item + ": only " + have + " left";
+        }
+        stock.put(item, have - qty);              // unbox, subtract, box
+        return item + ": sold " + qty + ", left " + stock.get(item);
+    }
+
+    public static void main(String[] args) {
+        stock.put("samosa", 40);                  // 40 is autoboxed
+        stock.put("chai", 75);
+        System.out.println(sell("samosa", 5));
+        System.out.println(sell("chai", 80));
+        System.out.println(sell("vada pav", 2));
+    }
+}</code></pre><div class="output">samosa: sold 5, left 35
+chai: only 75 left
+vada pav: not on the menu</div></div>
+  <ul class="anno">
+    <li><code>stock.put("samosa", 40)</code><span>Autoboxing: javac writes <code>Integer.valueOf(40)</code>.</span></li>
+    <li><code>Integer have = stock.get(item)</code><span>Kept as <code>Integer</code> on purpose, so it can hold null.</span></li>
+    <li><code>have &lt; qty</code><span>Unboxing: <code>have.intValue() &lt; qty</code>. Safe, because null was ruled out above.</span></li>
+    <li><code>have - qty</code><span>Unbox, subtract as ints, box the result for <code>put</code>.</span></li>
+  </ul>
+  <div class="runner">
+    <script type="application/json">{
+      "lang": "java", "file": "Main.java",
+      "tasks": [
+        { "label": "1 · Stock counter", "hint": "Press <b>Run</b>. Then add a method <code>restock(String item, int qty)</code> that adds to the stock, starting from 0 if the item is new (try <code>getOrDefault</code>).",
+          "code": "import java.util.HashMap;\n\npublic class Main {\n    static HashMap<String, Integer> stock = new HashMap<>();\n\n    static String sell(String item, int qty) {\n        Integer have = stock.get(item);\n        if (have == null) {\n            return item + \": not on the menu\";\n        }\n        if (have < qty) {\n            return item + \": only \" + have + \" left\";\n        }\n        stock.put(item, have - qty);\n        return item + \": sold \" + qty + \", left \" + stock.get(item);\n    }\n\n    public static void main(String[] args) {\n        stock.put(\"samosa\", 40);\n        stock.put(\"chai\", 75);\n        System.out.println(sell(\"samosa\", 5));\n        System.out.println(sell(\"chai\", 80));\n        System.out.println(sell(\"vada pav\", 2));\n    }\n}\n" },
+        { "label": "2 · Spot the error: null unboxing", "hint": "It crashes with <code>NullPointerException</code>. Which hidden call failed? Fix it with <code>getOrDefault(item, 0)</code>.",
+          "code": "import java.util.HashMap;\n\npublic class Main {\n    public static void main(String[] args) {\n        HashMap<String, Integer> stock = new HashMap<>();\n        stock.put(\"samosa\", 40);\n        String item = \"vada pav\";\n        int left = stock.get(item) - 1;\n        System.out.println(left);\n    }\n}\n", "_expect": "exception" },
+        { "label": "3 · Predict: == and boxing", "hint": "<b>Predict first:</b> what do the three lines print? Then change 1000 to 100 and predict again.",
+          "code": "public class Main {\n    public static void main(String[] args) {\n        Integer a = 1000, b = 1000;\n        int p = 1000;\n        System.out.println(a == b);\n        System.out.println(a == p);\n        System.out.println(a.equals(b));\n    }\n}\n" },
+        { "label": "4 · Spot the error: int to Long", "hint": "Read the error: autoboxing only goes to the matching wrapper. Fix it with an <code>L</code> suffix.",
+          "code": "public class Main {\n    public static void main(String[] args) {\n        Long phone = 9876543210;\n        Long views = 5;\n        System.out.println(phone + \" \" + views);\n    }\n}\n", "_expect": "compile-error" },
+        { "label": "5 · Predict: remove(1)", "hint": "<b>Predict first:</b> which element does <code>remove(1)</code> delete? Then change it to <code>remove(Integer.valueOf(1))</code>.",
+          "code": "import java.util.ArrayList;\nimport java.util.List;\n\npublic class Main {\n    public static void main(String[] args) {\n        List<Integer> seats = new ArrayList<>(List.of(3, 1, 4, 1, 5));\n        seats.remove(1);\n        System.out.println(seats);\n    }\n}\n" }
+      ]
+    }</script>
+  </div>
+</part>
+
+<part n="8" id="tracer" label="Line by line">
+  <h2>Every <code>+=</code> makes a new object</h2>
+  <p>This trace is recorded from the real JVM. Watch <code>total</code> point to a <b>different</b> Integer object after each addition, while the old ones stay unchanged.</p>
+  {{TRACER}}
+
+{{WORKED}}
+</part>
+
+<part n="9" id="quiz" label="Quiz and revision">
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <script type="application/json">[
+      { "q": "What does javac generate for Integer x = 7; ?", "options": ["new Integer(7)", "Integer.valueOf(7)", "Integer.parseInt(\"7\")", "(Integer) 7 with no call"], "answer": 1, "why": "Autoboxing is compiled to Integer.valueOf, which uses the -128..127 cache." },
+      { "q": "What does javac generate for int y = x; when x is an Integer?", "options": ["x.intValue()", "Integer.valueOf(x)", "(int) x with no call", "x.toString()"], "answer": 0, "why": "Unboxing calls intValue() (doubleValue() for Double, and so on)." },
+      { "q": "Integer v = null; int n = v; what happens?", "options": ["n becomes 0", "Compile error", "NullPointerException at run time", "n becomes -1"], "answer": 2, "why": "The hidden v.intValue() is called on null." },
+      { "q": "Which line does NOT compile?", "options": ["Integer a = 5;", "Long b = 5L;", "Long c = 5;", "Double d = 5.0;"], "answer": 2, "why": "5 is an int; autoboxing only produces Integer, and Integer isn't a Long." },
+      { "q": "List<Integer> l = [10, 20, 30]; l.remove(1); what remains?", "options": ["[20, 30]", "[10, 30]", "[10, 20, 30]", "Error"], "answer": 1, "why": "remove(int index) needs no boxing, so javac picks it: index 1 (value 20) is removed." },
+      { "q": "Integer a = 1000; int p = 1000; what is a == p?", "options": ["true, a is unboxed", "false, different objects", "Compile error", "Depends on the cache"], "answer": 0, "why": "When one operand is a primitive, the wrapper is unboxed and the values are compared." },
+      { "q": "Why can Integer total; total += x; in a big loop be slow?", "options": ["Integer addition is not allowed", "Each += unboxes and boxes a new object", "It uses String concatenation", "It isn't slow"], "answer": 1, "why": "Wrappers are immutable, so each update creates another object (outside the cache)." },
+      { "q": "Overloads f(long) and f(Integer) exist. Which does f(5) call?", "options": ["f(Integer), because of boxing", "f(long), because widening comes before boxing", "Compile error: ambiguous", "Neither"], "answer": 1, "why": "javac first tries methods without boxing (widening int → long is allowed), then boxing, then varargs." }
+    ]</script>
+  </div>
+  <h3>Quick revision</h3>
+  <div class="revision">
+    <h3>Lesson 10.2 in one screen</h3>
+    <ul>
+      <li>Autoboxing: primitive → wrapper, compiled to <code>Integer.valueOf(…)</code>. Unboxing: wrapper → primitive, compiled to <code>intValue()</code> etc.</li>
+      <li>Happens in assignments, arguments, returns, arithmetic, comparisons and conditions. Since Java 5.</li>
+      <li>Only to the matching wrapper: <code>Long l = 5;</code> ✗, <code>Long l = 5L;</code> ✓.</li>
+      <li>Unboxing null → <code>NullPointerException</code>. Watch map lookups and nullable fields; use <code>getOrDefault</code> or a null check.</li>
+      <li><code>wrapper == wrapper</code> compares references; <code>wrapper == primitive</code> unboxes. Use <code>equals</code>.</li>
+      <li>Overloads: exact/widening first, then boxing, then varargs. <code>list.remove(1)</code> removes index 1.</li>
+      <li><code>x++</code> on an Integer creates a new object. Use primitives in loops and sums.</li>
+    </ul>
+  </div>
+  <h3>Interview and viva questions</h3>
+  <div class="faq">
+    <details><summary>What is autoboxing and when was it introduced?</summary><p>Automatic conversion of a primitive to its wrapper (and unboxing for the reverse), done by the compiler, introduced in Java 5 together with generics. The compiler inserts calls like <code>Integer.valueOf</code> and <code>intValue()</code>; the JVM has no special instruction for it.</p></details>
+    <details><summary>Can autoboxing cause a NullPointerException?</summary><p>Unboxing can. If a wrapper reference is null and it's used where a primitive is needed (<code>int n = map.get(k);</code>, <code>total + v</code>, <code>if (flag)</code> with a null <code>Boolean</code>), the hidden <code>intValue()</code>/<code>booleanValue()</code> call throws. Boxing itself never throws.</p></details>
+    <details><summary>Why does Integer a = 127, b = 127; a == b give true but 128 gives false?</summary><p>Autoboxing uses <code>Integer.valueOf</code>, which returns cached objects for -128 to 127. 128 is boxed into two separate objects, and <code>==</code> compares references.</p></details>
+    <details><summary>How does boxing affect method overloading?</summary><p>javac resolves overloads in three phases: (1) without boxing or varargs, allowing widening, (2) with boxing/unboxing, (3) with varargs. So <code>f(5)</code> prefers <code>f(long)</code> over <code>f(Integer)</code>, and <code>list.remove(1)</code> picks <code>remove(int)</code>.</p></details>
+    <details><summary>Is autoboxing bad for performance?</summary><p>Not in normal code. In hot loops or large data it creates many short-lived objects and adds unboxing work. Use primitives, primitive arrays, or <code>IntStream</code>/<code>LongStream</code> there, and measure before optimising.</p></details>
+  </div>
+
+{{PRACTICE}}
+
+  <h3 id="scenarios">Real-world scenario questions (asked in company interviews)</h3>
+  <p class="scn-intro">Autoboxing bugs are favourites in interviews because the code looks correct. Read the line, then ask: where is the hidden call?</p>
+  <div class="scenarios">
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Retail · production bug</span><span class="scn__tag scn__tag--level">Fresher</span></div>
+      <h4>Crash on a new product</h4>
+      <p class="scn__situation">The billing service crashes with <code>NullPointerException</code> at <code>int qty = cart.get(sku) + 1;</code> only when a customer adds a product for the first time. There's no method call on an object in that line. Explain.</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> can you see the hidden unboxing?</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li><code>cart.get(sku)</code> returns <code>Integer</code>. For a new SKU it returns null.</li>
+          <li><code>+ 1</code> needs an int, so javac inserted <code>.intValue()</code>: <code>null.intValue()</code> throws.</li>
+          <li>Fix: <code>cart.getOrDefault(sku, 0) + 1</code>, or better, <code>cart.merge(sku, 1, Integer::sum)</code>.</li>
+          <li>Add a unit test for the first-time-add path.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> wrapping it in <code>try/catch (NullPointerException)</code>. Fix the cause, not the symptom.</p>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Fintech · code review</span><span class="scn__tag scn__tag--level">Junior</span></div>
+      <h4>Duplicate payments slip through</h4>
+      <p class="scn__situation">A duplicate check does <code>if (newTxn.getAmountPaise() == lastTxn.getAmountPaise())</code>, both returning <code>Long</code>. Small test amounts were caught; real ₹500 payments (50000 paise) are not. Why, and what's the fix?</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> wrapper equality and the Long cache.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li><code>Long</code> also caches only -128 to 127. 50000 creates distinct objects, so <code>==</code> is false.</li>
+          <li>Use <code>Objects.equals(a, b)</code>, or <code>long</code> return types if the amount can never be null.</li>
+          <li>Prefer primitives for amounts in domain logic; it removes both the <code>==</code> trap and null unboxing.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> “just increase the cache size”. That hides the bug for some values only.</p>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Analytics · performance</span><span class="scn__tag scn__tag--level">Junior</span></div>
+      <h4>GC pauses in a reporting job</h4>
+      <p class="scn__situation">A nightly job sums 50 million values from a <code>List&lt;Double&gt;</code> into a <code>Double total</code>. GC logs show huge allocation rates. What would you change?</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> awareness of boxing cost at scale.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li><code>Double total</code> boxes a new object on every <code>+=</code>; the list itself holds 50 million Double objects.</li>
+          <li>Use <code>double total</code>, and if possible a <code>double[]</code> or <code>DoubleStream</code> instead of <code>List&lt;Double&gt;</code>.</li>
+          <li>Measure allocation before and after (profiler or GC logs) to prove the improvement.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> tuning GC flags first. Remove the needless objects, then tune.</p>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Platform · API design</span><span class="scn__tag scn__tag--level">Mid</span></div>
+      <h4>Should this method return int or Integer?</h4>
+      <p class="scn__situation">You're designing <code>findDiscountPercent(String couponCode)</code>. Some codes are invalid. A teammate wants it to return <code>Integer</code> and use null for invalid. What do you think?</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> null design and unboxing risk for callers.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>Returning <code>Integer</code> with null invites callers to write <code>int d = findDiscountPercent(c);</code>, which crashes for invalid codes.</li>
+          <li>Better: return <code>OptionalInt</code> (or <code>Optional&lt;Integer&gt;</code>, Lesson 14.4), which forces callers to handle “absent”, or throw a clear exception for invalid codes.</li>
+          <li>If null is kept, document it and name the method to signal it, e.g. <code>discountOrNull</code>.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> returning 0 for invalid codes. A valid “0% discount” and an invalid code become indistinguishable.</p>
+      </div></details>
+    </article>
+  </div>
+</part>

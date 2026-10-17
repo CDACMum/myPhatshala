@@ -1,0 +1,847 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Comparable vs Comparator | MyPhatshala</title>
+<meta name="description" content="Sorting objects in Java: Comparable (compareTo, the natural order inside the class) vs Comparator (compare, any number of orders outside it). How sort calls your method, what negative/zero/positive mean, Comparator.comparing, thenComparing, reversed and nullsFirst, the subtraction overflow bug, consistency with equals, and sorting in TreeSet, TreeMap and PriorityQueue. With animations, a JVM tracer, 8 practice problems, quiz and interview scenarios.">
+<meta name="mp:minutes" content="24">
+<link rel="canonical" href="https://myphatshala.com/courses/core-java/11-collections/08-comparable-comparator/">
+<meta property="og:title" content="Comparable vs Comparator: teaching Java how to sort your objects · MyPhatshala">
+<meta property="og:description" content="Watch sort call your compareTo on the JVM, build multi-level comparators, and solve 8 problems.">
+<link rel="icon" href="../../../../assets/img/logo.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Fraunces:ital,opsz,wght@0,9..144,600;0,9..144,700;1,9..144,600&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../../../../assets/css/style.css">
+<link rel="stylesheet" href="../../../../assets/css/lesson.css">
+<script src="../../../../assets/js/config.js"></script>
+<script>try { const t = localStorage.getItem("mp-theme"); if (t) document.documentElement.dataset.theme = t; } catch (e) {}</script>
+<script type="application/ld+json">{"@context": "https://schema.org", "@type": "LearningResource", "name": "Comparable vs Comparator", "learningResourceType": "Lesson", "educationalLevel": "Intermediate", "isAccessibleForFree": true, "inLanguage": "en", "isPartOf": {"@type": "Course", "name": "Core Java", "provider": {"@type": "Organization", "name": "MyPhatshala"}}}</script>
+</head>
+<body style="--track:#E8772E" data-lesson="11-collections/08-comparable-comparator" data-course-root="../../">
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="site-header">
+  <div class="wrap">
+    <a class="brand" href="../../../../" aria-label="MyPhatshala home"><img src="../../../../assets/img/logo.svg" width="34" height="34" alt=""><span>My<b>Phatshala</b></span></a>
+    <nav class="nav" aria-label="Main">
+      <a href="../../../../#tracks">All courses</a>
+      <a href="../../">Core Java syllabus</a>
+      <button class="theme-btn" id="theme-btn" aria-label="Toggle dark mode"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg></button>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+<section class="lesson-hero">
+  <div class="wrap">
+    <nav class="crumbs" aria-label="Breadcrumb"><a href="../../../../">Home</a><span>›</span><a href="../../../../#track-programming">Programming Languages</a><span>›</span><a href="../../">Core Java</a><span>›</span><b>Lesson 11.8</b></nav>
+    <h1>Comparable vs Comparator</h1>
+    <p class="lead">Java can sort numbers and Strings out of the box, but how should it sort students, orders or trains? You have to tell it. <b>Comparable</b> puts one <i>natural</i> order inside the class (<code>compareTo</code>). <b>Comparator</b> describes extra orders outside it (<code>compare</code>): by marks, by name, by date, highest first, ties broken by roll number. You'll learn both, how sorting algorithms call them, and the small bugs that make sorts go wrong.</p>
+    <div class="lesson-meta"><span>Module 11 · Collections</span><span>⏱ 24 min</span><span>Intermediate</span><span>8 practice problems</span></div>
+  </div>
+</section>
+
+<div class="wrap lesson-layout">
+<article class="lesson-main">
+<!-- ======================= PART 1: THE STORY ======================= -->
+<section class="part" id="story">
+  <span class="part-label"><b>1</b> The story</span>
+  <h2>One class, three rank lists</h2>
+  <div class="story">
+    <p class="narration">The exam cell needs three printouts of the same students: by roll number for the attendance register, by marks (highest first) for the merit list, and by name for the certificate desk. Kabir calls <code>Collections.sort(students)</code> and gets a compile error.</p>
+    <div class="scene">
+      <svg viewBox="0 0 640 170" role="img" aria-label="The same students sorted three ways: by roll number, by marks descending, by name">
+        <g font-size="10.5">
+          <rect x="14" y="14" width="196" height="140" rx="12" class="s-soft-blue" style="stroke:var(--blue)"/>
+          <text x="26" y="36" font-weight="700" class="s-blue">By roll (natural)</text><text x="26" y="52" class="mono s-ink2">Comparable</text>
+          <text x="26" y="78" class="mono s-ink">07 Riya    92</text><text x="26" y="96" class="mono s-ink">12 Kabir   78</text><text x="26" y="114" class="mono s-ink">21 Om      92</text>
+          <rect x="222" y="14" width="196" height="140" rx="12" class="s-soft-acc" style="stroke:var(--track)"/>
+          <text x="234" y="36" font-weight="700" class="s-acc">Merit list</text><text x="234" y="52" class="mono s-ink2">Comparator: marks ↓, roll</text>
+          <text x="234" y="78" class="mono s-ink">07 Riya    92</text><text x="234" y="96" class="mono s-ink">21 Om      92</text><text x="234" y="114" class="mono s-ink">12 Kabir   78</text>
+          <rect x="430" y="14" width="196" height="140" rx="12" class="s-soft-green" style="stroke:var(--green)"/>
+          <text x="442" y="36" font-weight="700" class="s-green">Certificates</text><text x="442" y="52" class="mono s-ink2">Comparator: name</text>
+          <text x="442" y="78" class="mono s-ink">12 Kabir   78</text><text x="442" y="96" class="mono s-ink">21 Om      92</text><text x="442" y="114" class="mono s-ink">07 Riya    92</text>
+        </g>
+        <text x="632" y="166" text-anchor="end" class="s-wm">myphatshala.com</text>
+      </svg>
+    </div>
+    <div class="panel">
+      <div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#FCE6D6"/><path d="M14 64c2-12 9-18 18-18s16 6 18 18z" fill="#2E5AAC"/><circle cx="32" cy="29" r="12" fill="#C68B5E"/><path d="M19 29c0-10 6-15 13-15s13 5 13 15c-3-5-7-8-13-8s-10 3-13 8z" fill="#2A1B14"/><path d="M43 27c3 6 3 14 0 20" stroke="#2A1B14" stroke-width="4" fill="none" stroke-linecap="round"/><circle cx="27.5" cy="30" r="1.5" fill="#2A1B14"/><circle cx="36.5" cy="30" r="1.5" fill="#2A1B14"/><path d="M28 35q4 3 8 0" stroke="#2A1B14" stroke-width="1.6" fill="none" stroke-linecap="round"/><circle cx="32" cy="24" r="1.2" fill="#D64545"/></svg></div>
+      <div class="bubble"><b class="who">Riya</b><p>Sir, Java sorts numbers and names fine. Why can't it sort students?</p></div>
+    </div>
+    <div class="panel panel--right">
+      <div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#DDEFE6"/><path d="M12 64c2-12 10-18 20-18s18 6 20 18z" fill="#F4F1EA"/><path d="M28 46l4 8 4-8" fill="#2F7D5B"/><circle cx="32" cy="28" r="12" fill="#B57A50"/><path d="M20 26c0-8 5-13 12-13s12 5 12 13c-2-3-6-5-12-5s-10 2-12 5z" fill="#5A5A5A"/><path d="M22 32c1 8 5 11 10 11s9-3 10-11c-2 3-6 4-10 4s-8-1-10-4z" fill="#5A5A5A"/><circle cx="27" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><circle cx="37" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><path d="M30.4 29h3.2" stroke="#1B2433" stroke-width="1.4"/><circle cx="27" cy="29" r="1.1" fill="#1B2433"/><circle cx="37" cy="29" r="1.1" fill="#1B2433"/></svg></div>
+      <div class="bubble"><b class="who">Arjun Sir</b><p>Because it doesn't know what “smaller” means for a student. Roll number? Marks? Name? You choose. If one order is the obvious, everyday one, like roll number, put it inside the class by implementing <code>Comparable</code>.</p></div>
+    </div>
+    <div class="panel">
+      <div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#FCE6D6"/><path d="M14 64c2-12 9-18 18-18s16 6 18 18z" fill="#2E5AAC"/><circle cx="32" cy="29" r="12" fill="#C68B5E"/><path d="M19 29c0-10 6-15 13-15s13 5 13 15c-3-5-7-8-13-8s-10 3-13 8z" fill="#2A1B14"/><path d="M43 27c3 6 3 14 0 20" stroke="#2A1B14" stroke-width="4" fill="none" stroke-linecap="round"/><circle cx="27.5" cy="30" r="1.5" fill="#2A1B14"/><circle cx="36.5" cy="30" r="1.5" fill="#2A1B14"/><path d="M28 35q4 3 8 0" stroke="#2A1B14" stroke-width="1.6" fill="none" stroke-linecap="round"/><circle cx="32" cy="24" r="1.2" fill="#D64545"/></svg></div>
+      <div class="bubble"><b class="who">Riya</b><p>And the merit list and certificates?</p></div>
+    </div>
+    <div class="panel panel--right">
+      <div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#DDEFE6"/><path d="M12 64c2-12 10-18 20-18s18 6 20 18z" fill="#F4F1EA"/><path d="M28 46l4 8 4-8" fill="#2F7D5B"/><circle cx="32" cy="28" r="12" fill="#B57A50"/><path d="M20 26c0-8 5-13 12-13s12 5 12 13c-2-3-6-5-12-5s-10 2-12 5z" fill="#5A5A5A"/><path d="M22 32c1 8 5 11 10 11s9-3 10-11c-2 3-6 4-10 4s-8-1-10-4z" fill="#5A5A5A"/><circle cx="27" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><circle cx="37" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><path d="M30.4 29h3.2" stroke="#1B2433" stroke-width="1.4"/><circle cx="27" cy="29" r="1.1" fill="#1B2433"/><circle cx="37" cy="29" r="1.1" fill="#1B2433"/></svg></div>
+      <div class="bubble"><b class="who">Arjun Sir</b><p>Those are extra orders, so write them as <code>Comparator</code>s outside the class and pass them to <code>sort</code>. One class, as many orders as the exam cell wants, and modern Java builds them in one line.</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- ======================= PART 2: DEFINITION ======================= -->
+<section class="part" id="definition">
+  <span class="part-label"><b>2</b> Definition</span>
+  <h2>What are Comparable and Comparator?</h2>
+  <div class="def">
+    <div class="def__formal"><small>Formal definition (write this in exams)</small>
+      <p><b>Comparable&lt;T&gt;</b> (<code>java.lang</code>) is implemented by a class to define its <b>natural ordering</b> through the single method <code>int compareTo(T other)</code>. <b>Comparator&lt;T&gt;</b> (<code>java.util</code>) is a separate object that defines an ordering through <code>int compare(T a, T b)</code>, allowing multiple orderings and ordering of classes you can't modify. Both return a <b>negative</b> integer if the first argument comes before the second, <b>zero</b> if they are equal in the ordering, and a <b>positive</b> integer if it comes after. Sorting methods (<code>Collections.sort</code>, <code>List.sort</code>, <code>Arrays.sort</code>) and sorted collections (<code>TreeSet</code>, <code>TreeMap</code>, <code>PriorityQueue</code>) use the natural ordering unless a Comparator is supplied.</p></div>
+    <div class="def__simple"><small>In simple words</small>
+      <p>Comparable: “this is how my objects are normally ordered”, written in the class. Comparator: “sort them this way for now”, written anywhere.</p></div>
+  </div>
+  <h3>Words you'll meet in this lesson</h3>
+  <div class="terms">
+    <div class="term"><b>Natural ordering</b><span>The one default order of a type: numbers ascending, Strings alphabetical.</span></div>
+    <div class="term"><b>Sort key</b><span>The field you sort by: marks, name, date.</span></div>
+    <div class="term"><b>Tie-breaker</b><span>A second key used when the first is equal.</span></div>
+    <div class="term"><b>Stable sort</b><span>Equal elements keep their original relative order. Java's object sorts are stable.</span></div>
+    <div class="term"><b>Lexicographic</b><span>Dictionary order by character codes: “Zoya” &lt; “riya” because capitals come first.</span></div>
+    <div class="term"><b>Method reference</b><span><code>Student::marks</code> means “call <code>marks()</code> on each student” (Lesson 14.1).</span></div>
+  </div>
+  <h3>Comparable vs Comparator</h3>
+  <div class="table-wrap">
+  <table class="compare" style="min-width:560px">
+    <thead><tr><th></th><th><code>Comparable</code></th><th><code>Comparator</code></th></tr></thead>
+    <tbody>
+      <tr><td>Package</td><td><code>java.lang</code></td><td><code>java.util</code></td></tr>
+      <tr><td>Method</td><td><code>compareTo(T other)</code></td><td><code>compare(T a, T b)</code></td></tr>
+      <tr><td>Where</td><td>Inside the class being sorted</td><td>A separate object (class, lambda, method reference)</td></tr>
+      <tr><td>How many orders</td><td>One natural order</td><td>As many as you like</td></tr>
+      <tr><td>Use with</td><td><code>Collections.sort(list)</code>, <code>new TreeSet&lt;&gt;()</code></td><td><code>list.sort(cmp)</code>, <code>new TreeSet&lt;&gt;(cmp)</code></td></tr>
+      <tr><td>Classes you can't edit</td><td>Not possible</td><td>Works fine</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <div class="callout callout--exam"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19V5a2 2 0 0 1 2-2h12v18H6a2 2 0 0 1-2-2zm0 0a2 2 0 0 1 2-2h12"/></svg><p><b>Exam tip:</b> only the <b>sign</b> of the result matters (negative / zero / positive), not the size. And <code>compareTo</code> should be <b>consistent with equals</b>: <code>a.compareTo(b) == 0</code> exactly when <code>a.equals(b)</code>; otherwise TreeSet/TreeMap behave strangely (Lesson 11.5).</p></div>
+</section>
+
+<div class="ad-slot" data-slot="mid"></div>
+
+<!-- ======================= PART 3: TYPES AND WAYS TO USE IT ======================= -->
+<section class="part" id="types">
+  <span class="part-label"><b>3</b> Types and ways to use it</span>
+  <h2>From one natural order to many custom ones</h2>
+  <div class="cards">
+    <div class="card"><svg class="ic" viewBox="0 0 40 40" fill="none" stroke="var(--blue)" stroke-width="2"><rect x="6" y="8" width="28" height="24" rx="4"/><path d="M12 16h16M12 24h10"/></svg><h4>Comparable</h4><p>Implement <code>compareTo</code> in the class. Sorting needs no arguments.</p><span class="tag">natural order</span></div>
+    <div class="card"><svg class="ic" viewBox="0 0 40 40" fill="none" stroke="var(--track)" stroke-width="2"><path d="M8 10h24M8 20h16M8 30h8"/></svg><h4>Comparator class / lambda</h4><p><code>(a, b) -&gt; Integer.compare(a.marks, b.marks)</code></p><span class="tag">custom order</span></div>
+    <div class="card"><svg class="ic" viewBox="0 0 40 40" fill="none" stroke="var(--green)" stroke-width="2"><path d="M8 12h24M8 20h24M8 28h24"/><circle cx="32" cy="28" r="3"/></svg><h4>Comparator builders</h4><p><code>comparing</code>, <code>thenComparing</code>, <code>reversed</code>, <code>nullsFirst</code>.</p><span class="tag">readable</span></div>
+  </div>
+
+  <h3>Comparable: the natural order</h3>
+  <div class="code" data-lang="java" data-file="Main.java"><pre><code>import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+
+class Student implements Comparable&lt;Student&gt; {
+    final int roll;
+    final String name;
+    final int marks;
+
+    Student(int roll, String name, int marks) {
+        this.roll = roll;
+        this.name = name;
+        this.marks = marks;
+    }
+
+    @Override
+    public int compareTo(Student other) {
+        return Integer.compare(this.roll, other.roll);   // by roll number
+    }
+
+    @Override
+    public String toString() { return roll + " " + name + " " + marks; }
+}
+
+public class Main {
+    public static void main(String[] args) {
+        List&lt;Student&gt; list = new ArrayList&lt;&gt;(List.of(
+            new Student(21, "Om", 92), new Student(7, "Riya", 92), new Student(12, "Kabir", 78)));
+        Collections.sort(list);                 // uses compareTo
+        System.out.println(list);
+    }
+}</code></pre><div class="output">[7 Riya 92, 12 Kabir 78, 21 Om 92]</div></div>
+
+  <h3>Comparators: any order you need</h3>
+  <div class="code" data-lang="java" data-file="Main.java"><pre><code>import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.List;
+
+class Student {
+    final int roll; final String name; final int marks;
+    Student(int roll, String name, int marks) { this.roll = roll; this.name = name; this.marks = marks; }
+    int roll() { return roll; }
+    String name() { return name; }
+    int marks() { return marks; }
+    @Override public String toString() { return roll + " " + name + " " + marks; }
+}
+
+public class Main {
+    public static void main(String[] args) {
+        List&lt;Student&gt; list = new ArrayList&lt;&gt;(List.of(
+            new Student(21, "Om", 92), new Student(7, "Riya", 92), new Student(12, "Kabir", 78)));
+
+        // 1. A Comparator written as a lambda (Lesson 14.1)
+        list.sort((a, b) -&gt; a.name.compareTo(b.name));
+        System.out.println("By name:  " + list);
+
+        // 2. Built with Comparator.comparing: marks high→low, ties by roll
+        Comparator&lt;Student&gt; merit = Comparator.comparingInt(Student::marks).reversed()
+                                              .thenComparingInt(Student::roll);
+        list.sort(merit);
+        System.out.println("Merit:    " + list);
+    }
+}</code></pre><div class="output">By name:  [12 Kabir 78, 21 Om 92, 7 Riya 92]
+Merit:    [7 Riya 92, 21 Om 92, 12 Kabir 78]</div></div>
+
+  <h3>Strings: case matters</h3>
+  <div class="code" data-lang="java" data-file="Main.java"><pre><code>import java.util.*;
+
+public class Main {
+    public static void main(String[] args) {
+        List&lt;String&gt; names = new ArrayList&lt;&gt;(List.of("riya", "Zoya", "Kabir"));
+        Collections.sort(names);                              // natural: by char codes
+        System.out.println(names);
+        names.sort(String.CASE_INSENSITIVE_ORDER);           // a ready-made Comparator
+        System.out.println(names);
+        names.sort(Comparator.reverseOrder());
+        System.out.println(names);
+    }
+}</code></pre><div class="output">[Kabir, Zoya, riya]
+[Kabir, riya, Zoya]
+[riya, Zoya, Kabir]</div></div>
+
+  <h3>The subtraction trap</h3>
+  <div class="code" data-lang="java" data-file="Main.java"><pre><code>public class Main {
+    public static void main(String[] args) {
+        int a = -2_000_000_000, b = 2_000_000_000;
+        System.out.println(a - b);                  // overflows: looks positive!
+        System.out.println(Integer.compare(a, b));  // correct: negative
+    }
+}</code></pre><div class="output">294967296
+-1</div></div>
+  <div class="callout callout--warn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3 2 21h20L12 3z"/><path d="M12 10v5M12 18v.5"/></svg><p><b>Don't write <code>return this.x - other.x;</code></b> in compareTo. For large or negative values the subtraction overflows and the sign flips, so the sort silently goes wrong. Use <code>Integer.compare</code>, <code>Long.compare</code>, <code>Double.compare</code> or <code>Comparator.comparingInt</code>.</p></div>
+  <div class="callout callout--tip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18h6M10 22h4M12 2a7 7 0 0 0-4 12.7V17h8v-2.3A7 7 0 0 0 12 2z"/></svg><p><b>Rule of thumb:</b> give a class a natural order only if there's one obvious, stable order (IDs, dates, version numbers). Everything else is a Comparator, ideally a named constant like <code>Student.BY_MERIT</code> built with <code>comparing(...).thenComparing(...)</code>.</p></div>
+</section>
+
+<!-- ======================= PART 4: STEP BY STEP ======================= -->
+<section class="part" id="steps">
+  <span class="part-label"><b>4</b> Step by step</span>
+  <h2>What sort does with your comparator</h2>
+  <ol class="stepper">
+    <li><h4>You hand over the rule</h4>
+      <div class="code" data-lang="java" data-file="Main.java"><pre><code>list.sort(merit);</code></pre></div>
+      <span class="behind"><code>List.sort</code> copies the elements into an array and calls <code>Arrays.sort(array, merit)</code>.</span></li>
+    <li><h4>The algorithm picks pairs</h4>
+      <span class="behind">Java sorts objects with <b>TimSort</b>, a merge sort tuned for real data (it finds already-sorted runs). For tiny arrays it uses binary insertion sort. It decides which two elements to compare next.</span></li>
+    <li><h4>Your method answers: before, same or after</h4>
+      <span class="behind">For each pair it calls <code>merit.compare(a, b)</code> (or <code>a.compareTo(b)</code>). Your code never moves elements; it only answers with a sign. The algorithm moves them.</span></li>
+    <li><h4>About n log n questions</h4>
+      <span class="behind">Sorting n elements needs roughly n·log₂n comparisons: about 10,000 for 1,000 students. That's why a comparator should be cheap and must be consistent (if a &lt; b and b &lt; c then a &lt; c), or TimSort may throw <i>Comparison method violates its general contract!</i>.</span></li>
+    <li><h4>Stable result, written back</h4>
+      <span class="behind">The sorted array is copied back into the list. Because the sort is stable, students with equal keys stay in their previous relative order, which lets you sort by a secondary key first and the primary key second if you want.</span></li>
+  </ol>
+</section>
+
+<!-- ======================= PART 5: SEE IT HAPPEN ======================= -->
+<section class="part" id="animation">
+  <span class="part-label"><b>5</b> See it happen</span>
+  <h2>sort asks, your comparator answers: both views</h2>
+  <p>Left: the list being sorted for the merit list. Right: each call to <code>compare</code>, its result, and what the sort does with it.</p>
+  <div class="anim" data-frames="6">
+    <div class="anim__title">How sort uses your comparator <span>6 steps</span></div>
+    <div class="anim__views">
+      <div class="view view--see">
+        <span class="view__tag">What you see</span>
+        <svg viewBox="0 0 360 250" role="img" aria-label="Sorting three students for the merit list: marks high to low, ties by roll number">
+          <rect x="8" y="8" width="344" height="46" rx="8" class="s-board" style="stroke:board;stroke-width:1.5"/>
+          <text x="16" y="26" font-size="9.6" class="s-chalk mono">merit = comparingInt(marks).reversed()</text>
+          <text x="16" y="44" font-size="9.6" class="s-chalk mono">            .thenComparingInt(roll);   list.sort(merit);</text>
+          <g data-pos='{"1":"0,0","2":"0,0","3":"0,0","4":"116,0","5":"116,0","6":"116,0"}'><rect x="8" y="74" width="108" height="50" rx="8" class="s-soft-acc" style="stroke:var(--track);stroke-width:1.5"/><text x="62" y="96.14" font-size="11" text-anchor="middle" font-weight="700" class="s-ink">Om</text><text x="62" y="110.44" font-size="9.5" text-anchor="middle" class="s-ink2">21 · 92</text></g>
+          <g data-pos='{"1":"0,0","2":"0,0","3":"0,0","4":"-116,0","5":"-116,0","6":"-116,0"}'><rect x="124" y="74" width="108" height="50" rx="8" class="s-soft-acc" style="stroke:var(--track);stroke-width:1.5"/><text x="178" y="96.14" font-size="11" text-anchor="middle" font-weight="700" class="s-ink">Riya</text><text x="178" y="110.44" font-size="9.5" text-anchor="middle" class="s-ink2">07 · 92</text></g>
+          <g data-pos='{"1":"0,0","2":"0,0","3":"0,0","4":"0,0","5":"0,0","6":"0,0"}'><rect x="240" y="74" width="108" height="50" rx="8" class="s-soft-acc" style="stroke:var(--track);stroke-width:1.5"/><text x="294" y="96.14" font-size="11" text-anchor="middle" font-weight="700" class="s-ink">Kabir</text><text x="294" y="110.44" font-size="9.5" text-anchor="middle" class="s-ink2">12 · 78</text></g>
+          <text x="16" y="146" font-size="9" class="s-ink3">roll · marks</text>
+          <rect x="8" y="160" width="344" height="40" rx="8" class="s-card2" style="stroke:var(--line);stroke-width:1.5"/>
+          <text data-on="1-3" x="18" y="185" font-size="10.5" class="s-ink mono">[Om, Riya, Kabir]  (unsorted)</text>
+          <text data-on="4-5" x="18" y="185" font-size="10.5" class="s-ink mono">[Riya, Om, Kabir]</text>
+          <text data-on="6" x="18" y="185" font-size="10.5" font-weight="700" class="s-green mono">[Riya, Om, Kabir]  ✓ merit order</text>
+          <text data-on="1" x="180" y="226" font-size="10.5" text-anchor="middle" class="s-ink2">Three students to rank.</text>
+          <text data-on="2" x="180" y="226" font-size="10.5" text-anchor="middle" class="s-ink2">sort is thinking…</text>
+          <text data-on="3" x="180" y="226" font-size="10.5" text-anchor="middle" class="s-ink2">…still thinking…</text>
+          <text data-on="4" x="180" y="226" font-size="10.5" text-anchor="middle" class="s-ink2">Two cards swap.</text>
+          <text data-on="5" x="180" y="226" font-size="10.5" text-anchor="middle" class="s-ink2">Kabir stays last.</text>
+          <text data-on="6" x="180" y="226" font-size="10.5" text-anchor="middle" class="s-ink2">Done.</text>
+          <text x="354" y="245" text-anchor="end" class="s-wm">myphatshala.com</text>
+        </svg>
+        <ol class="caps" hidden>
+          <li>The list starts in arrival order. We ask for the merit order.</li>
+          <li>Nothing visible happens yet.</li>
+          <li>Still nothing visible.</li>
+          <li>Riya and Om change places.</li>
+          <li>Kabir stays where he is.</li>
+          <li>The merit list: Riya (92, roll 7), Om (92, roll 21), Kabir (78).</li>
+        </ol>
+      </div>
+      <div class="view view--behind">
+        <span class="view__tag">Behind the screen</span>
+        <svg viewBox="0 0 360 250" role="img" aria-label="The calls TimSort makes to the comparator and the results it uses">
+          <text x="8" y="18" font-size="10" font-weight="700" class="s-ink2">TimSort's questions to your comparator</text>
+          <g data-on="2-"><rect x="8" y="28" width="344" height="42" rx="8" class="s-card" style="stroke:var(--line);stroke-width:1.5"/></g>
+          <text data-on="2-" x="16" y="45" font-size="10" font-weight="700" class="s-ink mono">compare(Riya, Om)</text>
+          <text data-on="2-" x="16" y="62" font-size="9.2" class="s-ink2">marks 92 = 92 → roll 7 vs 21</text>
+          <text data-on="2-" x="344" y="54" font-size="9.6" text-anchor="end" font-weight="700" class="s-green">−1: Riya before Om</text>
+          <g data-on="3-"><rect x="8" y="78" width="344" height="42" rx="8" class="s-card" style="stroke:var(--line);stroke-width:1.5"/></g>
+          <text data-on="3-" x="16" y="95" font-size="10" font-weight="700" class="s-ink mono">compare(Kabir, Riya)</text>
+          <text data-on="3-" x="16" y="112" font-size="9.2" class="s-ink2">marks 78 vs 92 (reversed)</text>
+          <text data-on="3-" x="344" y="104" font-size="9.6" text-anchor="end" font-weight="700" class="s-green">+1: Kabir after Riya</text>
+          <g data-on="5-"><rect x="8" y="128" width="344" height="42" rx="8" class="s-card" style="stroke:var(--line);stroke-width:1.5"/></g>
+          <text data-on="5-" x="16" y="145" font-size="10" font-weight="700" class="s-ink mono">compare(Kabir, Om)</text>
+          <text data-on="5-" x="16" y="162" font-size="9.2" class="s-ink2">marks 78 vs 92 (reversed)</text>
+          <text data-on="5-" x="344" y="154" font-size="9.6" text-anchor="end" font-weight="700" class="s-green">+1: Kabir after Om</text>
+          <g data-on="2"><rect x="8" y="28" width="344" height="42" rx="8" class="" style="stroke:var(--track);stroke-width:3;fill:none"/></g>
+          <g data-on="3"><rect x="8" y="78" width="344" height="42" rx="8" class="" style="stroke:var(--track);stroke-width:3;fill:none"/></g>
+          <g data-on="5"><rect x="8" y="128" width="344" height="42" rx="8" class="" style="stroke:var(--track);stroke-width:3;fill:none"/></g>
+          <g data-on="4"><rect x="8" y="182" width="344" height="22" rx="8" class="s-soft-acc" style="stroke:var(--track);stroke-width:1.5"/></g>
+          <text data-on="4" x="180" y="197" font-size="9.2" text-anchor="middle" font-weight="700" class="s-ink">run [Om, Riya] was descending → reverse it: [Riya, Om]</text>
+          <text data-on="6" x="180" y="197" font-size="9.2" text-anchor="middle" font-weight="700" class="s-acc">your code only answered −1 / 0 / +1; TimSort moved the elements</text>
+          <text data-on="1" x="180" y="228" font-size="10" text-anchor="middle" class="s-ink2">sort copies the list into an array.</text>
+          <text data-on="2" x="180" y="228" font-size="10" text-anchor="middle" class="s-ink2">First question: Riya vs Om.</text>
+          <text data-on="3" x="180" y="228" font-size="10" text-anchor="middle" class="s-ink2">Does the first run continue? Kabir vs Riya.</text>
+          <text data-on="4" x="180" y="228" font-size="10" text-anchor="middle" class="s-ink2">TimSort reverses the descending run.</text>
+          <text data-on="5" x="180" y="228" font-size="10" text-anchor="middle" class="s-ink2">Insert Kabir: compare with Om.</text>
+          <text data-on="6" x="180" y="228" font-size="10" text-anchor="middle" class="s-ink2">3 comparisons for 3 elements.</text>
+          <text x="354" y="245" text-anchor="end" class="s-wm">myphatshala.com</text>
+        </svg>
+        <ol class="caps" hidden>
+          <li><code>list.sort(merit)</code> copies the list into an array and starts TimSort. For tiny arrays it looks for an ordered run and then inserts the rest.</li>
+          <li>It asks <code>merit.compare(Riya, Om)</code>. Marks are equal (92), so the tie-breaker compares rolls 7 and 21: −1. In merit order Riya comes first, so the first two elements form a <i>descending</i> run.</li>
+          <li>Does the run continue? <code>compare(Kabir, Riya)</code>: 78 vs 92 with <code>reversed()</code> gives +1, so no. The run is [Om, Riya].</li>
+          <li>A descending run is reversed in place: [Riya, Om, Kabir].</li>
+          <li>Kabir is inserted into the sorted part using binary search: <code>compare(Kabir, Om)</code> = +1, so he goes after Om, at the end.</li>
+          <li>These three calls were recorded from a real JVM. Your comparator never moves anything; it only answers with a sign.</li>
+        </ol>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ======================= PART 6: REAL-WORLD USE ======================= -->
+<section class="part" id="real-world">
+  <span class="part-label"><b>6</b> Real-world use</span>
+  <h2>Ordering in real systems</h2>
+  <p>Every sorted screen, ranked list and priority queue in an app has a comparator behind it.</p>
+  <!--ANIM2-->
+  <h3 id="animated-example">Watch it with an example: “Sort by” on a shopping app</h3>
+  <p class="anim-intro">The same four phones, re-sorted each time the shopper taps a different option. Each option is just a different Comparator.</p>
+  <div class="anim anim--one" data-frames="4" data-delay="4600">
+    <div class="anim__title">One list, three comparators <span>4 steps</span></div>
+    <div class="anim__views">
+      <div class="view view--story">
+        <span class="view__tag">Animated example</span>
+        <svg viewBox="0 0 360 244" role="img" aria-label="Phones re-sorted by price ascending, rating descending, and price descending with rating as tie-breaker">
+          <g data-pos='{"1":"0,0","2":"0,36","3":"0,108","4":"0,72"}'><rect x="10" y="40" width="342" height="30" rx="8" class="s-soft-blue" style="stroke:var(--blue);stroke-width:1.5"/><text x="181" y="58.6" font-size="10" text-anchor="middle" class="s-ink mono">Phone A  ₹14,999  ★4.2</text></g>
+          <g data-pos='{"1":"0,0","2":"0,-36","3":"0,0","4":"0,72"}'><rect x="10" y="76" width="342" height="30" rx="8" class="s-soft-blue" style="stroke:var(--blue);stroke-width:1.5"/><text x="181" y="94.6" font-size="10" text-anchor="middle" class="s-ink mono">Phone B  ₹9,999  ★4.5</text></g>
+          <g data-pos='{"1":"0,0","2":"0,0","3":"0,-72","4":"0,-36"}'><rect x="10" y="112" width="342" height="30" rx="8" class="s-soft-blue" style="stroke:var(--blue);stroke-width:1.5"/><text x="181" y="130.6" font-size="10" text-anchor="middle" class="s-ink mono">Phone C  ₹14,999  ★4.6</text></g>
+          <g data-pos='{"1":"0,0","2":"0,0","3":"0,-36","4":"0,-108"}'><rect x="10" y="148" width="342" height="30" rx="8" class="s-soft-blue" style="stroke:var(--blue);stroke-width:1.5"/><text x="181" y="166.6" font-size="10" text-anchor="middle" class="s-ink mono">Phone D  ₹21,999  ★4.4</text></g>
+          <text data-on="1" x="10" y="28" font-size="10.5" font-weight="700" class="s-acc">Sort by: as loaded</text>
+          <text data-on="2" x="10" y="28" font-size="10.5" font-weight="700" class="s-acc">Sort by: Price: low to high</text>
+          <text data-on="3" x="10" y="28" font-size="10.5" font-weight="700" class="s-acc">Sort by: Rating: high to low</text>
+          <text data-on="4" x="10" y="28" font-size="10.5" font-weight="700" class="s-acc">Sort by: Price: high to low, then rating</text>
+          <text data-on="2" x="10" y="194" font-size="9.5" class="s-acc mono">comparingInt(Phone::price)</text>
+          <text data-on="3" x="10" y="194" font-size="9.5" class="s-acc mono">comparingDouble(Phone::rating)</text>
+          <text data-on="4" x="10" y="194" font-size="9.5" class="s-acc mono">comparingInt(Phone::price)</text>
+          <text data-on="3" x="10" y="208" font-size="9.5" class="s-acc mono">  .reversed()</text>
+          <text data-on="4" x="10" y="208" font-size="9.5" class="s-acc mono">  .reversed().thenComparing(…)</text>
+          <text data-on="1" x="180" y="230" font-size="10.5" text-anchor="middle" class="s-ink2">Results arrive unsorted.</text>
+          <text data-on="2" x="180" y="230" font-size="10.5" text-anchor="middle" class="s-ink2">Cheapest first; A and C tie at ₹14,999.</text>
+          <text data-on="3" x="180" y="230" font-size="10.5" text-anchor="middle" class="s-ink2">Best rated first.</text>
+          <text data-on="4" x="180" y="230" font-size="10.5" text-anchor="middle" class="s-ink2">Costliest first; the tie is broken by rating.</text>
+          <text x="354" y="239" text-anchor="end" class="s-wm">myphatshala.com</text>
+        </svg>
+        <ol class="caps" hidden>
+          <li>The search returns four phones in no particular order.</li>
+          <li>“Price: low to high” uses <code>comparingInt(Phone::price)</code>. A and C cost the same; the stable sort keeps A before C, as they were.</li>
+          <li>“Rating” sorts by stars, highest first, using <code>reversed()</code>.</li>
+          <li>“Price: high to low” with a rating tie-breaker: C (★4.6) now comes before A (★4.2). (Simplified: real apps sort in the database and add a unique ID as the last tie-breaker.)</li>
+        </ol>
+      </div>
+    </div>
+  </div>
+  <!--/ANIM2-->
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="14" y="16" width="92" height="58" rx="6" class="s-card" style="stroke:var(--line)"/><text x="22" y="34" font-size="8" class="mono s-ink">Price ↑ | Rating ↓</text><path d="M22 44h70M22 54h70M22 64h50" style="stroke:var(--ink-3)"/></svg></div>
+    <div><h4>1. “Sort by” menus</h4><p>Shopping and travel apps offer “price low to high”, “rating”, “newest”. Each option is a Comparator (often with a tie-breaker like product ID so the order is stable across pages).</p>
+      <div class="uc-flow"><span>user picks “Price ↑”</span><i>→</i><span class="java">comparing(Product::price)</span><i>→</i><span>sorted results</span></div></div>
+  </div>
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="20" y="20" width="80" height="50" rx="6" class="s-card" style="stroke:var(--line)"/><text x="60" y="40" text-anchor="middle" font-size="8.5" class="mono s-ink">1. Riya 92</text><text x="60" y="56" text-anchor="middle" font-size="8.5" class="mono s-ink">2. Om   92</text></svg></div>
+    <div><h4>2. Rankings and leaderboards</h4><p>Exam results, sales leaderboards and cricket tables sort by a main score with tie-breakers (net run rate, then wins), exactly a <code>thenComparing</code> chain.</p>
+      <div class="uc-flow"><span>points ↓</span><i>→</i><span class="java">thenComparing(nrr ↓)</span><i>→</i><span>league table</span></div></div>
+  </div>
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="14" y="34" width="22" height="22" rx="4" class="s-soft-acc" style="stroke:var(--red)"/><rect x="40" y="34" width="22" height="22" rx="4" class="s-soft-acc" style="stroke:var(--track)"/><rect x="66" y="34" width="22" height="22" rx="4" class="s-card" style="stroke:var(--line)"/></svg></div>
+    <div><h4>3. Priority processing</h4><p>Support tickets by severity then age, hospital triage by condition, delivery jobs by deadline: a <code>PriorityQueue</code> with a Comparator always hands out the most urgent item next.</p>
+      <div class="uc-flow"><span>new ticket</span><i>→</i><span class="java">PriorityQueue(bySeverity)</span><i>→</i><span>most urgent first</span></div></div>
+  </div>
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="16" y="22" width="88" height="46" rx="6" class="s-card" style="stroke:var(--line)"/><text x="60" y="42" text-anchor="middle" font-size="8.5" class="mono s-ink">v1.10 &gt; v1.9</text><text x="60" y="58" text-anchor="middle" font-size="8.5" class="s-ink2">natural order</text></svg></div>
+    <div><h4>4. Natural orders in value types</h4><p>Types like <code>LocalDate</code>, <code>BigDecimal</code> and app version numbers implement <code>Comparable</code>, so they sort correctly in TreeMaps and reports without extra code.</p>
+      <div class="uc-flow"><span>TreeMap&lt;LocalDate, …&gt;</span><i>→</i><span class="java">compareTo</span><i>→</i><span>chronological report</span></div></div>
+  </div>
+  <p class="muted">Examples are simplified. Large lists are usually sorted by the database (<code>ORDER BY</code>) before reaching Java.</p>
+</section>
+
+<div class="ad-slot" data-slot="mid"></div>
+
+<!-- ======================= PART 7: RUN THE CODE ======================= -->
+<section class="part" id="run">
+  <span class="part-label"><b>7</b> Run the code</span>
+  <h2>Exam cell: three printouts from one list</h2>
+  <div class="code" data-lang="java" data-file="Main.java"><pre><code>import java.util.*;
+
+class Student implements Comparable&lt;Student&gt; {
+    final int roll;
+    final String name;
+    final int marks;
+
+    Student(int roll, String name, int marks) {
+        this.roll = roll;
+        this.name = name;
+        this.marks = marks;
+    }
+
+    int roll() { return roll; }
+    String name() { return name; }
+    int marks() { return marks; }
+
+    @Override
+    public int compareTo(Student o) { return Integer.compare(roll, o.roll); }
+
+    @Override
+    public String toString() { return String.format("%02d %-6s %d", roll, name, marks); }
+
+    static final Comparator&lt;Student&gt; BY_MERIT =
+        Comparator.comparingInt(Student::marks).reversed().thenComparing(Comparator.naturalOrder());
+    static final Comparator&lt;Student&gt; BY_NAME =
+        Comparator.comparing(Student::name, String.CASE_INSENSITIVE_ORDER);
+}
+
+public class Main {
+    static void print(String title, List&lt;Student&gt; list) {
+        System.out.println(title);
+        for (Student s : list) System.out.println("  " + s);
+    }
+
+    public static void main(String[] args) {
+        List&lt;Student&gt; students = new ArrayList&lt;&gt;(List.of(
+            new Student(21, "Om", 92), new Student(7, "Riya", 92),
+            new Student(12, "Kabir", 78), new Student(3, "zoya", 85)));
+
+        Collections.sort(students);
+        print("Register:", students);
+        students.sort(Student.BY_MERIT);
+        print("Merit list:", students);
+        students.sort(Student.BY_NAME);
+        print("Certificates:", students);
+    }
+}</code></pre><div class="output">Register:
+  03 zoya   85
+  07 Riya   92
+  12 Kabir  78
+  21 Om     92
+Merit list:
+  07 Riya   92
+  21 Om     92
+  03 zoya   85
+  12 Kabir  78
+Certificates:
+  12 Kabir  78
+  21 Om     92
+  07 Riya   92
+  03 zoya   85</div></div>
+  <ul class="anno">
+    <li><code>implements Comparable&lt;Student&gt;</code><span>The natural order: roll number. <code>Collections.sort(students)</code> uses it.</span></li>
+    <li><code>Integer.compare(roll, o.roll)</code><span>Safe comparison; no subtraction overflow.</span></li>
+    <li><code>BY_MERIT</code><span>Marks high → low, ties broken by the natural order (roll).</span></li>
+    <li><code>BY_NAME</code><span>Case-insensitive, so “zoya” doesn't jump after capitals.</span></li>
+  </ul>
+  <div class="runner">
+    <script type="application/json">{
+      "lang": "java", "file": "Main.java",
+      "tasks": [
+        { "label": "1 · Exam cell", "hint": "Press <b>Run</b>. Then add a comparator <code>BY_MARKS_ASC</code> (lowest first) and print a “needs help” list.",
+          "code": "import java.util.*;\n\nclass Student implements Comparable<Student> {\n    final int roll;\n    final String name;\n    final int marks;\n\n    Student(int roll, String name, int marks) {\n        this.roll = roll;\n        this.name = name;\n        this.marks = marks;\n    }\n\n    int roll() { return roll; }\n    String name() { return name; }\n    int marks() { return marks; }\n\n    @Override\n    public int compareTo(Student o) { return Integer.compare(roll, o.roll); }\n\n    @Override\n    public String toString() { return String.format(\"%02d %-6s %d\", roll, name, marks); }\n\n    static final Comparator<Student> BY_MERIT =\n        Comparator.comparingInt(Student::marks).reversed().thenComparing(Comparator.naturalOrder());\n    static final Comparator<Student> BY_NAME =\n        Comparator.comparing(Student::name, String.CASE_INSENSITIVE_ORDER);\n}\n\npublic class Main {\n    static void print(String title, List<Student> list) {\n        System.out.println(title);\n        for (Student s : list) System.out.println(\"  \" + s);\n    }\n\n    public static void main(String[] args) {\n        List<Student> students = new ArrayList<>(List.of(\n            new Student(21, \"Om\", 92), new Student(7, \"Riya\", 92),\n            new Student(12, \"Kabir\", 78), new Student(3, \"zoya\", 85)));\n\n        Collections.sort(students);\n        print(\"Register:\", students);\n        students.sort(Student.BY_MERIT);\n        print(\"Merit list:\", students);\n        students.sort(Student.BY_NAME);\n        print(\"Certificates:\", students);\n    }\n}\n" },
+        { "label": "2 · Spot the error: not Comparable", "hint": "<code>Collections.sort(list)</code> needs a natural order. Implement <code>Comparable&lt;Train&gt;</code>, or call <code>list.sort(...)</code> with a Comparator.",
+          "code": "import java.util.*;\n\nclass Train {\n    String no;\n    int departs;\n    Train(String no, int departs) { this.no = no; this.departs = departs; }\n}\n\npublic class Main {\n    public static void main(String[] args) {\n        List<Train> trains = new ArrayList<>(List.of(new Train(\"12123\", 1715), new Train(\"11007\", 640)));\n        Collections.sort(trains);\n        System.out.println(trains.get(0).no);\n    }\n}\n", "_expect": "compile-error" },
+        { "label": "3 · Predict: subtraction overflow", "hint": "<b>Predict first:</b> which order does each comparator produce? Then fix <code>bad</code> with <code>Integer.compare</code>.",
+          "code": "import java.util.*;\n\npublic class Main {\n    public static void main(String[] args) {\n        List<Integer> vals = new ArrayList<>(List.of(2_000_000_000, -2_000_000_000, 0));\n        Comparator<Integer> bad = (a, b) -> a - b;\n        Comparator<Integer> good = Integer::compare;\n        vals.sort(bad);\n        System.out.println(\"bad:  \" + vals);\n        vals.sort(good);\n        System.out.println(\"good: \" + vals);\n    }\n}\n" },
+        { "label": "4 · Case-insensitive names", "hint": "Press <b>Run</b>. Then sort by name length first, then alphabetically, using <code>Comparator.comparingInt(String::length).thenComparing(...)</code>.",
+          "code": "import java.util.*;\n\npublic class Main {\n    public static void main(String[] args) {\n        List<String> names = new ArrayList<>(List.of(\"riya\", \"Zoya\", \"Kabir\", \"om\"));\n        Collections.sort(names);\n        System.out.println(names);\n        names.sort(String.CASE_INSENSITIVE_ORDER);\n        System.out.println(names);\n    }\n}\n" },
+        { "label": "5 · PriorityQueue with a comparator", "hint": "Tickets: lower severity number = more urgent. Press <b>Run</b>, then break ties by ticket id.",
+          "code": "import java.util.*;\n\npublic class Main {\n    public static void main(String[] args) {\n        PriorityQueue<int[]> q = new PriorityQueue<>((a, b) -> Integer.compare(a[1], b[1]));\n        q.offer(new int[]{101, 3});\n        q.offer(new int[]{102, 1});\n        q.offer(new int[]{103, 2});\n        while (!q.isEmpty()) {\n            int[] t = q.poll();\n            System.out.println(\"Ticket \" + t[0] + \" (severity \" + t[1] + \")\");\n        }\n    }\n}\n" }
+      ]
+    }</script>
+  </div>
+</section>
+
+<!-- ======================= PART 8: LINE BY LINE ======================= -->
+<section class="part" id="tracer">
+  <span class="part-label"><b>8</b> Line by line</span>
+  <h2>sort calls your compareTo</h2>
+  <p>This trace is recorded from the real JVM. You never call <code>compareTo</code> yourself: watch <code>Collections.sort</code> call it on pairs of students (frames appear and disappear) and the list change order.</p>
+  <div class="tracer">
+    <script type="application/json">{"lang": "java", "code": ["import java.util.ArrayList;", "import java.util.Collections;", "import java.util.List;", "", "class Student implements Comparable<Student> {", "    int roll;", "    String name;", "", "    Student(int roll, String name) {", "        this.roll = roll;", "        this.name = name;", "    }", "", "    public int compareTo(Student other) {", "        int result = Integer.compare(this.roll, other.roll);", "        return result;", "    }", "}", "", "public class Main {", "    public static void main(String[] args) {", "        List<Student> list = new ArrayList<>();", "        list.add(new Student(21, \"Om\"));", "        list.add(new Student(7, \"Riya\"));", "        list.add(new Student(12, \"Kabir\"));", "        Collections.sort(list);", "        System.out.println(list.get(0).name + \" \" + list.get(1).name + \" \" + list.get(2).name);", "    }", "}"], "steps": [{"line": 22, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["list", "→ #1 ArrayList"]]}], "heap": ["<b>#1</b> ArrayList size 0, capacity 0 []", "<b>#2</b> String[0] (args, empty)"], "newVar": "list", "phase": "Assign", "note": "Now <code>list</code> = → #1 ArrayList. New object <b>#1</b> on the heap: ArrayList size 0, capacity 0 []."}, {"line": 23, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["list", "→ #1 ArrayList"]]}, {"frame": "new Student(int roll, String name)", "vars": [["this", "→ #3 Student"], ["roll", "21"], ["name", "→ #4 \"Om\""]]}], "heap": ["<b>#1</b> ArrayList size 0, capacity 0 []", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Student {roll=0, name=null}", "<b>#4</b> String &quot;Om&quot;"], "newVar": "this", "phase": "Call", "note": "<code>new Student()</code> is called: a new frame is pushed with <code>this</code> = → #3 Student, <code>roll</code> = 21, <code>name</code> = → #4 &quot;Om&quot;. New object <b>#3</b> on the heap: Student {roll=0, name=null}. New object <b>#4</b> on the heap: String &quot;Om&quot;."}, {"line": 9, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["list", "→ #1 ArrayList"]]}, {"frame": "new Student(int roll, String name)", "vars": [["this", "→ #3 Student"], ["roll", "21"], ["name", "→ #4 \"Om\""]]}], "heap": ["<b>#1</b> ArrayList size 0, capacity 0 []", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Student {roll=0, name=null}", "<b>#4</b> String &quot;Om&quot;"], "phase": "Constructor", "note": "The constructor starts. The new object already exists, with default values (0, null, false) in its fields."}, {"line": 10, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["list", "→ #1 ArrayList"]]}, {"frame": "new Student(int roll, String name)", "vars": [["this", "→ #3 Student"], ["roll", "21"], ["name", "→ #4 \"Om\""]]}], "heap": ["<b>#1</b> ArrayList size 0, capacity 0 []", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Student {roll=21, name=null}", "<b>#4</b> String &quot;Om&quot;"], "phase": "Update", "note": "Object <b>#3</b> changes: Student {roll=21, name=null}."}, {"line": 11, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["list", "→ #1 ArrayList"]]}, {"frame": "new Student(int roll, String name)", "vars": [["this", "→ #3 Student"], ["roll", "21"], ["name", "→ #4 \"Om\""]]}], "heap": ["<b>#1</b> ArrayList size 0, capacity 0 []", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Student {roll=21, name=&quot;Om&quot;}", "<b>#4</b> String &quot;Om&quot;"], "phase": "Update", "note": "Object <b>#3</b> changes: Student {roll=21, name=&quot;Om&quot;}."}, {"line": 12, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["list", "→ #1 ArrayList"]]}], "heap": ["<b>#1</b> ArrayList size 0, capacity 0 []", "<b>#2</b> String[0] (args, empty)"], "phase": "Return", "note": "<code>new Student()</code> returns and its frame is popped."}, {"line": 23, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["list", "→ #1 ArrayList"]]}], "heap": ["<b>#1</b> ArrayList size 1, capacity 10 [→#3]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Student {roll=21, name=&quot;Om&quot;}", "<b>#4</b> String &quot;Om&quot;"], "phase": "Update", "note": "Object <b>#1</b> changes: ArrayList size 1, capacity 10 [→#3]."}, {"line": 24, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["list", "→ #1 ArrayList"]]}, {"frame": "new Student(int roll, String name)", "vars": [["this", "→ #5 Student"], ["roll", "7"], ["name", "→ #6 \"Riya\""]]}], "heap": ["<b>#1</b> ArrayList size 1, capacity 10 [→#3]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Student {roll=21, name=&quot;Om&quot;}", "<b>#4</b> String &quot;Om&quot;", "<b>#5</b> Student {roll=0, name=null}", "<b>#6</b> String &quot;Riya&quot;"], "newVar": "this", "phase": "Call", "note": "<code>new Student()</code> is called: a new frame is pushed with <code>this</code> = → #5 Student, <code>roll</code> = 7, <code>name</code> = → #6 &quot;Riya&quot;. New object <b>#5</b> on the heap: Student {roll=0, name=null}. New object <b>#6</b> on the heap: String &quot;Riya&quot;."}, {"line": 9, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["list", "→ #1 ArrayList"]]}, {"frame": "new Student(int roll, String name)", "vars": [["this", "→ #5 Student"], ["roll", "7"], ["name", "→ #6 \"Riya\""]]}], "heap": ["<b>#1</b> ArrayList size 1, capacity 10 [→#3]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Student {roll=21, name=&quot;Om&quot;}", "<b>#4</b> String &quot;Om&quot;", "<b>#5</b> Student {roll=0, name=null}", "<b>#6</b> String &quot;Riya&quot;"], "phase": "Constructor", "note": "The constructor starts. The new object already exists, with default values (0, null, false) in its fields."}, {"line": 10, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["list", "→ #1 ArrayList"]]}, {"frame": "new Student(int roll, String name)", "vars": [["this", "→ #5 Student"], ["roll", "7"], ["name", "→ #6 \"Riya\""]]}], "heap": ["<b>#1</b> ArrayList size 1, capacity 10 [→#3]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Student {roll=21, name=&quot;Om&quot;}", "<b>#4</b> String &quot;Om&quot;", "<b>#5</b> Student {roll=7, name=null}", "<b>#6</b> String &quot;Riya&quot;"], "phase": "Update", "note": "Object <b>#5</b> changes: Student {roll=7, name=null}."}, {"line": 11, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["list", "→ #1 ArrayList"]]}, {"frame": "new Student(int roll, String name)", "vars": [["this", "→ #5 Student"], ["roll", "7"], ["name", "→ #6 \"Riya\""]]}], "heap": ["<b>#1</b> ArrayList size 1, capacity 10 [→#3]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Student {roll=21, name=&quot;Om&quot;}", "<b>#4</b> String &quot;Om&quot;", "<b>#5</b> Student {roll=7, name=&quot;Riya&quot;}", "<b>#6</b> String &quot;Riya&quot;"], "phase": "Update", "note": "Object <b>#5</b> changes: Student {roll=7, name=&quot;Riya&quot;}."}, {"line": 12, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["list", "→ #1 ArrayList"]]}], "heap": ["<b>#1</b> ArrayList size 1, capacity 10 [→#3]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Student {roll=21, name=&quot;Om&quot;}", "<b>#4</b> String &quot;Om&quot;"], "phase": "Return", "note": "<code>new Student()</code> returns and its frame is popped."}, {"line": 24, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["list", "→ #1 ArrayList"]]}], "heap": ["<b>#1</b> ArrayList size 2, capacity 10 [→#3, →#5]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Student {roll=21, name=&quot;Om&quot;}", "<b>#4</b> String &quot;Om&quot;", "<b>#5</b> Student {roll=7, name=&quot;Riya&quot;}", "<b>#6</b> String &quot;Riya&quot;"], "phase": "Update", "note": "Object <b>#1</b> changes: ArrayList size 2, capacity 10 [→#3, →#5]."}, {"line": 25, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["list", "→ #1 ArrayList"]]}, {"frame": "new Student(int roll, String name)", "vars": [["this", "→ #7 Student"], ["roll", "12"], ["name", "→ #8 \"Kabir\""]]}], "heap": ["<b>#1</b> ArrayList size 2, capacity 10 [→#3, →#5]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Student {roll=21, name=&quot;Om&quot;}", "<b>#4</b> String &quot;Om&quot;", "<b>#5</b> Student {roll=7, name=&quot;Riya&quot;}", "<b>#6</b> String &quot;Riya&quot;", "<b>#7</b> Student {roll=0, name=null}", "<b>#8</b> String &quot;Kabir&quot;"], "newVar": "this", "phase": "Call", "note": "<code>new Student()</code> is called: a new frame is pushed with <code>this</code> = → #7 Student, <code>roll</code> = 12, <code>name</code> = → #8 &quot;Kabir&quot;. New object <b>#7</b> on the heap: Student {roll=0, name=null}. New object <b>#8</b> on the heap: String &quot;Kabir&quot;."}, {"line": 9, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["list", "→ #1 ArrayList"]]}, {"frame": "new Student(int roll, String name)", "vars": [["this", "→ #7 Student"], ["roll", "12"], ["name", "→ #8 \"Kabir\""]]}], "heap": ["<b>#1</b> ArrayList size 2, capacity 10 [→#3, →#5]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Student {roll=21, name=&quot;Om&quot;}", "<b>#4</b> String &quot;Om&quot;", "<b>#5</b> Student {roll=7, name=&quot;Riya&quot;}", "<b>#6</b> String &quot;Riya&quot;", "<b>#7</b> Student {roll=0, name=null}", "<b>#8</b> String &quot;Kabir&quot;"], "phase": "Constructor", "note": "The constructor starts. The new object already exists, with default values (0, null, false) in its fields."}, {"line": 10, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["list", "→ #1 ArrayList"]]}, {"frame": "new Student(int roll, String name)", "vars": [["this", "→ #7 Student"], ["roll", "12"], ["name", "→ #8 \"Kabir\""]]}], "heap": ["<b>#1</b> ArrayList size 2, capacity 10 [→#3, →#5]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Student {roll=21, name=&quot;Om&quot;}", "<b>#4</b> String &quot;Om&quot;", "<b>#5</b> Student {roll=7, name=&quot;Riya&quot;}", "<b>#6</b> String &quot;Riya&quot;", "<b>#7</b> Student {roll=12, name=null}", "<b>#8</b> String &quot;Kabir&quot;"], "phase": "Update", "note": "Object <b>#7</b> changes: Student {roll=12, name=null}."}, {"line": 11, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["list", "→ #1 ArrayList"]]}, {"frame": "new Student(int roll, String name)", "vars": [["this", "→ #7 Student"], ["roll", "12"], ["name", "→ #8 \"Kabir\""]]}], "heap": ["<b>#1</b> ArrayList size 2, capacity 10 [→#3, →#5]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Student {roll=21, name=&quot;Om&quot;}", "<b>#4</b> String &quot;Om&quot;", "<b>#5</b> Student {roll=7, name=&quot;Riya&quot;}", "<b>#6</b> String &quot;Riya&quot;", "<b>#7</b> Student {roll=12, name=&quot;Kabir&quot;}", "<b>#8</b> String &quot;Kabir&quot;"], "phase": "Update", "note": "Object <b>#7</b> changes: Student {roll=12, name=&quot;Kabir&quot;}."}, {"line": 12, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["list", "→ #1 ArrayList"]]}], "heap": ["<b>#1</b> ArrayList size 2, capacity 10 [→#3, →#5]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Student {roll=21, name=&quot;Om&quot;}", "<b>#4</b> String &quot;Om&quot;", "<b>#5</b> Student {roll=7, name=&quot;Riya&quot;}", "<b>#6</b> String &quot;Riya&quot;"], "phase": "Return", "note": "<code>new Student()</code> returns and its frame is popped."}, {"line": 25, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["list", "→ #1 ArrayList"]]}], "heap": ["<b>#1</b> ArrayList size 3, capacity 10 [→#3, →#5, →#7]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Student {roll=21, name=&quot;Om&quot;}", "<b>#4</b> String &quot;Om&quot;", "<b>#5</b> Student {roll=7, name=&quot;Riya&quot;}", "<b>#6</b> String &quot;Riya&quot;", "<b>#7</b> Student {roll=12, name=&quot;Kabir&quot;}", "<b>#8</b> String &quot;Kabir&quot;"], "phase": "Update", "note": "Object <b>#1</b> changes: ArrayList size 3, capacity 10 [→#3, →#5, →#7]."}, {"line": 26, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["list", "→ #1 ArrayList"]]}, {"frame": "Student.compareTo(Student other)", "vars": [["this", "→ #5 Student"], ["other", "→ #3 Student"]]}], "heap": ["<b>#1</b> ArrayList size 3, capacity 10 [→#3, →#5, →#7]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Student {roll=21, name=&quot;Om&quot;}", "<b>#4</b> String &quot;Om&quot;", "<b>#5</b> Student {roll=7, name=&quot;Riya&quot;}", "<b>#6</b> String &quot;Riya&quot;", "<b>#7</b> Student {roll=12, name=&quot;Kabir&quot;}", "<b>#8</b> String &quot;Kabir&quot;"], "newVar": "this", "phase": "sort", "note": "<code>Collections.sort(list)</code> starts. You never call <code>compareTo</code>; the sorting code will. Watch frames named <code>Student.compareTo</code> appear."}, {"line": 15, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["list", "→ #1 ArrayList"]]}, {"frame": "Student.compareTo(Student other)", "vars": [["this", "→ #5 Student"], ["other", "→ #3 Student"], ["result", "-1"]]}], "heap": ["<b>#1</b> ArrayList size 3, capacity 10 [→#3, →#5, →#7]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Student {roll=21, name=&quot;Om&quot;}", "<b>#4</b> String &quot;Om&quot;", "<b>#5</b> Student {roll=7, name=&quot;Riya&quot;}", "<b>#6</b> String &quot;Riya&quot;", "<b>#7</b> Student {roll=12, name=&quot;Kabir&quot;}", "<b>#8</b> String &quot;Kabir&quot;"], "newVar": "result", "phase": "Compare", "note": "The sort's first question: Riya (this, roll 7) vs Om (other, roll 21). Now <code>result</code> = -1."}, {"line": 16, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["list", "→ #1 ArrayList"]]}, {"frame": "Student.compareTo(Student other)", "vars": [["this", "→ #7 Student"], ["other", "→ #5 Student"]]}], "heap": ["<b>#1</b> ArrayList size 3, capacity 10 [→#3, →#5, →#7]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Student {roll=21, name=&quot;Om&quot;}", "<b>#4</b> String &quot;Om&quot;", "<b>#5</b> Student {roll=7, name=&quot;Riya&quot;}", "<b>#6</b> String &quot;Riya&quot;", "<b>#7</b> Student {roll=12, name=&quot;Kabir&quot;}", "<b>#8</b> String &quot;Kabir&quot;"], "newVar": "this", "phase": "Answer", "note": "Returns −1: Riya comes before Om. The sort immediately asks its next question, so a new compareTo call replaces this one."}, {"line": 15, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["list", "→ #1 ArrayList"]]}, {"frame": "Student.compareTo(Student other)", "vars": [["this", "→ #7 Student"], ["other", "→ #5 Student"], ["result", "1"]]}], "heap": ["<b>#1</b> ArrayList size 3, capacity 10 [→#3, →#5, →#7]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Student {roll=21, name=&quot;Om&quot;}", "<b>#4</b> String &quot;Om&quot;", "<b>#5</b> Student {roll=7, name=&quot;Riya&quot;}", "<b>#6</b> String &quot;Riya&quot;", "<b>#7</b> Student {roll=12, name=&quot;Kabir&quot;}", "<b>#8</b> String &quot;Kabir&quot;"], "newVar": "result", "phase": "Compare", "note": "Kabir (12) vs Riya (7): +1, Kabir comes after Riya. Now <code>result</code> = 1."}, {"line": 16, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["list", "→ #1 ArrayList"]]}, {"frame": "Student.compareTo(Student other)", "vars": [["this", "→ #7 Student"], ["other", "→ #3 Student"]]}], "heap": ["<b>#1</b> ArrayList size 3, capacity 10 [→#5, →#3, →#7]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Student {roll=21, name=&quot;Om&quot;}", "<b>#4</b> String &quot;Om&quot;", "<b>#5</b> Student {roll=7, name=&quot;Riya&quot;}", "<b>#6</b> String &quot;Riya&quot;", "<b>#7</b> Student {roll=12, name=&quot;Kabir&quot;}", "<b>#8</b> String &quot;Kabir&quot;"], "newVar": "other", "phase": "Reverse", "note": "The first two elements formed a descending run, so TimSort reversed them: the heap list is now [Riya, Om, Kabir]. Next call: <code>other</code> = Om."}, {"line": 15, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["list", "→ #1 ArrayList"]]}, {"frame": "Student.compareTo(Student other)", "vars": [["this", "→ #7 Student"], ["other", "→ #3 Student"], ["result", "-1"]]}], "heap": ["<b>#1</b> ArrayList size 3, capacity 10 [→#5, →#3, →#7]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Student {roll=21, name=&quot;Om&quot;}", "<b>#4</b> String &quot;Om&quot;", "<b>#5</b> Student {roll=7, name=&quot;Riya&quot;}", "<b>#6</b> String &quot;Riya&quot;", "<b>#7</b> Student {roll=12, name=&quot;Kabir&quot;}", "<b>#8</b> String &quot;Kabir&quot;"], "newVar": "result", "phase": "Compare", "note": "Binary insertion of Kabir: Kabir (12) vs Om (21) → −1, Kabir belongs before Om. Now <code>result</code> = -1."}, {"line": 16, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["list", "→ #1 ArrayList"]]}, {"frame": "Student.compareTo(Student other)", "vars": [["this", "→ #7 Student"], ["other", "→ #5 Student"]]}], "heap": ["<b>#1</b> ArrayList size 3, capacity 10 [→#5, →#3, →#7]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Student {roll=21, name=&quot;Om&quot;}", "<b>#4</b> String &quot;Om&quot;", "<b>#5</b> Student {roll=7, name=&quot;Riya&quot;}", "<b>#6</b> String &quot;Riya&quot;", "<b>#7</b> Student {roll=12, name=&quot;Kabir&quot;}", "<b>#8</b> String &quot;Kabir&quot;"], "newVar": "other", "phase": "Next", "note": "Next call: <code>other</code> = Riya."}, {"line": 15, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["list", "→ #1 ArrayList"]]}, {"frame": "Student.compareTo(Student other)", "vars": [["this", "→ #7 Student"], ["other", "→ #5 Student"], ["result", "1"]]}], "heap": ["<b>#1</b> ArrayList size 3, capacity 10 [→#5, →#3, →#7]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Student {roll=21, name=&quot;Om&quot;}", "<b>#4</b> String &quot;Om&quot;", "<b>#5</b> Student {roll=7, name=&quot;Riya&quot;}", "<b>#6</b> String &quot;Riya&quot;", "<b>#7</b> Student {roll=12, name=&quot;Kabir&quot;}", "<b>#8</b> String &quot;Kabir&quot;"], "newVar": "result", "phase": "Compare", "note": "Kabir (12) vs Riya (7) → +1, after Riya. Now <code>result</code> = 1."}, {"line": 16, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["list", "→ #1 ArrayList"]]}], "heap": ["<b>#1</b> ArrayList size 3, capacity 10 [→#5, →#7, →#3]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Student {roll=21, name=&quot;Om&quot;}", "<b>#4</b> String &quot;Om&quot;", "<b>#5</b> Student {roll=7, name=&quot;Riya&quot;}", "<b>#6</b> String &quot;Riya&quot;", "<b>#7</b> Student {roll=12, name=&quot;Kabir&quot;}", "<b>#8</b> String &quot;Kabir&quot;"], "phase": "Place", "note": "Last answer. The sort moves Kabir between Riya and Om: the heap list is [Riya, Kabir, Om]."}, {"line": 27, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["list", "→ #1 ArrayList"]]}], "heap": ["<b>#1</b> ArrayList size 3, capacity 10 [→#5, →#7, →#3]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Student {roll=21, name=&quot;Om&quot;}", "<b>#4</b> String &quot;Om&quot;", "<b>#5</b> Student {roll=7, name=&quot;Riya&quot;}", "<b>#6</b> String &quot;Riya&quot;", "<b>#7</b> Student {roll=12, name=&quot;Kabir&quot;}", "<b>#8</b> String &quot;Kabir&quot;"], "out": "Riya Kabir Om\n", "phase": "Print", "note": "The list is now in natural order: by roll number. Prints <code>Riya Kabir Om</code>."}, {"line": 28, "phase": "Program ends", "note": "<code>main</code> returns, its frame is popped and the program ends.", "stack": [], "heap": []}]}</script>
+  </div>
+
+<h3 id="worked">Worked examples: real problems, solved and traced in memory</h3>
+  <p class="wx-intro">Three sorting problems from real apps, using Comparable, a custom Comparator, and a comparator inside a PriorityQueue.</p>
+  <article class="wx">
+    <div class="wx__head"><span class="wx__num">Example 1</span><span class="wx__tag">Railways · Comparable</span></div>
+    <h4>Trains in departure order</h4>
+    <div class="wx__problem"><p class="wx__label">Problem statement</p><p>A station display lists trains by departure time (HHMM as an int). Give <code>Train</code> a natural order by departure and sort three trains.</p></div>
+    <div class="prob__io"><div><small>Input</small><pre>12123 at 1715, 11007 at 0640, 12127 at 1015</pre></div><div><small>Expected output</small><pre>0640 11007
+1015 12127
+1715 12123</pre></div></div>
+    <div class="wx__approach"><p class="wx__label">Approach</p><ol><li><code>Train implements Comparable&lt;Train&gt;</code>; <code>compareTo</code> uses <code>Integer.compare</code> on departure.</li><li><code>Collections.sort(list)</code> needs no extra argument.</li><li>Print the board.</li></ol></div>
+    <p class="wx__label">Solution: run it live</p>
+    <div class="runner">
+    <script type="application/json">{"lang": "java", "file": "Main.java", "tasks": [{"label": "Run · Trains in departure order", "hint": "Press <b>Run</b>. Then sort latest first with <code>board.sort(Collections.reverseOrder());</code>.", "code": "import java.util.ArrayList;\nimport java.util.Collections;\nimport java.util.List;\n\nclass Train implements Comparable<Train> {\n    String no;\n    int departs;\n\n    Train(String no, int departs) {\n        this.no = no;\n        this.departs = departs;\n    }\n\n    public int compareTo(Train other) {\n        return Integer.compare(departs, other.departs);\n    }\n}\n\npublic class Main {\n    public static void main(String[] args) {\n        List<Train> board = new ArrayList<>();\n        board.add(new Train(\"12123\", 1715));\n        board.add(new Train(\"11007\", 640));\n        board.add(new Train(\"12127\", 1015));\n        Collections.sort(board);\n        for (Train t : board) {\n            System.out.printf(\"%04d %s%n\", t.departs, t.no);\n        }\n    }\n}\n"}]}</script>
+    </div>
+    <p class="wx__label">What happens in memory, step by step</p>
+    <p class="wx__how">Recorded from the real JVM: press <b>Next</b> to execute one line at a time. Watch method calls push and pop frames on the stack, and objects (numbered #1, #2 …) appear on the heap.</p>
+    <div class="tracer">
+    <script type="application/json">{"lang": "java", "code": ["import java.util.ArrayList;", "import java.util.Collections;", "import java.util.List;", "", "class Train implements Comparable<Train> {", "    String no;", "    int departs;", "", "    Train(String no, int departs) {", "        this.no = no;", "        this.departs = departs;", "    }", "", "    public int compareTo(Train other) {", "        return Integer.compare(departs, other.departs);", "    }", "}", "", "public class Main {", "    public static void main(String[] args) {", "        List<Train> board = new ArrayList<>();", "        board.add(new Train(\"12123\", 1715));", "        board.add(new Train(\"11007\", 640));", "        board.add(new Train(\"12127\", 1015));", "        Collections.sort(board);", "        for (Train t : board) {", "            System.out.printf(\"%04d %s%n\", t.departs, t.no);", "        }", "    }", "}"], "steps": [{"line": 21, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["board", "→ #1 ArrayList"]]}], "heap": ["<b>#1</b> ArrayList size 0, capacity 0 []", "<b>#2</b> String[0] (args, empty)"], "newVar": "board", "phase": "Assign", "note": "Now <code>board</code> = → #1 ArrayList. New object <b>#1</b> on the heap: ArrayList size 0, capacity 0 []."}, {"line": 22, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["board", "→ #1 ArrayList"]]}, {"frame": "new Train(String no, int departs)", "vars": [["this", "→ #3 Train"], ["no", "→ #4 \"12123\""], ["departs", "1715"]]}], "heap": ["<b>#1</b> ArrayList size 0, capacity 0 []", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Train {no=null, departs=0}", "<b>#4</b> String &quot;12123&quot;"], "newVar": "this", "phase": "Call", "note": "<code>new Train()</code> is called: a new frame is pushed with <code>this</code> = → #3 Train, <code>no</code> = → #4 &quot;12123&quot;, <code>departs</code> = 1715. New object <b>#3</b> on the heap: Train {no=null, departs=0}. New object <b>#4</b> on the heap: String &quot;12123&quot;."}, {"line": 9, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["board", "→ #1 ArrayList"]]}, {"frame": "new Train(String no, int departs)", "vars": [["this", "→ #3 Train"], ["no", "→ #4 \"12123\""], ["departs", "1715"]]}], "heap": ["<b>#1</b> ArrayList size 0, capacity 0 []", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Train {no=null, departs=0}", "<b>#4</b> String &quot;12123&quot;"], "phase": "Constructor", "note": "The constructor starts. The new object already exists, with default values (0, null, false) in its fields."}, {"line": 10, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["board", "→ #1 ArrayList"]]}, {"frame": "new Train(String no, int departs)", "vars": [["this", "→ #3 Train"], ["no", "→ #4 \"12123\""], ["departs", "1715"]]}], "heap": ["<b>#1</b> ArrayList size 0, capacity 0 []", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Train {no=&quot;12123&quot;, departs=0}", "<b>#4</b> String &quot;12123&quot;"], "phase": "Update", "note": "Object <b>#3</b> changes: Train {no=&quot;12123&quot;, departs=0}."}, {"line": 11, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["board", "→ #1 ArrayList"]]}, {"frame": "new Train(String no, int departs)", "vars": [["this", "→ #3 Train"], ["no", "→ #4 \"12123\""], ["departs", "1715"]]}], "heap": ["<b>#1</b> ArrayList size 0, capacity 0 []", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Train {no=&quot;12123&quot;, departs=1715}", "<b>#4</b> String &quot;12123&quot;"], "phase": "Update", "note": "Object <b>#3</b> changes: Train {no=&quot;12123&quot;, departs=1715}."}, {"line": 12, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["board", "→ #1 ArrayList"]]}], "heap": ["<b>#1</b> ArrayList size 0, capacity 0 []", "<b>#2</b> String[0] (args, empty)"], "phase": "Return", "note": "<code>new Train()</code> returns and its frame is popped."}, {"line": 22, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["board", "→ #1 ArrayList"]]}], "heap": ["<b>#1</b> ArrayList size 1, capacity 10 [→#3]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Train {no=&quot;12123&quot;, departs=1715}", "<b>#4</b> String &quot;12123&quot;"], "phase": "Update", "note": "Object <b>#1</b> changes: ArrayList size 1, capacity 10 [→#3]."}, {"line": 23, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["board", "→ #1 ArrayList"]]}, {"frame": "new Train(String no, int departs)", "vars": [["this", "→ #5 Train"], ["no", "→ #6 \"11007\""], ["departs", "640"]]}], "heap": ["<b>#1</b> ArrayList size 1, capacity 10 [→#3]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Train {no=&quot;12123&quot;, departs=1715}", "<b>#4</b> String &quot;12123&quot;", "<b>#5</b> Train {no=null, departs=0}", "<b>#6</b> String &quot;11007&quot;"], "newVar": "this", "phase": "Call", "note": "<code>new Train()</code> is called: a new frame is pushed with <code>this</code> = → #5 Train, <code>no</code> = → #6 &quot;11007&quot;, <code>departs</code> = 640. New object <b>#5</b> on the heap: Train {no=null, departs=0}. New object <b>#6</b> on the heap: String &quot;11007&quot;."}, {"line": 9, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["board", "→ #1 ArrayList"]]}, {"frame": "new Train(String no, int departs)", "vars": [["this", "→ #5 Train"], ["no", "→ #6 \"11007\""], ["departs", "640"]]}], "heap": ["<b>#1</b> ArrayList size 1, capacity 10 [→#3]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Train {no=&quot;12123&quot;, departs=1715}", "<b>#4</b> String &quot;12123&quot;", "<b>#5</b> Train {no=null, departs=0}", "<b>#6</b> String &quot;11007&quot;"], "phase": "Constructor", "note": "The constructor starts. The new object already exists, with default values (0, null, false) in its fields."}, {"line": 10, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["board", "→ #1 ArrayList"]]}, {"frame": "new Train(String no, int departs)", "vars": [["this", "→ #5 Train"], ["no", "→ #6 \"11007\""], ["departs", "640"]]}], "heap": ["<b>#1</b> ArrayList size 1, capacity 10 [→#3]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Train {no=&quot;12123&quot;, departs=1715}", "<b>#4</b> String &quot;12123&quot;", "<b>#5</b> Train {no=&quot;11007&quot;, departs=0}", "<b>#6</b> String &quot;11007&quot;"], "phase": "Update", "note": "Object <b>#5</b> changes: Train {no=&quot;11007&quot;, departs=0}."}, {"line": 11, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["board", "→ #1 ArrayList"]]}, {"frame": "new Train(String no, int departs)", "vars": [["this", "→ #5 Train"], ["no", "→ #6 \"11007\""], ["departs", "640"]]}], "heap": ["<b>#1</b> ArrayList size 1, capacity 10 [→#3]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Train {no=&quot;12123&quot;, departs=1715}", "<b>#4</b> String &quot;12123&quot;", "<b>#5</b> Train {no=&quot;11007&quot;, departs=640}", "<b>#6</b> String &quot;11007&quot;"], "phase": "Update", "note": "Object <b>#5</b> changes: Train {no=&quot;11007&quot;, departs=640}."}, {"line": 12, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["board", "→ #1 ArrayList"]]}], "heap": ["<b>#1</b> ArrayList size 1, capacity 10 [→#3]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Train {no=&quot;12123&quot;, departs=1715}", "<b>#4</b> String &quot;12123&quot;"], "phase": "Return", "note": "<code>new Train()</code> returns and its frame is popped."}, {"line": 23, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["board", "→ #1 ArrayList"]]}], "heap": ["<b>#1</b> ArrayList size 2, capacity 10 [→#3, →#5]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Train {no=&quot;12123&quot;, departs=1715}", "<b>#4</b> String &quot;12123&quot;", "<b>#5</b> Train {no=&quot;11007&quot;, departs=640}", "<b>#6</b> String &quot;11007&quot;"], "phase": "Update", "note": "Object <b>#1</b> changes: ArrayList size 2, capacity 10 [→#3, →#5]."}, {"line": 24, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["board", "→ #1 ArrayList"]]}, {"frame": "new Train(String no, int departs)", "vars": [["this", "→ #7 Train"], ["no", "→ #8 \"12127\""], ["departs", "1015"]]}], "heap": ["<b>#1</b> ArrayList size 2, capacity 10 [→#3, →#5]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Train {no=&quot;12123&quot;, departs=1715}", "<b>#4</b> String &quot;12123&quot;", "<b>#5</b> Train {no=&quot;11007&quot;, departs=640}", "<b>#6</b> String &quot;11007&quot;", "<b>#7</b> Train {no=null, departs=0}", "<b>#8</b> String &quot;12127&quot;"], "newVar": "this", "phase": "Call", "note": "<code>new Train()</code> is called: a new frame is pushed with <code>this</code> = → #7 Train, <code>no</code> = → #8 &quot;12127&quot;, <code>departs</code> = 1015. New object <b>#7</b> on the heap: Train {no=null, departs=0}. New object <b>#8</b> on the heap: String &quot;12127&quot;."}, {"line": 9, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["board", "→ #1 ArrayList"]]}, {"frame": "new Train(String no, int departs)", "vars": [["this", "→ #7 Train"], ["no", "→ #8 \"12127\""], ["departs", "1015"]]}], "heap": ["<b>#1</b> ArrayList size 2, capacity 10 [→#3, →#5]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Train {no=&quot;12123&quot;, departs=1715}", "<b>#4</b> String &quot;12123&quot;", "<b>#5</b> Train {no=&quot;11007&quot;, departs=640}", "<b>#6</b> String &quot;11007&quot;", "<b>#7</b> Train {no=null, departs=0}", "<b>#8</b> String &quot;12127&quot;"], "phase": "Constructor", "note": "The constructor starts. The new object already exists, with default values (0, null, false) in its fields."}, {"line": 10, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["board", "→ #1 ArrayList"]]}, {"frame": "new Train(String no, int departs)", "vars": [["this", "→ #7 Train"], ["no", "→ #8 \"12127\""], ["departs", "1015"]]}], "heap": ["<b>#1</b> ArrayList size 2, capacity 10 [→#3, →#5]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Train {no=&quot;12123&quot;, departs=1715}", "<b>#4</b> String &quot;12123&quot;", "<b>#5</b> Train {no=&quot;11007&quot;, departs=640}", "<b>#6</b> String &quot;11007&quot;", "<b>#7</b> Train {no=&quot;12127&quot;, departs=0}", "<b>#8</b> String &quot;12127&quot;"], "phase": "Update", "note": "Object <b>#7</b> changes: Train {no=&quot;12127&quot;, departs=0}."}, {"line": 11, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["board", "→ #1 ArrayList"]]}, {"frame": "new Train(String no, int departs)", "vars": [["this", "→ #7 Train"], ["no", "→ #8 \"12127\""], ["departs", "1015"]]}], "heap": ["<b>#1</b> ArrayList size 2, capacity 10 [→#3, →#5]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Train {no=&quot;12123&quot;, departs=1715}", "<b>#4</b> String &quot;12123&quot;", "<b>#5</b> Train {no=&quot;11007&quot;, departs=640}", "<b>#6</b> String &quot;11007&quot;", "<b>#7</b> Train {no=&quot;12127&quot;, departs=1015}", "<b>#8</b> String &quot;12127&quot;"], "phase": "Update", "note": "Object <b>#7</b> changes: Train {no=&quot;12127&quot;, departs=1015}."}, {"line": 12, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["board", "→ #1 ArrayList"]]}], "heap": ["<b>#1</b> ArrayList size 2, capacity 10 [→#3, →#5]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Train {no=&quot;12123&quot;, departs=1715}", "<b>#4</b> String &quot;12123&quot;", "<b>#5</b> Train {no=&quot;11007&quot;, departs=640}", "<b>#6</b> String &quot;11007&quot;"], "phase": "Return", "note": "<code>new Train()</code> returns and its frame is popped."}, {"line": 24, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["board", "→ #1 ArrayList"]]}], "heap": ["<b>#1</b> ArrayList size 3, capacity 10 [→#3, →#5, →#7]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Train {no=&quot;12123&quot;, departs=1715}", "<b>#4</b> String &quot;12123&quot;", "<b>#5</b> Train {no=&quot;11007&quot;, departs=640}", "<b>#6</b> String &quot;11007&quot;", "<b>#7</b> Train {no=&quot;12127&quot;, departs=1015}", "<b>#8</b> String &quot;12127&quot;"], "phase": "Update", "note": "Object <b>#1</b> changes: ArrayList size 3, capacity 10 [→#3, →#5, →#7]."}, {"line": 25, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["board", "→ #1 ArrayList"]]}, {"frame": "Train.compareTo(Train other)", "vars": [["this", "→ #5 Train"], ["other", "→ #3 Train"]]}], "heap": ["<b>#1</b> ArrayList size 3, capacity 10 [→#3, →#5, →#7]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Train {no=&quot;12123&quot;, departs=1715}", "<b>#4</b> String &quot;12123&quot;", "<b>#5</b> Train {no=&quot;11007&quot;, departs=640}", "<b>#6</b> String &quot;11007&quot;", "<b>#7</b> Train {no=&quot;12127&quot;, departs=1015}", "<b>#8</b> String &quot;12127&quot;"], "newVar": "this", "phase": "Call", "note": "<code>Train.compareTo()</code> is called: a new frame is pushed with <code>this</code> = → #5 Train, <code>other</code> = → #3 Train."}, {"line": 15, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["board", "→ #1 ArrayList"]]}, {"frame": "Train.compareTo(Train other)", "vars": [["this", "→ #7 Train"], ["other", "→ #5 Train"]]}], "heap": ["<b>#1</b> ArrayList size 3, capacity 10 [→#3, →#5, →#7]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Train {no=&quot;12123&quot;, departs=1715}", "<b>#4</b> String &quot;12123&quot;", "<b>#5</b> Train {no=&quot;11007&quot;, departs=640}", "<b>#6</b> String &quot;11007&quot;", "<b>#7</b> Train {no=&quot;12127&quot;, departs=1015}", "<b>#8</b> String &quot;12127&quot;"], "newVar": "this", "phase": "Assign", "note": "Now <code>this</code> = → #7 Train, <code>other</code> = → #5 Train."}, {"line": 15, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["board", "→ #1 ArrayList"]]}, {"frame": "Train.compareTo(Train other)", "vars": [["this", "→ #7 Train"], ["other", "→ #3 Train"]]}], "heap": ["<b>#1</b> ArrayList size 3, capacity 10 [→#5, →#3, →#7]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Train {no=&quot;12123&quot;, departs=1715}", "<b>#4</b> String &quot;12123&quot;", "<b>#5</b> Train {no=&quot;11007&quot;, departs=640}", "<b>#6</b> String &quot;11007&quot;", "<b>#7</b> Train {no=&quot;12127&quot;, departs=1015}", "<b>#8</b> String &quot;12127&quot;"], "newVar": "other", "phase": "Assign", "note": "Now <code>other</code> = → #3 Train. Object <b>#1</b> changes: ArrayList size 3, capacity 10 [→#5, →#3, →#7]."}, {"line": 15, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["board", "→ #1 ArrayList"]]}, {"frame": "Train.compareTo(Train other)", "vars": [["this", "→ #7 Train"], ["other", "→ #5 Train"]]}], "heap": ["<b>#1</b> ArrayList size 3, capacity 10 [→#5, →#3, →#7]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Train {no=&quot;12123&quot;, departs=1715}", "<b>#4</b> String &quot;12123&quot;", "<b>#5</b> Train {no=&quot;11007&quot;, departs=640}", "<b>#6</b> String &quot;11007&quot;", "<b>#7</b> Train {no=&quot;12127&quot;, departs=1015}", "<b>#8</b> String &quot;12127&quot;"], "newVar": "other", "phase": "Assign", "note": "Now <code>other</code> = → #5 Train."}, {"line": 15, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["board", "→ #1 ArrayList"]]}], "heap": ["<b>#1</b> ArrayList size 3, capacity 10 [→#5, →#7, →#3]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Train {no=&quot;12123&quot;, departs=1715}", "<b>#4</b> String &quot;12123&quot;", "<b>#5</b> Train {no=&quot;11007&quot;, departs=640}", "<b>#6</b> String &quot;11007&quot;", "<b>#7</b> Train {no=&quot;12127&quot;, departs=1015}", "<b>#8</b> String &quot;12127&quot;"], "phase": "Return", "note": "<code>Train.compareTo()</code> returns and its frame is popped. Object <b>#1</b> changes: ArrayList size 3, capacity 10 [→#5, →#7, →#3]."}, {"line": 26, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["board", "→ #1 ArrayList"], ["t", "→ #5 Train"]]}], "heap": ["<b>#1</b> ArrayList size 3, capacity 10 [→#5, →#7, →#3]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Train {no=&quot;12123&quot;, departs=1715}", "<b>#4</b> String &quot;12123&quot;", "<b>#5</b> Train {no=&quot;11007&quot;, departs=640}", "<b>#6</b> String &quot;11007&quot;", "<b>#7</b> Train {no=&quot;12127&quot;, departs=1015}", "<b>#8</b> String &quot;12127&quot;"], "newVar": "t", "phase": "Assign", "note": "Now <code>t</code> = → #5 Train."}, {"line": 27, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["board", "→ #1 ArrayList"]]}], "heap": ["<b>#1</b> ArrayList size 3, capacity 10 [→#5, →#7, →#3]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Train {no=&quot;12123&quot;, departs=1715}", "<b>#4</b> String &quot;12123&quot;", "<b>#5</b> Train {no=&quot;11007&quot;, departs=640}", "<b>#6</b> String &quot;11007&quot;", "<b>#7</b> Train {no=&quot;12127&quot;, departs=1015}", "<b>#8</b> String &quot;12127&quot;"], "out": "0640 11007\n", "phase": "Print", "note": "Prints <code>0640 11007</code>."}, {"line": 28, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["board", "→ #1 ArrayList"]]}], "heap": ["<b>#1</b> ArrayList size 3, capacity 10 [→#5, →#7, →#3]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Train {no=&quot;12123&quot;, departs=1715}", "<b>#4</b> String &quot;12123&quot;", "<b>#5</b> Train {no=&quot;11007&quot;, departs=640}", "<b>#6</b> String &quot;11007&quot;", "<b>#7</b> Train {no=&quot;12127&quot;, departs=1015}", "<b>#8</b> String &quot;12127&quot;"], "phase": "Step", "note": "End of the block."}, {"line": 26, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["board", "→ #1 ArrayList"], ["t", "→ #7 Train"]]}], "heap": ["<b>#1</b> ArrayList size 3, capacity 10 [→#5, →#7, →#3]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Train {no=&quot;12123&quot;, departs=1715}", "<b>#4</b> String &quot;12123&quot;", "<b>#5</b> Train {no=&quot;11007&quot;, departs=640}", "<b>#6</b> String &quot;11007&quot;", "<b>#7</b> Train {no=&quot;12127&quot;, departs=1015}", "<b>#8</b> String &quot;12127&quot;"], "newVar": "t", "phase": "Assign", "note": "Now <code>t</code> = → #7 Train."}, {"line": 27, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["board", "→ #1 ArrayList"]]}], "heap": ["<b>#1</b> ArrayList size 3, capacity 10 [→#5, →#7, →#3]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Train {no=&quot;12123&quot;, departs=1715}", "<b>#4</b> String &quot;12123&quot;", "<b>#5</b> Train {no=&quot;11007&quot;, departs=640}", "<b>#6</b> String &quot;11007&quot;", "<b>#7</b> Train {no=&quot;12127&quot;, departs=1015}", "<b>#8</b> String &quot;12127&quot;"], "out": "1015 12127\n", "phase": "Print", "note": "Prints <code>1015 12127</code>."}, {"line": 28, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["board", "→ #1 ArrayList"]]}], "heap": ["<b>#1</b> ArrayList size 3, capacity 10 [→#5, →#7, →#3]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Train {no=&quot;12123&quot;, departs=1715}", "<b>#4</b> String &quot;12123&quot;", "<b>#5</b> Train {no=&quot;11007&quot;, departs=640}", "<b>#6</b> String &quot;11007&quot;", "<b>#7</b> Train {no=&quot;12127&quot;, departs=1015}", "<b>#8</b> String &quot;12127&quot;"], "phase": "Step", "note": "End of the block."}, {"line": 26, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["board", "→ #1 ArrayList"], ["t", "→ #3 Train"]]}], "heap": ["<b>#1</b> ArrayList size 3, capacity 10 [→#5, →#7, →#3]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Train {no=&quot;12123&quot;, departs=1715}", "<b>#4</b> String &quot;12123&quot;", "<b>#5</b> Train {no=&quot;11007&quot;, departs=640}", "<b>#6</b> String &quot;11007&quot;", "<b>#7</b> Train {no=&quot;12127&quot;, departs=1015}", "<b>#8</b> String &quot;12127&quot;"], "newVar": "t", "phase": "Assign", "note": "Now <code>t</code> = → #3 Train."}, {"line": 27, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["board", "→ #1 ArrayList"]]}], "heap": ["<b>#1</b> ArrayList size 3, capacity 10 [→#5, →#7, →#3]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Train {no=&quot;12123&quot;, departs=1715}", "<b>#4</b> String &quot;12123&quot;", "<b>#5</b> Train {no=&quot;11007&quot;, departs=640}", "<b>#6</b> String &quot;11007&quot;", "<b>#7</b> Train {no=&quot;12127&quot;, departs=1015}", "<b>#8</b> String &quot;12127&quot;"], "out": "1715 12123\n", "phase": "Print", "note": "Prints <code>1715 12123</code>."}, {"line": 28, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["board", "→ #1 ArrayList"]]}], "heap": ["<b>#1</b> ArrayList size 3, capacity 10 [→#5, →#7, →#3]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Train {no=&quot;12123&quot;, departs=1715}", "<b>#4</b> String &quot;12123&quot;", "<b>#5</b> Train {no=&quot;11007&quot;, departs=640}", "<b>#6</b> String &quot;11007&quot;", "<b>#7</b> Train {no=&quot;12127&quot;, departs=1015}", "<b>#8</b> String &quot;12127&quot;"], "phase": "Step", "note": "End of the block."}, {"line": 26, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["board", "→ #1 ArrayList"]]}], "heap": ["<b>#1</b> ArrayList size 3, capacity 10 [→#5, →#7, →#3]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Train {no=&quot;12123&quot;, departs=1715}", "<b>#4</b> String &quot;12123&quot;", "<b>#5</b> Train {no=&quot;11007&quot;, departs=640}", "<b>#6</b> String &quot;11007&quot;", "<b>#7</b> Train {no=&quot;12127&quot;, departs=1015}", "<b>#8</b> String &quot;12127&quot;"], "phase": "Loop ends", "note": "No elements left, so the loop ends."}, {"line": 29, "phase": "Program ends", "note": "<code>main</code> returns, its frame is popped and the program ends.", "stack": [], "heap": []}]}</script>
+  </div>
+  </article>
+  <article class="wx">
+    <div class="wx__head"><span class="wx__num">Example 2</span><span class="wx__tag">Sales · Comparator</span></div>
+    <h4>Leaderboard: revenue high to low, then name</h4>
+    <div class="wx__problem"><p class="wx__label">Problem statement</p><p>Sales reps: Riya ₹80k, Om ₹95k, Kabir ₹80k. Sort by revenue (highest first); equal revenue by name. Write the comparator by hand as a class.</p></div>
+    <div class="prob__io"><div><small>Input</small><pre>Riya 80, Om 95, Kabir 80</pre></div><div><small>Expected output</small><pre>Om ₹95k
+Kabir ₹80k
+Riya ₹80k</pre></div></div>
+    <div class="wx__approach"><p class="wx__label">Approach</p><ol><li>A class <code>ByRevenue implements Comparator&lt;Rep&gt;</code>.</li><li><code>compare</code>: compare revenues in reverse (<code>Integer.compare(b, a)</code>); if 0, compare names.</li><li><code>list.sort(new ByRevenue())</code>.</li></ol></div>
+    <p class="wx__label">Solution: run it live</p>
+    <div class="runner">
+    <script type="application/json">{"lang": "java", "file": "Main.java", "tasks": [{"label": "Run · Leaderboard: revenue high to low, then name", "hint": "Press <b>Run</b>. Then replace the class with <code>Comparator.comparingInt((Rep r) -&gt; r.revenueK).reversed().thenComparing(r -&gt; r.name)</code>.", "code": "import java.util.ArrayList;\nimport java.util.Comparator;\nimport java.util.List;\n\nclass Rep {\n    String name;\n    int revenueK;\n\n    Rep(String name, int revenueK) {\n        this.name = name;\n        this.revenueK = revenueK;\n    }\n}\n\nclass ByRevenue implements Comparator<Rep> {\n    public int compare(Rep a, Rep b) {\n        int byRevenue = Integer.compare(b.revenueK, a.revenueK);\n        if (byRevenue != 0) {\n            return byRevenue;\n        }\n        return a.name.compareTo(b.name);\n    }\n}\n\npublic class Main {\n    public static void main(String[] args) {\n        List<Rep> reps = new ArrayList<>();\n        reps.add(new Rep(\"Riya\", 80));\n        reps.add(new Rep(\"Om\", 95));\n        reps.add(new Rep(\"Kabir\", 80));\n        reps.sort(new ByRevenue());\n        for (Rep r : reps) {\n            System.out.println(r.name + \" ₹\" + r.revenueK + \"k\");\n        }\n    }\n}\n"}]}</script>
+    </div>
+    <p class="wx__label">What happens in memory, step by step</p>
+    <p class="wx__how">Recorded from the real JVM: press <b>Next</b> to execute one line at a time. Watch method calls push and pop frames on the stack, and objects (numbered #1, #2 …) appear on the heap.</p>
+    <div class="tracer">
+    <script type="application/json">{"lang": "java", "code": ["import java.util.ArrayList;", "import java.util.Comparator;", "import java.util.List;", "", "class Rep {", "    String name;", "    int revenueK;", "", "    Rep(String name, int revenueK) {", "        this.name = name;", "        this.revenueK = revenueK;", "    }", "}", "", "class ByRevenue implements Comparator<Rep> {", "    public int compare(Rep a, Rep b) {", "        int byRevenue = Integer.compare(b.revenueK, a.revenueK);", "        if (byRevenue != 0) {", "            return byRevenue;", "        }", "        return a.name.compareTo(b.name);", "    }", "}", "", "public class Main {", "    public static void main(String[] args) {", "        List<Rep> reps = new ArrayList<>();", "        reps.add(new Rep(\"Riya\", 80));", "        reps.add(new Rep(\"Om\", 95));", "        reps.add(new Rep(\"Kabir\", 80));", "        reps.sort(new ByRevenue());", "        for (Rep r : reps) {", "            System.out.println(r.name + \" ₹\" + r.revenueK + \"k\");", "        }", "    }", "}"], "steps": [{"line": 27, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["reps", "→ #1 ArrayList"]]}], "heap": ["<b>#1</b> ArrayList size 0, capacity 0 []", "<b>#2</b> String[0] (args, empty)"], "newVar": "reps", "phase": "Assign", "note": "Now <code>reps</code> = → #1 ArrayList. New object <b>#1</b> on the heap: ArrayList size 0, capacity 0 []."}, {"line": 28, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["reps", "→ #1 ArrayList"]]}, {"frame": "new Rep(String name, int revenueK)", "vars": [["this", "→ #3 Rep"], ["name", "→ #4 \"Riya\""], ["revenueK", "80"]]}], "heap": ["<b>#1</b> ArrayList size 0, capacity 0 []", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Rep {name=null, revenueK=0}", "<b>#4</b> String &quot;Riya&quot;"], "newVar": "this", "phase": "Call", "note": "<code>new Rep()</code> is called: a new frame is pushed with <code>this</code> = → #3 Rep, <code>name</code> = → #4 &quot;Riya&quot;, <code>revenueK</code> = 80. New object <b>#3</b> on the heap: Rep {name=null, revenueK=0}. New object <b>#4</b> on the heap: String &quot;Riya&quot;."}, {"line": 9, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["reps", "→ #1 ArrayList"]]}, {"frame": "new Rep(String name, int revenueK)", "vars": [["this", "→ #3 Rep"], ["name", "→ #4 \"Riya\""], ["revenueK", "80"]]}], "heap": ["<b>#1</b> ArrayList size 0, capacity 0 []", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Rep {name=null, revenueK=0}", "<b>#4</b> String &quot;Riya&quot;"], "phase": "Constructor", "note": "The constructor starts. The new object already exists, with default values (0, null, false) in its fields."}, {"line": 10, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["reps", "→ #1 ArrayList"]]}, {"frame": "new Rep(String name, int revenueK)", "vars": [["this", "→ #3 Rep"], ["name", "→ #4 \"Riya\""], ["revenueK", "80"]]}], "heap": ["<b>#1</b> ArrayList size 0, capacity 0 []", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Rep {name=&quot;Riya&quot;, revenueK=0}", "<b>#4</b> String &quot;Riya&quot;"], "phase": "Update", "note": "Object <b>#3</b> changes: Rep {name=&quot;Riya&quot;, revenueK=0}."}, {"line": 11, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["reps", "→ #1 ArrayList"]]}, {"frame": "new Rep(String name, int revenueK)", "vars": [["this", "→ #3 Rep"], ["name", "→ #4 \"Riya\""], ["revenueK", "80"]]}], "heap": ["<b>#1</b> ArrayList size 0, capacity 0 []", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Rep {name=&quot;Riya&quot;, revenueK=80}", "<b>#4</b> String &quot;Riya&quot;"], "phase": "Update", "note": "Object <b>#3</b> changes: Rep {name=&quot;Riya&quot;, revenueK=80}."}, {"line": 12, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["reps", "→ #1 ArrayList"]]}], "heap": ["<b>#1</b> ArrayList size 0, capacity 0 []", "<b>#2</b> String[0] (args, empty)"], "phase": "Return", "note": "<code>new Rep()</code> returns and its frame is popped."}, {"line": 28, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["reps", "→ #1 ArrayList"]]}], "heap": ["<b>#1</b> ArrayList size 1, capacity 10 [→#3]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Rep {name=&quot;Riya&quot;, revenueK=80}", "<b>#4</b> String &quot;Riya&quot;"], "phase": "Update", "note": "Object <b>#1</b> changes: ArrayList size 1, capacity 10 [→#3]."}, {"line": 29, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["reps", "→ #1 ArrayList"]]}, {"frame": "new Rep(String name, int revenueK)", "vars": [["this", "→ #5 Rep"], ["name", "→ #6 \"Om\""], ["revenueK", "95"]]}], "heap": ["<b>#1</b> ArrayList size 1, capacity 10 [→#3]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Rep {name=&quot;Riya&quot;, revenueK=80}", "<b>#4</b> String &quot;Riya&quot;", "<b>#5</b> Rep {name=null, revenueK=0}", "<b>#6</b> String &quot;Om&quot;"], "newVar": "this", "phase": "Call", "note": "<code>new Rep()</code> is called: a new frame is pushed with <code>this</code> = → #5 Rep, <code>name</code> = → #6 &quot;Om&quot;, <code>revenueK</code> = 95. New object <b>#5</b> on the heap: Rep {name=null, revenueK=0}. New object <b>#6</b> on the heap: String &quot;Om&quot;."}, {"line": 9, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["reps", "→ #1 ArrayList"]]}, {"frame": "new Rep(String name, int revenueK)", "vars": [["this", "→ #5 Rep"], ["name", "→ #6 \"Om\""], ["revenueK", "95"]]}], "heap": ["<b>#1</b> ArrayList size 1, capacity 10 [→#3]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Rep {name=&quot;Riya&quot;, revenueK=80}", "<b>#4</b> String &quot;Riya&quot;", "<b>#5</b> Rep {name=null, revenueK=0}", "<b>#6</b> String &quot;Om&quot;"], "phase": "Constructor", "note": "The constructor starts. The new object already exists, with default values (0, null, false) in its fields."}, {"line": 10, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["reps", "→ #1 ArrayList"]]}, {"frame": "new Rep(String name, int revenueK)", "vars": [["this", "→ #5 Rep"], ["name", "→ #6 \"Om\""], ["revenueK", "95"]]}], "heap": ["<b>#1</b> ArrayList size 1, capacity 10 [→#3]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Rep {name=&quot;Riya&quot;, revenueK=80}", "<b>#4</b> String &quot;Riya&quot;", "<b>#5</b> Rep {name=&quot;Om&quot;, revenueK=0}", "<b>#6</b> String &quot;Om&quot;"], "phase": "Update", "note": "Object <b>#5</b> changes: Rep {name=&quot;Om&quot;, revenueK=0}."}, {"line": 11, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["reps", "→ #1 ArrayList"]]}, {"frame": "new Rep(String name, int revenueK)", "vars": [["this", "→ #5 Rep"], ["name", "→ #6 \"Om\""], ["revenueK", "95"]]}], "heap": ["<b>#1</b> ArrayList size 1, capacity 10 [→#3]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Rep {name=&quot;Riya&quot;, revenueK=80}", "<b>#4</b> String &quot;Riya&quot;", "<b>#5</b> Rep {name=&quot;Om&quot;, revenueK=95}", "<b>#6</b> String &quot;Om&quot;"], "phase": "Update", "note": "Object <b>#5</b> changes: Rep {name=&quot;Om&quot;, revenueK=95}."}, {"line": 12, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["reps", "→ #1 ArrayList"]]}], "heap": ["<b>#1</b> ArrayList size 1, capacity 10 [→#3]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Rep {name=&quot;Riya&quot;, revenueK=80}", "<b>#4</b> String &quot;Riya&quot;"], "phase": "Return", "note": "<code>new Rep()</code> returns and its frame is popped."}, {"line": 29, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["reps", "→ #1 ArrayList"]]}], "heap": ["<b>#1</b> ArrayList size 2, capacity 10 [→#3, →#5]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Rep {name=&quot;Riya&quot;, revenueK=80}", "<b>#4</b> String &quot;Riya&quot;", "<b>#5</b> Rep {name=&quot;Om&quot;, revenueK=95}", "<b>#6</b> String &quot;Om&quot;"], "phase": "Update", "note": "Object <b>#1</b> changes: ArrayList size 2, capacity 10 [→#3, →#5]."}, {"line": 30, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["reps", "→ #1 ArrayList"]]}, {"frame": "new Rep(String name, int revenueK)", "vars": [["this", "→ #7 Rep"], ["name", "→ #8 \"Kabir\""], ["revenueK", "80"]]}], "heap": ["<b>#1</b> ArrayList size 2, capacity 10 [→#3, →#5]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Rep {name=&quot;Riya&quot;, revenueK=80}", "<b>#4</b> String &quot;Riya&quot;", "<b>#5</b> Rep {name=&quot;Om&quot;, revenueK=95}", "<b>#6</b> String &quot;Om&quot;", "<b>#7</b> Rep {name=null, revenueK=0}", "<b>#8</b> String &quot;Kabir&quot;"], "newVar": "this", "phase": "Call", "note": "<code>new Rep()</code> is called: a new frame is pushed with <code>this</code> = → #7 Rep, <code>name</code> = → #8 &quot;Kabir&quot;, <code>revenueK</code> = 80. New object <b>#7</b> on the heap: Rep {name=null, revenueK=0}. New object <b>#8</b> on the heap: String &quot;Kabir&quot;."}, {"line": 9, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["reps", "→ #1 ArrayList"]]}, {"frame": "new Rep(String name, int revenueK)", "vars": [["this", "→ #7 Rep"], ["name", "→ #8 \"Kabir\""], ["revenueK", "80"]]}], "heap": ["<b>#1</b> ArrayList size 2, capacity 10 [→#3, →#5]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Rep {name=&quot;Riya&quot;, revenueK=80}", "<b>#4</b> String &quot;Riya&quot;", "<b>#5</b> Rep {name=&quot;Om&quot;, revenueK=95}", "<b>#6</b> String &quot;Om&quot;", "<b>#7</b> Rep {name=null, revenueK=0}", "<b>#8</b> String &quot;Kabir&quot;"], "phase": "Constructor", "note": "The constructor starts. The new object already exists, with default values (0, null, false) in its fields."}, {"line": 10, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["reps", "→ #1 ArrayList"]]}, {"frame": "new Rep(String name, int revenueK)", "vars": [["this", "→ #7 Rep"], ["name", "→ #8 \"Kabir\""], ["revenueK", "80"]]}], "heap": ["<b>#1</b> ArrayList size 2, capacity 10 [→#3, →#5]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Rep {name=&quot;Riya&quot;, revenueK=80}", "<b>#4</b> String &quot;Riya&quot;", "<b>#5</b> Rep {name=&quot;Om&quot;, revenueK=95}", "<b>#6</b> String &quot;Om&quot;", "<b>#7</b> Rep {name=&quot;Kabir&quot;, revenueK=0}", "<b>#8</b> String &quot;Kabir&quot;"], "phase": "Update", "note": "Object <b>#7</b> changes: Rep {name=&quot;Kabir&quot;, revenueK=0}."}, {"line": 11, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["reps", "→ #1 ArrayList"]]}, {"frame": "new Rep(String name, int revenueK)", "vars": [["this", "→ #7 Rep"], ["name", "→ #8 \"Kabir\""], ["revenueK", "80"]]}], "heap": ["<b>#1</b> ArrayList size 2, capacity 10 [→#3, →#5]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Rep {name=&quot;Riya&quot;, revenueK=80}", "<b>#4</b> String &quot;Riya&quot;", "<b>#5</b> Rep {name=&quot;Om&quot;, revenueK=95}", "<b>#6</b> String &quot;Om&quot;", "<b>#7</b> Rep {name=&quot;Kabir&quot;, revenueK=80}", "<b>#8</b> String &quot;Kabir&quot;"], "phase": "Update", "note": "Object <b>#7</b> changes: Rep {name=&quot;Kabir&quot;, revenueK=80}."}, {"line": 12, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["reps", "→ #1 ArrayList"]]}], "heap": ["<b>#1</b> ArrayList size 2, capacity 10 [→#3, →#5]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Rep {name=&quot;Riya&quot;, revenueK=80}", "<b>#4</b> String &quot;Riya&quot;", "<b>#5</b> Rep {name=&quot;Om&quot;, revenueK=95}", "<b>#6</b> String &quot;Om&quot;"], "phase": "Return", "note": "<code>new Rep()</code> returns and its frame is popped."}, {"line": 30, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["reps", "→ #1 ArrayList"]]}], "heap": ["<b>#1</b> ArrayList size 3, capacity 10 [→#3, →#5, →#7]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Rep {name=&quot;Riya&quot;, revenueK=80}", "<b>#4</b> String &quot;Riya&quot;", "<b>#5</b> Rep {name=&quot;Om&quot;, revenueK=95}", "<b>#6</b> String &quot;Om&quot;", "<b>#7</b> Rep {name=&quot;Kabir&quot;, revenueK=80}", "<b>#8</b> String &quot;Kabir&quot;"], "phase": "Update", "note": "Object <b>#1</b> changes: ArrayList size 3, capacity 10 [→#3, →#5, →#7]."}, {"line": 31, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["reps", "→ #1 ArrayList"]]}, {"frame": "new ByRevenue()", "vars": [["this", "→ #9 ByRevenue"]]}], "heap": ["<b>#1</b> ArrayList size 3, capacity 10 [→#3, →#5, →#7]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Rep {name=&quot;Riya&quot;, revenueK=80}", "<b>#4</b> String &quot;Riya&quot;", "<b>#5</b> Rep {name=&quot;Om&quot;, revenueK=95}", "<b>#6</b> String &quot;Om&quot;", "<b>#7</b> Rep {name=&quot;Kabir&quot;, revenueK=80}", "<b>#8</b> String &quot;Kabir&quot;", "<b>#9</b> ByRevenue {}"], "newVar": "this", "phase": "Call", "note": "<code>new ByRevenue()</code> is called: a new frame is pushed with <code>this</code> = → #9 ByRevenue. New object <b>#9</b> on the heap: ByRevenue {}."}, {"line": 15, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["reps", "→ #1 ArrayList"]]}], "heap": ["<b>#1</b> ArrayList size 3, capacity 10 [→#3, →#5, →#7]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Rep {name=&quot;Riya&quot;, revenueK=80}", "<b>#4</b> String &quot;Riya&quot;", "<b>#5</b> Rep {name=&quot;Om&quot;, revenueK=95}", "<b>#6</b> String &quot;Om&quot;", "<b>#7</b> Rep {name=&quot;Kabir&quot;, revenueK=80}", "<b>#8</b> String &quot;Kabir&quot;"], "phase": "Return", "note": "<code>new ByRevenue()</code> returns and its frame is popped."}, {"line": 31, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["reps", "→ #1 ArrayList"]]}, {"frame": "ByRevenue.compare(Rep a, Rep b)", "vars": [["this", "→ #9 ByRevenue"], ["a", "→ #5 Rep"], ["b", "→ #3 Rep"]]}], "heap": ["<b>#1</b> ArrayList size 3, capacity 10 [→#3, →#5, →#7]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Rep {name=&quot;Riya&quot;, revenueK=80}", "<b>#4</b> String &quot;Riya&quot;", "<b>#5</b> Rep {name=&quot;Om&quot;, revenueK=95}", "<b>#6</b> String &quot;Om&quot;", "<b>#7</b> Rep {name=&quot;Kabir&quot;, revenueK=80}", "<b>#8</b> String &quot;Kabir&quot;", "<b>#9</b> ByRevenue {}"], "newVar": "this", "phase": "Call", "note": "<code>ByRevenue.compare()</code> is called: a new frame is pushed with <code>this</code> = → #9 ByRevenue, <code>a</code> = → #5 Rep, <code>b</code> = → #3 Rep."}, {"line": 17, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["reps", "→ #1 ArrayList"]]}, {"frame": "ByRevenue.compare(Rep a, Rep b)", "vars": [["this", "→ #9 ByRevenue"], ["a", "→ #5 Rep"], ["b", "→ #3 Rep"], ["byRevenue", "-1"]]}], "heap": ["<b>#1</b> ArrayList size 3, capacity 10 [→#3, →#5, →#7]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Rep {name=&quot;Riya&quot;, revenueK=80}", "<b>#4</b> String &quot;Riya&quot;", "<b>#5</b> Rep {name=&quot;Om&quot;, revenueK=95}", "<b>#6</b> String &quot;Om&quot;", "<b>#7</b> Rep {name=&quot;Kabir&quot;, revenueK=80}", "<b>#8</b> String &quot;Kabir&quot;", "<b>#9</b> ByRevenue {}"], "newVar": "byRevenue", "phase": "Assign", "note": "Now <code>byRevenue</code> = -1."}, {"line": 18, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["reps", "→ #1 ArrayList"]]}, {"frame": "ByRevenue.compare(Rep a, Rep b)", "vars": [["this", "→ #9 ByRevenue"], ["a", "→ #5 Rep"], ["b", "→ #3 Rep"], ["byRevenue", "-1"]]}], "heap": ["<b>#1</b> ArrayList size 3, capacity 10 [→#3, →#5, →#7]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Rep {name=&quot;Riya&quot;, revenueK=80}", "<b>#4</b> String &quot;Riya&quot;", "<b>#5</b> Rep {name=&quot;Om&quot;, revenueK=95}", "<b>#6</b> String &quot;Om&quot;", "<b>#7</b> Rep {name=&quot;Kabir&quot;, revenueK=80}", "<b>#8</b> String &quot;Kabir&quot;", "<b>#9</b> ByRevenue {}"], "phase": "Check", "note": "The condition <code>byRevenue != 0</code> is checked: <b>true</b>, so the block runs."}, {"line": 19, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["reps", "→ #1 ArrayList"]]}, {"frame": "ByRevenue.compare(Rep a, Rep b)", "vars": [["this", "→ #9 ByRevenue"], ["a", "→ #7 Rep"], ["b", "→ #5 Rep"]]}], "heap": ["<b>#1</b> ArrayList size 3, capacity 10 [→#3, →#5, →#7]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Rep {name=&quot;Riya&quot;, revenueK=80}", "<b>#4</b> String &quot;Riya&quot;", "<b>#5</b> Rep {name=&quot;Om&quot;, revenueK=95}", "<b>#6</b> String &quot;Om&quot;", "<b>#7</b> Rep {name=&quot;Kabir&quot;, revenueK=80}", "<b>#8</b> String &quot;Kabir&quot;", "<b>#9</b> ByRevenue {}"], "newVar": "a", "phase": "Assign", "note": "Now <code>a</code> = → #7 Rep, <code>b</code> = → #5 Rep."}, {"line": 17, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["reps", "→ #1 ArrayList"]]}, {"frame": "ByRevenue.compare(Rep a, Rep b)", "vars": [["this", "→ #9 ByRevenue"], ["a", "→ #7 Rep"], ["b", "→ #5 Rep"], ["byRevenue", "1"]]}], "heap": ["<b>#1</b> ArrayList size 3, capacity 10 [→#3, →#5, →#7]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Rep {name=&quot;Riya&quot;, revenueK=80}", "<b>#4</b> String &quot;Riya&quot;", "<b>#5</b> Rep {name=&quot;Om&quot;, revenueK=95}", "<b>#6</b> String &quot;Om&quot;", "<b>#7</b> Rep {name=&quot;Kabir&quot;, revenueK=80}", "<b>#8</b> String &quot;Kabir&quot;", "<b>#9</b> ByRevenue {}"], "newVar": "byRevenue", "phase": "Assign", "note": "Now <code>byRevenue</code> = 1."}, {"line": 18, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["reps", "→ #1 ArrayList"]]}, {"frame": "ByRevenue.compare(Rep a, Rep b)", "vars": [["this", "→ #9 ByRevenue"], ["a", "→ #7 Rep"], ["b", "→ #5 Rep"], ["byRevenue", "1"]]}], "heap": ["<b>#1</b> ArrayList size 3, capacity 10 [→#3, →#5, →#7]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Rep {name=&quot;Riya&quot;, revenueK=80}", "<b>#4</b> String &quot;Riya&quot;", "<b>#5</b> Rep {name=&quot;Om&quot;, revenueK=95}", "<b>#6</b> String &quot;Om&quot;", "<b>#7</b> Rep {name=&quot;Kabir&quot;, revenueK=80}", "<b>#8</b> String &quot;Kabir&quot;", "<b>#9</b> ByRevenue {}"], "phase": "Check", "note": "The condition <code>byRevenue != 0</code> is checked: <b>true</b>, so the block runs."}, {"line": 19, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["reps", "→ #1 ArrayList"]]}, {"frame": "ByRevenue.compare(Rep a, Rep b)", "vars": [["this", "→ #9 ByRevenue"], ["a", "→ #7 Rep"], ["b", "→ #3 Rep"]]}], "heap": ["<b>#1</b> ArrayList size 3, capacity 10 [→#5, →#3, →#7]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Rep {name=&quot;Riya&quot;, revenueK=80}", "<b>#4</b> String &quot;Riya&quot;", "<b>#5</b> Rep {name=&quot;Om&quot;, revenueK=95}", "<b>#6</b> String &quot;Om&quot;", "<b>#7</b> Rep {name=&quot;Kabir&quot;, revenueK=80}", "<b>#8</b> String &quot;Kabir&quot;", "<b>#9</b> ByRevenue {}"], "newVar": "b", "phase": "Assign", "note": "Now <code>b</code> = → #3 Rep. Object <b>#1</b> changes: ArrayList size 3, capacity 10 [→#5, →#3, →#7]."}, {"line": 17, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["reps", "→ #1 ArrayList"]]}, {"frame": "ByRevenue.compare(Rep a, Rep b)", "vars": [["this", "→ #9 ByRevenue"], ["a", "→ #7 Rep"], ["b", "→ #3 Rep"], ["byRevenue", "0"]]}], "heap": ["<b>#1</b> ArrayList size 3, capacity 10 [→#5, →#3, →#7]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Rep {name=&quot;Riya&quot;, revenueK=80}", "<b>#4</b> String &quot;Riya&quot;", "<b>#5</b> Rep {name=&quot;Om&quot;, revenueK=95}", "<b>#6</b> String &quot;Om&quot;", "<b>#7</b> Rep {name=&quot;Kabir&quot;, revenueK=80}", "<b>#8</b> String &quot;Kabir&quot;", "<b>#9</b> ByRevenue {}"], "newVar": "byRevenue", "phase": "Assign", "note": "Now <code>byRevenue</code> = 0."}, {"line": 18, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["reps", "→ #1 ArrayList"]]}, {"frame": "ByRevenue.compare(Rep a, Rep b)", "vars": [["this", "→ #9 ByRevenue"], ["a", "→ #7 Rep"], ["b", "→ #3 Rep"], ["byRevenue", "0"]]}], "heap": ["<b>#1</b> ArrayList size 3, capacity 10 [→#5, →#3, →#7]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Rep {name=&quot;Riya&quot;, revenueK=80}", "<b>#4</b> String &quot;Riya&quot;", "<b>#5</b> Rep {name=&quot;Om&quot;, revenueK=95}", "<b>#6</b> String &quot;Om&quot;", "<b>#7</b> Rep {name=&quot;Kabir&quot;, revenueK=80}", "<b>#8</b> String &quot;Kabir&quot;", "<b>#9</b> ByRevenue {}"], "phase": "Check", "note": "The condition <code>byRevenue != 0</code> is checked: <b>false</b>, so the block is skipped."}, {"line": 21, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["reps", "→ #1 ArrayList"]]}, {"frame": "ByRevenue.compare(Rep a, Rep b)", "vars": [["this", "→ #9 ByRevenue"], ["a", "→ #7 Rep"], ["b", "→ #5 Rep"]]}], "heap": ["<b>#1</b> ArrayList size 3, capacity 10 [→#5, →#3, →#7]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Rep {name=&quot;Riya&quot;, revenueK=80}", "<b>#4</b> String &quot;Riya&quot;", "<b>#5</b> Rep {name=&quot;Om&quot;, revenueK=95}", "<b>#6</b> String &quot;Om&quot;", "<b>#7</b> Rep {name=&quot;Kabir&quot;, revenueK=80}", "<b>#8</b> String &quot;Kabir&quot;", "<b>#9</b> ByRevenue {}"], "newVar": "b", "phase": "Assign", "note": "Now <code>b</code> = → #5 Rep."}, {"line": 17, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["reps", "→ #1 ArrayList"]]}, {"frame": "ByRevenue.compare(Rep a, Rep b)", "vars": [["this", "→ #9 ByRevenue"], ["a", "→ #7 Rep"], ["b", "→ #5 Rep"], ["byRevenue", "1"]]}], "heap": ["<b>#1</b> ArrayList size 3, capacity 10 [→#5, →#3, →#7]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Rep {name=&quot;Riya&quot;, revenueK=80}", "<b>#4</b> String &quot;Riya&quot;", "<b>#5</b> Rep {name=&quot;Om&quot;, revenueK=95}", "<b>#6</b> String &quot;Om&quot;", "<b>#7</b> Rep {name=&quot;Kabir&quot;, revenueK=80}", "<b>#8</b> String &quot;Kabir&quot;", "<b>#9</b> ByRevenue {}"], "newVar": "byRevenue", "phase": "Assign", "note": "Now <code>byRevenue</code> = 1."}, {"line": 18, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["reps", "→ #1 ArrayList"]]}, {"frame": "ByRevenue.compare(Rep a, Rep b)", "vars": [["this", "→ #9 ByRevenue"], ["a", "→ #7 Rep"], ["b", "→ #5 Rep"], ["byRevenue", "1"]]}], "heap": ["<b>#1</b> ArrayList size 3, capacity 10 [→#5, →#3, →#7]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Rep {name=&quot;Riya&quot;, revenueK=80}", "<b>#4</b> String &quot;Riya&quot;", "<b>#5</b> Rep {name=&quot;Om&quot;, revenueK=95}", "<b>#6</b> String &quot;Om&quot;", "<b>#7</b> Rep {name=&quot;Kabir&quot;, revenueK=80}", "<b>#8</b> String &quot;Kabir&quot;", "<b>#9</b> ByRevenue {}"], "phase": "Check", "note": "The condition <code>byRevenue != 0</code> is checked: <b>true</b>, so the block runs."}, {"line": 19, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["reps", "→ #1 ArrayList"]]}], "heap": ["<b>#1</b> ArrayList size 3, capacity 10 [→#5, →#7, →#3]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Rep {name=&quot;Riya&quot;, revenueK=80}", "<b>#4</b> String &quot;Riya&quot;", "<b>#5</b> Rep {name=&quot;Om&quot;, revenueK=95}", "<b>#6</b> String &quot;Om&quot;", "<b>#7</b> Rep {name=&quot;Kabir&quot;, revenueK=80}", "<b>#8</b> String &quot;Kabir&quot;"], "phase": "Return", "note": "<code>ByRevenue.compare()</code> returns and its frame is popped. Object <b>#1</b> changes: ArrayList size 3, capacity 10 [→#5, →#7, →#3]."}, {"line": 32, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["reps", "→ #1 ArrayList"], ["r", "→ #5 Rep"]]}], "heap": ["<b>#1</b> ArrayList size 3, capacity 10 [→#5, →#7, →#3]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Rep {name=&quot;Riya&quot;, revenueK=80}", "<b>#4</b> String &quot;Riya&quot;", "<b>#5</b> Rep {name=&quot;Om&quot;, revenueK=95}", "<b>#6</b> String &quot;Om&quot;", "<b>#7</b> Rep {name=&quot;Kabir&quot;, revenueK=80}", "<b>#8</b> String &quot;Kabir&quot;"], "newVar": "r", "phase": "Assign", "note": "Now <code>r</code> = → #5 Rep."}, {"line": 33, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["reps", "→ #1 ArrayList"]]}], "heap": ["<b>#1</b> ArrayList size 3, capacity 10 [→#5, →#7, →#3]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Rep {name=&quot;Riya&quot;, revenueK=80}", "<b>#4</b> String &quot;Riya&quot;", "<b>#5</b> Rep {name=&quot;Om&quot;, revenueK=95}", "<b>#6</b> String &quot;Om&quot;", "<b>#7</b> Rep {name=&quot;Kabir&quot;, revenueK=80}", "<b>#8</b> String &quot;Kabir&quot;"], "out": "Om ₹95k\n", "phase": "Print", "note": "Prints <code>Om ₹95k</code>."}, {"line": 34, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["reps", "→ #1 ArrayList"]]}], "heap": ["<b>#1</b> ArrayList size 3, capacity 10 [→#5, →#7, →#3]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Rep {name=&quot;Riya&quot;, revenueK=80}", "<b>#4</b> String &quot;Riya&quot;", "<b>#5</b> Rep {name=&quot;Om&quot;, revenueK=95}", "<b>#6</b> String &quot;Om&quot;", "<b>#7</b> Rep {name=&quot;Kabir&quot;, revenueK=80}", "<b>#8</b> String &quot;Kabir&quot;"], "phase": "Step", "note": "End of the block."}, {"line": 32, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["reps", "→ #1 ArrayList"], ["r", "→ #7 Rep"]]}], "heap": ["<b>#1</b> ArrayList size 3, capacity 10 [→#5, →#7, →#3]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Rep {name=&quot;Riya&quot;, revenueK=80}", "<b>#4</b> String &quot;Riya&quot;", "<b>#5</b> Rep {name=&quot;Om&quot;, revenueK=95}", "<b>#6</b> String &quot;Om&quot;", "<b>#7</b> Rep {name=&quot;Kabir&quot;, revenueK=80}", "<b>#8</b> String &quot;Kabir&quot;"], "newVar": "r", "phase": "Assign", "note": "Now <code>r</code> = → #7 Rep."}, {"line": 33, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["reps", "→ #1 ArrayList"]]}], "heap": ["<b>#1</b> ArrayList size 3, capacity 10 [→#5, →#7, →#3]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Rep {name=&quot;Riya&quot;, revenueK=80}", "<b>#4</b> String &quot;Riya&quot;", "<b>#5</b> Rep {name=&quot;Om&quot;, revenueK=95}", "<b>#6</b> String &quot;Om&quot;", "<b>#7</b> Rep {name=&quot;Kabir&quot;, revenueK=80}", "<b>#8</b> String &quot;Kabir&quot;"], "out": "Kabir ₹80k\n", "phase": "Print", "note": "Prints <code>Kabir ₹80k</code>."}, {"line": 34, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["reps", "→ #1 ArrayList"]]}], "heap": ["<b>#1</b> ArrayList size 3, capacity 10 [→#5, →#7, →#3]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Rep {name=&quot;Riya&quot;, revenueK=80}", "<b>#4</b> String &quot;Riya&quot;", "<b>#5</b> Rep {name=&quot;Om&quot;, revenueK=95}", "<b>#6</b> String &quot;Om&quot;", "<b>#7</b> Rep {name=&quot;Kabir&quot;, revenueK=80}", "<b>#8</b> String &quot;Kabir&quot;"], "phase": "Step", "note": "End of the block."}, {"line": 32, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["reps", "→ #1 ArrayList"], ["r", "→ #3 Rep"]]}], "heap": ["<b>#1</b> ArrayList size 3, capacity 10 [→#5, →#7, →#3]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Rep {name=&quot;Riya&quot;, revenueK=80}", "<b>#4</b> String &quot;Riya&quot;", "<b>#5</b> Rep {name=&quot;Om&quot;, revenueK=95}", "<b>#6</b> String &quot;Om&quot;", "<b>#7</b> Rep {name=&quot;Kabir&quot;, revenueK=80}", "<b>#8</b> String &quot;Kabir&quot;"], "newVar": "r", "phase": "Assign", "note": "Now <code>r</code> = → #3 Rep."}, {"line": 33, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["reps", "→ #1 ArrayList"]]}], "heap": ["<b>#1</b> ArrayList size 3, capacity 10 [→#5, →#7, →#3]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Rep {name=&quot;Riya&quot;, revenueK=80}", "<b>#4</b> String &quot;Riya&quot;", "<b>#5</b> Rep {name=&quot;Om&quot;, revenueK=95}", "<b>#6</b> String &quot;Om&quot;", "<b>#7</b> Rep {name=&quot;Kabir&quot;, revenueK=80}", "<b>#8</b> String &quot;Kabir&quot;"], "out": "Riya ₹80k\n", "phase": "Print", "note": "Prints <code>Riya ₹80k</code>."}, {"line": 34, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["reps", "→ #1 ArrayList"]]}], "heap": ["<b>#1</b> ArrayList size 3, capacity 10 [→#5, →#7, →#3]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Rep {name=&quot;Riya&quot;, revenueK=80}", "<b>#4</b> String &quot;Riya&quot;", "<b>#5</b> Rep {name=&quot;Om&quot;, revenueK=95}", "<b>#6</b> String &quot;Om&quot;", "<b>#7</b> Rep {name=&quot;Kabir&quot;, revenueK=80}", "<b>#8</b> String &quot;Kabir&quot;"], "phase": "Step", "note": "End of the block."}, {"line": 32, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["reps", "→ #1 ArrayList"]]}], "heap": ["<b>#1</b> ArrayList size 3, capacity 10 [→#5, →#7, →#3]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Rep {name=&quot;Riya&quot;, revenueK=80}", "<b>#4</b> String &quot;Riya&quot;", "<b>#5</b> Rep {name=&quot;Om&quot;, revenueK=95}", "<b>#6</b> String &quot;Om&quot;", "<b>#7</b> Rep {name=&quot;Kabir&quot;, revenueK=80}", "<b>#8</b> String &quot;Kabir&quot;"], "phase": "Loop ends", "note": "No elements left, so the loop ends."}, {"line": 35, "phase": "Program ends", "note": "<code>main</code> returns, its frame is popped and the program ends.", "stack": [], "heap": []}]}</script>
+  </div>
+  </article>
+  <article class="wx">
+    <div class="wx__head"><span class="wx__num">Example 3</span><span class="wx__tag">Support · PriorityQueue</span></div>
+    <h4>Serve the most urgent ticket first</h4>
+    <div class="wx__problem"><p class="wx__label">Problem statement</p><p>Tickets have a severity (1 = critical) and an arrival number. Serve by severity, and for equal severity, by earlier arrival.</p></div>
+    <div class="prob__io"><div><small>Input</small><pre>(#1, sev 3), (#2, sev 1), (#3, sev 3), (#4, sev 1)</pre></div><div><small>Expected output</small><pre>#2 #4 #1 #3</pre></div></div>
+    <div class="wx__approach"><p class="wx__label">Approach</p><ol><li>A <code>PriorityQueue&lt;int[]&gt;</code> with a comparator: severity first, then arrival.</li><li>Offer all tickets.</li><li>Poll until empty: always the most urgent, oldest first.</li></ol></div>
+    <p class="wx__label">Solution: run it live</p>
+    <div class="runner">
+    <script type="application/json">{"lang": "java", "file": "Main.java", "tasks": [{"label": "Run · Serve the most urgent ticket first", "hint": "Press <b>Run</b>. Then remove the tie-breaker: is the order of #2 and #4 still guaranteed?", "code": "import java.util.PriorityQueue;\n\npublic class Main {\n    public static void main(String[] args) {\n        PriorityQueue<int[]> q = new PriorityQueue<>((a, b) -> {\n            int bySeverity = Integer.compare(a[1], b[1]);\n            return bySeverity != 0 ? bySeverity : Integer.compare(a[0], b[0]);\n        });\n        q.offer(new int[]{1, 3});\n        q.offer(new int[]{2, 1});\n        q.offer(new int[]{3, 3});\n        q.offer(new int[]{4, 1});\n        StringBuilder order = new StringBuilder();\n        while (!q.isEmpty()) {\n            order.append(\"#\").append(q.poll()[0]).append(\" \");\n        }\n        System.out.println(order.toString().trim());\n    }\n}\n"}]}</script>
+    </div>
+    <p class="wx__label">What happens in memory, step by step</p>
+    <p class="wx__how">Recorded from the real JVM: press <b>Next</b> to execute one line at a time. Watch method calls push and pop frames on the stack, and objects (numbered #1, #2 …) appear on the heap.</p>
+    <div class="tracer">
+    <script type="application/json">{"lang": "java", "code": ["import java.util.PriorityQueue;", "", "public class Main {", "    public static void main(String[] args) {", "        PriorityQueue<int[]> q = new PriorityQueue<>((a, b) -> {", "            int bySeverity = Integer.compare(a[1], b[1]);", "            return bySeverity != 0 ? bySeverity : Integer.compare(a[0], b[0]);", "        });", "        q.offer(new int[]{1, 3});", "        q.offer(new int[]{2, 1});", "        q.offer(new int[]{3, 3});", "        q.offer(new int[]{4, 1});", "        StringBuilder order = new StringBuilder();", "        while (!q.isEmpty()) {", "            order.append(\"#\").append(q.poll()[0]).append(\" \");", "        }", "        System.out.println(order.toString().trim());", "    }", "}"], "steps": [{"line": 5, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["q", "→ #1 PriorityQueue"]]}], "heap": ["<b>#1</b> PriorityQueue size 0 heap array [] (smallest first)", "<b>#2</b> String[0] (args, empty)"], "newVar": "q", "phase": "Assign", "note": "Now <code>q</code> = → #1 PriorityQueue. New object <b>#1</b> on the heap: PriorityQueue size 0 heap array [] (smallest first)."}, {"line": 9, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["q", "→ #1 PriorityQueue"]]}], "heap": ["<b>#1</b> PriorityQueue size 1 heap array [→#3] (smallest first)", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> int[2] {1, 3}"], "phase": "Update", "note": "Object <b>#1</b> changes: PriorityQueue size 1 heap array [→#3] (smallest first). New object <b>#3</b> on the heap: int[2] {1, 3}."}, {"line": 10, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["q", "→ #1 PriorityQueue"]]}, {"frame": "lambda body(int[] a, int[] b)", "vars": [["a", "→ #4 int[2]"], ["b", "→ #3 int[2]"]]}], "heap": ["<b>#1</b> PriorityQueue size 1 heap array [→#3] (smallest first)", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> int[2] {1, 3}", "<b>#4</b> int[2] {2, 1}"], "newVar": "a", "phase": "Call", "note": "<code>lambda body()</code> is called: a new frame is pushed with <code>a</code> = → #4 int[2], <code>b</code> = → #3 int[2]. New object <b>#4</b> on the heap: int[2] {2, 1}."}, {"line": 6, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["q", "→ #1 PriorityQueue"]]}, {"frame": "lambda body(int[] a, int[] b)", "vars": [["a", "→ #4 int[2]"], ["b", "→ #3 int[2]"], ["bySeverity", "-1"]]}], "heap": ["<b>#1</b> PriorityQueue size 1 heap array [→#3] (smallest first)", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> int[2] {1, 3}", "<b>#4</b> int[2] {2, 1}"], "newVar": "bySeverity", "phase": "Assign", "note": "Now <code>bySeverity</code> = -1."}, {"line": 7, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["q", "→ #1 PriorityQueue"]]}], "heap": ["<b>#1</b> PriorityQueue size 2 heap array [→#4, →#3] (smallest first)", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> int[2] {1, 3}", "<b>#4</b> int[2] {2, 1}"], "phase": "Return", "note": "<code>lambda body()</code> returns and its frame is popped. Object <b>#1</b> changes: PriorityQueue size 2 heap array [→#4, →#3] (smallest first)."}, {"line": 10, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["q", "→ #1 PriorityQueue"]]}], "heap": ["<b>#1</b> PriorityQueue size 2 heap array [→#4, →#3] (smallest first)", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> int[2] {1, 3}", "<b>#4</b> int[2] {2, 1}"], "phase": "Step", "note": "This line runs; nothing visible changes."}, {"line": 11, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["q", "→ #1 PriorityQueue"]]}, {"frame": "lambda body(int[] a, int[] b)", "vars": [["a", "→ #5 int[2]"], ["b", "→ #4 int[2]"]]}], "heap": ["<b>#1</b> PriorityQueue size 2 heap array [→#4, →#3] (smallest first)", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> int[2] {1, 3}", "<b>#4</b> int[2] {2, 1}", "<b>#5</b> int[2] {3, 3}"], "newVar": "a", "phase": "Call", "note": "<code>lambda body()</code> is called: a new frame is pushed with <code>a</code> = → #5 int[2], <code>b</code> = → #4 int[2]. New object <b>#5</b> on the heap: int[2] {3, 3}."}, {"line": 6, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["q", "→ #1 PriorityQueue"]]}, {"frame": "lambda body(int[] a, int[] b)", "vars": [["a", "→ #5 int[2]"], ["b", "→ #4 int[2]"], ["bySeverity", "1"]]}], "heap": ["<b>#1</b> PriorityQueue size 2 heap array [→#4, →#3] (smallest first)", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> int[2] {1, 3}", "<b>#4</b> int[2] {2, 1}", "<b>#5</b> int[2] {3, 3}"], "newVar": "bySeverity", "phase": "Assign", "note": "Now <code>bySeverity</code> = 1."}, {"line": 7, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["q", "→ #1 PriorityQueue"]]}], "heap": ["<b>#1</b> PriorityQueue size 3 heap array [→#4, →#3, →#5] (smallest first)", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> int[2] {1, 3}", "<b>#4</b> int[2] {2, 1}", "<b>#5</b> int[2] {3, 3}"], "phase": "Return", "note": "<code>lambda body()</code> returns and its frame is popped. Object <b>#1</b> changes: PriorityQueue size 3 heap array [→#4, →#3, →#5] (smallest first)."}, {"line": 11, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["q", "→ #1 PriorityQueue"]]}], "heap": ["<b>#1</b> PriorityQueue size 3 heap array [→#4, →#3, →#5] (smallest first)", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> int[2] {1, 3}", "<b>#4</b> int[2] {2, 1}", "<b>#5</b> int[2] {3, 3}"], "phase": "Step", "note": "This line runs; nothing visible changes."}, {"line": 12, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["q", "→ #1 PriorityQueue"]]}, {"frame": "lambda body(int[] a, int[] b)", "vars": [["a", "→ #6 int[2]"], ["b", "→ #3 int[2]"]]}], "heap": ["<b>#1</b> PriorityQueue size 3 heap array [→#4, →#3, →#5] (smallest first)", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> int[2] {1, 3}", "<b>#4</b> int[2] {2, 1}", "<b>#5</b> int[2] {3, 3}", "<b>#6</b> int[2] {4, 1}"], "newVar": "a", "phase": "Call", "note": "<code>lambda body()</code> is called: a new frame is pushed with <code>a</code> = → #6 int[2], <code>b</code> = → #3 int[2]. New object <b>#6</b> on the heap: int[2] {4, 1}."}, {"line": 6, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["q", "→ #1 PriorityQueue"]]}, {"frame": "lambda body(int[] a, int[] b)", "vars": [["a", "→ #6 int[2]"], ["b", "→ #3 int[2]"], ["bySeverity", "-1"]]}], "heap": ["<b>#1</b> PriorityQueue size 3 heap array [→#4, →#3, →#5] (smallest first)", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> int[2] {1, 3}", "<b>#4</b> int[2] {2, 1}", "<b>#5</b> int[2] {3, 3}", "<b>#6</b> int[2] {4, 1}"], "newVar": "bySeverity", "phase": "Assign", "note": "Now <code>bySeverity</code> = -1."}, {"line": 7, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["q", "→ #1 PriorityQueue"]]}, {"frame": "lambda body(int[] a, int[] b)", "vars": [["a", "→ #6 int[2]"], ["b", "→ #4 int[2]"]]}], "heap": ["<b>#1</b> PriorityQueue size 3 heap array [→#4, →#3, →#5] (smallest first)", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> int[2] {1, 3}", "<b>#4</b> int[2] {2, 1}", "<b>#5</b> int[2] {3, 3}", "<b>#6</b> int[2] {4, 1}"], "newVar": "b", "phase": "Assign", "note": "Now <code>b</code> = → #4 int[2]."}, {"line": 6, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["q", "→ #1 PriorityQueue"]]}, {"frame": "lambda body(int[] a, int[] b)", "vars": [["a", "→ #6 int[2]"], ["b", "→ #4 int[2]"], ["bySeverity", "0"]]}], "heap": ["<b>#1</b> PriorityQueue size 3 heap array [→#4, →#3, →#5] (smallest first)", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> int[2] {1, 3}", "<b>#4</b> int[2] {2, 1}", "<b>#5</b> int[2] {3, 3}", "<b>#6</b> int[2] {4, 1}"], "newVar": "bySeverity", "phase": "Assign", "note": "Now <code>bySeverity</code> = 0."}, {"line": 7, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["q", "→ #1 PriorityQueue"]]}], "heap": ["<b>#1</b> PriorityQueue size 4 heap array [→#4, →#6, →#5, →#3] (smallest first)", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> int[2] {1, 3}", "<b>#4</b> int[2] {2, 1}", "<b>#5</b> int[2] {3, 3}", "<b>#6</b> int[2] {4, 1}"], "phase": "Return", "note": "<code>lambda body()</code> returns and its frame is popped. Object <b>#1</b> changes: PriorityQueue size 4 heap array [→#4, →#6, →#5, →#3] (smallest first)."}, {"line": 12, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["q", "→ #1 PriorityQueue"]]}], "heap": ["<b>#1</b> PriorityQueue size 4 heap array [→#4, →#6, →#5, →#3] (smallest first)", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> int[2] {1, 3}", "<b>#4</b> int[2] {2, 1}", "<b>#5</b> int[2] {3, 3}", "<b>#6</b> int[2] {4, 1}"], "phase": "Step", "note": "This line runs; nothing visible changes."}, {"line": 13, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["q", "→ #1 PriorityQueue"], ["order", "→ #7 StringBuilder"]]}], "heap": ["<b>#1</b> PriorityQueue size 4 heap array [→#4, →#6, →#5, →#3] (smallest first)", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> int[2] {1, 3}", "<b>#4</b> int[2] {2, 1}", "<b>#5</b> int[2] {3, 3}", "<b>#6</b> int[2] {4, 1}", "<b>#7</b> StringBuilder &quot;&quot; (length 0, capacity 16)"], "newVar": "order", "phase": "Assign", "note": "Now <code>order</code> = → #7 StringBuilder. New object <b>#7</b> on the heap: StringBuilder &quot;&quot; (length 0, capacity 16)."}, {"line": 14, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["q", "→ #1 PriorityQueue"], ["order", "→ #7 StringBuilder"]]}], "heap": ["<b>#1</b> PriorityQueue size 4 heap array [→#4, →#6, →#5, →#3] (smallest first)", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> int[2] {1, 3}", "<b>#4</b> int[2] {2, 1}", "<b>#5</b> int[2] {3, 3}", "<b>#6</b> int[2] {4, 1}", "<b>#7</b> StringBuilder &quot;&quot; (length 0, capacity 16)"], "phase": "Check", "note": "The condition <code>!q.isEmpty()</code> is checked: <b>true</b>, so the block runs."}, {"line": 15, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["q", "→ #1 PriorityQueue"], ["order", "→ #7 StringBuilder"]]}, {"frame": "lambda body(int[] a, int[] b)", "vars": [["a", "→ #6 int[2]"], ["b", "→ #5 int[2]"]]}], "heap": ["<b>#1</b> PriorityQueue size 3 heap array [→#4, →#6, →#5] (smallest first)", "<b>#2</b> String[0] (args, empty)", "<b>#4</b> int[2] {2, 1}", "<b>#5</b> int[2] {3, 3}", "<b>#6</b> int[2] {4, 1}", "<b>#7</b> StringBuilder &quot;#&quot; (length 1, capacity 16)"], "newVar": "a", "phase": "Call", "note": "<code>lambda body()</code> is called: a new frame is pushed with <code>a</code> = → #6 int[2], <code>b</code> = → #5 int[2]. Object <b>#1</b> changes: PriorityQueue size 3 heap array [→#4, →#6, →#5] (smallest first)."}, {"line": 6, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["q", "→ #1 PriorityQueue"], ["order", "→ #7 StringBuilder"]]}, {"frame": "lambda body(int[] a, int[] b)", "vars": [["a", "→ #6 int[2]"], ["b", "→ #5 int[2]"], ["bySeverity", "-1"]]}], "heap": ["<b>#1</b> PriorityQueue size 3 heap array [→#4, →#6, →#5] (smallest first)", "<b>#2</b> String[0] (args, empty)", "<b>#4</b> int[2] {2, 1}", "<b>#5</b> int[2] {3, 3}", "<b>#6</b> int[2] {4, 1}", "<b>#7</b> StringBuilder &quot;#&quot; (length 1, capacity 16)"], "newVar": "bySeverity", "phase": "Assign", "note": "Now <code>bySeverity</code> = -1."}, {"line": 7, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["q", "→ #1 PriorityQueue"], ["order", "→ #7 StringBuilder"]]}, {"frame": "lambda body(int[] a, int[] b)", "vars": [["a", "→ #3 int[2]"], ["b", "→ #6 int[2]"]]}], "heap": ["<b>#1</b> PriorityQueue size 3 heap array [→#4, →#6, →#5] (smallest first)", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> int[2] {1, 3}", "<b>#4</b> int[2] {2, 1}", "<b>#5</b> int[2] {3, 3}", "<b>#6</b> int[2] {4, 1}", "<b>#7</b> StringBuilder &quot;#&quot; (length 1, capacity 16)"], "newVar": "a", "phase": "Assign", "note": "Now <code>a</code> = → #3 int[2], <code>b</code> = → #6 int[2]."}, {"line": 6, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["q", "→ #1 PriorityQueue"], ["order", "→ #7 StringBuilder"]]}, {"frame": "lambda body(int[] a, int[] b)", "vars": [["a", "→ #3 int[2]"], ["b", "→ #6 int[2]"], ["bySeverity", "1"]]}], "heap": ["<b>#1</b> PriorityQueue size 3 heap array [→#4, →#6, →#5] (smallest first)", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> int[2] {1, 3}", "<b>#4</b> int[2] {2, 1}", "<b>#5</b> int[2] {3, 3}", "<b>#6</b> int[2] {4, 1}", "<b>#7</b> StringBuilder &quot;#&quot; (length 1, capacity 16)"], "newVar": "bySeverity", "phase": "Assign", "note": "Now <code>bySeverity</code> = 1."}, {"line": 7, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["q", "→ #1 PriorityQueue"], ["order", "→ #7 StringBuilder"]]}], "heap": ["<b>#1</b> PriorityQueue size 3 heap array [→#6, →#3, →#5] (smallest first)", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> int[2] {1, 3}", "<b>#5</b> int[2] {3, 3}", "<b>#6</b> int[2] {4, 1}", "<b>#7</b> StringBuilder &quot;#&quot; (length 1, capacity 16)"], "phase": "Return", "note": "<code>lambda body()</code> returns and its frame is popped. Object <b>#1</b> changes: PriorityQueue size 3 heap array [→#6, →#3, →#5] (smallest first)."}, {"line": 15, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["q", "→ #1 PriorityQueue"], ["order", "→ #7 StringBuilder"]]}], "heap": ["<b>#1</b> PriorityQueue size 3 heap array [→#6, →#3, →#5] (smallest first)", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> int[2] {1, 3}", "<b>#5</b> int[2] {3, 3}", "<b>#6</b> int[2] {4, 1}", "<b>#7</b> StringBuilder &quot;#2 &quot; (length 3, capacity 16)"], "phase": "Step", "note": "This line runs; nothing visible changes."}, {"line": 14, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["q", "→ #1 PriorityQueue"], ["order", "→ #7 StringBuilder"]]}], "heap": ["<b>#1</b> PriorityQueue size 3 heap array [→#6, →#3, →#5] (smallest first)", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> int[2] {1, 3}", "<b>#5</b> int[2] {3, 3}", "<b>#6</b> int[2] {4, 1}", "<b>#7</b> StringBuilder &quot;#2 &quot; (length 3, capacity 16)"], "phase": "Check", "note": "The condition <code>!q.isEmpty()</code> is checked: <b>true</b>, so the block runs."}, {"line": 15, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["q", "→ #1 PriorityQueue"], ["order", "→ #7 StringBuilder"]]}, {"frame": "lambda body(int[] a, int[] b)", "vars": [["a", "→ #5 int[2]"], ["b", "→ #3 int[2]"]]}], "heap": ["<b>#1</b> PriorityQueue size 2 heap array [→#6, →#3] (smallest first)", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> int[2] {1, 3}", "<b>#5</b> int[2] {3, 3}", "<b>#6</b> int[2] {4, 1}", "<b>#7</b> StringBuilder &quot;#2 #&quot; (length 4, capacity 16)"], "newVar": "a", "phase": "Call", "note": "<code>lambda body()</code> is called: a new frame is pushed with <code>a</code> = → #5 int[2], <code>b</code> = → #3 int[2]. Object <b>#1</b> changes: PriorityQueue size 2 heap array [→#6, →#3] (smallest first)."}, {"line": 6, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["q", "→ #1 PriorityQueue"], ["order", "→ #7 StringBuilder"]]}, {"frame": "lambda body(int[] a, int[] b)", "vars": [["a", "→ #5 int[2]"], ["b", "→ #3 int[2]"], ["bySeverity", "0"]]}], "heap": ["<b>#1</b> PriorityQueue size 2 heap array [→#6, →#3] (smallest first)", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> int[2] {1, 3}", "<b>#5</b> int[2] {3, 3}", "<b>#6</b> int[2] {4, 1}", "<b>#7</b> StringBuilder &quot;#2 #&quot; (length 4, capacity 16)"], "newVar": "bySeverity", "phase": "Assign", "note": "Now <code>bySeverity</code> = 0."}, {"line": 7, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["q", "→ #1 PriorityQueue"], ["order", "→ #7 StringBuilder"]]}], "heap": ["<b>#1</b> PriorityQueue size 2 heap array [→#3, →#5] (smallest first)", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> int[2] {1, 3}", "<b>#5</b> int[2] {3, 3}", "<b>#7</b> StringBuilder &quot;#2 #&quot; (length 4, capacity 16)"], "phase": "Return", "note": "<code>lambda body()</code> returns and its frame is popped. Object <b>#1</b> changes: PriorityQueue size 2 heap array [→#3, →#5] (smallest first)."}, {"line": 15, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["q", "→ #1 PriorityQueue"], ["order", "→ #7 StringBuilder"]]}], "heap": ["<b>#1</b> PriorityQueue size 2 heap array [→#3, →#5] (smallest first)", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> int[2] {1, 3}", "<b>#5</b> int[2] {3, 3}", "<b>#7</b> StringBuilder &quot;#2 #4 &quot; (length 6, capacity 16)"], "phase": "Step", "note": "This line runs; nothing visible changes."}, {"line": 14, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["q", "→ #1 PriorityQueue"], ["order", "→ #7 StringBuilder"]]}], "heap": ["<b>#1</b> PriorityQueue size 2 heap array [→#3, →#5] (smallest first)", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> int[2] {1, 3}", "<b>#5</b> int[2] {3, 3}", "<b>#7</b> StringBuilder &quot;#2 #4 &quot; (length 6, capacity 16)"], "phase": "Check", "note": "The condition <code>!q.isEmpty()</code> is checked: <b>true</b>, so the block runs."}, {"line": 15, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["q", "→ #1 PriorityQueue"], ["order", "→ #7 StringBuilder"]]}], "heap": ["<b>#1</b> PriorityQueue size 1 heap array [→#5] (smallest first)", "<b>#2</b> String[0] (args, empty)", "<b>#5</b> int[2] {3, 3}", "<b>#7</b> StringBuilder &quot;#2 #4 #1 &quot; (length 9, capacity 16)"], "phase": "Update", "note": "Object <b>#1</b> changes: PriorityQueue size 1 heap array [→#5] (smallest first)."}, {"line": 14, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["q", "→ #1 PriorityQueue"], ["order", "→ #7 StringBuilder"]]}], "heap": ["<b>#1</b> PriorityQueue size 1 heap array [→#5] (smallest first)", "<b>#2</b> String[0] (args, empty)", "<b>#5</b> int[2] {3, 3}", "<b>#7</b> StringBuilder &quot;#2 #4 #1 &quot; (length 9, capacity 16)"], "phase": "Check", "note": "The condition <code>!q.isEmpty()</code> is checked: <b>true</b>, so the block runs."}, {"line": 15, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["q", "→ #1 PriorityQueue"], ["order", "→ #7 StringBuilder"]]}], "heap": ["<b>#1</b> PriorityQueue size 0 heap array [] (smallest first)", "<b>#2</b> String[0] (args, empty)", "<b>#7</b> StringBuilder &quot;#2 #4 #1 #3 &quot; (length 12, capacity 16)"], "phase": "Update", "note": "Object <b>#1</b> changes: PriorityQueue size 0 heap array [] (smallest first)."}, {"line": 14, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["q", "→ #1 PriorityQueue"], ["order", "→ #7 StringBuilder"]]}], "heap": ["<b>#1</b> PriorityQueue size 0 heap array [] (smallest first)", "<b>#2</b> String[0] (args, empty)", "<b>#7</b> StringBuilder &quot;#2 #4 #1 #3 &quot; (length 12, capacity 16)"], "phase": "Check", "note": "The condition <code>!q.isEmpty()</code> is checked: <b>false</b>, so the loop ends."}, {"line": 17, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["q", "→ #1 PriorityQueue"], ["order", "→ #7 StringBuilder"]]}], "heap": ["<b>#1</b> PriorityQueue size 0 heap array [] (smallest first)", "<b>#2</b> String[0] (args, empty)", "<b>#7</b> StringBuilder &quot;#2 #4 #1 #3 &quot; (length 12, capacity 16)"], "out": "#2 #4 #1 #3\n", "phase": "Print", "note": "Prints <code>#2 #4 #1 #3</code>."}, {"line": 18, "phase": "Program ends", "note": "<code>main</code> returns, its frame is popped and the program ends.", "stack": [], "heap": []}]}</script>
+  </div>
+  </article>
+
+</section>
+
+<!-- ======================= PART 9: QUIZ AND REVISION ======================= -->
+<section class="part" id="quiz">
+  <span class="part-label"><b>9</b> Quiz and revision</span>
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <script type="application/json">[
+      { "q": "Which method does Comparable declare?", "options": ["compare(a, b)", "compareTo(other)", "equals(other)", "sort()"], "answer": 1, "why": "Comparable<T> has int compareTo(T o); Comparator<T> has int compare(T a, T b)." },
+      { "q": "a.compareTo(b) returns a negative number. This means…", "options": ["a comes after b", "a comes before b", "a equals b", "An error"], "answer": 1, "why": "Negative = before, zero = same position, positive = after." },
+      { "q": "You need students sorted by marks today and by name tomorrow, without changing the class. Use…", "options": ["Comparable", "Comparator", "equals", "hashCode"], "answer": 1, "why": "Comparators are separate objects; you can have as many as you need." },
+      { "q": "Collections.sort(list) on a class that isn't Comparable…", "options": ["Sorts by memory address", "Doesn't compile (bounded type)", "Sorts by toString", "Does nothing"], "answer": 1, "why": "sort(List<T>) requires T extends Comparable<? super T>." },
+      { "q": "Why avoid return this.x - other.x;?", "options": ["It's slow", "Integer overflow can flip the sign", "It's not allowed", "It returns double"], "answer": 1, "why": "Use Integer.compare(this.x, other.x)." },
+      { "q": "A comparator is built with comparingInt(S::marks) and then .reversed() is called on it. How does it sort?", "options": ["Sorts by marks ascending", "Sorts by marks descending", "Reverses the list", "Sorts by name"], "answer": 1, "why": "reversed() flips the comparator's order." },
+      { "q": "Which algorithm does Java use to sort objects?", "options": ["Bubble sort", "Quicksort", "TimSort (stable)", "Heap sort"], "answer": 2, "why": "Object sorts use TimSort; primitive arrays use a dual-pivot quicksort." },
+      { "q": "In thenComparing chains, the second comparator is used when…", "options": ["Always", "The first comparator returns 0", "The first returns negative", "Never"], "answer": 1, "why": "It only breaks ties of the earlier keys." }
+    ]</script>
+  </div>
+  <h3>Quick revision</h3>
+  <div class="revision">
+    <h3>Lesson 11.8 in one screen</h3>
+    <ul>
+      <li>Comparable (java.lang): <code>compareTo(o)</code> inside the class = one natural order.</li>
+      <li>Comparator (java.util): <code>compare(a, b)</code> outside = any number of orders, even for classes you can't edit.</li>
+      <li>Result sign: negative (before), 0 (same), positive (after).</li>
+      <li>Build comparators: <code>comparing</code>, <code>comparingInt</code>, <code>thenComparing</code>, <code>reversed</code>, <code>nullsFirst/Last</code>, <code>naturalOrder</code>, <code>reverseOrder</code>, <code>String.CASE_INSENSITIVE_ORDER</code>.</li>
+      <li>Use <code>Integer.compare</code>, never subtraction. Keep compareTo consistent with equals.</li>
+      <li>Used by <code>Collections.sort</code>, <code>List.sort</code>, <code>Arrays.sort</code>, TreeSet, TreeMap, PriorityQueue. Object sort = stable TimSort.</li>
+    </ul>
+  </div>
+  <h3>Interview and viva questions</h3>
+  <div class="faq">
+    <details><summary>Comparable vs Comparator: when do you use which?</summary><p>Implement Comparable when the class has one obvious, natural order (ID, date, version). Use Comparators for every other order, for orders that depend on the situation (a screen's “sort by” choice), and for classes you don't own. Many classes have both: a natural order plus named comparators.</p></details>
+    <details><summary>What does “consistent with equals” mean?</summary><p>That <code>compareTo</code> returns 0 exactly when <code>equals</code> returns true. If not, sorted collections disagree with hash collections: a TreeSet may treat two unequal objects as duplicates, or keep two equal ones. <code>BigDecimal</code> is a famous exception: 2.0 and 2.00 compare as 0 but aren't equal.</p></details>
+    <details><summary>Can you sort with a lambda?</summary><p>Yes. Comparator is a functional interface, so <code>list.sort((a, b) -&gt; Integer.compare(a.marks, b.marks))</code> works, as does <code>list.sort(Comparator.comparingInt(Student::marks))</code>. Lambdas are covered in Lesson 14.1.</p></details>
+    <details><summary>What is “Comparison method violates its general contract”?</summary><p>TimSort throws this IllegalArgumentException when it detects an inconsistent comparator, e.g. one that isn't transitive, uses random values, or overflows with subtraction. Fix the comparator so it's a proper total order.</p></details>
+    <details><summary>How do you sort in descending order?</summary><p><code>list.sort(Comparator.reverseOrder())</code> for natural order, <code>cmp.reversed()</code> for a custom comparator, or <code>Collections.sort(list, Collections.reverseOrder())</code>.</p></details>
+  </div>
+
+  <h3 id="practice">Practice problems</h3>
+  <p class="prob-intro">Write natural orders and comparators, chain tie-breakers and avoid overflow. The last three are business tasks.</p>
+  <div class="probs">
+    <article class="prob"><div class="prob__head"><span class="prob__num">P1</span><span class="prob__tag prob__tag--easy">Easy</span><h4>Sort numbers descending</h4></div>
+      <p>Sort <code>[5, 1, 9, 3]</code> from highest to lowest.</p>
+      <div class="prob__io"><div><small>Input</small><pre>[5, 1, 9, 3]</pre></div><div><small>Expected output</small><pre>[9, 5, 3, 1]</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="java" data-file="Main.java"><pre><code>import java.util.*;
+
+public class Main {
+    public static void main(String[] args) {
+        List&lt;Integer&gt; l = new ArrayList&lt;&gt;(List.of(5, 1, 9, 3));
+        l.sort(Comparator.reverseOrder());
+        System.out.println(l);
+    }
+}</code></pre><div class="output">[9, 5, 3, 1]</div></div>
+        <p><b>How it works:</b> <code>reverseOrder()</code> flips Integer's natural order.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P2</span><span class="prob__tag prob__tag--easy">Easy</span><h4>Sort words by length</h4></div>
+      <p>Sort <code>["banana", "fig", "apple"]</code> by length, shortest first.</p>
+      <div class="prob__io"><div><small>Input</small><pre>[&quot;banana&quot;, &quot;fig&quot;, &quot;apple&quot;]</pre></div><div><small>Expected output</small><pre>[fig, apple, banana]</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="java" data-file="Main.java"><pre><code>import java.util.*;
+
+public class Main {
+    public static void main(String[] args) {
+        List&lt;String&gt; w = new ArrayList&lt;&gt;(List.of(&quot;banana&quot;, &quot;fig&quot;, &quot;apple&quot;));
+        w.sort(Comparator.comparingInt(String::length));
+        System.out.println(w);
+    }
+}</code></pre><div class="output">[fig, apple, banana]</div></div>
+        <p><b>How it works:</b> <code>comparingInt(String::length)</code> builds a comparator from a key: the length of each word.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P3</span><span class="prob__tag prob__tag--easy">Easy</span><h4>Comparable product by price</h4></div>
+      <p>Make <code>Product</code> Comparable by price and sort three products.</p>
+      <div class="prob__io"><div><small>Input</small><pre>Pen 10, Bag 450, Book 120</pre></div><div><small>Expected output</small><pre>[Pen ₹10, Book ₹120, Bag ₹450]</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="java" data-file="Main.java"><pre><code>import java.util.*;
+
+class Product implements Comparable&lt;Product&gt; {
+    String name; int price;
+    Product(String n, int p) { name = n; price = p; }
+    public int compareTo(Product o) { return Integer.compare(price, o.price); }
+    public String toString() { return name + &quot; ₹&quot; + price; }
+}
+
+public class Main {
+    public static void main(String[] args) {
+        List&lt;Product&gt; l = new ArrayList&lt;&gt;(List.of(new Product(&quot;Pen&quot;, 10), new Product(&quot;Bag&quot;, 450), new Product(&quot;Book&quot;, 120)));
+        Collections.sort(l);
+        System.out.println(l);
+    }
+}</code></pre><div class="output">[Pen ₹10, Book ₹120, Bag ₹450]</div></div>
+        <p><b>How it works:</b> once the class is Comparable, <code>Collections.sort</code> needs no comparator.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P4</span><span class="prob__tag prob__tag--medium">Medium</span><h4>Names: case-insensitive, then by length</h4></div>
+      <p>Sort <code>["om", "Riya", "kabir", "Om"]</code> case-insensitively; for equal names, shorter first, then natural order.</p>
+      <div class="prob__io"><div><small>Input</small><pre>[&quot;om&quot;, &quot;Riya&quot;, &quot;kabir&quot;, &quot;Om&quot;]</pre></div><div><small>Expected output</small><pre>[kabir, Om, om, Riya]</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="java" data-file="Main.java"><pre><code>import java.util.*;
+
+public class Main {
+    public static void main(String[] args) {
+        List&lt;String&gt; n = new ArrayList&lt;&gt;(List.of(&quot;om&quot;, &quot;Riya&quot;, &quot;kabir&quot;, &quot;Om&quot;));
+        n.sort(String.CASE_INSENSITIVE_ORDER.thenComparing(Comparator.naturalOrder()));
+        System.out.println(n);
+    }
+}</code></pre><div class="output">[kabir, Om, om, Riya]</div></div>
+        <p><b>How it works:</b> "om" and "Om" tie case-insensitively; the natural order then puts "Om" (capital O = 79) before "om" (111).</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P5</span><span class="prob__tag prob__tag--medium">Medium</span><h4>Nulls last</h4></div>
+      <p>Sort <code>["b", null, "a"]</code> with nulls at the end.</p>
+      <div class="prob__io"><div><small>Input</small><pre>[&quot;b&quot;, null, &quot;a&quot;]</pre></div><div><small>Expected output</small><pre>[a, b, null]</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="java" data-file="Main.java"><pre><code>import java.util.*;
+
+public class Main {
+    public static void main(String[] args) {
+        List&lt;String&gt; l = new ArrayList&lt;&gt;(Arrays.asList(&quot;b&quot;, null, &quot;a&quot;));
+        l.sort(Comparator.nullsLast(Comparator.naturalOrder()));
+        System.out.println(l);
+    }
+}</code></pre><div class="output">[a, b, null]</div></div>
+        <p><b>How it works:</b> without <code>nullsLast</code>, natural ordering would throw NullPointerException.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P6</span><span class="prob__tag prob__tag--business">Business problem</span><h4>Delivery route by pin, then time</h4></div>
+      <p>Deliveries (pin, time): (410210, 14), (400703, 11), (410210, 9). Sort by pin, then by time.</p>
+      <div class="prob__io"><div><small>Input</small><pre>3 deliveries</pre></div><div><small>Expected output</small><pre>400703 at 11:00
+410210 at 9:00
+410210 at 14:00</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="java" data-file="Main.java"><pre><code>import java.util.*;
+
+public class Main {
+    public static void main(String[] args) {
+        List&lt;int[]&gt; d = new ArrayList&lt;&gt;(List.of(new int[]{410210, 14}, new int[]{400703, 11}, new int[]{410210, 9}));
+        d.sort(Comparator.&lt;int[]&gt;comparingInt(x -&gt; x[0]).thenComparingInt(x -&gt; x[1]));
+        for (int[] x : d) System.out.println(x[0] + &quot; at &quot; + x[1] + &quot;:00&quot;);
+    }
+}</code></pre><div class="output">400703 at 11:00
+410210 at 9:00
+410210 at 14:00</div></div>
+        <p><b>How it works:</b> the second key only matters when the pins are equal. The <code>&lt;int[]&gt;</code> hint tells javac the element type for the lambdas.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P7</span><span class="prob__tag prob__tag--business">Business problem</span><h4>Top 2 rated restaurants</h4></div>
+      <p>Restaurants with ratings: Chai Point 4.3, Dosa Hut 4.7, Vada Corner 4.5. Print the top 2 by rating.</p>
+      <div class="prob__io"><div><small>Input</small><pre>3 restaurants</pre></div><div><small>Expected output</small><pre>[Dosa Hut=4.7, Vada Corner=4.5]</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="java" data-file="Main.java"><pre><code>import java.util.*;
+
+public class Main {
+    public static void main(String[] args) {
+        Map&lt;String, Double&gt; rating = new HashMap&lt;&gt;(Map.of(&quot;Chai Point&quot;, 4.3, &quot;Dosa Hut&quot;, 4.7, &quot;Vada Corner&quot;, 4.5));
+        List&lt;Map.Entry&lt;String, Double&gt;&gt; list = new ArrayList&lt;&gt;(rating.entrySet());
+        list.sort(Map.Entry.&lt;String, Double&gt;comparingByValue().reversed());
+        System.out.println(list.subList(0, 2));
+    }
+}</code></pre><div class="output">[Dosa Hut=4.7, Vada Corner=4.5]</div></div>
+        <p><b>How it works:</b> map entries can be sorted with <code>Map.Entry.comparingByValue()</code>; reversed for highest first.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P8</span><span class="prob__tag prob__tag--business">Business problem</span><h4>Safe comparator for large amounts</h4></div>
+      <p>Sort transaction amounts in paise <code>[9_000_000_000L, -5L, 300L]</code> ascending, safely.</p>
+      <div class="prob__io"><div><small>Input</small><pre>three long amounts</pre></div><div><small>Expected output</small><pre>[-5, 300, 9000000000]</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="java" data-file="Main.java"><pre><code>import java.util.*;
+
+public class Main {
+    public static void main(String[] args) {
+        List&lt;Long&gt; paise = new ArrayList&lt;&gt;(List.of(9_000_000_000L, -5L, 300L));
+        paise.sort(Long::compare);
+        System.out.println(paise);
+    }
+}</code></pre><div class="output">[-5, 300, 9000000000]</div></div>
+        <p><b>How it works:</b> <code>Long.compare</code> never overflows; a subtraction cast to int would give wrong signs for values this large.</p>
+      </details>
+    </article>
+  </div>
+
+
+
+  <h3 id="scenarios">Real-world scenario questions (asked in company interviews)</h3>
+  <p class="scn-intro">Sorting questions in interviews check whether your orders are correct, stable and maintainable.</p>
+  <div class="scenarios">
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">E-commerce · bug</span><span class="scn__tag scn__tag--level">Junior</span></div>
+      <h4>Products jump between pages</h4>
+      <p class="scn__situation">Search results are sorted by price and shown 20 per page. Users report the same product appearing on page 1 and page 2, and some never appearing. Many products share the same price. What's wrong?</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> tie-breakers and deterministic ordering.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>Ties by price have no defined order, so each page request (often a separate database query) may order equal-priced products differently.</li>
+          <li>Add a unique tie-breaker: <code>comparing(Product::price).thenComparing(Product::id)</code> in Java, or <code>ORDER BY price, id</code> in SQL.</li>
+          <li>Now every request produces the same total order, so pages don't overlap.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> blaming caching. The order itself is ambiguous.</p>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Fintech · correctness</span><span class="scn__tag scn__tag--level">Junior</span></div>
+      <h4>Large transactions sorted wrongly</h4>
+      <p class="scn__situation">A report sorts transactions by amount in paise using <code>(a, b) -&gt; (int) (a.paise - b.paise)</code>. Small amounts sort fine; crore-rupee transfers appear in random places. Why?</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> overflow and casting in comparators.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>The difference of two large <code>long</code> values cast to <code>int</code> overflows, so the sign can be wrong.</li>
+          <li>Use <code>Long.compare(a.paise, b.paise)</code> or <code>Comparator.comparingLong(Txn::paise)</code>.</li>
+          <li>Add a test with very large and negative values; a broken comparator can even make TimSort throw.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> converting to double; precision issues follow.</p>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Sports · design</span><span class="scn__tag scn__tag--level">Fresher</span></div>
+      <h4>Points table for a cricket league</h4>
+      <p class="scn__situation">Rank teams by points (high first); if equal, by net run rate (high first); if still equal, by team name. Write the comparator.</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> multi-level comparators.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li><code>Comparator.comparingInt(Team::points).reversed().thenComparing(Comparator.comparingDouble(Team::nrr).reversed()).thenComparing(Team::name)</code>.</li>
+          <li>Note that <code>reversed()</code> on a chain reverses everything before it, so reverse each key's comparator separately, as above.</li>
+          <li>Keep it as a named constant (e.g. <code>Team.TABLE_ORDER</code>) and unit-test tie cases.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> a long hand-written if/else compare method; it's easy to get a branch wrong.</p>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Platform · design</span><span class="scn__tag scn__tag--level">Mid</span></div>
+      <h4>Should Order implement Comparable?</h4>
+      <p class="scn__situation">A teammate wants <code>Order implements Comparable&lt;Order&gt;</code> comparing by total amount, “because we often sort by amount”. Do you agree?</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> what a natural order should be.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>Amount isn't a natural, unique order: two different orders can have the same amount, so compareTo wouldn't be consistent with equals, and TreeSet&lt;Order&gt; would drop orders.</li>
+          <li>If anything, the natural order should be the unique order ID or creation time. Sorting by amount should be a named Comparator (<code>Order.BY_AMOUNT</code>).</li>
+          <li>This keeps sorted collections and reports correct and explicit.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> making the most frequently used sort the natural order just for convenience.</p>
+      </div></details>
+    </article>
+  </div>
+</section>
+
+<nav class="lesson-nav" id="lesson-nav" aria-label="Lesson navigation"></nav>
+<div class="ad-slot" data-slot="bottom"></div>
+</article>
+
+<aside class="lesson-side">
+  <nav class="toc" aria-label="In this lesson">
+    <h4>In this lesson</h4>
+    <ol>
+      <li><a href="#story">The story</a></li>
+      <li><a href="#definition">Definition</a></li>
+      <li><a href="#types">Types and ways to use it</a></li>
+      <li><a href="#steps">Step by step</a></li>
+      <li><a href="#animation">See it happen</a></li>
+      <li><a href="#real-world">Real-world use</a></li>
+      <li><a href="#run">Run the code</a></li>
+      <li><a href="#tracer">Line by line</a></li>
+      <li><a href="#worked">Worked examples</a></li>
+      <li><a href="#quiz">Quiz and revision</a></li>
+      <li><a href="#practice">Practice problems</a></li>
+      <li><a href="#scenarios">Industry scenarios</a></li>
+    </ol>
+  </nav>
+  <div class="ad-slot" data-slot="side"></div>
+  <div class="outline" id="outline"></div>
+</aside>
+</div>
+</main>
+
+<footer class="site-footer">
+  <div class="wrap">
+    <div><h4>MyPhatshala</h4><p>Free programming and IT lessons that show what happens behind the screen.</p></div>
+    <div><h4>Learn</h4><a href="../../../../#tracks">All courses</a><a href="../../">Core Java syllabus</a></div>
+    <div><h4>Site</h4><a href="../../../../about.html">About</a><a href="../../../../contact.html">Contact</a><a href="../../../../privacy.html">Privacy policy</a><a href="../../../../disclaimer.html">Disclaimer</a></div>
+    <div class="copyright">© MyPhatshala. All lesson content, diagrams and animations are original. Please do not copy without permission.</div>
+  </div>
+</footer>
+
+<script src="../../../../data/courses/core-java.js"></script>
+<script src="../../../../assets/js/lesson.js"></script>
+<script src="../../../../assets/js/ads.js"></script>
+<script src="../../../../assets/js/site.js"></script>
+</body>
+</html>

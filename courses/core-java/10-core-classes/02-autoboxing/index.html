@@ -1,0 +1,851 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Autoboxing and unboxing | MyPhatshala</title>
+<meta name="description" content="Autoboxing and unboxing in Java: how the compiler converts int to Integer and back for you, what javac really writes (valueOf and intValue, checked with javap), the NullPointerException when unboxing null, == between wrappers, list.remove(int) vs remove(Object), overloading rules, and the cost of boxing in loops. With animations, a JVM tracer, 8 practice problems, quiz and interview scenarios.">
+<meta name="mp:minutes" content="18">
+<link rel="canonical" href="https://myphatshala.com/courses/core-java/10-core-classes/02-autoboxing/">
+<meta property="og:title" content="Autoboxing: the conversion you don&#x27;t see · MyPhatshala">
+<meta property="og:description" content="See javac insert valueOf() and intValue() for you, catch the null-unboxing crash, and solve 8 problems.">
+<link rel="icon" href="../../../../assets/img/logo.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Fraunces:ital,opsz,wght@0,9..144,600;0,9..144,700;1,9..144,600&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../../../../assets/css/style.css">
+<link rel="stylesheet" href="../../../../assets/css/lesson.css">
+<script src="../../../../assets/js/config.js"></script>
+<script>try { const t = localStorage.getItem("mp-theme"); if (t) document.documentElement.dataset.theme = t; } catch (e) {}</script>
+<script type="application/ld+json">{"@context": "https://schema.org", "@type": "LearningResource", "name": "Autoboxing and unboxing", "learningResourceType": "Lesson", "educationalLevel": "Intermediate", "isAccessibleForFree": true, "inLanguage": "en", "isPartOf": {"@type": "Course", "name": "Core Java", "provider": {"@type": "Organization", "name": "MyPhatshala"}}}</script>
+</head>
+<body style="--track:#E8772E" data-lesson="10-core-classes/02-autoboxing" data-course-root="../../">
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="site-header">
+  <div class="wrap">
+    <a class="brand" href="../../../../" aria-label="MyPhatshala home"><img src="../../../../assets/img/logo.svg" width="34" height="34" alt=""><span>My<b>Phatshala</b></span></a>
+    <nav class="nav" aria-label="Main">
+      <a href="../../../../#tracks">All courses</a>
+      <a href="../../">Core Java syllabus</a>
+      <button class="theme-btn" id="theme-btn" aria-label="Toggle dark mode"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg></button>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+<section class="lesson-hero">
+  <div class="wrap">
+    <nav class="crumbs" aria-label="Breadcrumb"><a href="../../../../">Home</a><span>›</span><a href="../../../../#track-programming">Programming Languages</a><span>›</span><a href="../../">Core Java</a><span>›</span><b>Lesson 10.2</b></nav>
+    <h1>Autoboxing and unboxing</h1>
+    <p class="lead">In the last lesson you wrote <code>Integer.valueOf(85)</code> and <code>m.intValue()</code> by hand. Since Java 5 you rarely need to: the compiler does it for you. This is <b>autoboxing</b> (primitive → wrapper) and <b>unboxing</b> (wrapper → primitive). It makes code shorter, but it hides method calls, and hidden calls can throw <code>NullPointerException</code> or create millions of objects. You'll learn exactly what javac writes and where the traps are.</p>
+    <div class="lesson-meta"><span>Module 10 · Core Classes</span><span>⏱ 18 min</span><span>Intermediate</span><span>8 practice problems</span></div>
+  </div>
+</section>
+
+<div class="wrap lesson-layout">
+<article class="lesson-main">
+<!-- ======================= PART 1: THE STORY ======================= -->
+<section class="part" id="story">
+  <span class="part-label"><b>1</b> The story</span>
+  <h2>The line that crashed with no object in sight</h2>
+  <div class="story">
+    <p class="narration">Riya's canteen app keeps stock in a <code>HashMap&lt;String, Integer&gt;</code>. Adding items works beautifully: <code>stock.put("samosa", 40)</code>. Then a customer orders a “vada pav”, which was never added, and the app crashes on a line that has no dot and no object.</p>
+    <div class="scene">
+      <svg viewBox="0 0 640 170" role="img" aria-label="int left = stock.get(item) - 1 crashes with NullPointerException because get returned null and the hidden intValue call fails">
+        <g font-size="10.5">
+          <rect x="14" y="14" width="300" height="80" rx="10" class="s-board"/>
+          <text x="26" y="38" class="mono s-chalk">stock.put("samosa", 40);</text>
+          <text x="26" y="58" class="mono s-chalk">int left = stock.get(item) - 1;</text>
+          <text x="26" y="80" class="mono s-kw">// item = "vada pav"</text>
+          <rect x="14" y="104" width="300" height="52" rx="10" class="s-soft-acc" style="stroke:var(--red)"/>
+          <text x="26" y="124" font-weight="700" class="s-red">NullPointerException</text>
+          <text x="26" y="142" class="s-ink2">Cannot invoke "Integer.intValue()"</text>
+          <path d="M330 56h40" style="stroke:var(--track);stroke-width:2"/><path d="M364 51l6 5-6 5" style="stroke:var(--track);stroke-width:2;fill:none"/>
+          <rect x="384" y="14" width="242" height="142" rx="12" class="s-card2"/>
+          <text x="398" y="36" font-weight="700" class="s-ink">What javac actually wrote</text>
+          <text x="398" y="62" class="mono s-ink">stock.get(item)</text><text x="520" y="62" class="s-ink2">→ null</text>
+          <text x="398" y="86" class="mono s-kw">.intValue()</text><text x="490" y="86" class="s-red" font-weight="700">← hidden call</text>
+          <text x="398" y="112" class="mono s-ink">- 1</text>
+          <text x="398" y="140" class="s-ink2">You never typed intValue().</text>
+        </g>
+        <text x="632" y="166" text-anchor="end" class="s-wm">myphatshala.com</text>
+      </svg>
+    </div>
+    <div class="panel">
+      <div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#FCE6D6"/><path d="M14 64c2-12 9-18 18-18s16 6 18 18z" fill="#2E5AAC"/><circle cx="32" cy="29" r="12" fill="#C68B5E"/><path d="M19 29c0-10 6-15 13-15s13 5 13 15c-3-5-7-8-13-8s-10 3-13 8z" fill="#2A1B14"/><path d="M43 27c3 6 3 14 0 20" stroke="#2A1B14" stroke-width="4" fill="none" stroke-linecap="round"/><circle cx="27.5" cy="30" r="1.5" fill="#2A1B14"/><circle cx="36.5" cy="30" r="1.5" fill="#2A1B14"/><path d="M28 35q4 3 8 0" stroke="#2A1B14" stroke-width="1.6" fill="none" stroke-linecap="round"/><circle cx="32" cy="24" r="1.2" fill="#D64545"/></svg></div>
+      <div class="bubble"><b class="who">Riya</b><p>Sir, a NullPointerException needs something like <code>obj.method()</code> on null. My line is just <code>stock.get(item) - 1</code>!</p></div>
+    </div>
+    <div class="panel panel--right">
+      <div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#DDEFE6"/><path d="M12 64c2-12 10-18 20-18s18 6 20 18z" fill="#F4F1EA"/><path d="M28 46l4 8 4-8" fill="#2F7D5B"/><circle cx="32" cy="28" r="12" fill="#B57A50"/><path d="M20 26c0-8 5-13 12-13s12 5 12 13c-2-3-6-5-12-5s-10 2-12 5z" fill="#5A5A5A"/><path d="M22 32c1 8 5 11 10 11s9-3 10-11c-2 3-6 4-10 4s-8-1-10-4z" fill="#5A5A5A"/><circle cx="27" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><circle cx="37" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><path d="M30.4 29h3.2" stroke="#1B2433" stroke-width="1.4"/><circle cx="27" cy="29" r="1.1" fill="#1B2433"/><circle cx="37" cy="29" r="1.1" fill="#1B2433"/></svg></div>
+      <div class="bubble"><b class="who">Arjun Sir</b><p>The method call is there; you just can't see it. <code>get</code> returns an <code>Integer</code>. To subtract 1, Java needs an <code>int</code>, so the compiler quietly writes <code>.intValue()</code> for you. That's <b>unboxing</b>.</p></div>
+    </div>
+    <div class="panel">
+      <div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#FCE6D6"/><path d="M14 64c2-12 9-18 18-18s16 6 18 18z" fill="#2E5AAC"/><circle cx="32" cy="29" r="12" fill="#C68B5E"/><path d="M19 29c0-10 6-15 13-15s13 5 13 15c-3-5-7-8-13-8s-10 3-13 8z" fill="#2A1B14"/><path d="M43 27c3 6 3 14 0 20" stroke="#2A1B14" stroke-width="4" fill="none" stroke-linecap="round"/><circle cx="27.5" cy="30" r="1.5" fill="#2A1B14"/><circle cx="36.5" cy="30" r="1.5" fill="#2A1B14"/><path d="M28 35q4 3 8 0" stroke="#2A1B14" stroke-width="1.6" fill="none" stroke-linecap="round"/><circle cx="32" cy="24" r="1.2" fill="#D64545"/></svg></div>
+      <div class="bubble"><b class="who">Riya</b><p>And “vada pav” isn't in the map, so <code>get</code> returned null…</p></div>
+    </div>
+    <div class="panel panel--right">
+      <div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#DDEFE6"/><path d="M12 64c2-12 10-18 20-18s18 6 20 18z" fill="#F4F1EA"/><path d="M28 46l4 8 4-8" fill="#2F7D5B"/><circle cx="32" cy="28" r="12" fill="#B57A50"/><path d="M20 26c0-8 5-13 12-13s12 5 12 13c-2-3-6-5-12-5s-10 2-12 5z" fill="#5A5A5A"/><path d="M22 32c1 8 5 11 10 11s9-3 10-11c-2 3-6 4-10 4s-8-1-10-4z" fill="#5A5A5A"/><circle cx="27" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><circle cx="37" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><path d="M30.4 29h3.2" stroke="#1B2433" stroke-width="1.4"/><circle cx="27" cy="29" r="1.1" fill="#1B2433"/><circle cx="37" cy="29" r="1.1" fill="#1B2433"/></svg></div>
+      <div class="bubble"><b class="who">Arjun Sir</b><p>…and the hidden <code>null.intValue()</code> blew up. The same trick runs the other way too: when you wrote <code>put("samosa", 40)</code>, javac turned 40 into <code>Integer.valueOf(40)</code>. That's <b>autoboxing</b>. Today we'll make the invisible calls visible.</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- ======================= PART 2: DEFINITION ======================= -->
+<section class="part" id="definition">
+  <span class="part-label"><b>2</b> Definition</span>
+  <h2>What are autoboxing and unboxing?</h2>
+  <div class="def">
+    <div class="def__formal"><small>Formal definition (write this in exams)</small>
+      <p><b>Autoboxing</b> is the automatic conversion, done by the compiler, of a primitive value into an object of its corresponding wrapper class (for example <code>int</code> → <code>Integer</code>), when an object is expected. <b>Unboxing</b> is the reverse: the automatic conversion of a wrapper object into its primitive value when a primitive is expected. Introduced in Java 5, the compiler implements them with calls such as <code>Integer.valueOf(int)</code> and <code>Integer.intValue()</code>. Unboxing a <code>null</code> reference throws <code>NullPointerException</code>.</p></div>
+    <div class="def__simple"><small>In simple words</small>
+      <p>You write <code>Integer x = 5;</code> and <code>int y = x;</code>, and the compiler adds the conversion code for you. Convenient, but the conversion is still a real method call.</p></div>
+  </div>
+  <h3>Words you'll meet in this lesson</h3>
+  <div class="terms">
+    <div class="term"><b>Autoboxing</b><span>Compiler wraps a primitive: <code>Integer x = 5;</code> becomes <code>Integer.valueOf(5)</code>.</span></div>
+    <div class="term"><b>Unboxing</b><span>Compiler unwraps: <code>int y = x;</code> becomes <code>x.intValue()</code>.</span></div>
+    <div class="term"><b>Syntactic sugar</b><span>A shortcut in the language that the compiler expands into longer code.</span></div>
+    <div class="term"><b>javap -c</b><span>A JDK tool that prints the bytecode inside a .class file, so you can see the hidden calls.</span></div>
+    <div class="term"><b>Overload resolution</b><span>How javac picks between methods with the same name (Lesson 5.4). Boxing is its <i>second</i> choice.</span></div>
+  </div>
+  <h3>Where it happens</h3>
+  <table class="facts">
+    <tr><th>Assigning</th><td><code>Integer a = 10;</code> (boxing) · <code>int b = a;</code> (unboxing)</td></tr>
+    <tr><th>Passing arguments</th><td><code>list.add(7)</code> boxes 7 because <code>add</code> takes an <code>Integer</code></td></tr>
+    <tr><th>Returning</th><td>A method returning <code>Integer</code> may <code>return 0;</code></td></tr>
+    <tr><th>Arithmetic and comparison</th><td><code>a + 1</code>, <code>a &gt; 5</code>, <code>a++</code> unbox first (and <code>a++</code> boxes the result again)</td></tr>
+    <tr><th>Conditions</th><td><code>Boolean ok = true; if (ok) …</code> unboxes with <code>booleanValue()</code></td></tr>
+  </table>
+  <div class="callout callout--exam"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19V5a2 2 0 0 1 2-2h12v18H6a2 2 0 0 1-2-2zm0 0a2 2 0 0 1 2-2h12"/></svg><p><b>Exam tip:</b> autoboxing only goes to the <b>matching</b> wrapper: <code>int</code> → <code>Integer</code>, never <code>int</code> → <code>Long</code>. <code>Long l = 5;</code> is a compile error (<i>int cannot be converted to Long</i>); write <code>Long l = 5L;</code>.</p></div>
+</section>
+
+<div class="ad-slot" data-slot="mid"></div>
+
+<!-- ======================= PART 3: TYPES AND WAYS TO USE IT ======================= -->
+<section class="part" id="types">
+  <span class="part-label"><b>3</b> Types and ways to use it</span>
+  <h2>Boxing, unboxing, and what javac writes</h2>
+  <div class="cards">
+    <div class="card"><svg class="ic" viewBox="0 0 40 40" fill="none" stroke="var(--track)" stroke-width="2"><rect x="18" y="10" width="18" height="20" rx="3"/><path d="M4 20h12M12 16l4 4-4 4"/></svg><h4>Autoboxing</h4><p>Primitive in, object out. <code>Integer x = 5;</code> → <code>Integer.valueOf(5)</code>.</p><span class="tag">int → Integer</span></div>
+    <div class="card"><svg class="ic" viewBox="0 0 40 40" fill="none" stroke="var(--green)" stroke-width="2"><rect x="4" y="10" width="18" height="20" rx="3"/><path d="M24 20h12M32 16l4 4-4 4"/></svg><h4>Unboxing</h4><p>Object in, primitive out. <code>int y = x;</code> → <code>x.intValue()</code>.</p><span class="tag">Integer → int</span></div>
+    <div class="card"><svg class="ic" viewBox="0 0 40 40" fill="none" stroke="var(--blue)" stroke-width="2"><path d="M8 28a12 12 0 1 1 24 0"/><path d="M20 12v4M10 20h4M26 20h4"/></svg><h4>Both in one line</h4><p><code>x++</code> or <code>x += 1</code> on an Integer: unbox, add, box a <b>new</b> object.</p><span class="tag">read-modify-write</span></div>
+  </div>
+  <h3>The same code, written two ways</h3>
+  <div class="code" data-lang="java" data-file="Main.java"><pre><code>import java.util.ArrayList;
+
+public class Main {
+    public static void main(String[] args) {
+        ArrayList&lt;Integer&gt; marks = new ArrayList&lt;&gt;();
+
+        // What you write (Java 5+)
+        marks.add(85);
+        int first = marks.get(0);
+
+        // What javac writes for you
+        marks.add(Integer.valueOf(92));
+        int second = marks.get(1).intValue();
+
+        System.out.println(marks + " " + (first + second));
+    }
+}</code></pre><div class="output">[85, 92] 177</div></div>
+  <h3>Proof: the bytecode</h3>
+  <p>Compile this tiny class and run <code>javap -c B</code> to see the instructions inside <code>B.class</code>:</p>
+  <div class="code" data-lang="java" data-file="B.java" data-run="skip"><pre><code>public class B {
+    public static void main(String[] args) {
+        Integer count = 5;
+        int n = count;
+        count++;
+    }
+}</code></pre></div>
+  <div class="code" data-lang="bash" data-file="javap -c B (main only, JDK 21)"><pre><code> 0: iconst_5
+ 1: invokestatic  #7   // Method java/lang/Integer.valueOf:(I)Ljava/lang/Integer;   ← Integer count = 5
+ 4: astore_1
+ 5: aload_1
+ 6: invokevirtual #13  // Method java/lang/Integer.intValue:()I                    ← int n = count
+ 9: istore_2
+10: aload_1
+11: astore_3
+12: aload_1
+13: invokevirtual #13  // Method java/lang/Integer.intValue:()I                    ← count++ : unbox
+16: iconst_1
+17: iadd                                                                             ←           add 1
+18: invokestatic  #7   // Method java/lang/Integer.valueOf:(I)Ljava/lang/Integer;   ←           box again
+21: astore_1
+22: aload_3
+23: pop
+24: return</code></pre></div>
+  <p>There is no special “autobox” instruction. It's ordinary method calls that the compiler inserted, and because it uses <code>valueOf</code>, the Integer cache from Lesson 10.1 still applies.</p>
+
+  <h3>Trap 1: unboxing null</h3>
+  <div class="code" data-lang="java" data-file="Main.java"><pre><code>import java.util.HashMap;
+
+public class Main {
+    public static void main(String[] args) {
+        HashMap&lt;String, Integer&gt; stock = new HashMap&lt;&gt;();
+        stock.put("samosa", 40);
+
+        Integer v = stock.get("vada pav");        // null: not in the map
+        System.out.println(v);                    // printing null is fine
+        int safe = (v == null) ? 0 : v;           // check before unboxing
+        System.out.println(safe);
+        System.out.println(stock.getOrDefault("vada pav", 0));
+        // int boom = stock.get("vada pav");      // NullPointerException
+    }
+}</code></pre><div class="output">null
+0
+0</div></div>
+  <div class="code" data-lang="bash" data-file="If you uncomment the last line (javac -g)"><pre><code>Exception in thread "main" java.lang.NullPointerException: Cannot invoke "java.lang.Integer.intValue()" because the return value of "java.util.HashMap.get(Object)" is null</code></pre></div>
+
+  <h3>Trap 2: <code>==</code> between two wrappers</h3>
+  <div class="code" data-lang="java" data-file="Main.java"><pre><code>public class Main {
+    public static void main(String[] args) {
+        Integer a = 1000, b = 1000;   // autoboxing uses valueOf: two objects
+        int p = 1000;
+
+        System.out.println(a == b);   // compares references
+        System.out.println(a == p);   // one side is int, so a is unboxed
+        System.out.println(a.equals(b));
+    }
+}</code></pre><div class="output">false
+true
+true</div></div>
+
+  <h3>Trap 3: <code>remove(1)</code> on a list of Integers</h3>
+  <div class="code" data-lang="java" data-file="Main.java"><pre><code>import java.util.ArrayList;
+import java.util.List;
+
+public class Main {
+    public static void main(String[] args) {
+        List&lt;Integer&gt; ids = new ArrayList&lt;&gt;(List.of(10, 20, 30));
+
+        ids.remove(1);                    // remove(int index): removes 20
+        System.out.println(ids);
+
+        ids.remove(Integer.valueOf(10));  // remove(Object): removes the value 10
+        System.out.println(ids);
+    }
+}</code></pre><div class="output">[10, 30]
+[30]</div></div>
+  <p>javac prefers a method that needs <b>no boxing</b>, so <code>remove(1)</code> picks <code>remove(int index)</code>. Overload resolution tries, in order: exact match or widening, then boxing/unboxing, then varargs.</p>
+  <div class="callout callout--tip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18h6M10 22h4M12 2a7 7 0 0 0-4 12.7V17h8v-2.3A7 7 0 0 0 12 2z"/></svg><p><b>Rule of thumb:</b> let autoboxing make collection code readable, but keep calculations in primitives, and treat every unboxing of a value that <i>might</i> be null (map lookups, database fields, method results) as a place to check for null first.</p></div>
+</section>
+
+<!-- ======================= PART 4: STEP BY STEP ======================= -->
+<section class="part" id="steps">
+  <span class="part-label"><b>4</b> Step by step</span>
+  <h2>How javac handles <code>total += price</code> with wrappers</h2>
+  <ol class="stepper">
+    <li><h4>javac sees the types</h4>
+      <div class="code" data-lang="java" data-file="Main.java"><pre><code>Integer total = 0;
+Integer price = 250;
+total += price;</code></pre></div>
+      <span class="behind">Both are <code>Integer</code>. The <code>+</code> operator works only on primitives (or Strings), so javac plans conversions.</span></li>
+    <li><h4>Box the literals</h4>
+      <span class="behind"><code>Integer total = 0;</code> becomes <code>Integer.valueOf(0)</code>, and 250 becomes <code>Integer.valueOf(250)</code>. 0 comes from the cache; 250 is a new object.</span></li>
+    <li><h4>Unbox both operands</h4>
+      <span class="behind"><code>total.intValue()</code> and <code>price.intValue()</code> copy 0 and 250 onto the operand stack. If either variable were null, this is where the <code>NullPointerException</code> would happen.</span></li>
+    <li><h4>Add as ints</h4>
+      <span class="behind">An ordinary <code>iadd</code> instruction: 0 + 250 = 250, a primitive result.</span></li>
+    <li><h4>Box the result into a new object</h4>
+      <span class="behind"><code>Integer.valueOf(250)</code> creates another Integer object (250 is outside the cache), and <code>total</code> now points to it. The old object holding 0 is untouched: wrappers are immutable. In a loop that runs a million times, that's up to a million new objects.</span></li>
+  </ol>
+</section>
+
+<!-- ======================= PART 5: SEE IT HAPPEN ======================= -->
+<section class="part" id="animation">
+  <span class="part-label"><b>5</b> See it happen</span>
+  <h2>Boxing in, unboxing out: both views</h2>
+  <p>Left: the code you write. Right: the calls javac inserted, and what they do to the stack and heap.</p>
+  <div class="anim" data-frames="6">
+    <div class="anim__title">Autoboxing and unboxing, made visible <span>6 steps</span></div>
+    <div class="anim__views">
+      <div class="view view--see">
+        <span class="view__tag">What you see</span>
+        <svg viewBox="0 0 360 250" role="img" aria-label="Six lines of code using Integer variables; the last one crashes">
+          <rect x="8" y="8" width="344" height="132" rx="8" class="s-board" style="stroke:board;stroke-width:1.5"/>
+          <g data-on="1"><rect x="12" y="16" width="336" height="19" rx="4" class="" style="stroke:var(--track);stroke-width:2;fill:none"/></g>
+          <text x="20" y="30" font-size="10.5" class="s-chalk mono">Integer total = 0;</text>
+          <g data-on="2"><rect x="12" y="36" width="336" height="19" rx="4" class="" style="stroke:var(--track);stroke-width:2;fill:none"/></g>
+          <text x="20" y="50" font-size="10.5" class="s-chalk mono">Integer price = 250;</text>
+          <g data-on="3"><rect x="12" y="56" width="336" height="19" rx="4" class="" style="stroke:var(--track);stroke-width:2;fill:none"/></g>
+          <text x="20" y="70" font-size="10.5" class="s-chalk mono">total += price;</text>
+          <g data-on="4"><rect x="12" y="76" width="336" height="19" rx="4" class="" style="stroke:var(--track);stroke-width:2;fill:none"/></g>
+          <text x="20" y="90" font-size="10.5" class="s-chalk mono">int n = total;</text>
+          <g data-on="5"><rect x="12" y="96" width="336" height="19" rx="4" class="" style="stroke:var(--track);stroke-width:2;fill:none"/></g>
+          <text x="20" y="110" font-size="10.5" class="s-chalk mono">Integer none = null;</text>
+          <g data-on="6"><rect x="12" y="116" width="336" height="19" rx="4" class="" style="stroke:var(--track);stroke-width:2;fill:none"/></g>
+          <text x="20" y="130" font-size="10.5" class="s-chalk mono">int bad = none;</text>
+          <rect x="8" y="150" width="344" height="50" rx="8" class="s-card2" style="stroke:var(--line);stroke-width:1.5"/>
+          <text x="18" y="168" font-size="9" font-weight="700" class="s-ink3">Console</text>
+          <text data-on="3-5" x="18" y="188" font-size="10.5" font-weight="700" class="s-green mono">println(total) → 250</text>
+          <text data-on="6" x="18" y="188" font-size="10.5" font-weight="700" class="s-red mono">NullPointerException</text>
+          <text data-on="1" x="180" y="226" font-size="10.5" text-anchor="middle" class="s-ink2">Looks like storing a number.</text>
+          <text data-on="2" x="180" y="226" font-size="10.5" text-anchor="middle" class="s-ink2">Looks like storing a number.</text>
+          <text data-on="3" x="180" y="226" font-size="10.5" text-anchor="middle" class="s-ink2">Looks like simple addition.</text>
+          <text data-on="4" x="180" y="226" font-size="10.5" text-anchor="middle" class="s-ink2">Looks like a plain copy.</text>
+          <text data-on="5" x="180" y="226" font-size="10.5" text-anchor="middle" class="s-ink2">A wrapper variable can be null.</text>
+          <text data-on="6" x="180" y="226" font-size="10.5" text-anchor="middle" class="s-ink2">A line with no dot crashes!</text>
+          <text x="354" y="245" text-anchor="end" class="s-wm">myphatshala.com</text>
+        </svg>
+        <ol class="caps" hidden>
+          <li>You assign the number 0 to an <code>Integer</code> variable. No method call in sight.</li>
+          <li>The same for 250.</li>
+          <li><code>total += price</code> reads like adding two numbers.</li>
+          <li>Copying an Integer into an int looks like an ordinary assignment.</li>
+          <li><code>none</code> holds no object at all.</li>
+          <li>This innocent-looking line throws <code>NullPointerException</code>. The right side shows the hidden call.</li>
+        </ol>
+      </div>
+      <div class="view view--behind">
+        <span class="view__tag">Behind the screen</span>
+        <svg viewBox="0 0 360 250" role="img" aria-label="The calls javac inserted and the objects they create on the heap">
+          <rect x="8" y="8" width="344" height="30" rx="8" class="s-soft-acc" style="stroke:var(--track);stroke-width:1.5"/>
+          <text x="16" y="28" font-size="9.5" font-weight="700" class="s-acc">javac writes:</text>
+          <text data-on="1" x="92" y="28" font-size="9.2" class="s-ink mono">Integer.valueOf(0)</text>
+          <text data-on="2" x="92" y="28" font-size="9.2" class="s-ink mono">Integer.valueOf(250)</text>
+          <text data-on="3" x="92" y="28" font-size="9.2" class="s-ink mono">valueOf(total.intValue() + price.intValue())</text>
+          <text data-on="4" x="92" y="28" font-size="9.2" class="s-ink mono">total.intValue()</text>
+          <text data-on="5" x="92" y="28" font-size="9.2" class="s-ink mono">(nothing to call: just null)</text>
+          <text data-on="6" x="92" y="28" font-size="9.2" font-weight="700" class="s-red mono">none.intValue()   ← on null!</text>
+          <text x="56" y="56" font-size="10" text-anchor="middle" font-weight="700" class="s-ink2">Stack</text>
+          <text x="250" y="56" font-size="10" text-anchor="middle" font-weight="700" class="s-ink2">Heap</text>
+          <rect x="8" y="62" width="98" height="140" rx="8" class="s-card" style="stroke:var(--line);stroke-width:1.5"/>
+          <rect x="128" y="62" width="224" height="140" rx="8" class="s-card" style="stroke:var(--line);stroke-width:1.5"/>
+          <g data-on="1-"><rect x="14" y="70" width="86" height="24" rx="5" class="s-soft-blue" style="stroke:var(--blue);stroke-width:1.5"/></g>
+          <text data-on="1-" x="20" y="86" font-size="10" font-weight="700" class="s-ink mono">total</text>
+          <text data-on="1-" x="94" y="86" font-size="10" text-anchor="end" class="s-blue mono">→</text>
+          <g data-on="2-"><rect x="14" y="102" width="86" height="24" rx="5" class="s-soft-blue" style="stroke:var(--blue);stroke-width:1.5"/></g>
+          <text data-on="2-" x="20" y="118" font-size="10" font-weight="700" class="s-ink mono">price</text>
+          <text data-on="2-" x="94" y="118" font-size="10" text-anchor="end" class="s-blue mono">→</text>
+          <g data-on="4-"><rect x="14" y="134" width="86" height="24" rx="5" class="s-soft-blue" style="stroke:var(--blue);stroke-width:1.5"/></g>
+          <text data-on="4-" x="20" y="150" font-size="10" font-weight="700" class="s-ink mono">n</text>
+          <text data-on="4-" x="94" y="150" font-size="10" text-anchor="end" class="s-ink mono">250</text>
+          <g data-on="5-"><rect x="14" y="166" width="86" height="24" rx="5" class="s-soft-blue" style="stroke:var(--blue);stroke-width:1.5"/></g>
+          <text data-on="5-" x="20" y="182" font-size="10" font-weight="700" class="s-ink mono">none</text>
+          <text data-on="5-" x="94" y="182" font-size="10" text-anchor="end" class="s-red mono">null</text>
+          <g data-on="1-"><rect x="140" y="70" width="92" height="32" rx="8" class="s-soft-green" style="stroke:var(--green);stroke-width:1.5"/><text x="186" y="83.53" font-size="9.5" text-anchor="middle" font-weight="700" class="s-ink">Integer 0</text><text x="186" y="95.88" font-size="8.0" text-anchor="middle" class="s-ink2">cached</text></g>
+          <g data-on="2-"><rect x="246" y="70" width="98" height="32" rx="8" class="s-soft-acc" style="stroke:var(--track);stroke-width:1.5"/><text x="295" y="83.53" font-size="9.5" text-anchor="middle" font-weight="700" class="s-ink">Integer 250</text><text x="295" y="95.88" font-size="8.0" text-anchor="middle" class="s-ink2">#1 price</text></g>
+          <g data-on="3-"><rect x="194" y="118" width="104" height="32" rx="8" class="s-soft-acc" style="stroke:var(--track);stroke-width:1.5"/><text x="246" y="131.53" font-size="9.5" text-anchor="middle" font-weight="700" class="s-ink">Integer 250</text><text x="246" y="143.88" font-size="8.0" text-anchor="middle" class="s-ink2">#2 new result</text></g>
+          <g data-on="1-2"><path d="M100 82 L140 84" style="stroke:var(--blue);stroke-width:2;fill:none"/><path d="M132.2 79.1 L140 84 L131.8 88.1" style="stroke:var(--blue);stroke-width:2;fill:none;stroke-linecap:round;stroke-linejoin:round"/></g>
+          <g data-on="3-"><path d="M100 82 Q151.548 97.0939 194 130" style="stroke:var(--blue);stroke-width:2;fill:none"/><path d="M190.4 121.5 L194 130 L184.9 128.7" style="stroke:var(--blue);stroke-width:2;fill:none;stroke-linecap:round;stroke-linejoin:round"/></g>
+          <g data-on="2-"><path d="M100 114 Q174.307 117.929 246 98" style="stroke:var(--blue);stroke-width:2;fill:none"/><path d="M237.1 95.8 L246 98 L239.5 104.5" style="stroke:var(--blue);stroke-width:2;fill:none;stroke-linecap:round;stroke-linejoin:round"/></g>
+          <g data-on="6"><rect x="150" y="164" width="190" height="30" rx="8" class="s-soft-acc" style="stroke:#D64545;stroke-width:1.5"/><text x="245" y="182.6" font-size="10" text-anchor="middle" font-weight="700" class="s-red">intValue() on null ✗</text></g>
+          <text data-on="1" x="180" y="226" font-size="10" text-anchor="middle" class="s-ink2">0 is in the cache: no new object.</text>
+          <text data-on="2" x="180" y="226" font-size="10" text-anchor="middle" class="s-ink2">250 is outside the cache: new object #1.</text>
+          <text data-on="3" x="180" y="226" font-size="10" text-anchor="middle" class="s-ink2">Unbox both, add as ints, box the result: object #2.</text>
+          <text data-on="4" x="180" y="226" font-size="10" text-anchor="middle" class="s-ink2">Unboxing copies 250 into a plain int.</text>
+          <text data-on="5" x="180" y="226" font-size="10" text-anchor="middle" class="s-ink2">none points nowhere.</text>
+          <text data-on="6" x="180" y="226" font-size="10" text-anchor="middle" class="s-ink2">The hidden intValue() has no object to run on.</text>
+          <text x="354" y="245" text-anchor="end" class="s-wm">myphatshala.com</text>
+        </svg>
+        <ol class="caps" hidden>
+          <li>Autoboxing: javac replaces <code>0</code> with <code>Integer.valueOf(0)</code>, which returns the cached object for 0.</li>
+          <li><code>Integer.valueOf(250)</code> creates a new object, because 250 is outside -128..127.</li>
+          <li><code>+=</code> needs ints: javac unboxes both with <code>intValue()</code>, adds 0 + 250 as ints, then boxes 250 into a <b>new</b> object. <code>total</code> moves to it; the cached 0 is untouched.</li>
+          <li>Unboxing: <code>total.intValue()</code> copies the value 250 into the primitive <code>n</code>, stored right in the frame.</li>
+          <li>Assigning null needs no conversion: <code>none</code> simply holds no reference.</li>
+          <li><code>int bad = none;</code> becomes <code>none.intValue()</code>. Calling a method on null throws <code>NullPointerException</code>.</li>
+        </ol>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ======================= PART 6: REAL-WORLD USE ======================= -->
+<section class="part" id="real-world">
+  <span class="part-label"><b>6</b> Real-world use</span>
+  <h2>Autoboxing in real systems</h2>
+  <p>Every time Java code puts numbers into collections, maps, streams or generic APIs, autoboxing is at work. Most of the time that's fine; a few places need care.</p>
+  <!--ANIM2-->
+  <h3 id="animated-example">Watch it with an example: an exam result portal</h3>
+  <p class="anim-intro">Marks come from a database where an absent student's mark is NULL. Watch the averaging code survive one absent student, then see the version that crashes.</p>
+  <div class="anim anim--one" data-frames="5" data-delay="4600">
+    <div class="anim__title">Averaging marks with an absent student <span>5 steps</span></div>
+    <div class="anim__views">
+      <div class="view view--story">
+        <span class="view__tag">Animated example</span>
+        <svg viewBox="0 0 360 226" role="img" aria-label="A list of Integer marks with a null; the safe loop skips it, the unsafe one crashes on unboxing">
+          <rect x="14" y="14" width="56" height="40" rx="8" class="s-soft-acc" style="stroke:var(--track);stroke-width:1.5"/><text x="42" y="37.96" font-size="11" text-anchor="middle" font-weight="700" class="s-ink mono">78</text>
+          <text x="42" y="66" font-size="9.5" text-anchor="middle" class="s-ink2">Riya</text>
+          <rect x="78" y="14" width="56" height="40" rx="8" class="s-soft-acc" style="stroke:var(--track);stroke-width:1.5"/><text x="106" y="37.96" font-size="11" text-anchor="middle" font-weight="700" class="s-ink mono">91</text>
+          <text x="106" y="66" font-size="9.5" text-anchor="middle" class="s-ink2">Kabir</text>
+          <rect x="142" y="14" width="56" height="40" rx="8" class="s-card2" style="stroke:#D64545;stroke-width:1.5"/><text x="170" y="37.96" font-size="11" text-anchor="middle" font-weight="700" class="s-red mono">null</text>
+          <text x="170" y="66" font-size="9.5" text-anchor="middle" class="s-ink2">Meera</text>
+          <rect x="206" y="14" width="56" height="40" rx="8" class="s-soft-acc" style="stroke:var(--track);stroke-width:1.5"/><text x="234" y="37.96" font-size="11" text-anchor="middle" font-weight="700" class="s-ink mono">64</text>
+          <text x="234" y="66" font-size="9.5" text-anchor="middle" class="s-ink2">Arjun</text>
+          <rect x="272" y="14" width="80" height="40" rx="8" class="" style="stroke:var(--line);stroke-width:1.5;fill:none"/><text x="312" y="37.24" font-size="9" text-anchor="middle" class="s-ink3 mono">List&lt;Integer&gt;</text>
+          <g data-on="2"><rect x="14" y="14" width="56" height="40" rx="8" class="" style="stroke:var(--blue);stroke-width:3;fill:none"/></g>
+          <g data-on="3"><rect x="142" y="14" width="56" height="40" rx="8" class="" style="stroke:var(--blue);stroke-width:3;fill:none"/></g>
+          <g data-on="5"><rect x="142" y="14" width="56" height="40" rx="8" class="" style="stroke:#D64545;stroke-width:3;fill:none"/></g>
+          <rect x="10" y="84" width="342" height="88" rx="8" class="s-board" style="stroke:board;stroke-width:1.5"/>
+          <g data-on="1-3">
+            <text x="20" y="104" font-size="10" class="s-chalk mono">for (Integer m : marks)</text>
+            <text x="20" y="118.5" font-size="10" class="s-chalk mono">  if (m != null) { sum += m; count++; }</text>
+          </g>
+          <text data-on="2" x="20" y="150" font-size="10" class="s-str mono">sum += 78   (unbox 78)</text>
+          <text data-on="3" x="20" y="150" font-size="10" class="s-str mono">null: skipped, not counted</text>
+          <g data-on="4">
+            <text x="20" y="104" font-size="10.5" class="s-chalk mono">sum = 233, count = 3</text>
+            <text x="20" y="119.225" font-size="10.5" class="s-chalk mono">average = 233 / 3 = 77.67</text>
+          </g>
+          <g data-on="5">
+            <text x="20" y="104" font-size="10" class="s-chalk mono">for (int m : marks)   // unboxes every element</text>
+            <text x="20" y="118.5" font-size="10" class="s-chalk mono">  sum += m;</text>
+          </g>
+          <text data-on="5" x="20" y="156" font-size="10" font-weight="700" class="s-red mono">NullPointerException at Meera</text>
+          <text data-on="1" x="180" y="200" font-size="10.5" text-anchor="middle" class="s-ink2">Meera was absent: her mark is null, not 0.</text>
+          <text data-on="2" x="180" y="200" font-size="10.5" text-anchor="middle" class="s-ink2">A real mark is unboxed and added.</text>
+          <text data-on="3" x="180" y="200" font-size="10.5" text-anchor="middle" class="s-ink2">The null is skipped before any unboxing.</text>
+          <text data-on="4" x="180" y="200" font-size="10.5" text-anchor="middle" class="s-ink2">Average of the 3 students who wrote the exam.</text>
+          <text data-on="5" x="180" y="200" font-size="10.5" text-anchor="middle" class="s-ink2">Declaring the loop variable as int unboxes null.</text>
+          <text x="354" y="221" text-anchor="end" class="s-wm">myphatshala.com</text>
+        </svg>
+        <ol class="caps" hidden>
+          <li>Marks arrive as <code>Integer</code> objects. Meera was absent, so the database gave <code>NULL</code>, which becomes <code>null</code> in Java.</li>
+          <li>For Riya's 78, the check passes and <code>sum += m</code> unboxes the Integer to add it.</li>
+          <li>For Meera, <code>m != null</code> is false, so nothing is unboxed and she isn't counted.</li>
+          <li>Average = 233 / 3 ≈ 77.67. Using 0 for Meera would have wrongly pulled it down to about 58.</li>
+          <li>The tempting shortcut <code>for (int m : marks)</code> unboxes each element automatically, and crashes on Meera's null. (Simplified: real portals also record why a mark is missing.)</li>
+        </ol>
+      </div>
+    </div>
+  </div>
+  <!--/ANIM2-->
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="14" y="18" width="92" height="54" rx="6" class="s-card" style="stroke:var(--line)"/><text x="22" y="38" font-size="9" class="mono s-ink">"samosa" → 40</text><text x="22" y="56" font-size="9" class="mono s-ink">"chai"   → 75</text></svg></div>
+    <div><h4>1. Counting with maps</h4><p>Inventory, word counts, votes and page views are kept in <code>Map&lt;String, Integer&gt;</code>. Code like <code>map.put(k, map.getOrDefault(k, 0) + 1)</code> unboxes, adds and boxes on every update.</p>
+      <div class="uc-flow"><span>getOrDefault</span><i>→</i><span class="java">unbox + 1 + box</span><i>→</i><span>put back</span></div></div>
+  </div>
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="20" y="22" width="80" height="46" rx="6" class="s-card" style="stroke:var(--line)"/><text x="60" y="42" text-anchor="middle" font-size="9" class="mono s-ink">discount</text><text x="60" y="58" text-anchor="middle" font-size="9" class="mono s-kw">NULL</text></svg></div>
+    <div><h4>2. Nullable database columns</h4><p>Entity classes map optional columns to <code>Integer</code> or <code>Double</code> fields. A business rule written as <code>int d = order.getDiscount();</code> crashes on the first order without a discount.</p>
+      <div class="uc-flow"><span>NULL column</span><i>→</i><span class="java">Integer field = null</span><i>→</i><span>check before unboxing</span></div></div>
+  </div>
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><path d="M14 70L40 40l18 14 22-30 26 20" style="stroke:var(--track);stroke-width:2;fill:none"/><text x="60" y="84" text-anchor="middle" font-size="9" class="s-ink2">millions of points</text></svg></div>
+    <div><h4>3. High-volume analytics</h4><p>Summing sensor readings or transaction amounts in a <code>Long</code> or a <code>List&lt;Double&gt;</code> creates an object per value. Performance-sensitive code uses <code>long</code>, arrays, or primitive streams like <code>IntStream</code> (Lesson 14.3).</p>
+      <div class="uc-flow"><span>Hot loop</span><i>→</i><span class="java">primitives, not wrappers</span><i>→</i><span>less garbage</span></div></div>
+  </div>
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="14" y="26" width="40" height="36" rx="6" class="s-soft-blue" style="stroke:var(--blue)"/><rect x="66" y="26" width="40" height="36" rx="6" class="s-soft-green" style="stroke:var(--green)"/><text x="34" y="48" text-anchor="middle" font-size="9" class="mono s-ink">id</text><text x="86" y="48" text-anchor="middle" font-size="9" class="mono s-ink">id</text><text x="60" y="80" text-anchor="middle" font-size="10" class="s-red" font-weight="700">==</text></svg></div>
+    <div><h4>4. Comparing IDs</h4><p>Code that compares <code>Integer</code> or <code>Long</code> IDs with <code>==</code> passes tests with small IDs and fails in production with large ones. Teams use <code>Objects.equals</code> and code-review rules to catch it.</p>
+      <div class="uc-flow"><span>Long id1, id2</span><i>→</i><span class="java">Objects.equals(id1, id2)</span><i>→</i><span>safe comparison</span></div></div>
+  </div>
+  <p class="muted">Examples are simplified. Frameworks and libraries add their own conversion layers on top.</p>
+</section>
+
+<div class="ad-slot" data-slot="mid"></div>
+
+<!-- ======================= PART 7: RUN THE CODE ======================= -->
+<section class="part" id="run">
+  <span class="part-label"><b>7</b> Run the code</span>
+  <h2>A canteen stock counter</h2>
+  <div class="code" data-lang="java" data-file="Main.java"><pre><code>import java.util.HashMap;
+
+public class Main {
+    static HashMap&lt;String, Integer&gt; stock = new HashMap&lt;&gt;();
+
+    static String sell(String item, int qty) {
+        Integer have = stock.get(item);           // may be null
+        if (have == null) {
+            return item + ": not on the menu";
+        }
+        if (have &lt; qty) {                         // unboxing for &lt;
+            return item + ": only " + have + " left";
+        }
+        stock.put(item, have - qty);              // unbox, subtract, box
+        return item + ": sold " + qty + ", left " + stock.get(item);
+    }
+
+    public static void main(String[] args) {
+        stock.put("samosa", 40);                  // 40 is autoboxed
+        stock.put("chai", 75);
+        System.out.println(sell("samosa", 5));
+        System.out.println(sell("chai", 80));
+        System.out.println(sell("vada pav", 2));
+    }
+}</code></pre><div class="output">samosa: sold 5, left 35
+chai: only 75 left
+vada pav: not on the menu</div></div>
+  <ul class="anno">
+    <li><code>stock.put("samosa", 40)</code><span>Autoboxing: javac writes <code>Integer.valueOf(40)</code>.</span></li>
+    <li><code>Integer have = stock.get(item)</code><span>Kept as <code>Integer</code> on purpose, so it can hold null.</span></li>
+    <li><code>have &lt; qty</code><span>Unboxing: <code>have.intValue() &lt; qty</code>. Safe, because null was ruled out above.</span></li>
+    <li><code>have - qty</code><span>Unbox, subtract as ints, box the result for <code>put</code>.</span></li>
+  </ul>
+  <div class="runner">
+    <script type="application/json">{
+      "lang": "java", "file": "Main.java",
+      "tasks": [
+        { "label": "1 · Stock counter", "hint": "Press <b>Run</b>. Then add a method <code>restock(String item, int qty)</code> that adds to the stock, starting from 0 if the item is new (try <code>getOrDefault</code>).",
+          "code": "import java.util.HashMap;\n\npublic class Main {\n    static HashMap<String, Integer> stock = new HashMap<>();\n\n    static String sell(String item, int qty) {\n        Integer have = stock.get(item);\n        if (have == null) {\n            return item + \": not on the menu\";\n        }\n        if (have < qty) {\n            return item + \": only \" + have + \" left\";\n        }\n        stock.put(item, have - qty);\n        return item + \": sold \" + qty + \", left \" + stock.get(item);\n    }\n\n    public static void main(String[] args) {\n        stock.put(\"samosa\", 40);\n        stock.put(\"chai\", 75);\n        System.out.println(sell(\"samosa\", 5));\n        System.out.println(sell(\"chai\", 80));\n        System.out.println(sell(\"vada pav\", 2));\n    }\n}\n" },
+        { "label": "2 · Spot the error: null unboxing", "hint": "It crashes with <code>NullPointerException</code>. Which hidden call failed? Fix it with <code>getOrDefault(item, 0)</code>.",
+          "code": "import java.util.HashMap;\n\npublic class Main {\n    public static void main(String[] args) {\n        HashMap<String, Integer> stock = new HashMap<>();\n        stock.put(\"samosa\", 40);\n        String item = \"vada pav\";\n        int left = stock.get(item) - 1;\n        System.out.println(left);\n    }\n}\n", "_expect": "exception" },
+        { "label": "3 · Predict: == and boxing", "hint": "<b>Predict first:</b> what do the three lines print? Then change 1000 to 100 and predict again.",
+          "code": "public class Main {\n    public static void main(String[] args) {\n        Integer a = 1000, b = 1000;\n        int p = 1000;\n        System.out.println(a == b);\n        System.out.println(a == p);\n        System.out.println(a.equals(b));\n    }\n}\n" },
+        { "label": "4 · Spot the error: int to Long", "hint": "Read the error: autoboxing only goes to the matching wrapper. Fix it with an <code>L</code> suffix.",
+          "code": "public class Main {\n    public static void main(String[] args) {\n        Long phone = 9876543210;\n        Long views = 5;\n        System.out.println(phone + \" \" + views);\n    }\n}\n", "_expect": "compile-error" },
+        { "label": "5 · Predict: remove(1)", "hint": "<b>Predict first:</b> which element does <code>remove(1)</code> delete? Then change it to <code>remove(Integer.valueOf(1))</code>.",
+          "code": "import java.util.ArrayList;\nimport java.util.List;\n\npublic class Main {\n    public static void main(String[] args) {\n        List<Integer> seats = new ArrayList<>(List.of(3, 1, 4, 1, 5));\n        seats.remove(1);\n        System.out.println(seats);\n    }\n}\n" }
+      ]
+    }</script>
+  </div>
+</section>
+
+<!-- ======================= PART 8: LINE BY LINE ======================= -->
+<section class="part" id="tracer">
+  <span class="part-label"><b>8</b> Line by line</span>
+  <h2>Every <code>+=</code> makes a new object</h2>
+  <p>This trace is recorded from the real JVM. Watch <code>total</code> point to a <b>different</b> Integer object after each addition, while the old ones stay unchanged.</p>
+  <div class="tracer">
+    <script type="application/json">{"lang": "java", "code": ["public class Main {", "    public static void main(String[] args) {", "        int[] prices = {120, 250, 80};", "        Integer total = 0;", "        for (int p : prices) {", "            total += p;", "        }", "        int asInt = total;", "        System.out.println(\"Bill: \" + asInt);", "    }", "}"], "steps": [{"line": 3, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["prices", "→ #1 int[3]"]]}], "heap": ["<b>#1</b> int[3] {120, 250, 80}", "<b>#2</b> String[0] (args, empty)"], "newVar": "prices", "phase": "Primitives", "note": "A plain int array: no wrapper objects yet. Now <code>prices</code> = → #1 int[3]. New object <b>#1</b> on the heap: int[3] {120, 250, 80}."}, {"line": 4, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["prices", "→ #1 int[3]"], ["total", "→ #3 Integer 0"]]}], "heap": ["<b>#1</b> int[3] {120, 250, 80}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Integer 0"], "newVar": "total", "phase": "Box", "note": "javac wrote <code>Integer.valueOf(0)</code>. 0 is in the cache, so <code>total</code> = → #3, an object the JDK created at start-up. (The trace numbers objects the first time our code uses them.)"}, {"line": 5, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["prices", "→ #1 int[3]"], ["total", "→ #3 Integer 0"], ["p", "120"]]}], "heap": ["<b>#1</b> int[3] {120, 250, 80}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Integer 0"], "newVar": "p", "phase": "Assign", "note": "Now <code>p</code> = 120."}, {"line": 6, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["prices", "→ #1 int[3]"], ["total", "→ #4 Integer 120"]]}], "heap": ["<b>#1</b> int[3] {120, 250, 80}", "<b>#2</b> String[0] (args, empty)", "<b>#4</b> Integer 120"], "newVar": "total", "phase": "Unbox, add, box", "note": "0 + 120 = 120, boxed again with <code>valueOf</code>. 120 is cached too, so <code>total</code> now points to the ready-made Integer 120 (#4). Nothing new was allocated."}, {"line": 5, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["prices", "→ #1 int[3]"], ["total", "→ #4 Integer 120"], ["p", "250"]]}], "heap": ["<b>#1</b> int[3] {120, 250, 80}", "<b>#2</b> String[0] (args, empty)", "<b>#4</b> Integer 120"], "newVar": "p", "phase": "Assign", "note": "Now <code>p</code> = 250."}, {"line": 6, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["prices", "→ #1 int[3]"], ["total", "→ #5 Integer 370"]]}], "heap": ["<b>#1</b> int[3] {120, 250, 80}", "<b>#2</b> String[0] (args, empty)", "<b>#5</b> Integer 370"], "newVar": "total", "phase": "Unbox, add, box", "note": "120 + 250 = 370. Outside the cache: a <b>new</b> Integer object. Now <code>total</code> = → #5 Integer 370. New object <b>#5</b> on the heap: Integer 370."}, {"line": 5, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["prices", "→ #1 int[3]"], ["total", "→ #5 Integer 370"], ["p", "80"]]}], "heap": ["<b>#1</b> int[3] {120, 250, 80}", "<b>#2</b> String[0] (args, empty)", "<b>#5</b> Integer 370"], "newVar": "p", "phase": "Assign", "note": "Now <code>p</code> = 80."}, {"line": 6, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["prices", "→ #1 int[3]"], ["total", "→ #6 Integer 450"]]}], "heap": ["<b>#1</b> int[3] {120, 250, 80}", "<b>#2</b> String[0] (args, empty)", "<b>#6</b> Integer 450"], "newVar": "total", "phase": "Unbox, add, box", "note": "370 + 80 = 450: <b>another</b> new object. The 370 object is now garbage. Now <code>total</code> = → #6 Integer 450. New object <b>#6</b> on the heap: Integer 450."}, {"line": 5, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["prices", "→ #1 int[3]"], ["total", "→ #6 Integer 450"]]}], "heap": ["<b>#1</b> int[3] {120, 250, 80}", "<b>#2</b> String[0] (args, empty)", "<b>#6</b> Integer 450"], "phase": "Loop ends", "note": "No elements left, so the loop ends."}, {"line": 8, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["prices", "→ #1 int[3]"], ["total", "→ #6 Integer 450"], ["asInt", "450"]]}], "heap": ["<b>#1</b> int[3] {120, 250, 80}", "<b>#2</b> String[0] (args, empty)", "<b>#6</b> Integer 450"], "newVar": "asInt", "phase": "Unbox", "note": "<code>total.intValue()</code> copies 450 into a primitive. Now <code>asInt</code> = 450."}, {"line": 9, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["prices", "→ #1 int[3]"], ["total", "→ #6 Integer 450"], ["asInt", "450"]]}], "heap": ["<b>#1</b> int[3] {120, 250, 80}", "<b>#2</b> String[0] (args, empty)", "<b>#6</b> Integer 450"], "out": "Bill: 450\n", "phase": "Print", "note": " Prints <code>Bill: 450</code>."}, {"line": 10, "phase": "Program ends", "note": "<code>main</code> returns, its frame is popped and the program ends.", "stack": [], "heap": []}]}</script>
+  </div>
+
+<h3 id="worked">Worked examples: real problems, solved and traced in memory</h3>
+  <p class="wx-intro">Three tasks where autoboxing helps, and where one careless unboxing would crash the program.</p>
+  <article class="wx">
+    <div class="wx__head"><span class="wx__num">Example 1</span><span class="wx__tag">Elections · counting</span></div>
+    <h4>Count votes in a map</h4>
+    <div class="wx__problem"><p class="wx__label">Problem statement</p><p>A class election records each vote as a name. Count the votes per candidate in a <code>HashMap&lt;String, Integer&gt;</code> without crashing on a candidate's first vote.</p></div>
+    <div class="prob__io"><div><small>Input</small><pre>&quot;Riya&quot;, &quot;Kabir&quot;, &quot;Riya&quot;</pre></div><div><small>Expected output</small><pre>{Riya=2, Kabir=1}</pre></div></div>
+    <div class="wx__approach"><p class="wx__label">Approach</p><ol><li>A helper <code>vote(map, name)</code> reads the current count with <code>getOrDefault(name, 0)</code>, so a new name gives 0, not null.</li><li>Store <code>now + 1</code>: unboxing for the addition, boxing for <code>put</code>.</li><li>Print the map.</li></ol></div>
+    <p class="wx__label">Solution: run it live</p>
+    <div class="runner">
+    <script type="application/json">{"lang": "java", "file": "Main.java", "tasks": [{"label": "Run · Count votes in a map", "hint": "Press <b>Run</b>. Then replace <code>getOrDefault(name, 0)</code> with <code>get(name)</code> and see the crash on the first vote.", "code": "import java.util.HashMap;\n\npublic class Main {\n    static void vote(HashMap<String, Integer> votes, String name) {\n        int now = votes.getOrDefault(name, 0);\n        votes.put(name, now + 1);\n    }\n\n    public static void main(String[] args) {\n        HashMap<String, Integer> votes = new HashMap<>();\n        vote(votes, \"Riya\");\n        vote(votes, \"Kabir\");\n        vote(votes, \"Riya\");\n        System.out.println(votes);\n    }\n}\n"}]}</script>
+    </div>
+    <p class="wx__label">What happens in memory, step by step</p>
+    <p class="wx__how">Recorded from the real JVM: press <b>Next</b> to execute one line at a time. Watch method calls push and pop frames on the stack, and objects (numbered #1, #2 …) appear on the heap.</p>
+    <div class="tracer">
+    <script type="application/json">{"lang": "java", "code": ["import java.util.HashMap;", "", "public class Main {", "    static void vote(HashMap<String, Integer> votes, String name) {", "        int now = votes.getOrDefault(name, 0);", "        votes.put(name, now + 1);", "    }", "", "    public static void main(String[] args) {", "        HashMap<String, Integer> votes = new HashMap<>();", "        vote(votes, \"Riya\");", "        vote(votes, \"Kabir\");", "        vote(votes, \"Riya\");", "        System.out.println(votes);", "    }", "}"], "steps": [{"line": 10, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["votes", "→ #1 HashMap"]]}], "heap": ["<b>#1</b> HashMap size 0 (no bucket table yet)", "<b>#2</b> String[0] (args, empty)"], "newVar": "votes", "phase": "Assign", "note": "Now <code>votes</code> = → #1 HashMap. New object <b>#1</b> on the heap: HashMap size 0 (no bucket table yet)."}, {"line": 11, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["votes", "→ #1 HashMap"]]}, {"frame": "vote(HashMap votes, String name)", "vars": [["votes", "→ #1 HashMap"], ["name", "→ #3 \"Riya\""]]}], "heap": ["<b>#1</b> HashMap size 0 (no bucket table yet)", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> String &quot;Riya&quot;"], "newVar": "votes", "phase": "Call", "note": "<code>vote()</code> is called: a new frame is pushed with <code>votes</code> = → #1 HashMap, <code>name</code> = → #3 &quot;Riya&quot;. New object <b>#3</b> on the heap: String &quot;Riya&quot;."}, {"line": 5, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["votes", "→ #1 HashMap"]]}, {"frame": "vote(HashMap votes, String name)", "vars": [["votes", "→ #1 HashMap"], ["name", "→ #3 \"Riya\""], ["now", "0"]]}], "heap": ["<b>#1</b> HashMap size 0 (no bucket table yet)", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> String &quot;Riya&quot;"], "newVar": "now", "phase": "Unbox", "note": "<code>getOrDefault</code> returns an Integer (never null here); javac unboxes it into <code>now</code>. Now <code>now</code> = 0."}, {"line": 6, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["votes", "→ #1 HashMap"]]}, {"frame": "vote(HashMap votes, String name)", "vars": [["votes", "→ #1 HashMap"], ["name", "→ #3 \"Riya\""], ["now", "0"]]}], "heap": ["<b>#1</b> HashMap size 1, 16 buckets: [9] &quot;Riya&quot;=1", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> String &quot;Riya&quot;"], "phase": "Box", "note": "<code>now + 1</code> is an int; javac boxes it for <code>put</code>. Object <b>#1</b> changes: HashMap size 1, 16 buckets: [9] &quot;Riya&quot;=1."}, {"line": 7, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["votes", "→ #1 HashMap"]]}], "heap": ["<b>#1</b> HashMap size 1, 16 buckets: [9] &quot;Riya&quot;=1", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> String &quot;Riya&quot;"], "phase": "Return", "note": "<code>vote()</code> returns and its frame is popped."}, {"line": 12, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["votes", "→ #1 HashMap"]]}, {"frame": "vote(HashMap votes, String name)", "vars": [["votes", "→ #1 HashMap"], ["name", "→ #4 \"Kabir\""]]}], "heap": ["<b>#1</b> HashMap size 1, 16 buckets: [9] &quot;Riya&quot;=1", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> String &quot;Riya&quot;", "<b>#4</b> String &quot;Kabir&quot;"], "newVar": "votes", "phase": "Call", "note": "<code>vote()</code> is called: a new frame is pushed with <code>votes</code> = → #1 HashMap, <code>name</code> = → #4 &quot;Kabir&quot;. New object <b>#4</b> on the heap: String &quot;Kabir&quot;."}, {"line": 5, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["votes", "→ #1 HashMap"]]}, {"frame": "vote(HashMap votes, String name)", "vars": [["votes", "→ #1 HashMap"], ["name", "→ #4 \"Kabir\""], ["now", "0"]]}], "heap": ["<b>#1</b> HashMap size 1, 16 buckets: [9] &quot;Riya&quot;=1", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> String &quot;Riya&quot;", "<b>#4</b> String &quot;Kabir&quot;"], "newVar": "now", "phase": "Unbox", "note": "<code>getOrDefault</code> returns an Integer (never null here); javac unboxes it into <code>now</code>. Now <code>now</code> = 0."}, {"line": 6, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["votes", "→ #1 HashMap"]]}, {"frame": "vote(HashMap votes, String name)", "vars": [["votes", "→ #1 HashMap"], ["name", "→ #4 \"Kabir\""], ["now", "0"]]}], "heap": ["<b>#1</b> HashMap size 2, 16 buckets: [9] &quot;Riya&quot;=1 | [11] &quot;Kabir&quot;=1", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> String &quot;Riya&quot;", "<b>#4</b> String &quot;Kabir&quot;"], "phase": "Box", "note": "<code>now + 1</code> is an int; javac boxes it for <code>put</code>. Object <b>#1</b> changes: HashMap size 2, 16 buckets: [9] &quot;Riya&quot;=1 | [11] &quot;Kabir&quot;=1."}, {"line": 7, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["votes", "→ #1 HashMap"]]}], "heap": ["<b>#1</b> HashMap size 2, 16 buckets: [9] &quot;Riya&quot;=1 | [11] &quot;Kabir&quot;=1", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> String &quot;Riya&quot;", "<b>#4</b> String &quot;Kabir&quot;"], "phase": "Return", "note": "<code>vote()</code> returns and its frame is popped."}, {"line": 13, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["votes", "→ #1 HashMap"]]}, {"frame": "vote(HashMap votes, String name)", "vars": [["votes", "→ #1 HashMap"], ["name", "→ #3 \"Riya\""]]}], "heap": ["<b>#1</b> HashMap size 2, 16 buckets: [9] &quot;Riya&quot;=1 | [11] &quot;Kabir&quot;=1", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> String &quot;Riya&quot;", "<b>#4</b> String &quot;Kabir&quot;"], "newVar": "votes", "phase": "Call", "note": "<code>vote()</code> is called: a new frame is pushed with <code>votes</code> = → #1 HashMap, <code>name</code> = → #3 &quot;Riya&quot;."}, {"line": 5, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["votes", "→ #1 HashMap"]]}, {"frame": "vote(HashMap votes, String name)", "vars": [["votes", "→ #1 HashMap"], ["name", "→ #3 \"Riya\""], ["now", "1"]]}], "heap": ["<b>#1</b> HashMap size 2, 16 buckets: [9] &quot;Riya&quot;=1 | [11] &quot;Kabir&quot;=1", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> String &quot;Riya&quot;", "<b>#4</b> String &quot;Kabir&quot;"], "newVar": "now", "phase": "Unbox", "note": "<code>getOrDefault</code> returns an Integer (never null here); javac unboxes it into <code>now</code>. Now <code>now</code> = 1."}, {"line": 6, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["votes", "→ #1 HashMap"]]}, {"frame": "vote(HashMap votes, String name)", "vars": [["votes", "→ #1 HashMap"], ["name", "→ #3 \"Riya\""], ["now", "1"]]}], "heap": ["<b>#1</b> HashMap size 2, 16 buckets: [9] &quot;Riya&quot;=2 | [11] &quot;Kabir&quot;=1", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> String &quot;Riya&quot;", "<b>#4</b> String &quot;Kabir&quot;"], "phase": "Box", "note": "<code>now + 1</code> is an int; javac boxes it for <code>put</code>. Object <b>#1</b> changes: HashMap size 2, 16 buckets: [9] &quot;Riya&quot;=2 | [11] &quot;Kabir&quot;=1."}, {"line": 7, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["votes", "→ #1 HashMap"]]}], "heap": ["<b>#1</b> HashMap size 2, 16 buckets: [9] &quot;Riya&quot;=2 | [11] &quot;Kabir&quot;=1", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> String &quot;Riya&quot;", "<b>#4</b> String &quot;Kabir&quot;"], "phase": "Return", "note": "<code>vote()</code> returns and its frame is popped."}, {"line": 14, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["votes", "→ #1 HashMap"]]}], "heap": ["<b>#1</b> HashMap size 2, 16 buckets: [9] &quot;Riya&quot;=2 | [11] &quot;Kabir&quot;=1", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> String &quot;Riya&quot;", "<b>#4</b> String &quot;Kabir&quot;"], "out": "{Riya=2, Kabir=1}\n", "phase": "Print", "note": " Prints <code>{Riya=2, Kabir=1}</code>."}, {"line": 15, "phase": "Program ends", "note": "<code>main</code> returns, its frame is popped and the program ends.", "stack": [], "heap": []}]}</script>
+  </div>
+  </article>
+  <article class="wx">
+    <div class="wx__head"><span class="wx__num">Example 2</span><span class="wx__tag">EdTech · reports</span></div>
+    <h4>Class average with absent students</h4>
+    <div class="wx__problem"><p class="wx__label">Problem statement</p><p>Marks are in a <code>List&lt;Integer&gt;</code>; <code>null</code> means absent. Compute the average of the students who were present.</p></div>
+    <div class="prob__io"><div><small>Input</small><pre>[78, 91, null, 64]</pre></div><div><small>Expected output</small><pre>Average: 77.67</pre></div></div>
+    <div class="wx__approach"><p class="wx__label">Approach</p><ol><li>A helper <code>average(List&lt;Integer&gt; marks)</code> loops with an <code>Integer</code> loop variable, so nothing is unboxed automatically.</li><li>Skip nulls; unbox the rest by adding them to an int sum.</li><li>Return the average as a double and print it with two decimals.</li></ol></div>
+    <p class="wx__label">Solution: run it live</p>
+    <div class="runner">
+    <script type="application/json">{"lang": "java", "file": "Main.java", "tasks": [{"label": "Run · Class average with absent students", "hint": "Press <b>Run</b>. Then change the loop to <code>for (int m : marks)</code> and read the error.", "code": "import java.util.Arrays;\nimport java.util.List;\n\npublic class Main {\n    static double average(List<Integer> marks) {\n        int sum = 0, count = 0;\n        for (Integer m : marks) {\n            if (m != null) {\n                sum += m;\n                count++;\n            }\n        }\n        return (double) sum / count;\n    }\n\n    public static void main(String[] args) {\n        List<Integer> marks = Arrays.asList(78, 91, null, 64);\n        double avg = average(marks);\n        System.out.printf(\"Average: %.2f%n\", avg);\n    }\n}\n"}]}</script>
+    </div>
+    <p class="wx__label">What happens in memory, step by step</p>
+    <p class="wx__how">Recorded from the real JVM: press <b>Next</b> to execute one line at a time. Watch method calls push and pop frames on the stack, and objects (numbered #1, #2 …) appear on the heap.</p>
+    <div class="tracer">
+    <script type="application/json">{"lang": "java", "code": ["import java.util.Arrays;", "import java.util.List;", "", "public class Main {", "    static double average(List<Integer> marks) {", "        int sum = 0, count = 0;", "        for (Integer m : marks) {", "            if (m != null) {", "                sum += m;", "                count++;", "            }", "        }", "        return (double) sum / count;", "    }", "", "    public static void main(String[] args) {", "        List<Integer> marks = Arrays.asList(78, 91, null, 64);", "        double avg = average(marks);", "        System.out.printf(\"Average: %.2f%n\", avg);", "    }", "}"], "steps": [{"line": 17, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["marks", "→ #1 Arrays.ArrayList"]]}], "heap": ["<b>#1</b> Arrays.ArrayList", "<b>#2</b> String[0] (args, empty)"], "newVar": "marks", "phase": "Box", "note": "<code>Arrays.asList(78, 91, null, 64)</code>: each number is autoboxed; null stays null. Now <code>marks</code> = → #1 Arrays.ArrayList. New object <b>#1</b> on the heap: Arrays.ArrayList."}, {"line": 18, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["marks", "→ #1 Arrays.ArrayList"]]}, {"frame": "average(List marks)", "vars": [["marks", "→ #1 Arrays.ArrayList"]]}], "heap": ["<b>#1</b> Arrays.ArrayList", "<b>#2</b> String[0] (args, empty)"], "newVar": "marks", "phase": "Call", "note": "<code>average()</code> is called: a new frame is pushed with <code>marks</code> = → #1 Arrays.ArrayList."}, {"line": 6, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["marks", "→ #1 Arrays.ArrayList"]]}, {"frame": "average(List marks)", "vars": [["marks", "→ #1 Arrays.ArrayList"], ["sum", "0"], ["count", "0"]]}], "heap": ["<b>#1</b> Arrays.ArrayList", "<b>#2</b> String[0] (args, empty)"], "newVar": "sum", "phase": "Assign", "note": "Now <code>sum</code> = 0, <code>count</code> = 0."}, {"line": 7, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["marks", "→ #1 Arrays.ArrayList"]]}, {"frame": "average(List marks)", "vars": [["marks", "→ #1 Arrays.ArrayList"], ["sum", "0"], ["count", "0"], ["m", "→ #3 Integer 78"]]}], "heap": ["<b>#1</b> Arrays.ArrayList", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Integer 78"], "newVar": "m", "phase": "Assign", "note": "Now <code>m</code> = → #3 Integer 78. Object <b>#3</b> (Integer 78) is a <b>cached</b> object the JDK made at start-up: boxing small values reuses it instead of creating one."}, {"line": 8, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["marks", "→ #1 Arrays.ArrayList"]]}, {"frame": "average(List marks)", "vars": [["marks", "→ #1 Arrays.ArrayList"], ["sum", "0"], ["count", "0"], ["m", "→ #3 Integer 78"]]}], "heap": ["<b>#1</b> Arrays.ArrayList", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Integer 78"], "phase": "Check", "note": "Test before unboxing. The condition <code>m != null</code> is checked: <b>true</b>, so the block runs."}, {"line": 9, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["marks", "→ #1 Arrays.ArrayList"]]}, {"frame": "average(List marks)", "vars": [["marks", "→ #1 Arrays.ArrayList"], ["sum", "78"], ["count", "0"], ["m", "→ #3 Integer 78"]]}], "heap": ["<b>#1</b> Arrays.ArrayList", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Integer 78"], "newVar": "sum", "phase": "Unbox", "note": "<code>sum += m</code> calls <code>m.intValue()</code>. Now <code>sum</code> = 78."}, {"line": 10, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["marks", "→ #1 Arrays.ArrayList"]]}, {"frame": "average(List marks)", "vars": [["marks", "→ #1 Arrays.ArrayList"], ["sum", "78"], ["count", "1"]]}], "heap": ["<b>#1</b> Arrays.ArrayList", "<b>#2</b> String[0] (args, empty)"], "newVar": "count", "phase": "Assign", "note": "Now <code>count</code> = 1."}, {"line": 12, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["marks", "→ #1 Arrays.ArrayList"]]}, {"frame": "average(List marks)", "vars": [["marks", "→ #1 Arrays.ArrayList"], ["sum", "78"], ["count", "1"]]}], "heap": ["<b>#1</b> Arrays.ArrayList", "<b>#2</b> String[0] (args, empty)"], "phase": "Step", "note": "End of the block."}, {"line": 7, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["marks", "→ #1 Arrays.ArrayList"]]}, {"frame": "average(List marks)", "vars": [["marks", "→ #1 Arrays.ArrayList"], ["sum", "78"], ["count", "1"], ["m", "→ #4 Integer 91"]]}], "heap": ["<b>#1</b> Arrays.ArrayList", "<b>#2</b> String[0] (args, empty)", "<b>#4</b> Integer 91"], "newVar": "m", "phase": "Assign", "note": "Now <code>m</code> = → #4 Integer 91. Object <b>#4</b> (Integer 91) is a <b>cached</b> object the JDK made at start-up: boxing small values reuses it instead of creating one."}, {"line": 8, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["marks", "→ #1 Arrays.ArrayList"]]}, {"frame": "average(List marks)", "vars": [["marks", "→ #1 Arrays.ArrayList"], ["sum", "78"], ["count", "1"], ["m", "→ #4 Integer 91"]]}], "heap": ["<b>#1</b> Arrays.ArrayList", "<b>#2</b> String[0] (args, empty)", "<b>#4</b> Integer 91"], "phase": "Check", "note": "Test before unboxing. The condition <code>m != null</code> is checked: <b>true</b>, so the block runs."}, {"line": 9, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["marks", "→ #1 Arrays.ArrayList"]]}, {"frame": "average(List marks)", "vars": [["marks", "→ #1 Arrays.ArrayList"], ["sum", "169"], ["count", "1"], ["m", "→ #4 Integer 91"]]}], "heap": ["<b>#1</b> Arrays.ArrayList", "<b>#2</b> String[0] (args, empty)", "<b>#4</b> Integer 91"], "newVar": "sum", "phase": "Unbox", "note": "<code>sum += m</code> calls <code>m.intValue()</code>. Now <code>sum</code> = 169."}, {"line": 10, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["marks", "→ #1 Arrays.ArrayList"]]}, {"frame": "average(List marks)", "vars": [["marks", "→ #1 Arrays.ArrayList"], ["sum", "169"], ["count", "2"]]}], "heap": ["<b>#1</b> Arrays.ArrayList", "<b>#2</b> String[0] (args, empty)"], "newVar": "count", "phase": "Assign", "note": "Now <code>count</code> = 2."}, {"line": 12, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["marks", "→ #1 Arrays.ArrayList"]]}, {"frame": "average(List marks)", "vars": [["marks", "→ #1 Arrays.ArrayList"], ["sum", "169"], ["count", "2"]]}], "heap": ["<b>#1</b> Arrays.ArrayList", "<b>#2</b> String[0] (args, empty)"], "phase": "Step", "note": "End of the block."}, {"line": 7, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["marks", "→ #1 Arrays.ArrayList"]]}, {"frame": "average(List marks)", "vars": [["marks", "→ #1 Arrays.ArrayList"], ["sum", "169"], ["count", "2"], ["m", "null"]]}], "heap": ["<b>#1</b> Arrays.ArrayList", "<b>#2</b> String[0] (args, empty)"], "newVar": "m", "phase": "Assign", "note": "Now <code>m</code> = null."}, {"line": 8, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["marks", "→ #1 Arrays.ArrayList"]]}, {"frame": "average(List marks)", "vars": [["marks", "→ #1 Arrays.ArrayList"], ["sum", "169"], ["count", "2"]]}], "heap": ["<b>#1</b> Arrays.ArrayList", "<b>#2</b> String[0] (args, empty)"], "phase": "Check", "note": "Test before unboxing. The condition <code>m != null</code> is checked: <b>false</b>, so the block is skipped."}, {"line": 12, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["marks", "→ #1 Arrays.ArrayList"]]}, {"frame": "average(List marks)", "vars": [["marks", "→ #1 Arrays.ArrayList"], ["sum", "169"], ["count", "2"]]}], "heap": ["<b>#1</b> Arrays.ArrayList", "<b>#2</b> String[0] (args, empty)"], "phase": "Step", "note": "End of the block."}, {"line": 7, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["marks", "→ #1 Arrays.ArrayList"]]}, {"frame": "average(List marks)", "vars": [["marks", "→ #1 Arrays.ArrayList"], ["sum", "169"], ["count", "2"], ["m", "→ #5 Integer 64"]]}], "heap": ["<b>#1</b> Arrays.ArrayList", "<b>#2</b> String[0] (args, empty)", "<b>#5</b> Integer 64"], "newVar": "m", "phase": "Assign", "note": "Now <code>m</code> = → #5 Integer 64. Object <b>#5</b> (Integer 64) is a <b>cached</b> object the JDK made at start-up: boxing small values reuses it instead of creating one."}, {"line": 8, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["marks", "→ #1 Arrays.ArrayList"]]}, {"frame": "average(List marks)", "vars": [["marks", "→ #1 Arrays.ArrayList"], ["sum", "169"], ["count", "2"], ["m", "→ #5 Integer 64"]]}], "heap": ["<b>#1</b> Arrays.ArrayList", "<b>#2</b> String[0] (args, empty)", "<b>#5</b> Integer 64"], "phase": "Check", "note": "Test before unboxing. The condition <code>m != null</code> is checked: <b>true</b>, so the block runs."}, {"line": 9, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["marks", "→ #1 Arrays.ArrayList"]]}, {"frame": "average(List marks)", "vars": [["marks", "→ #1 Arrays.ArrayList"], ["sum", "233"], ["count", "2"], ["m", "→ #5 Integer 64"]]}], "heap": ["<b>#1</b> Arrays.ArrayList", "<b>#2</b> String[0] (args, empty)", "<b>#5</b> Integer 64"], "newVar": "sum", "phase": "Unbox", "note": "<code>sum += m</code> calls <code>m.intValue()</code>. Now <code>sum</code> = 233."}, {"line": 10, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["marks", "→ #1 Arrays.ArrayList"]]}, {"frame": "average(List marks)", "vars": [["marks", "→ #1 Arrays.ArrayList"], ["sum", "233"], ["count", "3"]]}], "heap": ["<b>#1</b> Arrays.ArrayList", "<b>#2</b> String[0] (args, empty)"], "newVar": "count", "phase": "Assign", "note": "Now <code>count</code> = 3."}, {"line": 12, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["marks", "→ #1 Arrays.ArrayList"]]}, {"frame": "average(List marks)", "vars": [["marks", "→ #1 Arrays.ArrayList"], ["sum", "233"], ["count", "3"]]}], "heap": ["<b>#1</b> Arrays.ArrayList", "<b>#2</b> String[0] (args, empty)"], "phase": "Step", "note": "End of the block."}, {"line": 7, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["marks", "→ #1 Arrays.ArrayList"]]}, {"frame": "average(List marks)", "vars": [["marks", "→ #1 Arrays.ArrayList"], ["sum", "233"], ["count", "3"]]}], "heap": ["<b>#1</b> Arrays.ArrayList", "<b>#2</b> String[0] (args, empty)"], "phase": "Loop ends", "note": "No elements left, so the loop ends."}, {"line": 13, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["marks", "→ #1 Arrays.ArrayList"]]}], "heap": ["<b>#1</b> Arrays.ArrayList", "<b>#2</b> String[0] (args, empty)"], "phase": "Return", "note": " <code>average()</code> returns and its frame is popped."}, {"line": 18, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["marks", "→ #1 Arrays.ArrayList"], ["avg", "77.66666666666667"]]}], "heap": ["<b>#1</b> Arrays.ArrayList", "<b>#2</b> String[0] (args, empty)"], "newVar": "avg", "phase": "Assign", "note": "Now <code>avg</code> = 77.66666666666667."}, {"line": 19, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["marks", "→ #1 Arrays.ArrayList"], ["avg", "77.66666666666667"]]}], "heap": ["<b>#1</b> Arrays.ArrayList", "<b>#2</b> String[0] (args, empty)"], "out": "Average: 77.67\n", "phase": "Print", "note": "Prints <code>Average: 77.67</code>."}, {"line": 20, "phase": "Program ends", "note": "<code>main</code> returns, its frame is popped and the program ends.", "stack": [], "heap": []}]}</script>
+  </div>
+  </article>
+  <article class="wx">
+    <div class="wx__head"><span class="wx__num">Example 3</span><span class="wx__tag">E-commerce · bug fix</span></div>
+    <h4>Remove a product ID, not a position</h4>
+    <div class="wx__problem"><p class="wx__label">Problem statement</p><p>A wishlist stores product IDs <code>[7, 2, 9]</code>. The customer removes product <b>2</b>. The code <code>ids.remove(productId)</code> with an <code>int</code> removed the wrong item. Fix it.</p></div>
+    <div class="prob__io"><div><small>Input</small><pre>ids = [7, 2, 9], remove product 2</pre></div><div><small>Expected output</small><pre>By index: [7, 2]
+By value: [7, 9]</pre></div></div>
+    <div class="wx__approach"><p class="wx__label">Approach</p><ol><li><code>remove(int)</code> removes by <b>index</b>; <code>remove(Object)</code> removes by <b>value</b>.</li><li>Passing an <code>int</code> makes javac choose <code>remove(int)</code> (no boxing needed).</li><li>Box the ID explicitly with <code>Integer.valueOf</code> to call <code>remove(Object)</code>.</li></ol></div>
+    <p class="wx__label">Solution: run it live</p>
+    <div class="runner">
+    <script type="application/json">{"lang": "java", "file": "Main.java", "tasks": [{"label": "Run · Remove a product ID, not a position", "hint": "Press <b>Run</b>. Then try <code>right.remove((Integer) productId)</code>: a cast also forces boxing.", "code": "import java.util.ArrayList;\nimport java.util.List;\n\npublic class Main {\n    public static void main(String[] args) {\n        int productId = 2;\n        List<Integer> wrong = new ArrayList<>(List.of(7, 2, 9));\n        wrong.remove(productId);\n        System.out.println(\"By index: \" + wrong);\n\n        List<Integer> right = new ArrayList<>(List.of(7, 2, 9));\n        right.remove(Integer.valueOf(productId));\n        System.out.println(\"By value: \" + right);\n    }\n}\n"}]}</script>
+    </div>
+    <p class="wx__label">What happens in memory, step by step</p>
+    <p class="wx__how">Recorded from the real JVM: press <b>Next</b> to execute one line at a time. Watch method calls push and pop frames on the stack, and objects (numbered #1, #2 …) appear on the heap.</p>
+    <div class="tracer">
+    <script type="application/json">{"lang": "java", "code": ["import java.util.ArrayList;", "import java.util.List;", "", "public class Main {", "    public static void main(String[] args) {", "        int productId = 2;", "        List<Integer> wrong = new ArrayList<>(List.of(7, 2, 9));", "        wrong.remove(productId);", "        System.out.println(\"By index: \" + wrong);", "", "        List<Integer> right = new ArrayList<>(List.of(7, 2, 9));", "        right.remove(Integer.valueOf(productId));", "        System.out.println(\"By value: \" + right);", "    }", "}"], "steps": [{"line": 6, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["productId", "2"]]}], "heap": ["<b>#1</b> String[0] (args, empty)"], "newVar": "productId", "phase": "Assign", "note": "Now <code>productId</code> = 2."}, {"line": 7, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["productId", "2"], ["wrong", "→ #2 ArrayList"]]}], "heap": ["<b>#1</b> String[0] (args, empty)", "<b>#2</b> ArrayList size 3 [7, 2, 9]"], "newVar": "wrong", "phase": "Assign", "note": "Now <code>wrong</code> = → #2 ArrayList. New object <b>#2</b> on the heap: ArrayList size 3 [7, 2, 9]."}, {"line": 8, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["productId", "2"], ["wrong", "→ #2 ArrayList"]]}], "heap": ["<b>#1</b> String[0] (args, empty)", "<b>#2</b> ArrayList size 2 [7, 2]"], "phase": "Wrong call", "note": "<code>remove(int index)</code>: removes the element at position 2, which is 9. Object <b>#2</b> changes: ArrayList size 2 [7, 2]."}, {"line": 9, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["productId", "2"], ["wrong", "→ #2 ArrayList"]]}], "heap": ["<b>#1</b> String[0] (args, empty)", "<b>#2</b> ArrayList size 2 [7, 2]"], "out": "By index: [7, 2]\n", "phase": "Print", "note": "Prints <code>By index: [7, 2]</code>."}, {"line": 11, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["productId", "2"], ["wrong", "→ #2 ArrayList"], ["right", "→ #3 ArrayList"]]}], "heap": ["<b>#1</b> String[0] (args, empty)", "<b>#2</b> ArrayList size 2 [7, 2]", "<b>#3</b> ArrayList size 3 [7, 2, 9]"], "newVar": "right", "phase": "Assign", "note": "Now <code>right</code> = → #3 ArrayList. New object <b>#3</b> on the heap: ArrayList size 3 [7, 2, 9]."}, {"line": 12, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["productId", "2"], ["wrong", "→ #2 ArrayList"], ["right", "→ #3 ArrayList"]]}], "heap": ["<b>#1</b> String[0] (args, empty)", "<b>#2</b> ArrayList size 2 [7, 2]", "<b>#3</b> ArrayList size 2 [7, 9]"], "phase": "Right call", "note": "<code>remove(Object)</code>: finds the value 2 with <code>equals</code> and removes it. Object <b>#3</b> changes: ArrayList size 2 [7, 9]."}, {"line": 13, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["productId", "2"], ["wrong", "→ #2 ArrayList"], ["right", "→ #3 ArrayList"]]}], "heap": ["<b>#1</b> String[0] (args, empty)", "<b>#2</b> ArrayList size 2 [7, 2]", "<b>#3</b> ArrayList size 2 [7, 9]"], "out": "By value: [7, 9]\n", "phase": "Print", "note": "Prints <code>By value: [7, 9]</code>."}, {"line": 14, "phase": "Program ends", "note": "<code>main</code> returns, its frame is popped and the program ends.", "stack": [], "heap": []}]}</script>
+  </div>
+  </article>
+
+</section>
+
+<!-- ======================= PART 9: QUIZ AND REVISION ======================= -->
+<section class="part" id="quiz">
+  <span class="part-label"><b>9</b> Quiz and revision</span>
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <script type="application/json">[
+      { "q": "What does javac generate for Integer x = 7; ?", "options": ["new Integer(7)", "Integer.valueOf(7)", "Integer.parseInt(\"7\")", "(Integer) 7 with no call"], "answer": 1, "why": "Autoboxing is compiled to Integer.valueOf, which uses the -128..127 cache." },
+      { "q": "What does javac generate for int y = x; when x is an Integer?", "options": ["x.intValue()", "Integer.valueOf(x)", "(int) x with no call", "x.toString()"], "answer": 0, "why": "Unboxing calls intValue() (doubleValue() for Double, and so on)." },
+      { "q": "Integer v = null; int n = v; what happens?", "options": ["n becomes 0", "Compile error", "NullPointerException at run time", "n becomes -1"], "answer": 2, "why": "The hidden v.intValue() is called on null." },
+      { "q": "Which line does NOT compile?", "options": ["Integer a = 5;", "Long b = 5L;", "Long c = 5;", "Double d = 5.0;"], "answer": 2, "why": "5 is an int; autoboxing only produces Integer, and Integer isn't a Long." },
+      { "q": "List<Integer> l = [10, 20, 30]; l.remove(1); what remains?", "options": ["[20, 30]", "[10, 30]", "[10, 20, 30]", "Error"], "answer": 1, "why": "remove(int index) needs no boxing, so javac picks it: index 1 (value 20) is removed." },
+      { "q": "Integer a = 1000; int p = 1000; what is a == p?", "options": ["true, a is unboxed", "false, different objects", "Compile error", "Depends on the cache"], "answer": 0, "why": "When one operand is a primitive, the wrapper is unboxed and the values are compared." },
+      { "q": "Why can Integer total; total += x; in a big loop be slow?", "options": ["Integer addition is not allowed", "Each += unboxes and boxes a new object", "It uses String concatenation", "It isn't slow"], "answer": 1, "why": "Wrappers are immutable, so each update creates another object (outside the cache)." },
+      { "q": "Overloads f(long) and f(Integer) exist. Which does f(5) call?", "options": ["f(Integer), because of boxing", "f(long), because widening comes before boxing", "Compile error: ambiguous", "Neither"], "answer": 1, "why": "javac first tries methods without boxing (widening int → long is allowed), then boxing, then varargs." }
+    ]</script>
+  </div>
+  <h3>Quick revision</h3>
+  <div class="revision">
+    <h3>Lesson 10.2 in one screen</h3>
+    <ul>
+      <li>Autoboxing: primitive → wrapper, compiled to <code>Integer.valueOf(…)</code>. Unboxing: wrapper → primitive, compiled to <code>intValue()</code> etc.</li>
+      <li>Happens in assignments, arguments, returns, arithmetic, comparisons and conditions. Since Java 5.</li>
+      <li>Only to the matching wrapper: <code>Long l = 5;</code> ✗, <code>Long l = 5L;</code> ✓.</li>
+      <li>Unboxing null → <code>NullPointerException</code>. Watch map lookups and nullable fields; use <code>getOrDefault</code> or a null check.</li>
+      <li><code>wrapper == wrapper</code> compares references; <code>wrapper == primitive</code> unboxes. Use <code>equals</code>.</li>
+      <li>Overloads: exact/widening first, then boxing, then varargs. <code>list.remove(1)</code> removes index 1.</li>
+      <li><code>x++</code> on an Integer creates a new object. Use primitives in loops and sums.</li>
+    </ul>
+  </div>
+  <h3>Interview and viva questions</h3>
+  <div class="faq">
+    <details><summary>What is autoboxing and when was it introduced?</summary><p>Automatic conversion of a primitive to its wrapper (and unboxing for the reverse), done by the compiler, introduced in Java 5 together with generics. The compiler inserts calls like <code>Integer.valueOf</code> and <code>intValue()</code>; the JVM has no special instruction for it.</p></details>
+    <details><summary>Can autoboxing cause a NullPointerException?</summary><p>Unboxing can. If a wrapper reference is null and it's used where a primitive is needed (<code>int n = map.get(k);</code>, <code>total + v</code>, <code>if (flag)</code> with a null <code>Boolean</code>), the hidden <code>intValue()</code>/<code>booleanValue()</code> call throws. Boxing itself never throws.</p></details>
+    <details><summary>Why does Integer a = 127, b = 127; a == b give true but 128 gives false?</summary><p>Autoboxing uses <code>Integer.valueOf</code>, which returns cached objects for -128 to 127. 128 is boxed into two separate objects, and <code>==</code> compares references.</p></details>
+    <details><summary>How does boxing affect method overloading?</summary><p>javac resolves overloads in three phases: (1) without boxing or varargs, allowing widening, (2) with boxing/unboxing, (3) with varargs. So <code>f(5)</code> prefers <code>f(long)</code> over <code>f(Integer)</code>, and <code>list.remove(1)</code> picks <code>remove(int)</code>.</p></details>
+    <details><summary>Is autoboxing bad for performance?</summary><p>Not in normal code. In hot loops or large data it creates many short-lived objects and adds unboxing work. Use primitives, primitive arrays, or <code>IntStream</code>/<code>LongStream</code> there, and measure before optimising.</p></details>
+  </div>
+
+  <h3 id="practice">Practice problems</h3>
+  <p class="prob-intro">Find the hidden calls, prevent null crashes and pick the right overload. The last three are business tasks.</p>
+  <div class="probs">
+    <article class="prob"><div class="prob__head"><span class="prob__num">P1</span><span class="prob__tag prob__tag--easy">Easy</span><h4>Box and unbox without calling methods</h4></div>
+      <p>Store 45 in an <code>Integer</code>, add 5 to it using an <code>int</code>, and print both, writing no <code>valueOf</code> or <code>intValue</code> yourself.</p>
+      <div class="prob__io"><div><small>Input</small><pre>45</pre></div><div><small>Expected output</small><pre>45 50</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="java" data-file="Main.java"><pre><code>public class Main {
+    public static void main(String[] args) {
+        Integer boxed = 45;
+        int plain = boxed + 5;
+        System.out.println(boxed + &quot; &quot; + plain);
+    }
+}</code></pre><div class="output">45 50</div></div>
+        <p><b>How it works:</b> line 3 is autoboxed to <code>Integer.valueOf(45)</code>; in line 4 <code>boxed</code> is unboxed with <code>intValue()</code> before adding.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P2</span><span class="prob__tag prob__tag--easy">Easy</span><h4>Safe lookup with getOrDefault</h4></div>
+      <p>A price map has only <code>"tea" → 15</code>. Print the price of <code>"coffee"</code> as 0 without crashing.</p>
+      <div class="prob__io"><div><small>Input</small><pre>&quot;coffee&quot;</pre></div><div><small>Expected output</small><pre>coffee: 0</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="java" data-file="Main.java"><pre><code>import java.util.HashMap;
+
+public class Main {
+    public static void main(String[] args) {
+        HashMap&lt;String, Integer&gt; price = new HashMap&lt;&gt;();
+        price.put(&quot;tea&quot;, 15);
+        int coffee = price.getOrDefault(&quot;coffee&quot;, 0);
+        System.out.println(&quot;coffee: &quot; + coffee);
+    }
+}</code></pre><div class="output">coffee: 0</div></div>
+        <p><b>How it works:</b> <code>get</code> would return null and unboxing it into <code>int</code> would throw. <code>getOrDefault</code> returns 0 (boxed) instead.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P3</span><span class="prob__tag prob__tag--easy">Easy</span><h4>Fix the Long literal</h4></div>
+      <p><code>Long views = 1200;</code> doesn't compile. Fix it and print views doubled.</p>
+      <div class="prob__io"><div><small>Input</small><pre>1200</pre></div><div><small>Expected output</small><pre>2400</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="java" data-file="Main.java"><pre><code>public class Main {
+    public static void main(String[] args) {
+        Long views = 1200L;
+        System.out.println(views * 2);
+    }
+}</code></pre><div class="output">2400</div></div>
+        <p><b>How it works:</b> 1200 is an int, which can only be boxed to Integer. The <code>L</code> suffix makes it a long, which boxes to Long.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P4</span><span class="prob__tag prob__tag--medium">Medium</span><h4>Compare two boxed scores correctly</h4></div>
+      <p>Two players scored 500 each, stored as <code>Integer</code>. Print whether they tied, correctly.</p>
+      <div class="prob__io"><div><small>Input</small><pre>500, 500</pre></div><div><small>Expected output</small><pre>== says     : false
+equals says : true</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="java" data-file="Main.java"><pre><code>import java.util.Objects;
+
+public class Main {
+    public static void main(String[] args) {
+        Integer p1 = 500, p2 = 500;
+        System.out.println(&quot;== says     : &quot; + (p1 == p2));
+        System.out.println(&quot;equals says : &quot; + Objects.equals(p1, p2));
+    }
+}</code></pre><div class="output">== says     : false
+equals says : true</div></div>
+        <p><b>How it works:</b> autoboxing 500 creates two objects, so <code>==</code> is false. <code>Objects.equals</code> compares values and is also safe if either is null.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P5</span><span class="prob__tag prob__tag--medium">Medium</span><h4>Which overload runs?</h4></div>
+      <p>Predict, then confirm, which method each call picks: <code>show(int)</code> doesn't exist, but <code>show(long)</code>, <code>show(Integer)</code> and <code>show(Object)</code> do.</p>
+      <div class="prob__io"><div><small>Input</small><pre>show(5), show(Integer.valueOf(5)), show(&quot;x&quot;)</pre></div><div><small>Expected output</small><pre>long
+Integer
+Object</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="java" data-file="Main.java"><pre><code>public class Main {
+    static void show(long x)    { System.out.println(&quot;long&quot;); }
+    static void show(Integer x) { System.out.println(&quot;Integer&quot;); }
+    static void show(Object x)  { System.out.println(&quot;Object&quot;); }
+
+    public static void main(String[] args) {
+        show(5);
+        show(Integer.valueOf(5));
+        show(&quot;x&quot;);
+    }
+}</code></pre><div class="output">long
+Integer
+Object</div></div>
+        <p><b>How it works:</b> for <code>show(5)</code>, javac first looks for a match without boxing: widening int → long works, so <code>show(long)</code> wins. An Integer argument matches <code>show(Integer)</code> exactly. A String only fits <code>Object</code>.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P6</span><span class="prob__tag prob__tag--business">Business problem</span><h4>Shopping cart quantities</h4></div>
+      <p>Add items to a cart map: <code>pen</code>, <code>pen</code>, <code>book</code>, <code>pen</code>. Use <code>merge</code> so first-time items start at 1, then print the cart.</p>
+      <div class="prob__io"><div><small>Input</small><pre>pen, pen, book, pen</pre></div><div><small>Expected output</small><pre>{pen=3, book=1}</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="java" data-file="Main.java"><pre><code>import java.util.LinkedHashMap;
+import java.util.Map;
+
+public class Main {
+    public static void main(String[] args) {
+        Map&lt;String, Integer&gt; cart = new LinkedHashMap&lt;&gt;();
+        String[] added = {&quot;pen&quot;, &quot;pen&quot;, &quot;book&quot;, &quot;pen&quot;};
+        for (String item : added) {
+            cart.merge(item, 1, Integer::sum);
+        }
+        System.out.println(cart);
+    }
+}</code></pre><div class="output">{pen=3, book=1}</div></div>
+        <p><b>How it works:</b> <code>merge</code> puts 1 for a new key, otherwise combines the old and new values with <code>Integer::sum</code> (a method reference, Lesson 14.1). No null is ever unboxed. (<code>LinkedHashMap</code> keeps insertion order; Lesson 11.6.)</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P7</span><span class="prob__tag prob__tag--business">Business problem</span><h4>Optional discount from a nullable field</h4></div>
+      <p>Orders have an <code>Integer discountPct</code> that may be null. Compute the final price for ₹1000 with 10% and with no discount.</p>
+      <div class="prob__io"><div><small>Input</small><pre>1000 with 10, 1000 with null</pre></div><div><small>Expected output</small><pre>900
+1000</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="java" data-file="Main.java"><pre><code>public class Main {
+    static int finalPrice(int price, Integer discountPct) {
+        int pct = (discountPct == null) ? 0 : discountPct;
+        return price - price * pct / 100;
+    }
+
+    public static void main(String[] args) {
+        System.out.println(finalPrice(1000, 10));
+        System.out.println(finalPrice(1000, null));
+    }
+}</code></pre><div class="output">900
+1000</div></div>
+        <p><b>How it works:</b> the null check happens <i>before</i> unboxing, inside one helper, so no caller can forget it. The literal 10 is autoboxed when passed.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P8</span><span class="prob__tag prob__tag--business">Business problem</span><h4>Fast sum of daily sales</h4></div>
+      <p>Sum one million sales of ₹1 each, first with a <code>Long</code> total, then with a <code>long</code>. Print both totals (the timing is up to you to measure).</p>
+      <div class="prob__io"><div><small>Input</small><pre>1,000,000 × ₹1</pre></div><div><small>Expected output</small><pre>1000000 1000000</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="java" data-file="Main.java"><pre><code>public class Main {
+    public static void main(String[] args) {
+        Long boxedTotal = 0L;
+        long plainTotal = 0L;
+        for (int i = 0; i &lt; 1_000_000; i++) {
+            boxedTotal += 1;   // unbox, add, box a new Long
+            plainTotal += 1;   // just add
+        }
+        System.out.println(boxedTotal + &quot; &quot; + plainTotal);
+    }
+}</code></pre><div class="output">1000000 1000000</div></div>
+        <p><b>How it works:</b> both totals are correct, but the <code>Long</code> version creates a new object on almost every iteration. Wrap each loop with <code>System.nanoTime()</code> to see the difference on your machine.</p>
+      </details>
+    </article>
+  </div>
+
+
+
+  <h3 id="scenarios">Real-world scenario questions (asked in company interviews)</h3>
+  <p class="scn-intro">Autoboxing bugs are favourites in interviews because the code looks correct. Read the line, then ask: where is the hidden call?</p>
+  <div class="scenarios">
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Retail · production bug</span><span class="scn__tag scn__tag--level">Fresher</span></div>
+      <h4>Crash on a new product</h4>
+      <p class="scn__situation">The billing service crashes with <code>NullPointerException</code> at <code>int qty = cart.get(sku) + 1;</code> only when a customer adds a product for the first time. There's no method call on an object in that line. Explain.</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> can you see the hidden unboxing?</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li><code>cart.get(sku)</code> returns <code>Integer</code>. For a new SKU it returns null.</li>
+          <li><code>+ 1</code> needs an int, so javac inserted <code>.intValue()</code>: <code>null.intValue()</code> throws.</li>
+          <li>Fix: <code>cart.getOrDefault(sku, 0) + 1</code>, or better, <code>cart.merge(sku, 1, Integer::sum)</code>.</li>
+          <li>Add a unit test for the first-time-add path.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> wrapping it in <code>try/catch (NullPointerException)</code>. Fix the cause, not the symptom.</p>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Fintech · code review</span><span class="scn__tag scn__tag--level">Junior</span></div>
+      <h4>Duplicate payments slip through</h4>
+      <p class="scn__situation">A duplicate check does <code>if (newTxn.getAmountPaise() == lastTxn.getAmountPaise())</code>, both returning <code>Long</code>. Small test amounts were caught; real ₹500 payments (50000 paise) are not. Why, and what's the fix?</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> wrapper equality and the Long cache.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li><code>Long</code> also caches only -128 to 127. 50000 creates distinct objects, so <code>==</code> is false.</li>
+          <li>Use <code>Objects.equals(a, b)</code>, or <code>long</code> return types if the amount can never be null.</li>
+          <li>Prefer primitives for amounts in domain logic; it removes both the <code>==</code> trap and null unboxing.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> “just increase the cache size”. That hides the bug for some values only.</p>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Analytics · performance</span><span class="scn__tag scn__tag--level">Junior</span></div>
+      <h4>GC pauses in a reporting job</h4>
+      <p class="scn__situation">A nightly job sums 50 million values from a <code>List&lt;Double&gt;</code> into a <code>Double total</code>. GC logs show huge allocation rates. What would you change?</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> awareness of boxing cost at scale.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li><code>Double total</code> boxes a new object on every <code>+=</code>; the list itself holds 50 million Double objects.</li>
+          <li>Use <code>double total</code>, and if possible a <code>double[]</code> or <code>DoubleStream</code> instead of <code>List&lt;Double&gt;</code>.</li>
+          <li>Measure allocation before and after (profiler or GC logs) to prove the improvement.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> tuning GC flags first. Remove the needless objects, then tune.</p>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Platform · API design</span><span class="scn__tag scn__tag--level">Mid</span></div>
+      <h4>Should this method return int or Integer?</h4>
+      <p class="scn__situation">You're designing <code>findDiscountPercent(String couponCode)</code>. Some codes are invalid. A teammate wants it to return <code>Integer</code> and use null for invalid. What do you think?</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> null design and unboxing risk for callers.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>Returning <code>Integer</code> with null invites callers to write <code>int d = findDiscountPercent(c);</code>, which crashes for invalid codes.</li>
+          <li>Better: return <code>OptionalInt</code> (or <code>Optional&lt;Integer&gt;</code>, Lesson 14.4), which forces callers to handle “absent”, or throw a clear exception for invalid codes.</li>
+          <li>If null is kept, document it and name the method to signal it, e.g. <code>discountOrNull</code>.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> returning 0 for invalid codes. A valid “0% discount” and an invalid code become indistinguishable.</p>
+      </div></details>
+    </article>
+  </div>
+</section>
+
+<nav class="lesson-nav" id="lesson-nav" aria-label="Lesson navigation"></nav>
+<div class="ad-slot" data-slot="bottom"></div>
+</article>
+
+<aside class="lesson-side">
+  <nav class="toc" aria-label="In this lesson">
+    <h4>In this lesson</h4>
+    <ol>
+      <li><a href="#story">The story</a></li>
+      <li><a href="#definition">Definition</a></li>
+      <li><a href="#types">Types and ways to use it</a></li>
+      <li><a href="#steps">Step by step</a></li>
+      <li><a href="#animation">See it happen</a></li>
+      <li><a href="#real-world">Real-world use</a></li>
+      <li><a href="#run">Run the code</a></li>
+      <li><a href="#tracer">Line by line</a></li>
+      <li><a href="#worked">Worked examples</a></li>
+      <li><a href="#quiz">Quiz and revision</a></li>
+      <li><a href="#practice">Practice problems</a></li>
+      <li><a href="#scenarios">Industry scenarios</a></li>
+    </ol>
+  </nav>
+  <div class="ad-slot" data-slot="side"></div>
+  <div class="outline" id="outline"></div>
+</aside>
+</div>
+</main>
+
+<footer class="site-footer">
+  <div class="wrap">
+    <div><h4>MyPhatshala</h4><p>Free programming and IT lessons that show what happens behind the screen.</p></div>
+    <div><h4>Learn</h4><a href="../../../../#tracks">All courses</a><a href="../../">Core Java syllabus</a></div>
+    <div><h4>Site</h4><a href="../../../../about.html">About</a><a href="../../../../contact.html">Contact</a><a href="../../../../privacy.html">Privacy policy</a><a href="../../../../disclaimer.html">Disclaimer</a></div>
+    <div class="copyright">© MyPhatshala. All lesson content, diagrams and animations are original. Please do not copy without permission.</div>
+  </div>
+</footer>
+
+<script src="../../../../data/courses/core-java.js"></script>
+<script src="../../../../assets/js/lesson.js"></script>
+<script src="../../../../assets/js/ads.js"></script>
+<script src="../../../../assets/js/site.js"></script>
+</body>
+</html>

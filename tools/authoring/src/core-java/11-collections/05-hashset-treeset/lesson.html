@@ -1,0 +1,361 @@
+<!--META {
+"course": "core-java", "module": "11-collections", "lesson": "05-hashset-treeset",
+"title": "HashSet, LinkedHashSet and TreeSet", "courseTitle": "Core Java", "number": "11.5",
+"track": "#E8772E", "trackId": "programming", "trackTitle": "Programming Languages", "level": "Intermediate",
+"minutes": 22,
+"description": "Sets in Java: HashSet (fast, unordered), LinkedHashSet (insertion order) and TreeSet (sorted). How each one detects duplicates (hashCode/equals vs compareTo), what's inside (a HashMap, a linked hash map, a red-black tree), costs, TreeSet navigation methods (first, floor, ceiling, headSet), set operations (union, intersection, difference) and common traps. With animations, a JVM tracer, {{NPROB}} practice problems, quiz and interview scenarios.",
+"ogTitle": "Sets: no duplicates, three kinds of order",
+"ogDescription": "See the same names land in a hash table, a linked order and a sorted tree, and solve {{NPROB}} problems.",
+"lead": "A <b>Set</b> keeps each element only once. Java gives you three everyday sets that agree on that promise but differ on order and speed: <code>HashSet</code> (fastest, no particular order), <code>LinkedHashSet</code> (remembers insertion order) and <code>TreeSet</code> (always sorted, with handy “nearest value” searches). You'll learn how each one decides what counts as a duplicate, what's inside it, and which to pick.",
+"chips": ["Module 11 · Collections", "⏱ 22 min", "Intermediate", "{{NPROB}} practice problems"]
+} META-->
+<part n="1" id="story" label="The story">
+  <h2>Three ways to keep a guest list</h2>
+  <div class="story">
+    <p class="narration">Riya is managing entries for the college fest. Volunteers at three gates scan wristbands, and some guests come in, go out and come back. She needs three things from the same data: <i>how many different guests</i>, <i>who arrived first</i>, and <i>an alphabetical list for the certificates</i>.</p>
+    <div class="scene">
+      <svg viewBox="0 0 640 170" role="img" aria-label="The same scans stored in a HashSet with no order, a LinkedHashSet in arrival order, and a TreeSet in alphabetical order">
+        <g font-size="10.5">
+          <text x="14" y="22" class="s-ink2">Scans: Riya, Kabir, Om, Riya, Meera, Kabir</text>
+          <rect x="14" y="34" width="196" height="120" rx="12" class="s-soft-blue" style="stroke:var(--blue)"/>
+          <text x="26" y="56" font-weight="700" class="s-blue">HashSet</text><text x="26" y="72" class="s-ink2">“how many?” fastest</text>
+          <text x="26" y="100" class="mono s-ink">[Meera, Riya,</text><text x="26" y="118" class="mono s-ink"> Kabir, Om]</text><text x="26" y="142" class="s-ink2">order: whatever the hash says</text>
+          <rect x="222" y="34" width="196" height="120" rx="12" class="s-soft-green" style="stroke:var(--green)"/>
+          <text x="234" y="56" font-weight="700" class="s-green">LinkedHashSet</text><text x="234" y="72" class="s-ink2">“who came first?”</text>
+          <text x="234" y="100" class="mono s-ink">[Riya, Kabir,</text><text x="234" y="118" class="mono s-ink"> Om, Meera]</text><text x="234" y="142" class="s-ink2">order: first arrival</text>
+          <rect x="430" y="34" width="196" height="120" rx="12" class="s-soft-acc" style="stroke:var(--track)"/>
+          <text x="442" y="56" font-weight="700" class="s-acc">TreeSet</text><text x="442" y="72" class="s-ink2">“certificates A–Z”</text>
+          <text x="442" y="100" class="mono s-ink">[Kabir, Meera,</text><text x="442" y="118" class="mono s-ink"> Om, Riya]</text><text x="442" y="142" class="s-ink2">order: sorted</text>
+        </g>
+        <text x="632" y="166" text-anchor="end" class="s-wm">myphatshala.com</text>
+      </svg>
+    </div>
+    <riya>Sir, all three say 4 guests, which is right. But the order is different every time!</riya>
+    <arjun>Because each set keeps a different promise about order. A <code>HashSet</code> puts elements wherever their hash code sends them: fastest, but no meaningful order. A <code>LinkedHashSet</code> also remembers the order they arrived. A <code>TreeSet</code> keeps them sorted.</arjun>
+    <riya>And how does each one know Riya's second scan is a duplicate?</riya>
+    <arjun>The hash-based sets ask <code>hashCode</code> and <code>equals</code>, from Lesson 10.3. The TreeSet asks <code>compareTo</code>: if it says 0, that's “the same”. That difference causes some surprising bugs, so let's look closely.</arjun>
+  </div>
+</part>
+
+<part n="2" id="definition" label="Definition">
+  <h2>What are HashSet, LinkedHashSet and TreeSet?</h2>
+  <div class="def">
+    <div class="def__formal"><small>Formal definition (write this in exams)</small>
+      <p>A <code>Set</code> is a collection that contains <b>no duplicate elements</b>. <code>HashSet</code> stores elements in a hash table (it is backed by a <code>HashMap</code>), offers O(1) average <code>add</code>, <code>remove</code> and <code>contains</code>, makes no guarantee about iteration order and permits one <code>null</code>. <code>LinkedHashSet</code> extends HashSet and additionally maintains a doubly linked list through its entries, so it iterates in <b>insertion order</b>. <code>TreeSet</code> implements <code>NavigableSet</code> using a <b>red-black tree</b> (backed by a <code>TreeMap</code>); it keeps elements <b>sorted</b> by natural ordering or a supplied <code>Comparator</code>, with O(log n) operations, and does not permit <code>null</code>. Hash sets detect duplicates with <code>hashCode</code> and <code>equals</code>; TreeSet uses <code>compareTo</code>/<code>compare</code>.</p></div>
+    <div class="def__simple"><small>In simple words</small>
+      <p>Three sets, all without duplicates. HashSet: fastest, jumbled. LinkedHashSet: remembers arrival order. TreeSet: keeps things sorted and can find the nearest value.</p></div>
+  </div>
+  <h3>Words you'll meet in this lesson</h3>
+  <div class="terms">
+    <div class="term"><b>Hash table</b><span>An array of buckets; the hash code picks the bucket (Lesson 11.6 goes deep).</span></div>
+    <div class="term"><b>Red-black tree</b><span>A self-balancing binary search tree: left smaller, right larger, height kept about log n.</span></div>
+    <div class="term"><b>Natural ordering</b><span>The order from <code>compareTo</code>: numbers ascending, Strings alphabetical.</span></div>
+    <div class="term"><b>Navigable</b><span>TreeSet can answer “nearest”: <code>floor</code>, <code>ceiling</code>, <code>higher</code>, <code>lower</code>.</span></div>
+    <div class="term"><b>View</b><span><code>headSet</code>/<code>tailSet</code>/<code>subSet</code> return live windows of the set.</span></div>
+  </div>
+  <h3>Side by side</h3>
+  <div class="table-wrap">
+  <table class="compare" style="min-width:600px">
+    <thead><tr><th></th><th><code>HashSet</code></th><th><code>LinkedHashSet</code></th><th><code>TreeSet</code></th></tr></thead>
+    <tbody>
+      <tr><td>Order</td><td>None guaranteed</td><td>Insertion order</td><td>Sorted</td></tr>
+      <tr><td>Inside</td><td>HashMap</td><td>LinkedHashMap</td><td>TreeMap (red-black tree)</td></tr>
+      <tr><td>add / contains / remove</td><td>O(1) average</td><td>O(1) average</td><td>O(log n)</td></tr>
+      <tr><td>Duplicate check</td><td>hashCode + equals</td><td>hashCode + equals</td><td>compareTo / Comparator</td></tr>
+      <tr><td><code>null</code></td><td>One allowed</td><td>One allowed</td><td>Not allowed (NPE)</td></tr>
+      <tr><td>Extra</td><td>Smallest memory</td><td>Predictable output</td><td>first, last, floor, ceiling, ranges</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <exam><b>Exam tip:</b> <code>HashSet</code> is internally a <code>HashMap</code> whose keys are your elements and whose values are all one shared dummy object (<code>PRESENT</code>). <code>add</code> returns <b>false</b> if the element was already there. <code>TreeSet</code> elements must be <code>Comparable</code> (or you pass a Comparator), otherwise <code>add</code> throws <code>ClassCastException</code>.</exam>
+</part>
+
+{{AD}}
+
+<part n="3" id="types" label="Types and ways to use it">
+  <h2>Using the three sets</h2>
+  <div class="cards">
+    <div class="card"><svg class="ic" viewBox="0 0 40 40" fill="none" stroke="var(--blue)" stroke-width="2"><path d="M14 6l-4 28M28 6l-4 28M6 14h28M6 26h28"/></svg><h4>HashSet</h4><p>Membership tests, de-duplication, “seen before?”. Default choice.</p><span class="tag">speed</span></div>
+    <div class="card"><svg class="ic" viewBox="0 0 40 40" fill="none" stroke="var(--green)" stroke-width="2"><circle cx="10" cy="20" r="4"/><circle cx="20" cy="20" r="4"/><circle cx="30" cy="20" r="4"/><path d="M14 20h2M24 20h2"/></svg><h4>LinkedHashSet</h4><p>Unique items, shown in the order they arrived.</p><span class="tag">predictable</span></div>
+    <div class="card"><svg class="ic" viewBox="0 0 40 40" fill="none" stroke="var(--track)" stroke-width="2"><circle cx="20" cy="10" r="4"/><circle cx="11" cy="26" r="4"/><circle cx="29" cy="26" r="4"/><path d="M17 13l-4 9M23 13l4 9"/></svg><h4>TreeSet</h4><p>Sorted unique items, ranges and “nearest” lookups.</p><span class="tag">sorted</span></div>
+  </div>
+
+  <h3>The same input, three outputs</h3>
+  <div class="code" data-lang="java" data-file="Main.java"><pre><code>import java.util.*;
+
+public class Main {
+    public static void main(String[] args) {
+        List&lt;String&gt; scans = List.of("Riya", "Kabir", "Om", "Riya", "Meera", "Kabir");
+
+        Set&lt;String&gt; hash = new HashSet&lt;&gt;(scans);
+        Set&lt;String&gt; linked = new LinkedHashSet&lt;&gt;(scans);
+        Set&lt;String&gt; tree = new TreeSet&lt;&gt;(scans);
+
+        System.out.println(hash.size() + " " + hash);
+        System.out.println(linked.size() + " " + linked);
+        System.out.println(tree.size() + " " + tree);
+        System.out.println(hash.add("Om") + " " + hash.add("Zoya"));   // false: already there
+    }
+}</code></pre><div class="output">4 [Meera, Riya, Kabir, Om]
+4 [Riya, Kabir, Om, Meera]
+4 [Kabir, Meera, Om, Riya]
+false true</div></div>
+  <p>The HashSet order comes from the hash codes and the table size; it's stable for the same data and JDK, but never rely on it.</p>
+
+  <h3>TreeSet's navigation methods</h3>
+  <div class="code" data-lang="java" data-file="Main.java"><pre><code>import java.util.List;
+import java.util.TreeSet;
+
+public class Main {
+    public static void main(String[] args) {
+        TreeSet&lt;Integer&gt; slots = new TreeSet&lt;&gt;(List.of(40, 10, 30, 20));   // minutes past the hour
+
+        System.out.println(slots);                                  // sorted
+        System.out.println(slots.first() + " " + slots.last());
+        System.out.println(slots.floor(25) + " " + slots.ceiling(25));   // nearest ≤ 25, ≥ 25
+        System.out.println(slots.headSet(30) + " " + slots.tailSet(30)); // &lt; 30, ≥ 30
+        System.out.println(slots.higher(40));                       // nothing above 40
+        System.out.println(slots.descendingSet());
+    }
+}</code></pre><div class="output">[10, 20, 30, 40]
+10 40
+20 30
+[10, 20] [30, 40]
+null
+[40, 30, 20, 10]</div></div>
+
+  <h3>Set operations: union, intersection, difference</h3>
+  <div class="code" data-lang="java" data-file="Main.java"><pre><code>import java.util.Set;
+import java.util.TreeSet;
+
+public class Main {
+    public static void main(String[] args) {
+        Set&lt;String&gt; riya = Set.of("java", "sql", "python");
+        Set&lt;String&gt; kabir = Set.of("sql", "excel", "python");
+
+        Set&lt;String&gt; union = new TreeSet&lt;&gt;(riya);   union.addAll(kabir);
+        Set&lt;String&gt; both = new TreeSet&lt;&gt;(riya);    both.retainAll(kabir);
+        Set&lt;String&gt; onlyRiya = new TreeSet&lt;&gt;(riya); onlyRiya.removeAll(kabir);
+
+        System.out.println("Either: " + union);
+        System.out.println("Both:   " + both);
+        System.out.println("Only Riya: " + onlyRiya);
+    }
+}</code></pre><div class="output">Either: [excel, java, python, sql]
+Both:   [python, sql]
+Only Riya: [java]</div></div>
+  <warn><b>Two classic traps.</b> (1) A custom class in a HashSet without <code>equals</code>/<code>hashCode</code> lets duplicates in (Lesson 10.3). (2) A TreeSet treats elements as equal when <code>compareTo</code> returns 0, even if <code>equals</code> says otherwise: a TreeSet sorted by <i>marks</i> will silently drop a second student with the same marks.</warn>
+  <tip><b>Rule of thumb:</b> HashSet by default; LinkedHashSet when the output order should match the input; TreeSet when you need sorting or “nearest” lookups. Don't sort a HashSet's output by copying into a TreeSet on every request: pick TreeSet once if you always need order.</tip>
+</part>
+
+<part n="4" id="steps" label="Step by step">
+  <h2>How TreeSet.add finds a place</h2>
+  <ol class="stepper">
+    <li><h4>Start at the root</h4>
+      <div class="code" data-lang="java" data-file="Main.java"><pre><code>slots.add(25);   // tree holds 10, 20, 30, 40</code></pre></div>
+      <span class="behind">The TreeSet's TreeMap compares 25 with the root node using <code>compareTo</code>.</span></li>
+    <li><h4>Go left or right</h4>
+      <span class="behind">Smaller → go to the left child; larger → right child. Each comparison discards about half of the remaining tree.</span></li>
+    <li><h4>compareTo returns 0? It's a duplicate</h4>
+      <span class="behind">If any comparison returns 0, the set already “contains” the element: <code>add</code> returns false and nothing changes. This is why TreeSet never calls <code>equals</code>.</span></li>
+    <li><h4>Reach an empty spot: insert</h4>
+      <span class="behind">The new node becomes a red leaf where the search ended.</span></li>
+    <li><h4>Rebalance</h4>
+      <span class="behind">If two red nodes are now adjacent, the tree recolours and rotates a few nodes. The height stays at most about 2 log₂(n), so a million elements need only about 20–40 comparisons per operation.</span></li>
+  </ol>
+</part>
+
+<part n="5" id="animation" label="See it happen">
+  <h2>HashSet vs TreeSet: both views</h2>
+  <p>Left: the same <code>add</code> calls on two sets. Right: buckets in the HashSet and the sorted tree inside the TreeSet.</p>
+  {{ANIM}}
+</part>
+
+<part n="6" id="real-world" label="Real-world use">
+  <h2>Sets in real systems</h2>
+  <p>Wherever “each thing once” matters, a set is the natural tool.</p>
+  {{ANIM2}}
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="16" y="22" width="88" height="46" rx="6" class="s-card" style="stroke:var(--line)"/><text x="60" y="42" text-anchor="middle" font-size="9" class="mono s-ink">txn 88213</text><text x="60" y="58" text-anchor="middle" font-size="9" class="s-red" font-weight="700">seen → skip</text></svg></div>
+    <div><h4>1. Duplicate detection</h4><p>Payment gateways ignore repeated transaction IDs, email services avoid sending the same campaign twice, and crawlers skip URLs they've already visited, all with hash sets.</p>
+      <div class="uc-flow"><span>incoming id</span><i>→</i><span class="java">seen.add(id)</span><i>→</i><span>false = duplicate</span></div></div>
+  </div>
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><circle cx="45" cy="45" r="24" class="s-soft-blue" style="stroke:var(--blue)"/><circle cx="75" cy="45" r="24" class="s-soft-green" style="stroke:var(--green);fill-opacity:.6"/></svg></div>
+    <div><h4>2. Permissions and tags</h4><p>A user's roles, a product's tags or a course's prerequisites are sets. “Does she have ADMIN?” is <code>contains</code>; “common interests” is an intersection.</p>
+      <div class="uc-flow"><span>user roles</span><i>→</i><span class="java">roles.contains("ADMIN")</span><i>→</i><span>allow</span></div></div>
+  </div>
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="14" y="30" width="20" height="30" rx="3" class="s-card" style="stroke:var(--line)"/><rect x="38" y="30" width="20" height="30" rx="3" class="s-soft-green" style="stroke:var(--green)"/><rect x="62" y="30" width="20" height="30" rx="3" class="s-card" style="stroke:var(--line)"/><rect x="86" y="30" width="20" height="30" rx="3" class="s-soft-green" style="stroke:var(--green)"/></svg></div>
+    <div><h4>3. Booking free slots</h4><p>A clinic or turf keeps free time slots in a TreeSet. “Next available after 4:20 pm” is <code>ceiling(time)</code>; “all slots before noon” is <code>headSet(noon)</code>.</p>
+      <div class="uc-flow"><span>request 16:20</span><i>→</i><span class="java">free.ceiling(1620)</span><i>→</i><span>16:30</span></div></div>
+  </div>
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="16" y="20" width="88" height="50" rx="6" class="s-card" style="stroke:var(--line)"/><text x="24" y="40" font-size="8.5" class="mono s-ink">Recently searched:</text><text x="24" y="56" font-size="8.5" class="mono s-ink2">dosa, chai, vada</text></svg></div>
+    <div><h4>4. “Recent” lists without repeats</h4><p>Recent searches or recently viewed items use a LinkedHashSet: unique, and in the order the user did them.</p>
+      <div class="uc-flow"><span>search “chai”</span><i>→</i><span class="java">LinkedHashSet</span><i>→</i><span>shown once, in order</span></div></div>
+  </div>
+  <p class="muted">Examples are simplified. Across many servers, duplicate checks usually move to a shared store such as a database unique key.</p>
+</part>
+
+{{AD}}
+
+<part n="7" id="run" label="Run the code">
+  <h2>Fest entry desk</h2>
+  <div class="code" data-lang="java" data-file="Main.java"><pre><code>import java.util.*;
+
+public class Main {
+    public static void main(String[] args) {
+        String[] scans = {"Riya", "Kabir", "Om", "Riya", "Meera", "Kabir", "Zoya"};
+        Set&lt;String&gt; vip = Set.of("Meera", "Zoya", "Arjun");
+
+        Set&lt;String&gt; arrivals = new LinkedHashSet&lt;&gt;();
+        int repeats = 0;
+        for (String s : scans) {
+            if (!arrivals.add(s)) repeats++;          // add returns false for a duplicate
+        }
+
+        Set&lt;String&gt; certificates = new TreeSet&lt;&gt;(arrivals);
+        Set&lt;String&gt; vipsPresent = new TreeSet&lt;&gt;(arrivals);
+        vipsPresent.retainAll(vip);
+
+        System.out.println("Unique guests: " + arrivals.size() + ", repeat scans: " + repeats);
+        System.out.println("Arrival order: " + arrivals);
+        System.out.println("Certificates:  " + certificates);
+        System.out.println("VIPs present:  " + vipsPresent);
+    }
+}</code></pre><div class="output">Unique guests: 5, repeat scans: 2
+Arrival order: [Riya, Kabir, Om, Meera, Zoya]
+Certificates:  [Kabir, Meera, Om, Riya, Zoya]
+VIPs present:  [Meera, Zoya]</div></div>
+  <ul class="anno">
+    <li><code>LinkedHashSet</code><span>Unique guests in the order they first arrived.</span></li>
+    <li><code>!arrivals.add(s)</code><span>Counting duplicates using add's return value.</span></li>
+    <li><code>new TreeSet&lt;&gt;(arrivals)</code><span>Copy into a TreeSet for an alphabetical list.</span></li>
+    <li><code>retainAll(vip)</code><span>Intersection: keep only guests who are also VIPs.</span></li>
+  </ul>
+  <div class="runner">
+    <script type="application/json">{
+      "lang": "java", "file": "Main.java",
+      "tasks": [
+        { "label": "1 · Entry desk", "hint": "Press <b>Run</b>. Then find VIPs who did <b>not</b> come, using <code>removeAll</code>.",
+          "code": "import java.util.*;\n\npublic class Main {\n    public static void main(String[] args) {\n        String[] scans = {\"Riya\", \"Kabir\", \"Om\", \"Riya\", \"Meera\", \"Kabir\", \"Zoya\"};\n        Set<String> vip = Set.of(\"Meera\", \"Zoya\", \"Arjun\");\n\n        Set<String> arrivals = new LinkedHashSet<>();\n        int repeats = 0;\n        for (String s : scans) {\n            if (!arrivals.add(s)) repeats++;\n        }\n\n        Set<String> certificates = new TreeSet<>(arrivals);\n        Set<String> vipsPresent = new TreeSet<>(arrivals);\n        vipsPresent.retainAll(vip);\n\n        System.out.println(\"Unique guests: \" + arrivals.size() + \", repeat scans: \" + repeats);\n        System.out.println(\"Arrival order: \" + arrivals);\n        System.out.println(\"Certificates:  \" + certificates);\n        System.out.println(\"VIPs present:  \" + vipsPresent);\n    }\n}\n" },
+        { "label": "2 · Predict: case matters", "hint": "<b>Predict first:</b> how many elements? Then create the TreeSet with <code>String.CASE_INSENSITIVE_ORDER</code> and run again.",
+          "code": "import java.util.*;\n\npublic class Main {\n    public static void main(String[] args) {\n        Set<String> names = new TreeSet<>();\n        names.add(\"Riya\");\n        names.add(\"riya\");\n        names.add(\"RIYA\");\n        System.out.println(names.size() + \" \" + names);\n    }\n}\n" },
+        { "label": "3 · Spot the error: null in a TreeSet", "hint": "TreeSet can't compare null. Remove the null, or use a HashSet if you really need it.",
+          "code": "import java.util.*;\n\npublic class Main {\n    public static void main(String[] args) {\n        Set<String> s = new TreeSet<>();\n        s.add(\"chai\");\n        s.add(null);\n        System.out.println(s);\n    }\n}\n", "_expect": "exception" },
+        { "label": "4 · Spot the error: not Comparable", "hint": "A TreeSet must know how to order elements. Make <code>Seat</code> implement <code>Comparable&lt;Seat&gt;</code> (Lesson 11.8), or use a HashSet.",
+          "code": "import java.util.*;\n\nclass Seat {\n    int no;\n    Seat(int no) { this.no = no; }\n}\n\npublic class Main {\n    public static void main(String[] args) {\n        Set<Seat> seats = new TreeSet<>();\n        seats.add(new Seat(12));\n        System.out.println(seats.size());\n    }\n}\n", "_expect": "exception" },
+        { "label": "5 · Nearest slot", "hint": "Free slots are minutes after 9:00. Press <b>Run</b>, then find the latest free slot at or before 50 with <code>floor</code>.",
+          "code": "import java.util.*;\n\npublic class Main {\n    public static void main(String[] args) {\n        TreeSet<Integer> free = new TreeSet<>(List.of(0, 30, 45, 90, 120));\n        int want = 50;\n        Integer next = free.ceiling(want);\n        System.out.println(\"Next free slot at or after \" + want + \" min: \" + next);\n        free.remove(next);\n        System.out.println(\"Still free: \" + free);\n    }\n}\n" }
+      ]
+    }</script>
+  </div>
+</part>
+
+<part n="8" id="tracer" label="Line by line">
+  <h2>Three sets, one input</h2>
+  <p>This trace is recorded from the real JVM. Watch the HashSet's buckets, the LinkedHashSet's insertion order and the TreeSet's sorted order as the same names arrive, including a repeat.</p>
+  {{TRACER}}
+
+{{WORKED}}
+</part>
+
+<part n="9" id="quiz" label="Quiz and revision">
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <script type="application/json">[
+      { "q": "Which set keeps elements in insertion order?", "options": ["HashSet", "LinkedHashSet", "TreeSet", "EnumSet"], "answer": 1, "why": "It links its entries in arrival order." },
+      { "q": "What does HashSet use internally?", "options": ["An ArrayList", "A HashMap", "A TreeMap", "A LinkedList"], "answer": 1, "why": "Elements are keys of a HashMap; values are a dummy PRESENT object." },
+      { "q": "What does set.add(x) return when x is already present?", "options": ["true", "false", "null", "It throws"], "answer": 1, "why": "false means nothing was added." },
+      { "q": "Cost of contains in a TreeSet?", "options": ["O(1)", "O(log n)", "O(n)", "O(n log n)"], "answer": 1, "why": "It's a balanced (red-black) tree." },
+      { "q": "What happens when you add null to a TreeSet (natural ordering)?", "options": ["Stored first", "Ignored", "NullPointerException", "Stored last"], "answer": 2, "why": "null can't be compared." },
+      { "q": "A TreeSet decides two elements are duplicates when…", "options": ["equals returns true", "hashCode matches", "compareTo returns 0", "They're the same object"], "answer": 2, "why": "TreeSet only uses the ordering, never equals." },
+      { "q": "TreeSet {10, 20, 30, 40}: what is floor(25)?", "options": ["10", "20", "30", "null"], "answer": 1, "why": "floor = greatest element ≤ 25." },
+      { "q": "Which operation gives the intersection of sets a and b (into a)?", "options": ["a.addAll(b)", "a.retainAll(b)", "a.removeAll(b)", "a.containsAll(b)"], "answer": 1, "why": "retainAll keeps only elements also in b." }
+    ]</script>
+  </div>
+  <h3>Quick revision</h3>
+  <div class="revision">
+    <h3>Lesson 11.5 in one screen</h3>
+    <ul>
+      <li>Set = no duplicates. <code>add</code> returns false for a duplicate.</li>
+      <li>HashSet: HashMap inside, O(1) average, no order, one null. LinkedHashSet: + insertion order.</li>
+      <li>TreeSet: red-black tree (TreeMap), sorted, O(log n), no null, needs Comparable or Comparator.</li>
+      <li>Duplicates: hash sets use hashCode + equals; TreeSet uses compareTo = 0.</li>
+      <li>TreeSet extras: <code>first/last</code>, <code>floor/ceiling/lower/higher</code>, <code>headSet/tailSet/subSet</code>, <code>descendingSet</code>, <code>pollFirst</code>.</li>
+      <li>Set algebra: union <code>addAll</code>, intersection <code>retainAll</code>, difference <code>removeAll</code>.</li>
+    </ul>
+  </div>
+  <h3>Interview and viva questions</h3>
+  <div class="faq">
+    <details><summary>How does HashSet ensure uniqueness?</summary><p><code>add(e)</code> calls <code>map.put(e, PRESENT)</code> on an internal HashMap. The map finds the bucket via <code>e.hashCode()</code> and compares with <code>equals</code>; if an equal key exists, <code>put</code> returns the old value and <code>add</code> returns false. That's why correct equals/hashCode matter.</p></details>
+    <details><summary>HashSet vs TreeSet?</summary><p>HashSet: O(1) average, unordered, allows one null, uses hashCode/equals. TreeSet: O(log n), sorted, no null, uses compareTo/Comparator, and offers navigation methods. Choose TreeSet only when you need ordering or range queries.</p></details>
+    <details><summary>Why can a TreeSet lose elements that are not equal?</summary><p>Because it treats <code>compare(a, b) == 0</code> as “same element”. If the ordering is not consistent with equals (e.g. sorting students only by marks), two different students with equal marks collapse into one. Add a tie-breaker (e.g. then by roll number).</p></details>
+    <details><summary>Is iteration order of HashSet random?</summary><p>Not random, but unspecified: it depends on hash codes, table size and insertion history, and can change when the set resizes or between JDK versions. Never depend on it; use LinkedHashSet or TreeSet when order matters.</p></details>
+    <details><summary>How do you make a thread-safe set?</summary><p><code>ConcurrentHashMap.newKeySet()</code> for a concurrent hash set, <code>ConcurrentSkipListSet</code> for a sorted one, or <code>Collections.synchronizedSet(...)</code> for simple cases (Module 12).</p></details>
+  </div>
+
+{{PRACTICE}}
+
+  <h3 id="scenarios">Real-world scenario questions (asked in company interviews)</h3>
+  <p class="scn-intro">Set questions test whether you can match a requirement (uniqueness, order, nearest value) to the right implementation, and spot equality bugs.</p>
+  <div class="scenarios">
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">EdTech · bug</span><span class="scn__tag scn__tag--level">Junior</span></div>
+      <h4>Rank list missing students</h4>
+      <p class="scn__situation">A rank list uses <code>new TreeSet&lt;&gt;(byMarksDesc)</code> where the comparator compares only marks. Two students with 92 marks: only one appears. Why, and how do you fix it?</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> TreeSet uses the comparator for equality.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>TreeSet treats <code>compare == 0</code> as a duplicate, so the second 92 is rejected.</li>
+          <li>Add a tie-breaker: compare marks, then roll number (<code>Comparator.comparing(...).thenComparing(...)</code>, Lesson 11.8).</li>
+          <li>Or keep students in a List and sort it; a set isn't needed for ranking.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> overriding equals to “fix” it. TreeSet never calls equals.</p>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Healthcare · scheduling</span><span class="scn__tag scn__tag--level">Fresher</span></div>
+      <h4>Next free appointment</h4>
+      <p class="scn__situation">A clinic stores free appointment times. Patients ask “give me the first slot at or after 4:20 pm”. Which collection and method?</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> NavigableSet methods.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>A <code>TreeSet&lt;LocalTime&gt;</code> of free slots; <code>ceiling(LocalTime.of(16, 20))</code> returns the next slot in O(log n).</li>
+          <li>Booking removes the slot; cancelling adds it back.</li>
+          <li>With concurrent bookings, use <code>ConcurrentSkipListSet</code> or database locking so two patients can't take one slot.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> scanning a sorted list linearly on every request.</p>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Marketing · data</span><span class="scn__tag scn__tag--level">Fresher</span></div>
+      <h4>Customers in both campaigns</h4>
+      <p class="scn__situation">Two lists of customer emails (Diwali sale and New Year sale), each with about 2 lakh entries and some duplicates. Marketing wants customers who responded to both. How?</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> set intersection and normalisation.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>Normalise emails (trim, lower-case), load one list into a <code>HashSet</code>, copy it and call <code>retainAll</code> with the other: O(n + m) on average.</li>
+          <li>Use a LinkedHashSet or TreeSet for the result if the report needs a stable order.</li>
+          <li>For data in a database, an SQL <code>INTERSECT</code> or join may be simpler.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> nested loops comparing every pair: 40 billion comparisons.</p>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Platform · tests</span><span class="scn__tag scn__tag--level">Junior</span></div>
+      <h4>A test that fails on another machine</h4>
+      <p class="scn__situation">A unit test asserts that <code>tagsSet.toString()</code> equals <code>"[java, sql, spark]"</code>. It passes locally but fails in CI after a JDK upgrade. Why?</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> HashSet iteration order isn't a contract.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>The set is a HashSet; its iteration order depends on hashing and internals, which may differ across versions or capacities.</li>
+          <li>Compare sets as sets: <code>assertEquals(Set.of("java", "sql", "spark"), tagsSet)</code>, which uses equals and ignores order.</li>
+          <li>If the product needs an order, change the implementation to LinkedHashSet or TreeSet deliberately.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> “fixing” the expected string to the new order. It will break again.</p>
+      </div></details>
+    </article>
+  </div>
+</part>

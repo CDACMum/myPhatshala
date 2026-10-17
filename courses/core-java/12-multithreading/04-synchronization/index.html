@@ -1,0 +1,1018 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Synchronization and race conditions | MyPhatshala</title>
+<meta name="description" content="Race conditions and synchronization in Java: why count++ loses updates, critical sections, synchronized methods and blocks, monitor locks, static synchronized, volatile, AtomicInteger and deadlock. With animations, a JVM tracer, 9 practice problems, quiz and interview scenarios.">
+<meta name="mp:minutes" content="25">
+<link rel="canonical" href="https://myphatshala.com/courses/core-java/12-multithreading/04-synchronization/">
+<meta property="og:title" content="Synchronization in Java: race conditions and locks · MyPhatshala">
+<meta property="og:description" content="Watch count++ lose an update, see a monitor lock make threads take turns, and solve 9 problems.">
+<link rel="icon" href="../../../../assets/img/logo.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Fraunces:ital,opsz,wght@0,9..144,600;0,9..144,700;1,9..144,600&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../../../../assets/css/style.css">
+<link rel="stylesheet" href="../../../../assets/css/lesson.css">
+<script src="../../../../assets/js/config.js"></script>
+<script>try { const t = localStorage.getItem("mp-theme"); if (t) document.documentElement.dataset.theme = t; } catch (e) {}</script>
+<script type="application/ld+json">{"@context": "https://schema.org", "@type": "LearningResource", "name": "Synchronization and race conditions", "learningResourceType": "Lesson", "educationalLevel": "Intermediate", "isAccessibleForFree": true, "inLanguage": "en", "isPartOf": {"@type": "Course", "name": "Core Java", "provider": {"@type": "Organization", "name": "MyPhatshala"}}}</script>
+</head>
+<body style="--track:#E8772E" data-lesson="12-multithreading/04-synchronization" data-course-root="../../">
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="site-header">
+  <div class="wrap">
+    <a class="brand" href="../../../../" aria-label="MyPhatshala home"><img src="../../../../assets/img/logo.svg" width="34" height="34" alt=""><span>My<b>Phatshala</b></span></a>
+    <nav class="nav" aria-label="Main">
+      <a href="../../../../#tracks">All courses</a>
+      <a href="../../">Core Java syllabus</a>
+      <button class="theme-btn" id="theme-btn" aria-label="Toggle dark mode"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg></button>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+<section class="lesson-hero">
+  <div class="wrap">
+    <nav class="crumbs" aria-label="Breadcrumb"><a href="../../../../">Home</a><span>›</span><a href="../../../../#track-programming">Programming Languages</a><span>›</span><a href="../../">Core Java</a><span>›</span><b>Lesson 12.4</b></nav>
+    <h1>Synchronization and race conditions</h1>
+    <p class="lead">Threads share the heap, and that's both their power and their danger. When two threads change the same data at the same time, updates get lost and balances go negative. You'll see a race condition happen in real code, understand exactly why at the bytecode level, and fix it with <code>synchronized</code>, atomic classes and <code>volatile</code>, while avoiding the classic trap: deadlock.</p>
+    <div class="lesson-meta"><span>Module 12 · Multithreading</span><span>⏱ 25 min</span><span>Intermediate</span><span>9 practice problems</span></div>
+  </div>
+</section>
+
+<div class="wrap lesson-layout">
+<article class="lesson-main">
+<!-- ======================= PART 1: THE STORY ======================= -->
+<section class="part" id="story">
+  <span class="part-label"><b>1</b> The story</span>
+  <h2>The likes counter that couldn't count</h2>
+  <div class="story">
+    <p class="narration">Riya's canteen app has a “like” button for dishes. In testing, two phones tap Like 100,000 times each. The counter should say 200,000. It says 148,870. Run again: 169,997.</p>
+    <div class="scene">
+      <svg viewBox="0 0 640 170" role="img" aria-label="Two hands reach for the same counter at the same time; one of the updates is lost">
+        <g font-size="10.5">
+          <rect x="250" y="30" width="140" height="70" rx="10" class="s-soft-blue" style="stroke:var(--blue)"/>
+          <text x="320" y="56" text-anchor="middle" class="s-blue" font-weight="700">likes</text>
+          <text x="320" y="84" text-anchor="middle" class="s-ink" font-weight="700" font-size="18">148,870</text>
+          <rect x="30" y="40" width="130" height="50" rx="8" class="s-card2" style="stroke:var(--line)"/><text x="95" y="62" text-anchor="middle" class="s-ink" font-weight="700">Phone A</text><text x="95" y="80" text-anchor="middle" class="s-ink2">100,000 taps</text>
+          <rect x="480" y="40" width="130" height="50" rx="8" class="s-card2" style="stroke:var(--line)"/><text x="545" y="62" text-anchor="middle" class="s-ink" font-weight="700">Phone B</text><text x="545" y="80" text-anchor="middle" class="s-ink2">100,000 taps</text>
+          <path d="M162 65h84" style="stroke:var(--track);stroke-width:1.6"/><path d="M240 59l8 6-8 6" style="fill:none;stroke:var(--track);stroke-width:1.6"/>
+          <path d="M478 65h-84" style="stroke:var(--track);stroke-width:1.6"/><path d="M400 59l-8 6 8 6" style="fill:none;stroke:var(--track);stroke-width:1.6"/>
+          <text x="320" y="128" text-anchor="middle" class="s-red" font-weight="700">expected 200,000: about 51,000 likes lost</text>
+          <text x="320" y="148" text-anchor="middle" class="s-ink2">(numbers from a real run; yours will differ)</text>
+        </g>
+        <text x="632" y="166" text-anchor="end" class="s-wm">myphatshala.com</text>
+      </svg>
+    </div>
+    <div class="panel">
+      <div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#FCE6D6"/><path d="M14 64c2-12 9-18 18-18s16 6 18 18z" fill="#2E5AAC"/><circle cx="32" cy="29" r="12" fill="#C68B5E"/><path d="M19 29c0-10 6-15 13-15s13 5 13 15c-3-5-7-8-13-8s-10 3-13 8z" fill="#2A1B14"/><path d="M43 27c3 6 3 14 0 20" stroke="#2A1B14" stroke-width="4" fill="none" stroke-linecap="round"/><circle cx="27.5" cy="30" r="1.5" fill="#2A1B14"/><circle cx="36.5" cy="30" r="1.5" fill="#2A1B14"/><path d="M28 35q4 3 8 0" stroke="#2A1B14" stroke-width="1.6" fill="none" stroke-linecap="round"/><circle cx="32" cy="24" r="1.2" fill="#D64545"/></svg></div>
+      <div class="bubble"><b class="who">Riya</b><p>Sir, the code is just <code>likes++</code>. How can Java lose a plus-one?</p></div>
+    </div>
+    <div class="panel panel--right">
+      <div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#DDEFE6"/><path d="M12 64c2-12 10-18 20-18s18 6 20 18z" fill="#F4F1EA"/><path d="M28 46l4 8 4-8" fill="#2F7D5B"/><circle cx="32" cy="28" r="12" fill="#B57A50"/><path d="M20 26c0-8 5-13 12-13s12 5 12 13c-2-3-6-5-12-5s-10 2-12 5z" fill="#5A5A5A"/><path d="M22 32c1 8 5 11 10 11s9-3 10-11c-2 3-6 4-10 4s-8-1-10-4z" fill="#5A5A5A"/><circle cx="27" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><circle cx="37" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><path d="M30.4 29h3.2" stroke="#1B2433" stroke-width="1.4"/><circle cx="27" cy="29" r="1.1" fill="#1B2433"/><circle cx="37" cy="29" r="1.1" fill="#1B2433"/></svg></div>
+      <div class="bubble"><b class="who">Arjun Sir</b><p><code>likes++</code> is three steps: read, add, write. If both threads read the same old value, one write overwrites the other. That's a <b>race condition</b>.</p></div>
+    </div>
+    <div class="panel">
+      <div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#FCE6D6"/><path d="M14 64c2-12 9-18 18-18s16 6 18 18z" fill="#2E5AAC"/><circle cx="32" cy="29" r="12" fill="#C68B5E"/><path d="M19 29c0-10 6-15 13-15s13 5 13 15c-3-5-7-8-13-8s-10 3-13 8z" fill="#2A1B14"/><path d="M43 27c3 6 3 14 0 20" stroke="#2A1B14" stroke-width="4" fill="none" stroke-linecap="round"/><circle cx="27.5" cy="30" r="1.5" fill="#2A1B14"/><circle cx="36.5" cy="30" r="1.5" fill="#2A1B14"/><path d="M28 35q4 3 8 0" stroke="#2A1B14" stroke-width="1.6" fill="none" stroke-linecap="round"/><circle cx="32" cy="24" r="1.2" fill="#D64545"/></svg></div>
+      <div class="bubble"><b class="who">Riya</b><p>So threads sharing data is dangerous?</p></div>
+    </div>
+    <div class="panel panel--right">
+      <div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#DDEFE6"/><path d="M12 64c2-12 10-18 20-18s18 6 20 18z" fill="#F4F1EA"/><path d="M28 46l4 8 4-8" fill="#2F7D5B"/><circle cx="32" cy="28" r="12" fill="#B57A50"/><path d="M20 26c0-8 5-13 12-13s12 5 12 13c-2-3-6-5-12-5s-10 2-12 5z" fill="#5A5A5A"/><path d="M22 32c1 8 5 11 10 11s9-3 10-11c-2 3-6 4-10 4s-8-1-10-4z" fill="#5A5A5A"/><circle cx="27" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><circle cx="37" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><path d="M30.4 29h3.2" stroke="#1B2433" stroke-width="1.4"/><circle cx="27" cy="29" r="1.1" fill="#1B2433"/><circle cx="37" cy="29" r="1.1" fill="#1B2433"/></svg></div>
+      <div class="bubble"><b class="who">Arjun Sir</b><p>Unprotected sharing is. The fix is to make the read-add-write happen as one indivisible step, one thread at a time. That's what <code>synchronized</code> does.</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- ======================= PART 2: DEFINITION ======================= -->
+<section class="part" id="definition">
+  <span class="part-label"><b>2</b> Definition</span>
+  <h2>What are race conditions and synchronization?</h2>
+  <div class="def">
+    <div class="def__formal"><small>Formal definition (write this in exams)</small>
+      <p>A <b>race condition</b> occurs when the result of a program depends on the timing or interleaving of threads that access shared mutable data, at least one of them writing. The code that accesses such data is a <b>critical section</b>. <b>Synchronization</b> ensures <b>mutual exclusion</b> (only one thread executes a critical section at a time) and <b>visibility</b> (changes made by one thread are seen by others). In Java, every object has an intrinsic lock (<b>monitor</b>); a <code>synchronized</code> method or block acquires that lock on entry and releases it on exit, and a thread that cannot acquire it is BLOCKED.</p></div>
+    <div class="def__simple"><small>In simple words</small>
+      <p>Shared data is a single-person changing room. <code>synchronized</code> is the lock on the door: one person inside at a time, the rest wait in line.</p></div>
+  </div>
+  <h3>Words you'll meet in this lesson</h3>
+  <div class="terms">
+    <div class="term"><b>Race condition</b><span>Wrong results that depend on which thread runs when.</span></div>
+    <div class="term"><b>Critical section</b><span>Code that reads or writes shared data and must not interleave.</span></div>
+    <div class="term"><b>Monitor / intrinsic lock</b><span>The lock every Java object has; one owner at a time.</span></div>
+    <div class="term"><b>Atomic</b><span>Happens as one indivisible step: no other thread sees it half-done.</span></div>
+    <div class="term"><b>Visibility</b><span>Whether one thread's write is seen by another thread.</span></div>
+    <div class="term"><b>Deadlock</b><span>Threads waiting for each other's locks forever.</span></div>
+  </div>
+  <h3>Your three tools</h3>
+  <div class="table-wrap">
+  <table class="compare" style="min-width:580px">
+    <thead><tr><th></th><th><code>synchronized</code></th><th>Atomic classes</th><th><code>volatile</code></th></tr></thead>
+    <tbody>
+      <tr><td>Mutual exclusion</td><td>Yes</td><td>For one variable's update</td><td>No</td></tr>
+      <tr><td>Visibility</td><td>Yes</td><td>Yes</td><td>Yes</td></tr>
+      <tr><td>Makes <code>x++</code> safe</td><td>Yes</td><td>Yes (<code>incrementAndGet</code>)</td><td>No</td></tr>
+      <tr><td>Protects several fields together</td><td>Yes</td><td>No</td><td>No</td></tr>
+      <tr><td>Can block threads</td><td>Yes</td><td>No (lock-free)</td><td>No</td></tr>
+      <tr><td>Typical use</td><td>Balance check + debit</td><td>Counters, IDs</td><td>Stop flags, status</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <div class="callout callout--exam"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19V5a2 2 0 0 1 2-2h12v18H6a2 2 0 0 1-2-2zm0 0a2 2 0 0 1 2-2h12"/></svg><p><b>Exam tip:</b> “<code>volatile</code> guarantees visibility but <b>not atomicity</b>.” A <code>volatile int</code> with <code>count++</code> still loses updates. Also: a synchronized <b>instance</b> method locks <code>this</code>; a <b>static</b> synchronized method locks <code>ClassName.class</code>.</p></div>
+</section>
+
+<div class="ad-slot" data-slot="mid"></div>
+
+<!-- ======================= PART 3: TYPES AND WAYS TO USE IT ======================= -->
+<section class="part" id="types">
+  <span class="part-label"><b>3</b> Types and ways to use it</span>
+  <h2>See the race, then fix it</h2>
+  <h3>The race</h3>
+  <div class="code" data-lang="java" data-file="Main.java" data-check="skip"><pre><code>public class Main {
+    static int count = 0;
+
+    public static void main(String[] args) throws InterruptedException {
+        Runnable job = () -&gt; {
+            for (int i = 0; i &lt; 100_000; i++) {
+                count++;
+            }
+        };
+        Thread a = new Thread(job);
+        Thread b = new Thread(job);
+        a.start();
+        b.start();
+        a.join();
+        b.join();
+        System.out.println("expected 200000, got " + count);
+    }
+}</code></pre><div class="output">expected 200000, got 128965</div></div>
+  <p class="muted">This output is from one real run. Yours will be different, and different each time; that's what makes race conditions so hard to catch in testing.</p>
+  <h3>The fix: a synchronized method</h3>
+  <div class="code" data-lang="java" data-file="Main.java"><pre><code>public class Main {
+    static int count = 0;
+
+    static synchronized void increment() {
+        count++;
+    }
+
+    public static void main(String[] args) throws InterruptedException {
+        Runnable job = () -&gt; {
+            for (int i = 0; i &lt; 100_000; i++) {
+                increment();
+            }
+        };
+        Thread a = new Thread(job);
+        Thread b = new Thread(job);
+        a.start();
+        b.start();
+        a.join();
+        b.join();
+        System.out.println("expected 200000, got " + count);
+    }
+}</code></pre><div class="output">expected 200000, got 200000</div></div>
+
+  <h3>The ways to synchronize</h3>
+  <div class="cards">
+    <div class="card"><svg class="ic" viewBox="0 0 40 40" fill="none" stroke="var(--green)" stroke-width="2"><rect x="11" y="18" width="18" height="13" rx="2"/><path d="M15 18v-4a5 5 0 0110 0v4"/></svg><h4>synchronized method</h4><p>The whole method is the critical section. Locks <code>this</code> (or the class, if static).</p><span class="tag">simplest</span></div>
+    <div class="card"><svg class="ic" viewBox="0 0 40 40" fill="none" stroke="var(--blue)" stroke-width="2"><path d="M12 10h16v20H12z"/><path d="M12 18h16M12 24h16"/></svg><h4>synchronized block</h4><p>Lock only the lines that touch shared data, on a lock object you choose.</p><span class="tag">fine-grained</span></div>
+    <div class="card"><svg class="ic" viewBox="0 0 40 40" fill="none" stroke="var(--track)" stroke-width="2"><circle cx="20" cy="20" r="11"/><path d="M15 20h10M20 15v10"/></svg><h4>Atomic classes</h4><p><code>AtomicInteger</code>, <code>AtomicLong</code>, <code>LongAdder</code>: safe single-variable updates without locks.</p><span class="tag">counters</span></div>
+    <div class="card"><svg class="ic" viewBox="0 0 40 40" fill="none" stroke="var(--ink-3)" stroke-width="2"><path d="M10 20h20"/><path d="M24 14l6 6-6 6"/><path d="M16 14l-6 6 6 6"/></svg><h4>volatile</h4><p>Every thread always sees the latest value. For flags one thread writes and others read.</p><span class="tag">visibility</span></div>
+  </div>
+  <div class="code" data-lang="java" data-file="Main.java"><pre><code>synchronized void deposit(int amt) { … }        // locks this
+static synchronized void log(String s) { … }    // locks the class object (Bank.class)
+synchronized (lock) { … }                       // locks the object you choose
+
+volatile boolean running;                       // visibility only, no locking
+AtomicInteger hits = new AtomicInteger();       // lock-free atomic updates
+hits.incrementAndGet();</code></pre></div>
+
+  <h3>The trap: deadlock</h3>
+  <div class="code" data-lang="java" data-file="Main.java"><pre><code>// Thread 1                       // Thread 2
+synchronized (accountA) {          synchronized (accountB) {
+    synchronized (accountB) {          synchronized (accountA) {   // each waits for the
+        …                                  …                       // other's lock: forever
+    }                                  }
+}                                  }</code></pre></div>
+  <div class="callout callout--warn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3 2 21h20L12 3z"/><path d="M12 10v5M12 18v.5"/></svg><p><b>Always take multiple locks in the same order.</b> If every thread locks account A before account B (for example, by smaller account id first), the circular wait above can never happen. And keep locked sections short: never call a slow network service while holding a lock.</p></div>
+</section>
+
+<!-- ======================= PART 4: STEP BY STEP ======================= -->
+<section class="part" id="steps">
+  <span class="part-label"><b>4</b> Step by step</span>
+  <h2>What happens at a synchronized block</h2>
+  <ol class="stepper">
+    <li><h4>A thread reaches the block</h4>
+      <div class="code" data-lang="java" data-file="Main.java"><pre><code>synchronized (account) {
+    if (account.balance &gt;= amt) account.balance -= amt;
+}</code></pre></div>
+      <span class="behind">The JVM runs <code>monitorenter</code> on the <code>account</code> object's monitor.</span></li>
+    <li><h4>Lock free? Take it</h4>
+      <span class="behind">If no one owns the monitor, this thread becomes the owner and enters. It also sees every write made by the previous owner before it released the lock.</span></li>
+    <li><h4>Lock taken? Wait</h4>
+      <span class="behind">If another thread owns it, this thread joins the monitor's entry set and is <b>BLOCKED</b>. It uses no CPU while waiting.</span></li>
+    <li><h4>Leave the block</h4>
+      <span class="behind"><code>monitorexit</code> releases the lock, even if an exception is thrown inside (the compiler adds a hidden finally). All writes made inside become visible to the next owner.</span></li>
+    <li><h4>Next in line</h4>
+      <span class="behind">One BLOCKED thread acquires the lock and becomes RUNNABLE. Which one is not guaranteed. The same thread may re-enter a lock it already owns (locks are <b>re-entrant</b>).</span></li>
+  </ol>
+</section>
+
+<!-- ======================= PART 5: SEE IT HAPPEN ======================= -->
+<section class="part" id="animation">
+  <span class="part-label"><b>5</b> See it happen</span>
+  <h2>A lost update, and the lock that prevents it</h2>
+  <p>Left: two threads and one shared <code>count</code>. Right: the bytecode steps of <code>count++</code>, each thread's private operand stack, and the monitor.</p>
+  <div class="anim" data-frames="6">
+    <div class="anim__title">A race condition and its fix <span>6 steps</span></div>
+    <div class="anim__views">
+      <div class="view view--see">
+        <span class="view__tag">What you see</span>
+        <svg viewBox="0 0 360 250" role="img" aria-label="Two threads do count++ at the same time and one update is lost; with synchronized they take turns">
+          <rect x="130" y="10" width="100" height="44" rx="8" class="s-soft-blue" style="stroke:var(--blue);stroke-width:1.5"/>
+          <text x="180" y="28" font-size="9.5" text-anchor="middle" font-weight="700" class="s-blue">count</text>
+          <text data-on="1" x="180" y="47" font-size="14" text-anchor="middle" font-weight="700" class="s-ink mono">5</text>
+          <text data-on="2" x="180" y="47" font-size="14" text-anchor="middle" font-weight="700" class="s-ink mono">5</text>
+          <text data-on="3" x="180" y="47" font-size="14" text-anchor="middle" font-weight="700" class="s-ink mono">5</text>
+          <text data-on="4" x="180" y="47" font-size="14" text-anchor="middle" font-weight="700" class="s-red mono">6</text>
+          <text data-on="5" x="180" y="47" font-size="14" text-anchor="middle" font-weight="700" class="s-ink mono">6</text>
+          <text data-on="6" x="180" y="47" font-size="14" text-anchor="middle" font-weight="700" class="s-ink mono">7</text>
+          <rect x="10" y="74" width="100" height="96" rx="8" class="s-card2" style="stroke:var(--line);stroke-width:1.5"/>
+          <text x="20" y="92" font-size="10.5" font-weight="700" class="s-ink">T1</text>
+          <rect x="250" y="74" width="100" height="96" rx="8" class="s-card2" style="stroke:var(--line);stroke-width:1.5"/>
+          <text x="260" y="92" font-size="10.5" font-weight="700" class="s-ink">T2</text>
+          <text data-on="1" x="20" y="114" font-size="9.5" class="s-ink mono">count++</text>
+          <text data-on="1" x="260" y="114" font-size="9.5" class="s-ink mono">count++</text>
+          <text data-on="2-4" x="20" y="114" font-size="9.5" class="s-acc mono">read 5</text>
+          <text data-on="3-4" x="260" y="114" font-size="9.5" class="s-acc mono">read 5</text>
+          <text data-on="4" x="20" y="134" font-size="9.5" class="s-red mono">write 6</text>
+          <text data-on="4" x="260" y="134" font-size="9.5" class="s-red mono">write 6</text>
+          <g data-on="2"><path d="M110 104 L140 54" style="stroke:acc;stroke-width:2;fill:none"/><path d="M132.0 58.5 L140 54 L139.7 63.2" style="stroke:acc;stroke-width:2;fill:none;stroke-linecap:round;stroke-linejoin:round"/></g>
+          <g data-on="3"><path d="M250 104 L220 54" style="stroke:acc;stroke-width:2;fill:none"/><path d="M220.3 63.2 L220 54 L228.0 58.5" style="stroke:acc;stroke-width:2;fill:none;stroke-linecap:round;stroke-linejoin:round"/></g>
+          <text data-on="4" x="180" y="196" font-size="10" text-anchor="middle" font-weight="700" class="s-red">2 increments, count went up by 1</text>
+          <g data-on="5-"><rect x="118" y="60" width="124" height="24" rx="8" class="s-soft-green" style="stroke:var(--green);stroke-width:1.5"/><text x="180" y="75.24" font-size="9" text-anchor="middle" font-weight="700" class="s-ink">synchronized</text></g>
+          <text data-on="5" x="20" y="114" font-size="9" class="s-green mono">has lock: 5→6</text>
+          <text data-on="5" x="260" y="114" font-size="9.5" font-weight="700" class="s-red mono">BLOCKED</text>
+          <text data-on="6" x="20" y="114" font-size="9.5" class="s-ink3 mono">done</text>
+          <text data-on="6" x="260" y="114" font-size="9" class="s-green mono">has lock: 6→7</text>
+          <text data-on="6" x="180" y="196" font-size="10" text-anchor="middle" font-weight="700" class="s-green">they take turns: no update lost</text>
+          <text data-on="1" x="180" y="234" font-size="10.5" text-anchor="middle" class="s-ink2">Two threads, one shared count.</text>
+          <text data-on="2" x="180" y="234" font-size="10.5" text-anchor="middle" class="s-ink2">T1 reads 5…</text>
+          <text data-on="3" x="180" y="234" font-size="10.5" text-anchor="middle" class="s-ink2">…T2 also reads 5.</text>
+          <text data-on="4" x="180" y="234" font-size="10.5" text-anchor="middle" class="s-ink2">Both write 6: one update lost.</text>
+          <text data-on="5" x="180" y="234" font-size="10.5" text-anchor="middle" class="s-ink2">With synchronized, T2 must wait.</text>
+          <text data-on="6" x="180" y="234" font-size="10.5" text-anchor="middle" class="s-ink2">T2 then sees 6 and writes 7.</text>
+          <text x="354" y="245" text-anchor="end" class="s-wm">myphatshala.com</text>
+        </svg>
+        <ol class="caps" hidden>
+          <li><code>count</code> is a shared field on the heap, value 5. Two threads both run <code>count++</code>.</li>
+          <li><code>count++</code> is not one step. T1 first <b>reads</b> 5 into its own working space…</li>
+          <li>…and before T1 writes back, the scheduler lets T2 run. T2 also reads 5.</li>
+          <li>Both add 1 and both write 6. Two increments, but count only went up by 1: a <b>lost update</b>. This is a <b>race condition</b>.</li>
+          <li>Now <code>count++</code> is inside a <code>synchronized</code> block. T1 takes the lock first; T2 arrives, finds the lock taken, and is <b>BLOCKED</b>.</li>
+          <li>T1 writes 6 and releases the lock. T2 gets the lock, reads 6, writes 7. The result is always correct.</li>
+        </ol>
+      </div>
+      <div class="view view--behind">
+        <span class="view__tag">Behind the screen</span>
+        <svg viewBox="0 0 360 250" role="img" aria-label="count++ compiles to four bytecode steps; a monitor lock lets only one thread run them at a time">
+          <rect x="6" y="6" width="150" height="112" rx="8" class="s-board" style="stroke:board;stroke-width:1.5"/>
+          <text x="16" y="24" font-size="9" font-weight="700" class="s-chalk">count++ in bytecode</text>
+          <text x="16" y="44" font-size="9.2" class="s-chalk mono">getstatic count</text>
+          <text x="16" y="62" font-size="9.2" class="s-chalk mono">iconst_1</text>
+          <text x="16" y="80" font-size="9.2" class="s-chalk mono">iadd</text>
+          <text x="16" y="98" font-size="9.2" class="s-chalk mono">putstatic count</text>
+          <g data-on="2-3"><rect x="10" y="30" width="142" height="20" rx="3" class="" style="stroke:var(--track);stroke-width:1.5;fill:none"/></g>
+          <g data-on="4"><rect x="10" y="84" width="142" height="20" rx="3" class="" style="stroke:#D64545;stroke-width:1.5;fill:none"/></g>
+          <rect x="170" y="6" width="88" height="62" rx="8" class="s-card2" style="stroke:var(--line);stroke-width:1.5"/>
+          <text x="176" y="22" font-size="8" font-weight="700" class="s-ink2">T1 operand stack</text>
+          <rect x="266" y="6" width="88" height="62" rx="8" class="s-card2" style="stroke:var(--line);stroke-width:1.5"/>
+          <text x="272" y="22" font-size="8" font-weight="700" class="s-ink2">T2 operand stack</text>
+          <text data-on="2-3" x="190" y="48" font-size="13" font-weight="700" class="s-acc mono">5</text>
+          <text data-on="4" x="190" y="48" font-size="13" font-weight="700" class="s-red mono">6</text>
+          <text data-on="3" x="286" y="48" font-size="13" font-weight="700" class="s-acc mono">5</text>
+          <text data-on="4" x="286" y="48" font-size="13" font-weight="700" class="s-red mono">6</text>
+          <text data-on="2-4" x="178" y="92" font-size="8.8" class="s-ink2">a switch can happen between</text>
+          <text data-on="2-4" x="178" y="106" font-size="8.8" class="s-ink2">any two of these steps</text>
+          <g data-on="5-"><rect x="170" y="80" width="184" height="96" rx="8" class="s-soft-green" style="stroke:var(--green);stroke-width:1.5"/></g>
+          <text data-on="5-" x="180" y="98" font-size="9" font-weight="700" class="s-green">monitor of the lock object</text>
+          <text data-on="5" x="180" y="118" font-size="9.5" class="s-ink mono">owner: T1</text>
+          <text data-on="6" x="180" y="118" font-size="9.5" class="s-ink mono">owner: T2</text>
+          <text data-on="5" x="180" y="136" font-size="9" class="s-red mono">entry set: T2 (BLOCKED)</text>
+          <text data-on="6" x="180" y="136" font-size="9" class="s-ink3 mono">entry set: (empty)</text>
+          <text data-on="5-" x="180" y="156" font-size="8.6" class="s-ink2 mono">monitorenter … monitorexit</text>
+          <text x="10" y="146" font-size="9.5" class="s-ink2">count on the heap:</text>
+          <text data-on="1" x="116" y="147" font-size="12" font-weight="700" class="s-ink mono">5</text>
+          <text data-on="2" x="116" y="147" font-size="12" font-weight="700" class="s-ink mono">5</text>
+          <text data-on="3" x="116" y="147" font-size="12" font-weight="700" class="s-ink mono">5</text>
+          <text data-on="4" x="116" y="147" font-size="12" font-weight="700" class="s-red mono">6</text>
+          <text data-on="5" x="116" y="147" font-size="12" font-weight="700" class="s-ink mono">6</text>
+          <text data-on="6" x="116" y="147" font-size="12" font-weight="700" class="s-ink mono">7</text>
+          <text data-on="1" x="180" y="236" font-size="10.5" text-anchor="middle" class="s-ink2">One line of Java…</text>
+          <text data-on="2" x="180" y="236" font-size="10.5" text-anchor="middle" class="s-ink2">…is four bytecode steps.</text>
+          <text data-on="3" x="180" y="236" font-size="10.5" text-anchor="middle" class="s-ink2">T2 interleaves after T1's read.</text>
+          <text data-on="4" x="180" y="236" font-size="10.5" text-anchor="middle" class="s-ink2">Two writes of 6.</text>
+          <text data-on="5" x="180" y="236" font-size="10.5" text-anchor="middle" class="s-ink2">The lock has one owner at a time.</text>
+          <text data-on="6" x="180" y="236" font-size="10.5" text-anchor="middle" class="s-ink2">Ownership passes to T2.</text>
+          <text x="354" y="245" text-anchor="end" class="s-wm">myphatshala.com</text>
+        </svg>
+        <ol class="caps" hidden>
+          <li><code>count++</code> looks like one action, but the compiler turns it into several bytecode instructions.</li>
+          <li><code>getstatic</code> copies the current value (5) onto T1's own <b>operand stack</b>. The shared field isn't changed yet.</li>
+          <li>The scheduler can switch threads between any two instructions. T2 also copies 5 onto its own stack.</li>
+          <li>Each thread adds 1 and <code>putstatic</code> writes 6. The second write overwrites the first.</li>
+          <li><code>synchronized</code> compiles to <code>monitorenter</code> / <code>monitorexit</code>. Every object has a <b>monitor</b>: one owner at a time, and other threads wait in its entry set (BLOCKED).</li>
+          <li>When T1 leaves the block, the lock is released and T2 becomes the owner. Leaving the block also makes T1's write <b>visible</b> to the next thread that takes the lock.</li>
+        </ol>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ======================= PART 6: REAL-WORLD USE ======================= -->
+<section class="part" id="real-world">
+  <span class="part-label"><b>6</b> Real-world use</span>
+  <h2>Where races cost real money</h2>
+  <p>Race conditions are behind overselling in flash sales, double payouts, duplicate order numbers and corrupted caches.</p>
+  <!--ANIM2-->
+  <h3 id="animated-example">Watch it with an example: two ATMs, one joint account</h3>
+  <p class="anim-intro">A joint account has ₹1,000. Two holders withdraw ₹800 at two ATMs at the same moment. Without a lock, both succeed.</p>
+  <div class="anim anim--one" data-frames="6" data-delay="4600">
+    <div class="anim__title">Two ATMs, one balance <span>6 steps</span></div>
+    <div class="anim__views">
+      <div class="view view--story">
+        <span class="view__tag">Animated example</span>
+        <svg viewBox="0 0 360 230" role="img" aria-label="Without synchronization both withdrawals pass the balance check; with a synchronized withdraw the second is refused">
+          <rect x="130" y="14" width="100" height="50" rx="8" class="s-soft-blue" style="stroke:var(--blue);stroke-width:1.5"/>
+          <text x="180" y="32" font-size="9.5" text-anchor="middle" font-weight="700" class="s-blue">balance</text>
+          <text data-on="1" x="180" y="54" font-size="13" text-anchor="middle" font-weight="700" class="s-ink mono">₹1000</text>
+          <text data-on="2" x="180" y="54" font-size="13" text-anchor="middle" font-weight="700" class="s-ink mono">₹1000</text>
+          <text data-on="3" x="180" y="54" font-size="13" text-anchor="middle" font-weight="700" class="s-ink mono">₹200</text>
+          <text data-on="4" x="180" y="54" font-size="13" text-anchor="middle" font-weight="700" class="s-red mono">₹-600</text>
+          <text data-on="5" x="180" y="54" font-size="13" text-anchor="middle" font-weight="700" class="s-ink mono">₹200</text>
+          <text data-on="6" x="180" y="54" font-size="13" text-anchor="middle" font-weight="700" class="s-ink mono">₹200</text>
+          <rect x="10" y="84" width="100" height="86" rx="8" class="s-card2" style="stroke:var(--line);stroke-width:1.5"/>
+          <text x="20" y="102" font-size="10" font-weight="700" class="s-ink">ATM 1</text>
+          <rect x="250" y="84" width="100" height="86" rx="8" class="s-card2" style="stroke:var(--line);stroke-width:1.5"/>
+          <text x="260" y="102" font-size="10" font-weight="700" class="s-ink">ATM 2</text>
+          <text data-on="2-4" x="20" y="124" font-size="9" class="s-green mono">1000 ≥ 800 ✓</text>
+          <text data-on="2-4" x="260" y="124" font-size="9" class="s-green mono">1000 ≥ 800 ✓</text>
+          <text data-on="3-4" x="20" y="144" font-size="9.5" font-weight="700" class="s-ink">pay ₹800</text>
+          <text data-on="4" x="260" y="144" font-size="9.5" font-weight="700" class="s-ink">pay ₹800</text>
+          <text data-on="4" x="180" y="188" font-size="11" text-anchor="middle" font-weight="700" class="s-red">overdrawn by ₹600!</text>
+          <g data-on="5-"><rect x="118" y="66" width="124" height="18" rx="8" class="s-soft-green" style="stroke:var(--green);stroke-width:1.5"/><text x="180" y="78.096" font-size="8.6" text-anchor="middle" font-weight="700" class="s-ink">synchronized withdraw</text></g>
+          <text data-on="5-" x="20" y="124" font-size="9" class="s-green mono">1000 ≥ 800 ✓</text>
+          <text data-on="5-" x="20" y="144" font-size="9.5" font-weight="700" class="s-ink">paid ₹800</text>
+          <text data-on="5" x="260" y="124" font-size="9.5" font-weight="700" class="s-red">waits…</text>
+          <text data-on="6" x="260" y="124" font-size="9" class="s-red mono">200 ≥ 800 ✗</text>
+          <text data-on="6" x="260" y="144" font-size="9.5" font-weight="700" class="s-red">refused</text>
+          <text data-on="6" x="180" y="188" font-size="11" text-anchor="middle" font-weight="700" class="s-green">balance never goes negative</text>
+          <text data-on="1" x="180" y="206" font-size="10.5" text-anchor="middle" class="s-ink2">₹1000 in the account.</text>
+          <text data-on="2" x="180" y="206" font-size="10.5" text-anchor="middle" class="s-ink2">Both ATMs check the balance.</text>
+          <text data-on="3" x="180" y="206" font-size="10.5" text-anchor="middle" class="s-ink2">ATM 1 pays out.</text>
+          <text data-on="4" x="180" y="206" font-size="10.5" text-anchor="middle" class="s-ink2">ATM 2 pays out too.</text>
+          <text data-on="5" x="180" y="206" font-size="10.5" text-anchor="middle" class="s-ink2">With a lock: ATM 2 waits.</text>
+          <text data-on="6" x="180" y="206" font-size="10.5" text-anchor="middle" class="s-ink2">Then it sees ₹200 and refuses.</text>
+          <text x="354" y="225" text-anchor="end" class="s-wm">myphatshala.com</text>
+        </svg>
+        <ol class="caps" hidden>
+          <li>A shared <code>Account</code> object with balance ₹1,000. Two threads (two ATMs) call <code>withdraw(800)</code>.</li>
+          <li>Both run <code>if (balance &gt;= amount)</code> before either subtracts. Both checks pass.</li>
+          <li>ATM 1 subtracts: ₹200 left.</li>
+          <li>ATM 2 already passed its check, so it subtracts too: ₹−600. The bank paid ₹1,600 from ₹1,000. This is a <b>check-then-act</b> race.</li>
+          <li>Make <code>withdraw</code> <code>synchronized</code>: the check and the subtraction become one indivisible step. ATM 2 is BLOCKED until ATM 1 is done.</li>
+          <li>ATM 2 now checks against ₹200 and refuses. Real banks protect balances the same way, usually with database locks or transactions.</li>
+        </ol>
+      </div>
+    </div>
+  </div>
+  <!--/ANIM2-->
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="30" y="20" width="60" height="50" rx="6" class="s-soft-green" style="stroke:var(--green)"/><text x="60" y="52" text-anchor="middle" class="s-green" font-size="18" font-weight="700">₹</text></svg></div>
+    <div><h4>1. Balances and wallets</h4><p>Debit must check and update the balance as one step, or two parallel payments can overdraw it.</p>
+      <div class="uc-flow"><span>2 payments at once</span><i>→</i><span class="java">synchronized debit()</span><i>→</i><span>never negative</span></div></div>
+  </div>
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="20" y="30" width="22" height="30" rx="3" class="s-soft-acc" style="stroke:var(--track)"/><rect x="50" y="30" width="22" height="30" rx="3" class="s-soft-acc" style="stroke:var(--track)"/><rect x="80" y="30" width="22" height="30" rx="3" class="s-card2" style="stroke:var(--line)"/></svg></div>
+    <div><h4>2. Inventory in flash sales</h4><p>Thousands of buyers hit “Buy” for 100 units. Reservation must be atomic so exactly 100 orders succeed.</p>
+      <div class="uc-flow"><span>10,000 clicks</span><i>→</i><span class="java">atomic reserve</span><i>→</i><span>100 orders</span></div></div>
+  </div>
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="30" y="24" width="60" height="42" rx="6" class="s-board"/><text x="60" y="51" text-anchor="middle" class="s-chalk" font-size="13" font-family="monospace">#1042</text></svg></div>
+    <div><h4>3. IDs and counters</h4><p>Order numbers, page views and rate-limit counters use <code>AtomicLong</code> or <code>LongAdder</code> so no two orders get the same number.</p>
+      <div class="uc-flow"><span>new order</span><i>→</i><span class="java">ids.incrementAndGet()</span><i>→</i><span>unique id</span></div></div>
+  </div>
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><circle cx="40" cy="45" r="16" class="s-soft-blue" style="stroke:var(--blue)"/><circle cx="80" cy="45" r="16" class="s-soft-blue" style="stroke:var(--blue)"/><path d="M56 40h8M64 50h-8" style="stroke:var(--red);stroke-width:2"/></svg></div>
+    <div><h4>4. Shared caches and config</h4><p>Concurrent maps (<code>ConcurrentHashMap</code>) and <code>volatile</code> references let many request threads read config and cached data safely while one thread refreshes it.</p>
+      <div class="uc-flow"><span>refresh thread</span><i>→</i><span class="java">volatile config</span><i>→</i><span>all threads see it</span></div></div>
+  </div>
+  <p class="muted">Simplified: real banking systems also rely on database transactions and row locks, because many servers (not just many threads) share the data.</p>
+</section>
+
+<div class="ad-slot" data-slot="mid"></div>
+
+<!-- ======================= PART 7: RUN THE CODE ======================= -->
+<section class="part" id="run">
+  <span class="part-label"><b>7</b> Run the code</span>
+  <h2>The same race, fixed with a block</h2>
+  <div class="code" data-lang="java" data-file="Main.java"><pre><code>public class Main {
+    static int count = 0;
+
+    public static void main(String[] args) throws InterruptedException {
+        Runnable job = () -&gt; {
+            for (int i = 0; i &lt; 100_000; i++) {
+                synchronized (Main.class) {
+                    count++;
+                }
+            }
+        };
+        Thread a = new Thread(job);
+        Thread b = new Thread(job);
+        a.start();
+        b.start();
+        a.join();
+        b.join();
+        System.out.println("synchronized result: " + count);
+    }
+}</code></pre><div class="output">synchronized result: 200000</div></div>
+  <ul class="anno">
+    <li><code>synchronized (Main.class)</code><span>Both threads lock the same object (the Class object of Main), so only one is inside at a time.</span></li>
+    <li><code>count++</code><span>Now the read-add-write can't interleave with the other thread's.</span></li>
+    <li><code>a.join(); b.join();</code><span>join also guarantees main sees both threads' final writes.</span></li>
+  </ul>
+  <div class="runner">
+    <script type="application/json">{
+ "lang": "java",
+ "file": "Main.java",
+ "tasks": [
+  {
+   "label": "1 · See the race",
+   "hint": "Press <b>Run</b> several times. The total changes, and is almost never 200000. Then fix it by adding <code>synchronized (Main.class) { … }</code> around <code>count++</code>.",
+   "code": "public class Main {\n    static int count = 0;\n\n    public static void main(String[] args) throws InterruptedException {\n        Runnable job = () -> {\n            for (int i = 0; i < 100_000; i++) {\n                count++;\n            }\n        };\n        Thread a = new Thread(job);\n        Thread b = new Thread(job);\n        a.start();\n        b.start();\n        a.join();\n        b.join();\n        System.out.println(\"expected 200000, got \" + count);\n    }\n}\n"
+  },
+  {
+   "label": "2 · Predict: two different locks",
+   "hint": "<b>Predict first:</b> is the result always 200000? Each thread locks its <i>own</i> object, so they never wait for each other. Fix: make both use one shared lock.",
+   "code": "public class Main {\n    static int count = 0;\n\n    public static void main(String[] args) throws InterruptedException {\n        Thread a = new Thread(new Adder());\n        Thread b = new Thread(new Adder());\n        a.start(); b.start();\n        a.join(); b.join();\n        System.out.println(\"got \" + count);\n    }\n}\n\nclass Adder implements Runnable {\n    public void run() {\n        for (int i = 0; i < 100_000; i++) {\n            synchronized (this) {\n                Main.count++;\n            }\n        }\n    }\n}\n"
+  },
+  {
+   "label": "3 · Predict: is ++ on volatile safe?",
+   "hint": "<b>Predict first:</b> <code>volatile</code> gives visibility, but is <code>count++</code> now atomic? Run it a few times, then switch to <code>AtomicInteger</code>.",
+   "code": "public class Main {\n    static volatile int count = 0;\n\n    public static void main(String[] args) throws InterruptedException {\n        Runnable job = () -> { for (int i = 0; i < 100_000; i++) count++; };\n        Thread a = new Thread(job), b = new Thread(job);\n        a.start(); b.start();\n        a.join(); b.join();\n        System.out.println(\"got \" + count);\n    }\n}\n"
+  },
+  {
+   "label": "4 · Crash: lock is null",
+   "hint": "You can't lock a <code>null</code> reference. Initialise the lock: <code>static final Object lock = new Object();</code>",
+   "code": "public class Main {\n    static Object lock;\n    static int stock = 10;\n\n    public static void main(String[] args) {\n        synchronized (lock) {\n            stock--;\n        }\n        System.out.println(\"stock \" + stock);\n    }\n}\n",
+   "_expect": "exception"
+  },
+  {
+   "label": "5 · Spot the error",
+   "hint": "Only objects have locks. <code>synchronized</code> needs a reference, not an <code>int</code>. Lock a dedicated object instead.",
+   "code": "public class Main {\n    static int count = 0;\n\n    public static void main(String[] args) {\n        synchronized (count) {\n            count++;\n        }\n        System.out.println(count);\n    }\n}\n",
+   "_expect": "compile-error"
+  }
+ ]
+}</script>
+  </div>
+</section>
+
+<!-- ======================= PART 8: LINE BY LINE ======================= -->
+<section class="part" id="tracer">
+  <span class="part-label"><b>8</b> Line by line</span>
+  <h2>A synchronized counter shared by two threads</h2>
+  <p>Recorded from the real JVM, following <b>main</b>. Watch the single Counter object on the heap: both threads update it, and the result is right every time.</p>
+  <div class="tracer">
+    <script type="application/json">{"lang": "java", "code": ["class Counter {", "    private int value;", "", "    synchronized void add() {", "        value++;", "    }", "", "    synchronized int get() {", "        return value;", "    }", "}", "", "public class Main {", "    public static void main(String[] args) throws InterruptedException {", "        Counter likes = new Counter();", "        Runnable tap = () -> {", "            for (int i = 0; i < 1000; i++) likes.add();", "        };", "        Thread a = new Thread(tap, \"phone-A\");", "        Thread b = new Thread(tap, \"phone-B\");", "        a.start();", "        b.start();", "        a.join();", "        b.join();", "        System.out.println(\"likes = \" + likes.get());", "    }", "}"], "steps": [{"line": 15, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "new Counter()", "vars": [["this", "→ #1 Counter"]]}], "heap": ["<b>#1</b> Counter {value=0}", "<b>#2</b> String[0] (args, empty)"], "newVar": "this", "phase": "Shared object", "note": "One Counter object (#n) on the heap. Its monitor is the lock that <code>synchronized</code> methods use."}, {"line": 1, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}], "heap": ["<b>#2</b> String[0] (args, empty)"], "phase": "Return", "note": "<code>new Counter()</code> returns and its frame is popped."}, {"line": 15, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["likes", "→ #1 Counter"]]}], "heap": ["<b>#1</b> Counter {value=0}", "<b>#2</b> String[0] (args, empty)"], "newVar": "likes", "phase": "Shared object", "note": "One Counter object (#n) on the heap. Its monitor is the lock that <code>synchronized</code> methods use."}, {"line": 16, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["likes", "→ #1 Counter"], ["tap", "→ #3 lambda"]]}], "heap": ["<b>#1</b> Counter {value=0}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> lambda object (a Runnable)"], "newVar": "tap", "phase": "The job", "note": "Both threads will run this same lambda, so both call <code>add()</code> on the same Counter. Now <code>tap</code> = → #3 lambda. New object <b>#3</b> on the heap: lambda object (a Runnable)."}, {"line": 19, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["likes", "→ #1 Counter"], ["tap", "→ #3 lambda"], ["a", "→ #4 Thread"]]}], "heap": ["<b>#1</b> Counter {value=0}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> lambda object (a Runnable)", "<b>#4</b> Thread &quot;phone-A&quot; (NEW)"], "newVar": "a", "phase": "Thread A", "note": "The first Thread object (NEW). Now <code>a</code> = → #4 Thread. New object <b>#4</b> on the heap: Thread &quot;phone-A&quot; (NEW)."}, {"line": 20, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["likes", "→ #1 Counter"], ["tap", "→ #3 lambda"], ["a", "→ #4 Thread"], ["b", "→ #5 Thread"]]}], "heap": ["<b>#1</b> Counter {value=0}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> lambda object (a Runnable)", "<b>#4</b> Thread &quot;phone-A&quot; (NEW)", "<b>#5</b> Thread &quot;phone-B&quot; (NEW)"], "newVar": "b", "phase": "Thread B", "note": "The second Thread object (NEW), with the same job. Now <code>b</code> = → #5 Thread. New object <b>#5</b> on the heap: Thread &quot;phone-B&quot; (NEW)."}, {"line": 21, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["likes", "→ #1 Counter"], ["tap", "→ #3 lambda"], ["a", "→ #4 Thread"], ["b", "→ #5 Thread"]]}], "heap": ["<b>#1</b> Counter {value=0}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> lambda object (a Runnable)", "<b>#4</b> Thread &quot;phone-A&quot; (RUNNABLE)", "<b>#5</b> Thread &quot;phone-B&quot; (NEW)"], "phase": "Start A", "note": "Phone A starts tapping. Each <code>add()</code> takes the Counter's lock, does <code>value++</code>, and releases it."}, {"line": 22, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["likes", "→ #1 Counter"], ["tap", "→ #3 lambda"], ["a", "→ #4 Thread"], ["b", "→ #5 Thread"]]}], "heap": ["<b>#1</b> Counter {value=64}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> lambda object (a Runnable)", "<b>#4</b> Thread &quot;phone-A&quot; (RUNNABLE)", "<b>#5</b> Thread &quot;phone-B&quot; (RUNNABLE)"], "phase": "Start B", "note": "Phone B starts. When it calls <code>add()</code> while A holds the lock, it is BLOCKED for a moment, then continues."}, {"line": 23, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["likes", "→ #1 Counter"], ["tap", "→ #3 lambda"], ["a", "→ #4 Thread"], ["b", "→ #5 Thread"]]}], "heap": ["<b>#1</b> Counter {value=2000}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> lambda object (a Runnable)", "<b>#4</b> Thread &quot;phone-A&quot; (TERMINATED)", "<b>#5</b> Thread &quot;phone-B&quot; (TERMINATED)"], "phase": "Update", "note": "Object <b>#1</b> changes: Counter {value=2000}. Object <b>#4</b> changes: Thread &quot;phone-A&quot; (TERMINATED)."}, {"line": 24, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["likes", "→ #1 Counter"], ["tap", "→ #3 lambda"], ["a", "→ #4 Thread"], ["b", "→ #5 Thread"]]}], "heap": ["<b>#1</b> Counter {value=2000}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> lambda object (a Runnable)", "<b>#4</b> Thread &quot;phone-A&quot; (TERMINATED)", "<b>#5</b> Thread &quot;phone-B&quot; (TERMINATED)"], "phase": "Both done", "note": "After both joins, all 2000 increments have happened; none were lost."}, {"line": 25, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["likes", "→ #1 Counter"], ["tap", "→ #3 lambda"], ["a", "→ #4 Thread"], ["b", "→ #5 Thread"]]}, {"frame": "Counter.get()", "vars": [["this", "→ #1 Counter"]]}], "heap": ["<b>#1</b> Counter {value=2000}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> lambda object (a Runnable)", "<b>#4</b> Thread &quot;phone-A&quot; (TERMINATED)", "<b>#5</b> Thread &quot;phone-B&quot; (TERMINATED)"], "newVar": "this", "phase": "Read", "note": "<code>get()</code> is synchronized too, so main reads the latest value: 2000 every run. Remove both <code>synchronized</code> keywords and you'll often get less."}, {"line": 9, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["likes", "→ #1 Counter"], ["tap", "→ #3 lambda"], ["a", "→ #4 Thread"], ["b", "→ #5 Thread"]]}], "heap": ["<b>#1</b> Counter {value=2000}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> lambda object (a Runnable)", "<b>#4</b> Thread &quot;phone-A&quot; (TERMINATED)", "<b>#5</b> Thread &quot;phone-B&quot; (TERMINATED)"], "phase": "Return", "note": "<code>Counter.get()</code> returns and its frame is popped."}, {"line": 25, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["likes", "→ #1 Counter"], ["tap", "→ #3 lambda"], ["a", "→ #4 Thread"], ["b", "→ #5 Thread"]]}], "heap": ["<b>#1</b> Counter {value=2000}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> lambda object (a Runnable)", "<b>#4</b> Thread &quot;phone-A&quot; (TERMINATED)", "<b>#5</b> Thread &quot;phone-B&quot; (TERMINATED)"], "out": "likes = 2000\n", "phase": "Read", "note": "<code>get()</code> is synchronized too, so main reads the latest value: 2000 every run. Remove both <code>synchronized</code> keywords and you'll often get less."}, {"line": 26, "phase": "Program ends", "note": "<code>main</code> returns, its frame is popped and the program ends.", "stack": [], "heap": []}]}</script>
+  </div>
+
+<h3 id="worked">Worked examples: real problems, solved and traced in memory</h3>
+  <p class="wx-intro">Three ways to make shared data safe: a synchronized method, an atomic class, and a volatile flag. Each trace follows main; the other threads' work shows up in the shared objects on the heap.</p>
+  <article class="wx">
+    <div class="wx__head"><span class="wx__num">Example 1</span><span class="wx__tag">Ticketing · last seat</span></div>
+    <h4>Only one person gets the last seat</h4>
+    <div class="wx__problem"><p class="wx__label">Problem statement</p><p>A concert has 1 seat left. Two customers press Book at the same moment, each on their own thread. Exactly one booking must succeed. Make <code>book()</code> safe and print how many bookings succeeded and how many seats are left.</p></div>
+    <div class="prob__io"><div><small>Input</small><pre>seats left: 1; two booking threads</pre></div><div><small>Expected output</small><pre>successful bookings: 1, seats left: 0</pre></div></div>
+    <div class="wx__approach"><p class="wx__label">Approach</p><ol><li>The check (<code>left &gt; 0</code>) and the update (<code>left--</code>) must happen as one step, so put both inside a <code>synchronized</code> method.</li><li>Each thread stores whether it succeeded in its own array slot.</li><li>After joining, count the successes. The winner's name may vary; the counts never do.</li></ol></div>
+    <p class="wx__label">Solution: run it live</p>
+    <div class="runner">
+    <script type="application/json">{"lang": "java", "file": "Main.java", "tasks": [{"label": "Run · Only one person gets the last seat", "hint": "Press <b>Run</b>. Then remove <code>synchronized</code> from <code>book()</code> and set <code>left</code> to 1 with 50 threads: sometimes more than one booking succeeds and <code>left</code> goes negative.", "code": "class Show {\n    private int left = 1;\n\n    synchronized boolean book() {\n        if (left > 0) {\n            left--;\n            return true;\n        }\n        return false;\n    }\n\n    synchronized int seatsLeft() {\n        return left;\n    }\n}\n\npublic class Main {\n    public static void main(String[] args) throws InterruptedException {\n        Show show = new Show();\n        boolean[] ok = new boolean[2];\n        Thread asha = new Thread(() -> ok[0] = show.book(), \"asha\");\n        Thread ravi = new Thread(() -> ok[1] = show.book(), \"ravi\");\n        asha.start();\n        ravi.start();\n        asha.join();\n        ravi.join();\n        int wins = (ok[0] ? 1 : 0) + (ok[1] ? 1 : 0);\n        System.out.println(\"successful bookings: \" + wins + \", seats left: \" + show.seatsLeft());\n    }\n}\n"}]}</script>
+    </div>
+    <p class="wx__label">What happens in memory, step by step</p>
+    <p class="wx__how">Recorded from the real JVM: press <b>Next</b> to execute one line at a time. Watch method calls push and pop frames on the stack, and objects (numbered #1, #2 …) appear on the heap.</p>
+    <div class="tracer">
+    <script type="application/json">{"lang": "java", "code": ["class Show {", "    private int left = 1;", "", "    synchronized boolean book() {", "        if (left > 0) {", "            left--;", "            return true;", "        }", "        return false;", "    }", "", "    synchronized int seatsLeft() {", "        return left;", "    }", "}", "", "public class Main {", "    public static void main(String[] args) throws InterruptedException {", "        Show show = new Show();", "        boolean[] ok = new boolean[2];", "        Thread asha = new Thread(() -> ok[0] = show.book(), \"asha\");", "        Thread ravi = new Thread(() -> ok[1] = show.book(), \"ravi\");", "        asha.start();", "        ravi.start();", "        asha.join();", "        ravi.join();", "        int wins = (ok[0] ? 1 : 0) + (ok[1] ? 1 : 0);", "        System.out.println(\"successful bookings: \" + wins + \", seats left: \" + show.seatsLeft());", "    }", "}"], "steps": [{"line": 19, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "new Show()", "vars": [["this", "→ #1 Show"]]}], "heap": ["<b>#1</b> Show {left=0}", "<b>#2</b> String[0] (args, empty)"], "newVar": "this", "phase": "Shared show", "note": "One Show object with <code>left = 1</code>. Its monitor guards <code>book()</code>. <code>new Show()</code> is called: a new frame is pushed with <code>this</code> = → #1 Show. New object <b>#1</b> on the heap: Show {left=0}."}, {"line": 1, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "new Show()", "vars": [["this", "→ #1 Show"]]}], "heap": ["<b>#1</b> Show {left=0}", "<b>#2</b> String[0] (args, empty)"], "phase": "Step", "note": "This line runs; nothing visible changes."}, {"line": 2, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}], "heap": ["<b>#2</b> String[0] (args, empty)"], "phase": "Return", "note": "<code>new Show()</code> returns and its frame is popped."}, {"line": 19, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["show", "→ #1 Show"]]}], "heap": ["<b>#1</b> Show {left=1}", "<b>#2</b> String[0] (args, empty)"], "newVar": "show", "phase": "Shared show", "note": "One Show object with <code>left = 1</code>. Its monitor guards <code>book()</code>. Now <code>show</code> = → #1 Show."}, {"line": 20, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["show", "→ #1 Show"], ["ok", "→ #3 boolean[2]"]]}], "heap": ["<b>#1</b> Show {left=1}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> boolean[2] {false, false}"], "newVar": "ok", "phase": "Results", "note": "Each thread writes its own slot, so this array needs no lock. Now <code>ok</code> = → #3 boolean[2]. New object <b>#3</b> on the heap: boolean[2] {false, false}."}, {"line": 21, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["show", "→ #1 Show"], ["ok", "→ #3 boolean[2]"], ["asha", "→ #4 Thread"]]}], "heap": ["<b>#1</b> Show {left=1}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> boolean[2] {false, false}", "<b>#4</b> Thread &quot;asha&quot; (NEW)"], "newVar": "asha", "phase": "Assign", "note": "Now <code>asha</code> = → #4 Thread. New object <b>#4</b> on the heap: Thread &quot;asha&quot; (NEW)."}, {"line": 22, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["show", "→ #1 Show"], ["ok", "→ #3 boolean[2]"], ["asha", "→ #4 Thread"], ["ravi", "→ #5 Thread"]]}], "heap": ["<b>#1</b> Show {left=1}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> boolean[2] {false, false}", "<b>#4</b> Thread &quot;asha&quot; (NEW)", "<b>#5</b> Thread &quot;ravi&quot; (NEW)"], "newVar": "ravi", "phase": "Assign", "note": "Now <code>ravi</code> = → #5 Thread. New object <b>#5</b> on the heap: Thread &quot;ravi&quot; (NEW)."}, {"line": 23, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["show", "→ #1 Show"], ["ok", "→ #3 boolean[2]"], ["asha", "→ #4 Thread"], ["ravi", "→ #5 Thread"]]}], "heap": ["<b>#1</b> Show {left=1}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> boolean[2] {false, false}", "<b>#4</b> Thread &quot;asha&quot; (RUNNABLE)", "<b>#5</b> Thread &quot;ravi&quot; (NEW)"], "phase": "Start", "note": "Asha's thread tries to book."}, {"line": 24, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["show", "→ #1 Show"], ["ok", "→ #3 boolean[2]"], ["asha", "→ #4 Thread"], ["ravi", "→ #5 Thread"]]}], "heap": ["<b>#1</b> Show {left=0}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> boolean[2] {true, false}", "<b>#4</b> Thread &quot;asha&quot; (RUNNABLE)", "<b>#5</b> Thread &quot;ravi&quot; (RUNNABLE)"], "phase": "Start", "note": "Ravi's thread tries at the same time. Whoever gets the lock second finds <code>left == 0</code>."}, {"line": 25, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["show", "→ #1 Show"], ["ok", "→ #3 boolean[2]"], ["asha", "→ #4 Thread"], ["ravi", "→ #5 Thread"]]}], "heap": ["<b>#1</b> Show {left=0}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> boolean[2] {true, false}", "<b>#4</b> Thread &quot;asha&quot; (TERMINATED)", "<b>#5</b> Thread &quot;ravi&quot; (TERMINATED)"], "phase": "Update", "note": "Object <b>#4</b> changes: Thread &quot;asha&quot; (TERMINATED). Object <b>#5</b> changes: Thread &quot;ravi&quot; (TERMINATED)."}, {"line": 26, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["show", "→ #1 Show"], ["ok", "→ #3 boolean[2]"], ["asha", "→ #4 Thread"], ["ravi", "→ #5 Thread"]]}], "heap": ["<b>#1</b> Show {left=0}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> boolean[2] {true, false}", "<b>#4</b> Thread &quot;asha&quot; (TERMINATED)", "<b>#5</b> Thread &quot;ravi&quot; (TERMINATED)"], "phase": "Both done", "note": "Exactly one of the two slots is true."}, {"line": 27, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["show", "→ #1 Show"], ["ok", "→ #3 boolean[2]"], ["asha", "→ #4 Thread"], ["ravi", "→ #5 Thread"], ["wins", "1"]]}], "heap": ["<b>#1</b> Show {left=0}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> boolean[2] {true, false}", "<b>#4</b> Thread &quot;asha&quot; (TERMINATED)", "<b>#5</b> Thread &quot;ravi&quot; (TERMINATED)"], "newVar": "wins", "phase": "Count", "note": "One win, zero seats left, on every run. Now <code>wins</code> = 1."}, {"line": 28, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["show", "→ #1 Show"], ["ok", "→ #3 boolean[2]"], ["asha", "→ #4 Thread"], ["ravi", "→ #5 Thread"], ["wins", "1"]]}, {"frame": "Show.seatsLeft()", "vars": [["this", "→ #1 Show"]]}], "heap": ["<b>#1</b> Show {left=0}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> boolean[2] {true, false}", "<b>#4</b> Thread &quot;asha&quot; (TERMINATED)", "<b>#5</b> Thread &quot;ravi&quot; (TERMINATED)"], "newVar": "this", "phase": "Call", "note": "<code>Show.seatsLeft()</code> is called: a new frame is pushed with <code>this</code> = → #1 Show."}, {"line": 13, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["show", "→ #1 Show"], ["ok", "→ #3 boolean[2]"], ["asha", "→ #4 Thread"], ["ravi", "→ #5 Thread"], ["wins", "1"]]}], "heap": ["<b>#1</b> Show {left=0}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> boolean[2] {true, false}", "<b>#4</b> Thread &quot;asha&quot; (TERMINATED)", "<b>#5</b> Thread &quot;ravi&quot; (TERMINATED)"], "phase": "Return", "note": "<code>Show.seatsLeft()</code> returns and its frame is popped."}, {"line": 28, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["show", "→ #1 Show"], ["ok", "→ #3 boolean[2]"], ["asha", "→ #4 Thread"], ["ravi", "→ #5 Thread"], ["wins", "1"]]}], "heap": ["<b>#1</b> Show {left=0}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> boolean[2] {true, false}", "<b>#4</b> Thread &quot;asha&quot; (TERMINATED)", "<b>#5</b> Thread &quot;ravi&quot; (TERMINATED)"], "out": "successful bookings: 1, seats left: 0\n", "phase": "Print", "note": "Prints <code>successful bookings: 1, seats left: 0</code>."}, {"line": 29, "phase": "Program ends", "note": "<code>main</code> returns, its frame is popped and the program ends.", "stack": [], "heap": []}]}</script>
+  </div>
+  </article>
+  <article class="wx">
+    <div class="wx__head"><span class="wx__num">Example 2</span><span class="wx__tag">Payments · cashback</span></div>
+    <h4>Cashback counter with AtomicInteger</h4>
+    <div class="wx__problem"><p class="wx__label">Problem statement</p><p>Four payment servers each credit ₹1 cashback 1,000 times to the same wallet total. Use <code>AtomicInteger</code> so no credit is lost, without writing <code>synchronized</code>.</p></div>
+    <div class="prob__io"><div><small>Input</small><pre>4 threads × 1,000 credits of ₹1</pre></div><div><small>Expected output</small><pre>total cashback: Rs 4000</pre></div></div>
+    <div class="wx__approach"><p class="wx__label">Approach</p><ol><li><code>AtomicInteger.incrementAndGet()</code> performs read-add-write as one indivisible hardware operation (compare-and-swap).</li><li>All four threads share one AtomicInteger.</li><li>Join all, then print the total: always 4000.</li></ol></div>
+    <p class="wx__label">Solution: run it live</p>
+    <div class="runner">
+    <script type="application/json">{"lang": "java", "file": "Main.java", "tasks": [{"label": "Run · Cashback counter with AtomicInteger", "hint": "Press <b>Run</b>. Then replace the AtomicInteger with a plain <code>static int</code> and <code>count++</code>: the total usually comes out below 4000.", "code": "import java.util.concurrent.atomic.AtomicInteger;\n\npublic class Main {\n    public static void main(String[] args) throws InterruptedException {\n        AtomicInteger cashback = new AtomicInteger();\n        Thread[] servers = new Thread[4];\n        for (int s = 0; s < 4; s++) {\n            servers[s] = new Thread(() -> {\n                for (int i = 0; i < 1000; i++) cashback.incrementAndGet();\n            }, \"server-\" + s);\n            servers[s].start();\n        }\n        for (Thread t : servers) t.join();\n        System.out.println(\"total cashback: Rs \" + cashback.get());\n    }\n}\n"}]}</script>
+    </div>
+    <p class="wx__label">What happens in memory, step by step</p>
+    <p class="wx__how">Recorded from the real JVM: press <b>Next</b> to execute one line at a time. Watch method calls push and pop frames on the stack, and objects (numbered #1, #2 …) appear on the heap.</p>
+    <div class="tracer">
+    <script type="application/json">{"lang": "java", "code": ["import java.util.concurrent.atomic.AtomicInteger;", "", "public class Main {", "    public static void main(String[] args) throws InterruptedException {", "        AtomicInteger cashback = new AtomicInteger();", "        Thread[] servers = new Thread[4];", "        for (int s = 0; s < 4; s++) {", "            servers[s] = new Thread(() -> {", "                for (int i = 0; i < 1000; i++) cashback.incrementAndGet();", "            }, \"server-\" + s);", "            servers[s].start();", "        }", "        for (Thread t : servers) t.join();", "        System.out.println(\"total cashback: Rs \" + cashback.get());", "    }", "}"], "steps": [{"line": 5, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["cashback", "→ #1 AtomicInteger"]]}], "heap": ["<b>#1</b> AtomicInteger 0", "<b>#2</b> String[0] (args, empty)"], "newVar": "cashback", "phase": "Atomic", "note": "An AtomicInteger object on the heap, value 0. Its methods are safe to call from many threads at once."}, {"line": 6, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["cashback", "→ #1 AtomicInteger"], ["servers", "→ #3 Thread[4]"]]}], "heap": ["<b>#1</b> AtomicInteger 0", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Thread[4] {null, null, null, null}"], "newVar": "servers", "phase": "Array", "note": "Room for four server threads. Now <code>servers</code> = → #3 Thread[4]. New object <b>#3</b> on the heap: Thread[4] {null, null, null, null}."}, {"line": 7, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["cashback", "→ #1 AtomicInteger"], ["servers", "→ #3 Thread[4]"], ["s", "0"]]}], "heap": ["<b>#1</b> AtomicInteger 0", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Thread[4] {null, null, null, null}"], "newVar": "s", "phase": "Assign", "note": "Now <code>s</code> = 0."}, {"line": 8, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["cashback", "→ #1 AtomicInteger"], ["servers", "→ #3 Thread[4]"], ["s", "0"]]}], "heap": ["<b>#1</b> AtomicInteger 0", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Thread[4] {→#4, null, null, null}", "<b>#4</b> Thread &quot;server-0&quot; (NEW)"], "phase": "Update", "note": "Object <b>#3</b> changes: Thread[4] {→#4, null, null, null}. New object <b>#4</b> on the heap: Thread &quot;server-0&quot; (NEW)."}, {"line": 11, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["cashback", "→ #1 AtomicInteger"], ["servers", "→ #3 Thread[4]"], ["s", "0"]]}], "heap": ["<b>#1</b> AtomicInteger 0", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Thread[4] {→#4, null, null, null}", "<b>#4</b> Thread &quot;server-0&quot; (RUNNABLE)"], "phase": "Start server-0", "note": "The first server starts crediting."}, {"line": 7, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["cashback", "→ #1 AtomicInteger"], ["servers", "→ #3 Thread[4]"], ["s", "1"]]}], "heap": ["<b>#1</b> AtomicInteger 121", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Thread[4] {→#4, null, null, null}", "<b>#4</b> Thread &quot;server-0&quot; (RUNNABLE)"], "newVar": "s", "phase": "Assign", "note": "Now <code>s</code> = 1. Object <b>#1</b> changes: AtomicInteger 121."}, {"line": 8, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["cashback", "→ #1 AtomicInteger"], ["servers", "→ #3 Thread[4]"], ["s", "1"]]}], "heap": ["<b>#1</b> AtomicInteger 144", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Thread[4] {→#4, →#5, null, null}", "<b>#4</b> Thread &quot;server-0&quot; (RUNNABLE)", "<b>#5</b> Thread &quot;server-1&quot; (NEW)"], "phase": "Update", "note": "Object <b>#1</b> changes: AtomicInteger 144. Object <b>#3</b> changes: Thread[4] {→#4, →#5, null, null}. New object <b>#5</b> on the heap: Thread &quot;server-1&quot; (NEW)."}, {"line": 11, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["cashback", "→ #1 AtomicInteger"], ["servers", "→ #3 Thread[4]"], ["s", "1"]]}], "heap": ["<b>#1</b> AtomicInteger 656", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Thread[4] {→#4, →#5, null, null}", "<b>#4</b> Thread &quot;server-0&quot; (RUNNABLE)", "<b>#5</b> Thread &quot;server-1&quot; (RUNNABLE)"], "phase": "Update", "note": "Object <b>#1</b> changes: AtomicInteger 656. Object <b>#5</b> changes: Thread &quot;server-1&quot; (RUNNABLE)."}, {"line": 7, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["cashback", "→ #1 AtomicInteger"], ["servers", "→ #3 Thread[4]"], ["s", "2"]]}], "heap": ["<b>#1</b> AtomicInteger 677", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Thread[4] {→#4, →#5, null, null}", "<b>#4</b> Thread &quot;server-0&quot; (RUNNABLE)", "<b>#5</b> Thread &quot;server-1&quot; (RUNNABLE)"], "newVar": "s", "phase": "Assign", "note": "Now <code>s</code> = 2. Object <b>#1</b> changes: AtomicInteger 677."}, {"line": 8, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["cashback", "→ #1 AtomicInteger"], ["servers", "→ #3 Thread[4]"], ["s", "2"]]}], "heap": ["<b>#1</b> AtomicInteger 741", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Thread[4] {→#4, →#5, →#6, null}", "<b>#4</b> Thread &quot;server-0&quot; (RUNNABLE)", "<b>#5</b> Thread &quot;server-1&quot; (RUNNABLE)", "<b>#6</b> Thread &quot;server-2&quot; (NEW)"], "phase": "Update", "note": "Object <b>#1</b> changes: AtomicInteger 741. Object <b>#3</b> changes: Thread[4] {→#4, →#5, →#6, null}. New object <b>#6</b> on the heap: Thread &quot;server-2&quot; (NEW)."}, {"line": 11, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["cashback", "→ #1 AtomicInteger"], ["servers", "→ #3 Thread[4]"], ["s", "2"]]}], "heap": ["<b>#1</b> AtomicInteger 755", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Thread[4] {→#4, →#5, →#6, null}", "<b>#4</b> Thread &quot;server-0&quot; (RUNNABLE)", "<b>#5</b> Thread &quot;server-1&quot; (RUNNABLE)", "<b>#6</b> Thread &quot;server-2&quot; (RUNNABLE)"], "phase": "Update", "note": "Object <b>#1</b> changes: AtomicInteger 755. Object <b>#6</b> changes: Thread &quot;server-2&quot; (RUNNABLE)."}, {"line": 7, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["cashback", "→ #1 AtomicInteger"], ["servers", "→ #3 Thread[4]"], ["s", "3"]]}], "heap": ["<b>#1</b> AtomicInteger 765", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Thread[4] {→#4, →#5, →#6, null}", "<b>#4</b> Thread &quot;server-0&quot; (RUNNABLE)", "<b>#5</b> Thread &quot;server-1&quot; (RUNNABLE)", "<b>#6</b> Thread &quot;server-2&quot; (RUNNABLE)"], "newVar": "s", "phase": "Assign", "note": "Now <code>s</code> = 3. Object <b>#1</b> changes: AtomicInteger 765."}, {"line": 8, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["cashback", "→ #1 AtomicInteger"], ["servers", "→ #3 Thread[4]"], ["s", "3"]]}], "heap": ["<b>#1</b> AtomicInteger 903", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Thread[4] {→#4, →#5, →#6, →#7}", "<b>#4</b> Thread &quot;server-0&quot; (RUNNABLE)", "<b>#5</b> Thread &quot;server-1&quot; (RUNNABLE)", "<b>#6</b> Thread &quot;server-2&quot; (RUNNABLE)", "<b>#7</b> Thread &quot;server-3&quot; (NEW)"], "phase": "Update", "note": "Object <b>#1</b> changes: AtomicInteger 903. Object <b>#3</b> changes: Thread[4] {→#4, →#5, →#6, →#7}. New object <b>#7</b> on the heap: Thread &quot;server-3&quot; (NEW)."}, {"line": 11, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["cashback", "→ #1 AtomicInteger"], ["servers", "→ #3 Thread[4]"], ["s", "3"]]}], "heap": ["<b>#1</b> AtomicInteger 921", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Thread[4] {→#4, →#5, →#6, →#7}", "<b>#4</b> Thread &quot;server-0&quot; (RUNNABLE)", "<b>#5</b> Thread &quot;server-1&quot; (RUNNABLE)", "<b>#6</b> Thread &quot;server-2&quot; (RUNNABLE)", "<b>#7</b> Thread &quot;server-3&quot; (RUNNABLE)"], "phase": "All started", "note": "Four threads are incrementing the same AtomicInteger."}, {"line": 7, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["cashback", "→ #1 AtomicInteger"], ["servers", "→ #3 Thread[4]"]]}], "heap": ["<b>#1</b> AtomicInteger 937", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Thread[4] {→#4, →#5, →#6, →#7}", "<b>#4</b> Thread &quot;server-0&quot; (RUNNABLE)", "<b>#5</b> Thread &quot;server-1&quot; (RUNNABLE)", "<b>#6</b> Thread &quot;server-2&quot; (RUNNABLE)", "<b>#7</b> Thread &quot;server-3&quot; (RUNNABLE)"], "phase": "Update", "note": "Object <b>#1</b> changes: AtomicInteger 937."}, {"line": 13, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["cashback", "→ #1 AtomicInteger"], ["servers", "→ #3 Thread[4]"]]}], "heap": ["<b>#1</b> AtomicInteger 4000", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Thread[4] {→#4, →#5, →#6, →#7}", "<b>#4</b> Thread &quot;server-0&quot; (TERMINATED)", "<b>#5</b> Thread &quot;server-1&quot; (TERMINATED)", "<b>#6</b> Thread &quot;server-2&quot; (TERMINATED)", "<b>#7</b> Thread &quot;server-3&quot; (TERMINATED)"], "phase": "Join", "note": "Wait for all four."}, {"line": 14, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["cashback", "→ #1 AtomicInteger"], ["servers", "→ #3 Thread[4]"]]}], "heap": ["<b>#1</b> AtomicInteger 4000", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Thread[4] {→#4, →#5, →#6, →#7}", "<b>#4</b> Thread &quot;server-0&quot; (TERMINATED)", "<b>#5</b> Thread &quot;server-1&quot; (TERMINATED)", "<b>#6</b> Thread &quot;server-2&quot; (TERMINATED)", "<b>#7</b> Thread &quot;server-3&quot; (TERMINATED)"], "out": "total cashback: Rs 4000\n", "phase": "Total", "note": "4 × 1000 = 4000, every run, with no lock in sight. Prints <code>total cashback: Rs 4000</code>."}, {"line": 15, "phase": "Program ends", "note": "<code>main</code> returns, its frame is popped and the program ends.", "stack": [], "heap": []}]}</script>
+  </div>
+  </article>
+  <article class="wx">
+    <div class="wx__head"><span class="wx__num">Example 3</span><span class="wx__tag">Streaming · shutdown</span></div>
+    <h4>Stop a worker with a volatile flag</h4>
+    <div class="wx__problem"><p class="wx__label">Problem statement</p><p>A video-encoding worker keeps processing chunks while a flag <code>running</code> is true. main lets it work for a moment, then sets the flag to false. Without <code>volatile</code>, the worker might never see the change. Make the stop reliable.</p></div>
+    <div class="prob__io"><div><small>Input</small><pre>(no input)</pre></div><div><small>Expected output</small><pre>encoder: saw running = false, stopping
+encoded some chunks: true</pre></div></div>
+    <div class="wx__approach"><p class="wx__label">Approach</p><ol><li>Declare <code>static volatile boolean running = true;</code>.</li><li>The worker loops <code>while (running)</code>.</li><li>main sleeps briefly, sets <code>running = false</code>, joins the worker, and reports.</li></ol></div>
+    <p class="wx__label">Solution: run it live</p>
+    <div class="runner">
+    <script type="application/json">{"lang": "java", "file": "Main.java", "tasks": [{"label": "Run · Stop a worker with a volatile flag", "hint": "Press <b>Run</b>. Then remove <code>volatile</code>: on many JVMs the program may never end, because the JIT compiler can hoist the read of <code>running</code> out of the loop. (The online runner would time out.)", "code": "public class Main {\n    static volatile boolean running = true;\n    static long chunks = 0;\n\n    public static void main(String[] args) throws InterruptedException {\n        Thread encoder = new Thread(() -> {\n            while (running) {\n                chunks++;\n            }\n            System.out.println(\"encoder: saw running = false, stopping\");\n        }, \"encoder\");\n        encoder.start();\n        Thread.sleep(50);\n        running = false;\n        encoder.join();\n        System.out.println(\"encoded some chunks: \" + (chunks > 0));\n    }\n}\n"}]}</script>
+    </div>
+    <p class="wx__label">What happens in memory, step by step</p>
+    <p class="wx__how">Recorded from the real JVM: press <b>Next</b> to execute one line at a time. Watch method calls push and pop frames on the stack, and objects (numbered #1, #2 …) appear on the heap.</p>
+    <div class="tracer">
+    <script type="application/json">{"lang": "java", "code": ["public class Main {", "    static volatile boolean running = true;", "    static long chunks = 0;", "", "    public static void main(String[] args) throws InterruptedException {", "        Thread encoder = new Thread(() -> {", "            while (running) {", "                chunks++;", "            }", "            System.out.println(\"encoder: saw running = false, stopping\");", "        }, \"encoder\");", "        encoder.start();", "        Thread.sleep(50);", "        running = false;", "        encoder.join();", "        System.out.println(\"encoded some chunks: \" + (chunks > 0));", "    }", "}"], "steps": [{"line": 6, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["encoder", "→ #1 Thread"]]}], "heap": ["<b>static</b> Main.chunks = 0", "<b>static</b> Main.running = true", "<b>#1</b> Thread &quot;encoder&quot; (NEW)", "<b>#2</b> String[0] (args, empty)"], "newVar": "encoder", "phase": "Create", "note": "The encoder thread object. Now <code>encoder</code> = → #1 Thread. New object <b>#1</b> on the heap: Thread &quot;encoder&quot; (NEW)."}, {"line": 12, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["encoder", "→ #1 Thread"]]}], "heap": ["<b>static</b> Main.chunks = 0", "<b>static</b> Main.running = true", "<b>#1</b> Thread &quot;encoder&quot; (RUNNABLE)", "<b>#2</b> String[0] (args, empty)"], "phase": "Start", "note": "The encoder spins, counting chunks, re-reading <code>running</code> each time."}, {"line": 13, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["encoder", "→ #1 Thread"]]}], "heap": ["<b>static</b> Main.chunks = 2514643", "<b>static</b> Main.running = true", "<b>#1</b> Thread &quot;encoder&quot; (RUNNABLE)", "<b>#2</b> String[0] (args, empty)"], "phase": "Let it work", "note": "main pauses 50 ms while the encoder runs."}, {"line": 14, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["encoder", "→ #1 Thread"]]}], "heap": ["<b>static</b> Main.chunks = 2514836", "<b>static</b> Main.running = false", "<b>#1</b> Thread &quot;encoder&quot; (RUNNABLE)", "<b>#2</b> String[0] (args, empty)"], "phase": "Signal", "note": "main writes false. Because <code>running</code> is <code>volatile</code>, the write is published to all threads at once and the encoder's next read sees it."}, {"line": 15, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["encoder", "→ #1 Thread"]]}], "heap": ["<b>static</b> Main.chunks = 2514836", "<b>static</b> Main.running = false", "<b>#1</b> Thread &quot;encoder&quot; (TERMINATED)", "<b>#2</b> String[0] (args, empty)"], "out": "encoder: saw running = false, stopping\n", "phase": "Join", "note": "The encoder leaves its loop, prints, and ends."}, {"line": 16, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["encoder", "→ #1 Thread"]]}], "heap": ["<b>static</b> Main.chunks = 2514836", "<b>static</b> Main.running = false", "<b>#1</b> Thread &quot;encoder&quot; (TERMINATED)", "<b>#2</b> String[0] (args, empty)"], "out": "encoded some chunks: true\n", "phase": "Report", "note": "<code>chunks</code> is only read after <code>join()</code>, which guarantees we see the encoder's final value. Prints <code>encoded some chunks: true</code>."}, {"line": 17, "phase": "Program ends", "note": "<code>main</code> returns, its frame is popped and the program ends.", "stack": [], "heap": []}]}</script>
+  </div>
+  </article>
+
+</section>
+
+<!-- ======================= PART 9: QUIZ AND REVISION ======================= -->
+<section class="part" id="quiz">
+  <span class="part-label"><b>9</b> Quiz and revision</span>
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <script type="application/json">[
+ {
+  "q": "Why can count++ lose updates when two threads run it?",
+  "options": [
+   "Java ints are 16-bit",
+   "It is read, add, write: another thread can interleave between the steps",
+   "The JVM skips it",
+   "Only on one-core machines"
+  ],
+  "answer": 1,
+  "why": "count++ is not atomic; two threads can read the same old value."
+ },
+ {
+  "q": "A synchronized instance method locks…",
+  "options": [
+   "the class",
+   "this object",
+   "all objects",
+   "nothing"
+  ],
+  "answer": 1,
+  "why": "Instance methods use this object's monitor; static synchronized methods use the Class object."
+ },
+ {
+  "q": "Two threads call synchronized methods on two DIFFERENT objects of the same class. They…",
+  "options": [
+   "block each other",
+   "don't block each other",
+   "deadlock",
+   "throw an exception"
+  ],
+  "answer": 1,
+  "why": "Each object has its own lock."
+ },
+ {
+  "q": "What does volatile guarantee?",
+  "options": [
+   "Atomic ++",
+   "Visibility: every thread sees the latest written value",
+   "Mutual exclusion",
+   "Faster code"
+  ],
+  "answer": 1,
+  "why": "volatile is about visibility and ordering, not atomicity of compound actions."
+ },
+ {
+  "q": "Which is lock-free and safe for a shared counter?",
+  "options": [
+   "int",
+   "volatile int",
+   "AtomicInteger",
+   "Integer"
+  ],
+  "answer": 2,
+  "why": "AtomicInteger uses compare-and-swap for atomic read-modify-write."
+ },
+ {
+  "q": "A thread waiting to enter a synchronized block held by another thread is in state…",
+  "options": [
+   "WAITING",
+   "BLOCKED",
+   "TIMED_WAITING",
+   "NEW"
+  ],
+  "answer": 1,
+  "why": "BLOCKED = waiting to acquire a monitor."
+ },
+ {
+  "q": "Thread 1 holds lock A and wants B; thread 2 holds B and wants A. This is…",
+  "options": [
+   "a race condition",
+   "a deadlock",
+   "starvation",
+   "fine"
+  ],
+  "answer": 1,
+  "why": "Each waits for the other forever. Prevent it with a consistent lock order."
+ },
+ {
+  "q": "Is a synchronized lock re-entrant (can the owner enter another block on the same lock)?",
+  "options": [
+   "Yes",
+   "No, it deadlocks itself",
+   "Only for static methods",
+   "Only once"
+  ],
+  "answer": 0,
+  "why": "Java monitors are re-entrant: the owning thread can re-acquire the lock it already holds."
+ }
+]</script>
+  </div>
+  <h3>Quick revision</h3>
+  <div class="revision">
+    <h3>Lesson 12.4 in one screen</h3>
+    <ul>
+      <li>Race condition: result depends on thread timing; needs shared mutable data and at least one writer.</li>
+      <li><code>x++</code> is read-add-write, not atomic. Check-then-act (<code>if (bal &gt;= amt) bal -= amt</code>) is also a race.</li>
+      <li><code>synchronized</code> = mutual exclusion + visibility, using an object's monitor. Instance method → <code>this</code>; static → <code>Class</code>.</li>
+      <li>Threads must lock the <b>same</b> object to exclude each other.</li>
+      <li><code>volatile</code> = visibility only. Atomic classes = lock-free safe updates of one variable.</li>
+      <li>Deadlock: circular wait for locks. Prevent with a fixed lock order and short critical sections.</li>
+      <li>Locks are re-entrant and released even when an exception is thrown.</li>
+    </ul>
+  </div>
+  <h3>Interview and viva questions</h3>
+  <div class="faq">
+    <details><summary>What is a race condition? Give an example.</summary><p>A bug where the outcome depends on the interleaving of threads accessing shared mutable data. Example: two threads run <code>count++</code> on a shared int; both read the same value and one increment is lost. Another: two withdrawals both pass a balance check before either debits.</p></details>
+    <details><summary>Difference between a synchronized method and a synchronized block?</summary><p>A synchronized method locks the whole method on <code>this</code> (or the Class for static methods). A block locks only its statements, on any object you choose. Blocks keep critical sections smaller and let you use private lock objects that outside code can't interfere with.</p></details>
+    <details><summary>What is the difference between volatile and synchronized?</summary><p><code>volatile</code> ensures reads and writes of one variable go to main memory and aren't reordered, giving visibility. It doesn't make compound actions atomic. <code>synchronized</code> provides both mutual exclusion and visibility for any block of code, at the cost of possible blocking.</p></details>
+    <details><summary>What is a deadlock and how do you prevent it?</summary><p>Two or more threads each hold a lock and wait for a lock held by another, forever. Prevent it by acquiring locks in a consistent global order, holding locks briefly, avoiding calling unknown code while holding a lock, or using <code>ReentrantLock.tryLock</code> with a timeout.</p></details>
+    <details><summary>How does AtomicInteger work without locks?</summary><p>It uses a CPU compare-and-swap (CAS) instruction: read the value, compute the new one, and write it only if the value is still what was read; otherwise retry. No thread blocks, so there's no deadlock risk, though heavy contention can cause retries (LongAdder reduces that).</p></details>
+  </div>
+
+  <h3 id="practice">Practice problems</h3>
+  <p class="prob-intro">Find the shared data, then protect it with <code>synchronized</code>, an atomic class, or <code>volatile</code>. Every solution prints the same result on every run. The last three are business tasks.</p>
+  <div class="probs">
+    <article class="prob"><div class="prob__head"><span class="prob__num">P1</span><span class="prob__tag prob__tag--easy">Easy</span><h4>Synchronized counter</h4></div>
+      <p>Two threads each call <code>inc()</code> 50,000 times on one counter. Make the total always 100000.</p>
+      <div class="prob__io"><div><small>Input</small><pre>2 × 50,000</pre></div><div><small>Expected output</small><pre>100000</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="java" data-file="Main.java"><pre><code>class Counter {
+    private int n;
+    synchronized void inc() { n++; }
+    synchronized int get() { return n; }
+}
+
+public class Main {
+    public static void main(String[] args) throws InterruptedException {
+        Counter c = new Counter();
+        Runnable job = () -&gt; { for (int i = 0; i &lt; 50_000; i++) c.inc(); };
+        Thread a = new Thread(job), b = new Thread(job);
+        a.start(); b.start();
+        a.join(); b.join();
+        System.out.println(c.get());
+    }
+}</code></pre><div class="output">100000</div></div>
+        <p><b>How it works:</b> a synchronized instance method locks <code>this</code>. Both threads use the same Counter, so they take turns inside <code>inc()</code>.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P2</span><span class="prob__tag prob__tag--easy">Easy</span><h4>Synchronized block on a lock object</h4></div>
+      <p>Do the same with a static <code>int</code> and a <code>synchronized (LOCK)</code> block around <code>count++</code> only.</p>
+      <div class="prob__io"><div><small>Input</small><pre>2 × 50,000</pre></div><div><small>Expected output</small><pre>100000</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="java" data-file="Main.java"><pre><code>public class Main {
+    static int count = 0;
+    static final Object LOCK = new Object();
+
+    public static void main(String[] args) throws InterruptedException {
+        Runnable job = () -&gt; {
+            for (int i = 0; i &lt; 50_000; i++) {
+                synchronized (LOCK) {
+                    count++;
+                }
+            }
+        };
+        Thread a = new Thread(job), b = new Thread(job);
+        a.start(); b.start();
+        a.join(); b.join();
+        System.out.println(count);
+    }
+}</code></pre><div class="output">100000</div></div>
+        <p><b>How it works:</b> a block lets you lock only the lines that touch shared data. Make the lock object <code>final</code> so it can never be replaced.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P3</span><span class="prob__tag prob__tag--easy">Easy</span><h4>AtomicInteger</h4></div>
+      <p>Three threads each add 10 to an <code>AtomicInteger</code> 100 times using <code>addAndGet</code>. Print the result.</p>
+      <div class="prob__io"><div><small>Input</small><pre>3 × 100 × 10</pre></div><div><small>Expected output</small><pre>3000</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="java" data-file="Main.java"><pre><code>import java.util.concurrent.atomic.AtomicInteger;
+
+public class Main {
+    public static void main(String[] args) throws InterruptedException {
+        AtomicInteger total = new AtomicInteger();
+        Thread[] ts = new Thread[3];
+        for (int i = 0; i &lt; 3; i++) {
+            ts[i] = new Thread(() -&gt; { for (int k = 0; k &lt; 100; k++) total.addAndGet(10); });
+            ts[i].start();
+        }
+        for (Thread t : ts) t.join();
+        System.out.println(total.get());
+    }
+}</code></pre><div class="output">3000</div></div>
+        <p><b>How it works:</b> atomic classes use a CPU compare-and-swap instruction, retrying if another thread got there first. No thread is ever BLOCKED.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P4</span><span class="prob__tag prob__tag--medium">Medium</span><h4>Static synchronized across objects</h4></div>
+      <p>Each thread uses its <b>own</b> <code>Visit</code> object, but all visits must be counted in one static total. Use a <code>static synchronized</code> method.</p>
+      <div class="prob__io"><div><small>Input</small><pre>4 threads × 2,500 visits</pre></div><div><small>Expected output</small><pre>visits: 10000</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="java" data-file="Main.java"><pre><code>class Visit {
+    private static int total = 0;
+
+    static synchronized void record() { total++; }
+    static synchronized int total() { return total; }
+}
+
+public class Main {
+    public static void main(String[] args) throws InterruptedException {
+        Thread[] ts = new Thread[4];
+        for (int i = 0; i &lt; 4; i++) {
+            ts[i] = new Thread(() -&gt; { for (int k = 0; k &lt; 2500; k++) Visit.record(); });
+            ts[i].start();
+        }
+        for (Thread t : ts) t.join();
+        System.out.println(&quot;visits: &quot; + Visit.total());
+    }
+}</code></pre><div class="output">visits: 10000</div></div>
+        <p><b>How it works:</b> a static synchronized method locks the <b>class object</b> <code>Visit.class</code>, one lock for the whole class, which is right for a static field. An instance lock (<code>this</code>) would not protect it if the threads used different objects.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P5</span><span class="prob__tag prob__tag--medium">Medium</span><h4>Thread-safe list</h4></div>
+      <p>Two threads each add 1,000 items to a shared list. A plain ArrayList can lose items or crash. Use <code>Collections.synchronizedList</code> and print the size.</p>
+      <div class="prob__io"><div><small>Input</small><pre>2 × 1,000 items</pre></div><div><small>Expected output</small><pre>orders: 2000</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="java" data-file="Main.java"><pre><code>import java.util.*;
+
+public class Main {
+    public static void main(String[] args) throws InterruptedException {
+        List&lt;Integer&gt; orders = Collections.synchronizedList(new ArrayList&lt;&gt;());
+        Runnable job = () -&gt; { for (int i = 0; i &lt; 1000; i++) orders.add(i); };
+        Thread a = new Thread(job), b = new Thread(job);
+        a.start(); b.start();
+        a.join(); b.join();
+        System.out.println(&quot;orders: &quot; + orders.size());
+    }
+}</code></pre><div class="output">orders: 2000</div></div>
+        <p><b>How it works:</b> the wrapper makes each method synchronized. ArrayList's <code>add</code> does several steps (check capacity, store, size++), so unsynchronized adds can be lost. For heavy use, prefer <code>java.util.concurrent</code> collections such as <code>CopyOnWriteArrayList</code> or <code>ConcurrentHashMap</code>.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P6</span><span class="prob__tag prob__tag--medium">Medium</span><h4>Check-then-act fixed</h4></div>
+      <p>A coupon can be used at most 3 times. Ten threads try to redeem it. Make <code>redeem()</code> safe and print how many succeeded.</p>
+      <div class="prob__io"><div><small>Input</small><pre>limit 3, 10 attempts</pre></div><div><small>Expected output</small><pre>redeemed 3 times</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="java" data-file="Main.java"><pre><code>class Coupon {
+    private int uses = 0;
+
+    synchronized boolean redeem() {
+        if (uses &lt; 3) {
+            uses++;
+            return true;
+        }
+        return false;
+    }
+}
+
+public class Main {
+    public static void main(String[] args) throws InterruptedException {
+        Coupon c = new Coupon();
+        boolean[] ok = new boolean[10];
+        Thread[] ts = new Thread[10];
+        for (int i = 0; i &lt; 10; i++) {
+            int k = i;
+            ts[i] = new Thread(() -&gt; ok[k] = c.redeem());
+            ts[i].start();
+        }
+        int wins = 0;
+        for (int i = 0; i &lt; 10; i++) {
+            ts[i].join();
+            if (ok[i]) wins++;
+        }
+        System.out.println(&quot;redeemed &quot; + wins + &quot; times&quot;);
+    }
+}</code></pre><div class="output">redeemed 3 times</div></div>
+        <p><b>How it works:</b> the comparison and the increment must be in the same synchronized method. Synchronizing them separately would still allow two threads to pass the check before either increments.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P7</span><span class="prob__tag prob__tag--business">Business problem</span><h4>Flash-sale stock reservation</h4></div>
+      <p>A phone has 5 units in stock. Eight shoppers' threads each try to reserve one. Print reserved and sold-out counts and the final stock.</p>
+      <div class="prob__io"><div><small>Input</small><pre>stock 5, 8 shoppers</pre></div><div><small>Expected output</small><pre>reserved: 5, sold out for: 3, stock now: 0</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="java" data-file="Main.java"><pre><code>class Stock {
+    private int units = 5;
+
+    synchronized boolean reserve() {
+        if (units == 0) return false;
+        units--;
+        return true;
+    }
+
+    synchronized int units() { return units; }
+}
+
+public class Main {
+    public static void main(String[] args) throws InterruptedException {
+        Stock phone = new Stock();
+        boolean[] got = new boolean[8];
+        Thread[] shoppers = new Thread[8];
+        for (int i = 0; i &lt; 8; i++) {
+            int k = i;
+            shoppers[i] = new Thread(() -&gt; got[k] = phone.reserve(), &quot;shopper-&quot; + i);
+            shoppers[i].start();
+        }
+        int reserved = 0;
+        for (int i = 0; i &lt; 8; i++) {
+            shoppers[i].join();
+            if (got[i]) reserved++;
+        }
+        System.out.println(&quot;reserved: &quot; + reserved + &quot;, sold out for: &quot; + (8 - reserved) + &quot;, stock now: &quot; + phone.units());
+    }
+}</code></pre><div class="output">reserved: 5, sold out for: 3, stock now: 0</div></div>
+        <p><b>How it works:</b> this is the classic overselling bug in flash sales. Real systems use the same idea one level down: a database row lock or an atomic <code>UPDATE … WHERE units &gt; 0</code>.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P8</span><span class="prob__tag prob__tag--business">Business problem</span><h4>Transfers without deadlock</h4></div>
+      <p>Two threads run transfers at once: ten of A→B ₹100 and ten of B→A ₹50. Each must lock both accounts. Always lock the account with the smaller id first, so the threads can't deadlock. Print the final balances.</p>
+      <div class="prob__io"><div><small>Input</small><pre>A (id 1) ₹500, B (id 2) ₹300</pre></div><div><small>Expected output</small><pre>A: 0, B: 800, total: 800</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="java" data-file="Main.java"><pre><code>class Account {
+    final int id;
+    int balance;
+
+    Account(int id, int balance) {
+        this.id = id;
+        this.balance = balance;
+    }
+}
+
+public class Main {
+    static void transfer(Account from, Account to, int amt) {
+        Account first = from.id &lt; to.id ? from : to;
+        Account second = first == from ? to : from;
+        synchronized (first) {
+            synchronized (second) {
+                from.balance -= amt;
+                to.balance += amt;
+            }
+        }
+    }
+
+    public static void main(String[] args) throws InterruptedException {
+        Account a = new Account(1, 500), b = new Account(2, 300);
+        Thread t1 = new Thread(() -&gt; { for (int i = 0; i &lt; 10; i++) transfer(a, b, 100); });
+        Thread t2 = new Thread(() -&gt; { for (int i = 0; i &lt; 10; i++) transfer(b, a, 50); });
+        t1.start(); t2.start();
+        t1.join(); t2.join();
+        System.out.println(&quot;A: &quot; + a.balance + &quot;, B: &quot; + b.balance + &quot;, total: &quot; + (a.balance + b.balance));
+    }
+}</code></pre><div class="output">A: 0, B: 800, total: 800</div></div>
+        <p><b>How it works:</b> if t1 locked A then waited for B while t2 locked B then waited for A, both would wait forever: a <b>deadlock</b>. A fixed global lock order makes that cycle impossible. The total stays ₹800. (No balance checks here, so balances may go negative; it's only a locking demo.)</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P9</span><span class="prob__tag prob__tag--business">Business problem</span><h4>Page-view counter for a news site</h4></div>
+      <p>Six web threads each record 5,000 page views. Use <code>LongAdder</code>, which is faster than AtomicLong when many threads update often, and print the total.</p>
+      <div class="prob__io"><div><small>Input</small><pre>6 × 5,000</pre></div><div><small>Expected output</small><pre>page views: 30000</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="java" data-file="Main.java"><pre><code>import java.util.concurrent.atomic.LongAdder;
+
+public class Main {
+    public static void main(String[] args) throws InterruptedException {
+        LongAdder views = new LongAdder();
+        Thread[] web = new Thread[6];
+        for (int i = 0; i &lt; 6; i++) {
+            web[i] = new Thread(() -&gt; { for (int k = 0; k &lt; 5000; k++) views.increment(); });
+            web[i].start();
+        }
+        for (Thread t : web) t.join();
+        System.out.println(&quot;page views: &quot; + views.sum());
+    }
+}</code></pre><div class="output">page views: 30000</div></div>
+        <p><b>How it works:</b> LongAdder keeps several internal cells so threads rarely compete for the same one, and <code>sum()</code> adds them up. It's the usual choice for high-traffic counters and metrics.</p>
+      </details>
+    </article>
+  </div>
+
+
+
+  <h3 id="scenarios">Real-world scenario questions (asked in company interviews)</h3>
+  <p class="scn-intro">Concurrency bugs are favourite interview topics because they are expensive in production and invisible in simple tests.</p>
+  <div class="scenarios">
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">E-commerce · overselling</span><span class="scn__tag scn__tag--level">Fresher</span></div>
+      <h4>103 orders for 100 phones</h4>
+      <p class="scn__situation">During a flash sale, 100 units were listed but 103 orders were confirmed. The code does <code>if (stock &gt; 0) { createOrder(); stock--; }</code> in a request handler. Explain and fix.</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> check-then-act races.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>Several request threads passed the <code>stock &gt; 0</code> check before any of them decremented: a check-then-act race.</li>
+          <li>Make the check and decrement one atomic step: a synchronized method, an <code>AtomicInteger</code> with <code>compareAndSet</code>/<code>getAndUpdate</code>, or (across servers) a conditional database update <code>UPDATE … SET stock = stock - 1 WHERE stock &gt; 0</code>.</li>
+          <li>Create the order only after the reservation succeeds.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> “add a small sleep” or “it only happens under load”. That's exactly when it matters.</p>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Code review · locks</span><span class="scn__tag scn__tag--level">Junior</span></div>
+      <h4>Synchronized, yet still wrong</h4>
+      <p class="scn__situation">A colleague wrote <code>synchronized (new Object()) { total += amount; }</code> and says the method is now thread-safe. Tests still show wrong totals. Why?</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> that exclusion requires a shared lock.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>Every call locks a brand-new object, so no two threads ever compete for the same lock: no exclusion at all.</li>
+          <li>Use one shared, final lock object (<code>private final Object lock = new Object();</code>) or <code>synchronized (this)</code>, or an atomic type.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> locking on strings or boxed Integers: they may be shared or replaced unexpectedly.</p>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Payments · deadlock</span><span class="scn__tag scn__tag--level">Mid</span></div>
+      <h4>Transfers freeze at month end</h4>
+      <p class="scn__situation">The transfer service locks the sender account, then the receiver. On salary day it sometimes freezes completely; a thread dump shows two threads BLOCKED, each holding the lock the other needs. Fix it.</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> deadlock diagnosis and lock ordering.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>A→B and B→A transfers ran at once: thread 1 holds A and wants B; thread 2 holds B and wants A. A circular wait.</li>
+          <li>Lock by a global order (e.g. smaller account id first), whatever the transfer direction.</li>
+          <li>Alternatively use <code>tryLock</code> with a timeout and retry, and alert on long lock waits.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> restarting the server as the fix. The deadlock will return on the next busy day.</p>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Performance · contention</span><span class="scn__tag scn__tag--level">Mid</span></div>
+      <h4>Thread-safe, but now slow</h4>
+      <p class="scn__situation">To fix a race, someone made the whole <code>handleRequest()</code> method synchronized, including a 300 ms database call. Throughput dropped from 800 to 3 requests per second. What would you do?</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> minimal critical sections.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>The lock serialises every request, so all requests queue behind the slow call.</li>
+          <li>Identify the actual shared state, and lock only the few lines that touch it; do I/O outside the lock.</li>
+          <li>Use concurrent data structures (<code>ConcurrentHashMap</code>, atomics) where they fit, so most code needs no lock.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> removing synchronization entirely to regain speed; the race comes back.</p>
+      </div></details>
+    </article>
+  </div>
+</section>
+
+<nav class="lesson-nav" id="lesson-nav" aria-label="Lesson navigation"></nav>
+<div class="ad-slot" data-slot="bottom"></div>
+</article>
+
+<aside class="lesson-side">
+  <nav class="toc" aria-label="In this lesson">
+    <h4>In this lesson</h4>
+    <ol>
+      <li><a href="#story">The story</a></li>
+      <li><a href="#definition">Definition</a></li>
+      <li><a href="#types">Types and ways to use it</a></li>
+      <li><a href="#steps">Step by step</a></li>
+      <li><a href="#animation">See it happen</a></li>
+      <li><a href="#real-world">Real-world use</a></li>
+      <li><a href="#run">Run the code</a></li>
+      <li><a href="#tracer">Line by line</a></li>
+      <li><a href="#worked">Worked examples</a></li>
+      <li><a href="#quiz">Quiz and revision</a></li>
+      <li><a href="#practice">Practice problems</a></li>
+      <li><a href="#scenarios">Industry scenarios</a></li>
+    </ol>
+  </nav>
+  <div class="ad-slot" data-slot="side"></div>
+  <div class="outline" id="outline"></div>
+</aside>
+</div>
+</main>
+
+<footer class="site-footer">
+  <div class="wrap">
+    <div><h4>MyPhatshala</h4><p>Free programming and IT lessons that show what happens behind the screen.</p></div>
+    <div><h4>Learn</h4><a href="../../../../#tracks">All courses</a><a href="../../">Core Java syllabus</a></div>
+    <div><h4>Site</h4><a href="../../../../about.html">About</a><a href="../../../../contact.html">Contact</a><a href="../../../../privacy.html">Privacy policy</a><a href="../../../../disclaimer.html">Disclaimer</a></div>
+    <div class="copyright">© MyPhatshala. All lesson content, diagrams and animations are original. Please do not copy without permission.</div>
+  </div>
+</footer>
+
+<script src="../../../../data/courses/core-java.js"></script>
+<script src="../../../../assets/js/lesson.js"></script>
+<script src="../../../../assets/js/ads.js"></script>
+<script src="../../../../assets/js/site.js"></script>
+</body>
+</html>

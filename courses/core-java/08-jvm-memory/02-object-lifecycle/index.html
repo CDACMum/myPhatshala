@@ -1,0 +1,1011 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Object lifecycle | MyPhatshala</title>
+<meta name="description" content="The Java object lifecycle explained: allocation, zero-filled defaults and the constructor chain, use, becoming unreachable by reassignment, null or scope end, reachability from GC roots, islands of isolation, why finalize() is deprecated, and Cleaner and try-with-resources instead. With animations, a JVM tracer, 8 practice problems, quiz and industry scenarios.">
+<meta name="mp:minutes" content="22">
+<link rel="canonical" href="https://myphatshala.com/courses/core-java/08-jvm-memory/02-object-lifecycle/">
+<meta property="og:title" content="The life of a Java object: from new to garbage · MyPhatshala">
+<meta property="og:description" content="See an object get built step by step, lose its last reference and disappear. Then solve 8 problems including business tasks.">
+<link rel="icon" href="../../../../assets/img/logo.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Fraunces:ital,opsz,wght@0,9..144,600;0,9..144,700;1,9..144,600&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../../../../assets/css/style.css">
+<link rel="stylesheet" href="../../../../assets/css/lesson.css">
+<script src="../../../../assets/js/config.js"></script>
+<script>try { const t = localStorage.getItem("mp-theme"); if (t) document.documentElement.dataset.theme = t; } catch (e) {}</script>
+<script type="application/ld+json">{"@context": "https://schema.org", "@type": "LearningResource", "name": "Object lifecycle", "learningResourceType": "Lesson", "educationalLevel": "Beginner", "isAccessibleForFree": true, "inLanguage": "en", "isPartOf": {"@type": "Course", "name": "Core Java", "provider": {"@type": "Organization", "name": "MyPhatshala"}}}</script>
+</head>
+<body style="--track:#E8772E" data-lesson="08-jvm-memory/02-object-lifecycle" data-course-root="../../">
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="site-header">
+  <div class="wrap">
+    <a class="brand" href="../../../../" aria-label="MyPhatshala home"><img src="../../../../assets/img/logo.svg" width="34" height="34" alt=""><span>My<b>Phatshala</b></span></a>
+    <nav class="nav" aria-label="Main">
+      <a href="../../../../#tracks">All courses</a>
+      <a href="../../">Core Java syllabus</a>
+      <button class="theme-btn" id="theme-btn" aria-label="Toggle dark mode"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg></button>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+<section class="lesson-hero">
+  <div class="wrap">
+    <nav class="crumbs" aria-label="Breadcrumb"><a href="../../../../">Home</a><span>›</span><a href="../../../../#track-programming">Programming Languages</a><span>›</span><a href="../../">Core Java</a><span>›</span><b>Lesson 8.2</b></nav>
+    <h1>Object lifecycle</h1>
+    <p class="lead">Every object you create with new goes through the same life: memory is reserved and zero-filled, the constructor fills it in, your code uses it, and one day the last reference to it is lost. You'll see each stage inside the JVM, learn exactly what “reachable” means, why finalize() is deprecated, how try-with-resources and Cleaner release resources properly, and then practise with 8 problems.</p>
+    <div class="lesson-meta"><span>Module 8 · JVM Memory</span><span>⏱ 22 min</span><span>Intermediate</span><span>8 practice problems</span></div>
+  </div>
+</section>
+
+<div class="wrap lesson-layout">
+<article class="lesson-main">
+<!-- ======================= PART 1: THE STORY ======================= -->
+<section class="part" id="story">
+  <span class="part-label"><b>1</b> The story</span>
+  <h2>Who deletes the old orders?</h2>
+  <div class="story">
+    <p class="narration">Riya is building the canteen's pre-order app. Every time a student edits an order, her code does <code>order = new Order(...)</code>. After testing, she has created 2,000 Order objects but never deleted one. In C, her friend Kabir says, she would have had to call <code>free()</code> on every one of them. She starts to worry that her app is slowly eating the server's memory.</p>
+    <div class="scene">
+      <svg viewBox="0 0 640 170" role="img" aria-label="A timeline of an object's life: allocated, constructed, in use, unreachable, collected. A reference arrow is attached during use and cut at the unreachable stage.">
+        <g font-size="10">
+          <g class="s-card2" style="stroke:var(--line)">
+            <rect x="14" y="40" width="108" height="64" rx="8"/><rect x="138" y="40" width="108" height="64" rx="8"/><rect x="262" y="40" width="108" height="64" rx="8"/>
+          </g>
+          <rect x="386" y="40" width="108" height="64" rx="8" style="fill:none;stroke:var(--red);stroke-width:1.5;stroke-dasharray:5 4"/>
+          <rect x="510" y="40" width="116" height="64" rx="8" style="fill:none;stroke:var(--line);stroke-width:1.2;stroke-dasharray:2 4"/>
+          <g font-weight="700" text-anchor="middle"><text x="68" y="30" class="s-blue">1. Allocated</text><text x="192" y="30" class="s-blue">2. Constructed</text><text x="316" y="30" class="s-green">3. In use</text><text x="440" y="30" class="s-red">4. Unreachable</text><text x="568" y="30" class="s-ink2">5. Collected</text></g>
+          <g class="mono" font-size="9.4">
+            <text x="24" y="62" class="s-ink">id = 0</text><text x="24" y="78" class="s-ink">item = null</text><text x="24" y="94" class="s-ink2">all zeros</text>
+            <text x="148" y="62" class="s-ink">id = 7</text><text x="148" y="78" class="s-ink">item = "Dosa"</text><text x="148" y="94" class="s-ink2">fields filled</text>
+            <text x="272" y="62" class="s-ink">id = 7</text><text x="272" y="78" class="s-ink">item = "Dosa"</text><text x="272" y="94" class="s-green">order → here</text>
+            <text x="396" y="62" class="s-ink2">id = 7</text><text x="396" y="78" class="s-ink2">item = "Dosa"</text><text x="396" y="94" class="s-red">no references</text>
+            <text x="568" y="76" text-anchor="middle" class="s-ink2">space reused</text>
+          </g>
+          <path d="M316 150 V110" style="stroke:var(--green);stroke-width:2"/><path d="M310 116l6 -8 6 8" style="stroke:var(--green);stroke-width:2;fill:none"/>
+          <text x="316" y="162" text-anchor="middle" class="mono s-green">order</text>
+          <path d="M440 150 V124" style="stroke:var(--red);stroke-width:2;stroke-dasharray:3 3"/><path d="M432 132 l16 -10 M432 122 l16 10" style="stroke:var(--red);stroke-width:2"/>
+          <text x="440" y="162" text-anchor="middle" class="mono s-red">order = new …</text>
+          <text x="130" y="140" text-anchor="middle" class="s-ink2">new does steps 1 and 2</text>
+          <text x="568" y="140" text-anchor="middle" class="s-ink2">done by the GC, not you</text>
+        </g>
+        <text x="632" y="166" text-anchor="end" class="s-wm">myphatshala.com</text>
+      </svg>
+    </div>
+    <div class="panel">
+      <div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#FCE6D6"/><path d="M14 64c2-12 9-18 18-18s16 6 18 18z" fill="#2E5AAC"/><circle cx="32" cy="29" r="12" fill="#C68B5E"/><path d="M19 29c0-10 6-15 13-15s13 5 13 15c-3-5-7-8-13-8s-10 3-13 8z" fill="#2A1B14"/><path d="M43 27c3 6 3 14 0 20" stroke="#2A1B14" stroke-width="4" fill="none" stroke-linecap="round"/><circle cx="27.5" cy="30" r="1.5" fill="#2A1B14"/><circle cx="36.5" cy="30" r="1.5" fill="#2A1B14"/><path d="M28 35q4 3 8 0" stroke="#2A1B14" stroke-width="1.6" fill="none" stroke-linecap="round"/><circle cx="32" cy="24" r="1.2" fill="#D64545"/></svg></div>
+      <div class="bubble"><b class="who">Riya</b><p>Sir, I keep replacing orders with new ones. Shouldn't I be deleting the old Order objects somewhere?</p></div>
+    </div>
+    <div class="panel panel--right">
+      <div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#DDEFE6"/><path d="M12 64c2-12 10-18 20-18s18 6 20 18z" fill="#F4F1EA"/><path d="M28 46l4 8 4-8" fill="#2F7D5B"/><circle cx="32" cy="28" r="12" fill="#B57A50"/><path d="M20 26c0-8 5-13 12-13s12 5 12 13c-2-3-6-5-12-5s-10 2-12 5z" fill="#5A5A5A"/><path d="M22 32c1 8 5 11 10 11s9-3 10-11c-2 3-6 4-10 4s-8-1-10-4z" fill="#5A5A5A"/><circle cx="27" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><circle cx="37" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><path d="M30.4 29h3.2" stroke="#1B2433" stroke-width="1.4"/><circle cx="27" cy="29" r="1.1" fill="#1B2433"/><circle cx="37" cy="29" r="1.1" fill="#1B2433"/></svg></div>
+      <div class="bubble"><b class="who">Arjun Sir</b><p>Java has no <code>delete</code>. The moment no variable, field or array can reach the old order any more, it becomes <b>garbage</b>, and the garbage collector reclaims its memory when it needs space.</p></div>
+    </div>
+    <div class="panel">
+      <div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#FCE6D6"/><path d="M14 64c2-12 9-18 18-18s16 6 18 18z" fill="#2E5AAC"/><circle cx="32" cy="29" r="12" fill="#C68B5E"/><path d="M19 29c0-10 6-15 13-15s13 5 13 15c-3-5-7-8-13-8s-10 3-13 8z" fill="#2A1B14"/><path d="M43 27c3 6 3 14 0 20" stroke="#2A1B14" stroke-width="4" fill="none" stroke-linecap="round"/><circle cx="27.5" cy="30" r="1.5" fill="#2A1B14"/><circle cx="36.5" cy="30" r="1.5" fill="#2A1B14"/><path d="M28 35q4 3 8 0" stroke="#2A1B14" stroke-width="1.6" fill="none" stroke-linecap="round"/><circle cx="32" cy="24" r="1.2" fill="#D64545"/></svg></div>
+      <div class="bubble"><b class="who">Riya</b><p>So I can't leak memory in Java at all?</p></div>
+    </div>
+    <div class="panel panel--right">
+      <div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#DDEFE6"/><path d="M12 64c2-12 10-18 20-18s18 6 20 18z" fill="#F4F1EA"/><path d="M28 46l4 8 4-8" fill="#2F7D5B"/><circle cx="32" cy="28" r="12" fill="#B57A50"/><path d="M20 26c0-8 5-13 12-13s12 5 12 13c-2-3-6-5-12-5s-10 2-12 5z" fill="#5A5A5A"/><path d="M22 32c1 8 5 11 10 11s9-3 10-11c-2 3-6 4-10 4s-8-1-10-4z" fill="#5A5A5A"/><circle cx="27" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><circle cx="37" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><path d="M30.4 29h3.2" stroke="#1B2433" stroke-width="1.4"/><circle cx="27" cy="29" r="1.1" fill="#1B2433"/><circle cx="37" cy="29" r="1.1" fill="#1B2433"/></svg></div>
+      <div class="bubble"><b class="who">Arjun Sir</b><p>You can, if you keep references you don't need, like storing every order in a static list forever. Today we follow one object from <code>new</code> to collection, so you'll know exactly when it is alive and when it is gone.</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- ======================= PART 2: DEFINITION ======================= -->
+<section class="part" id="definition">
+  <span class="part-label"><b>2</b> Definition</span>
+  <h2>What is the object lifecycle?</h2>
+  <div class="def">
+    <div class="def__formal"><small>Formal definition (write this in exams)</small>
+      <p>The <b>lifecycle</b> of a Java object has four stages. <b>Creation:</b> <code>new</code> allocates memory on the heap, initialises every field to its default value, and then runs the constructor chain (superclass constructor, field initializers and instance initializer blocks, constructor body). <b>Use:</b> the object is <b>reachable</b>, that is, there is a chain of references to it from a <b>GC root</b>, such as a local variable in an active frame or a static field. <b>Unreachable:</b> no such chain exists any more, so the object is eligible for garbage collection. <b>Collection:</b> the garbage collector reclaims its memory at a time of its own choosing, possibly never if the program ends first.</p></div>
+    <div class="def__simple"><small>In simple words</small>
+      <p>An object lives as long as someone can still find it. Lose every way to reach it, and it is rubbish waiting to be swept up. You never sweep; the JVM does, whenever it decides to.</p></div>
+  </div>
+  <h3>Words you'll meet in this lesson</h3>
+  <div class="terms">
+    <div class="term"><b>GC root</b><span>A starting point the collector trusts: locals in live frames, static fields, running threads.</span></div>
+    <div class="term"><b>Reachable</b><span>Some chain of references leads to the object from a GC root.</span></div>
+    <div class="term"><b>Unreachable</b><span>No such chain exists. The object is eligible for collection.</span></div>
+    <div class="term"><b>Island of isolation</b><span>Objects that refer to each other but can't be reached from any root. Still garbage.</span></div>
+    <div class="term"><b>finalize()</b><span>An old Object method called before collection. Deprecated since Java 9.</span></div>
+    <div class="term"><b>Cleaner</b><span>A Java 9 class that runs a cleanup action after an object becomes unreachable.</span></div>
+  </div>
+  <h3>Lifecycle facts at a glance</h3>
+  <table class="facts">
+    <tr><th>Creation order</th><td>Allocate + zero-fill → parent constructor → field initializers and <code>{ }</code> blocks (in source order) → constructor body</td></tr>
+    <tr><th>Becomes unreachable by</th><td>Reassigning the variable, setting it to <code>null</code>, the method returning (its frame is popped), or the object holding it becoming unreachable</td></tr>
+    <tr><th>GC roots</th><td>Local variables and parameters of active frames, static fields of loaded classes, live threads, references held by native code</td></tr>
+    <tr><th>When collected</th><td>Not immediately. Only when the GC runs, and never guaranteed before the program exits</td></tr>
+    <tr><th>finalize()</th><td>Deprecated in Java 9, marked for removal in Java 18. Avoid it</td></tr>
+    <tr><th>Release resources with</th><td><code>try</code>-with-resources and <code>AutoCloseable</code> (Java 7); <code>Cleaner</code> (Java 9) only as a safety net</td></tr>
+  </table>
+  <div class="callout callout--exam"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19V5a2 2 0 0 1 2-2h12v18H6a2 2 0 0 1-2-2zm0 0a2 2 0 0 1 2-2h12"/></svg><p><b>Exam tip:</b> “Is the object <b>eligible</b> for GC?” and “Has it been <b>collected</b>?” are different questions. After <code>o = null;</code> the old object is eligible; whether and when it is collected is up to the JVM. Answer “eligible”, never “destroyed”.</p></div>
+</section>
+
+<div class="ad-slot" data-slot="mid"></div>
+
+<!-- ======================= PART 3: TYPES AND WAYS TO USE IT ======================= -->
+<section class="part" id="types">
+  <span class="part-label"><b>3</b> Types and ways to use it</span>
+  <h2>Three ways to lose an object, and the right way to clean up</h2>
+  <div class="cards">
+    <div class="card"><svg class="ic" viewBox="0 0 40 40" fill="none" stroke="var(--track)" stroke-width="2"><circle cx="8" cy="20" r="4"/><path d="M12 20c8 0 10-10 18-10M12 20c8 0 10 10 18 10" /><rect x="30" y="6" width="6" height="8"/><rect x="30" y="26" width="6" height="8"/></svg><h4>Reassignment</h4><p><code>order = new Order(102);</code><br>The variable now points elsewhere. The old object loses that reference.</p><span class="tag">Point elsewhere</span></div>
+    <div class="card"><svg class="ic" viewBox="0 0 40 40" fill="none" stroke="var(--red)" stroke-width="2"><circle cx="20" cy="20" r="13"/><path d="M11 29L29 11"/></svg><h4>Set to null</h4><p><code>order = null;</code><br>Useful for long-lived fields or arrays. Rarely needed for locals.</p><span class="tag">Drop it</span></div>
+    <div class="card"><svg class="ic" viewBox="0 0 40 40" fill="none" stroke="var(--blue)" stroke-width="2"><rect x="8" y="22" width="24" height="10" rx="2"/><rect x="8" y="8" width="24" height="10" rx="2" stroke-dasharray="3 3"/><path d="M20 4v-2"/></svg><h4>Scope end</h4><p>A method returns and its frame is popped. Objects referenced only by its locals become unreachable.</p><span class="tag">Frame popped</span></div>
+  </div>
+  <h3>Releasing resources: try-with-resources and Cleaner</h3>
+  <p>Memory is freed by the GC, but files, connections and sockets must be closed by you, at a known moment. Here both mechanisms run, in a predictable order.</p>
+  <div class="code" data-lang="java" data-file="Main.java"><pre><code>import java.lang.ref.Cleaner;
+
+public class Main {
+    static final Cleaner CLEANER = Cleaner.create();
+
+    static class ReportFile implements AutoCloseable {
+        private final Cleaner.Cleanable cleanable;
+
+        ReportFile(String name) {
+            System.out.println("open " + name);
+            Runnable action = () -&gt; System.out.println("cleanup " + name);
+            cleanable = CLEANER.register(this, action);   // safety net
+        }
+
+        @Override
+        public void close() {
+            cleanable.clean();                             // runs the action now, only once
+        }
+    }
+
+    public static void main(String[] args) {
+        try (ReportFile f = new ReportFile("sales-june.csv")) {
+            System.out.println("writing rows");
+        }                                                  // close() is called here
+        System.out.println("after try");
+    }
+}</code></pre><div class="output">open sales-june.csv
+writing rows
+cleanup sales-june.csv
+after try</div></div>
+  <div class="table-wrap">
+  <table class="compare" style="min-width:560px">
+    <thead><tr><th></th><th><code>finalize()</code></th><th><code>Cleaner</code></th><th>try-with-resources</th></tr></thead>
+    <tbody>
+      <tr><td>Since</td><td>Java 1.0</td><td>Java 9</td><td>Java 7</td></tr>
+      <tr><td>Status</td><td>Deprecated (9), for removal (18)</td><td>Recommended safety net</td><td>Recommended main tool</td></tr>
+      <tr><td>When it runs</td><td>Some time after unreachable, maybe never</td><td>On <code>clean()</code>, or some time after unreachable</td><td>Exactly at the end of the try block</td></tr>
+      <tr><td>Can bring the object back?</td><td>Yes (resurrection), a classic bug</td><td>No: the action can't see the object</td><td>Not applicable</td></tr>
+      <tr><td>Cost for the GC</td><td>Objects need extra GC cycles</td><td>Small</td><td>None</td></tr>
+      <tr><td>Use it for</td><td>Nothing in new code</td><td>Backup cleanup of native resources</td><td>Files, connections, streams, locks</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <div class="callout callout--warn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3 2 21h20L12 3z"/><path d="M12 10v5M12 18v.5"/></svg><p><b>finalize() is a trap:</b> it may run late, in an unknown thread, or not at all; it slows down collection; and an exception thrown inside it is ignored. Since Java 18, javac warns <code>[removal] finalize() in Object has been deprecated and marked for removal</code>, and <code>java --finalization=disabled</code> turns it off completely.</p></div>
+</section>
+
+<!-- ======================= PART 4: STEP BY STEP ======================= -->
+<section class="part" id="steps">
+  <span class="part-label"><b>4</b> Step by step</span>
+  <h2>From new to garbage, one stage at a time</h2>
+  <ol class="stepper">
+    <li><h4>Make sure the class is ready</h4>
+      <div class="code" data-lang="java" data-file="Main.java"><pre><code>Order o = new Order(101, 499.0);</code></pre></div>
+      <span class="behind">If <code>Order</code> hasn't been loaded and initialised yet, the JVM does that first (Lesson 8.4). Now it knows exactly how many bytes an Order needs.</span></li>
+    <li><h4>Allocate and zero-fill</h4>
+      <p>The bytecode instruction <code>new</code> reserves the memory on the heap.</p>
+      <span class="behind">The JVM writes an object header (which class it belongs to, data for hashing and locking) and sets every field to 0, 0.0, false or null. That's why fields have default values and why a constructor can never see garbage.</span></li>
+    <li><h4>Run the constructor chain</h4>
+      <div class="code" data-lang="java" data-file="Main.java"><pre><code>Order(int id, double amount) {
+    super();              // Object() first
+    // then field initializers and { } blocks
+    this.id = id;         // then the body
+    this.amount = amount;
+}</code></pre></div>
+      <span class="behind"><code>invokespecial Order.&lt;init&gt;</code> pushes a constructor frame with <code>this</code> in slot 0. Parent constructors run first, so a parent's fields are ready before the child's code uses them.</span></li>
+    <li><h4>Use it while it is reachable</h4>
+      <div class="code" data-lang="java" data-file="Main.java"><pre><code>double total = o.amount * 1.18;</code></pre></div>
+      <span class="behind">The reference in <code>o</code> (a slot in main's frame, which is a GC root) keeps the object alive. So would a reference from a static field, from an array, or from another reachable object.</span></li>
+    <li><h4>Lose the last reference</h4>
+      <div class="code" data-lang="java" data-file="Main.java"><pre><code>o = new Order(102, 99.0);   // or o = null; or the method returns</code></pre></div>
+      <span class="behind">Nothing happens immediately: no method is called, no memory is freed. The object is simply no longer found when the GC next traces from the roots, so its space is reused (Lesson 8.3).</span></li>
+  </ol>
+</section>
+
+<!-- ======================= PART 5: SEE IT HAPPEN ======================= -->
+<section class="part" id="animation">
+  <span class="part-label"><b>5</b> See it happen</span>
+  <h2>One order's life: both views</h2>
+  <p>Left: the code and what it tells you. Right: the GC roots, the heap, and how the collector decides what lives.</p>
+  <div class="anim" data-frames="6">
+    <div class="anim__title">From <code>new</code> to collected <span>6 steps</span></div>
+    <div class="anim__views">
+      <div class="view view--see">
+        <span class="view__tag">What you see</span>
+        <svg viewBox="0 0 360 250" role="img" aria-label="Each stage of the order's life as code and console text">
+          <rect x="10" y="12" width="340" height="40" rx="8" class="s-board"/>
+          <g font-size="11" class="mono s-chalk">
+            <text x="22" y="37" data-on="1-2">Order o = new Order(101, 499.0);</text>
+            <text x="22" y="37" data-on="3">double t = o.amount * 1.18;</text>
+            <text x="22" y="37" data-on="4">o = new Order(102, 99.0);</text>
+            <text x="22" y="37" data-on="5-6">// later: the heap is getting full</text>
+          </g>
+          <rect x="10" y="62" width="340" height="130" rx="8" style="fill:#0F1512"/>
+          <g font-size="11" class="mono" style="fill:#B9F5D0">
+            <text x="24" y="90" data-on="1">// memory for order 101 reserved</text>
+            <text x="24" y="112" data-on="1">// id=0 amount=0.0 status=null</text>
+            <text x="24" y="90" data-on="2">// constructor fills the fields</text>
+            <text x="24" y="112" data-on="2">id=101 amount=499.0 status=NEW</text>
+            <text x="24" y="90" data-on="3">t = 588.8199999999999</text>
+            <text x="24" y="112" data-on="3">// order 101 is in use</text>
+            <text x="24" y="90" data-on="4">o now refers to order 102</text>
+            <text x="24" y="112" data-on="4">// 101: no references left</text>
+            <text x="24" y="90" data-on="5">// a GC cycle starts</text>
+            <text x="24" y="112" data-on="5">// (you see nothing at all)</text>
+            <text x="24" y="90" data-on="6">// 101's memory is reused</text>
+            <text x="24" y="112" data-on="6">// no message, no callback</text>
+          </g>
+          <g font-size="10.2" class="s-ink2" text-anchor="middle">
+            <text x="180" y="222" data-on="1">new reserves zeroed memory first.</text>
+            <text x="180" y="222" data-on="2">Then the constructor fills it in.</text>
+            <text x="180" y="222" data-on="3">Reachable from main, so it is alive.</text>
+            <text x="180" y="222" data-on="4">Reassigned: order 101 is now garbage.</text>
+            <text x="180" y="222" data-on="5">The collector starts from the roots.</text>
+            <text x="180" y="222" data-on="6">Garbage is reclaimed, silently.</text>
+          </g>
+          <text x="354" y="246" text-anchor="end" class="s-wm">myphatshala.com</text>
+        </svg>
+        <ol class="caps" hidden>
+          <li><b>Allocate:</b> <code>new</code> first reserves memory for the order with every field at its default value.</li>
+          <li><b>Construct:</b> the constructor runs and sets id, amount and status.</li>
+          <li><b>Use:</b> the program reads the order through <code>o</code>. (The long decimal is normal <code>double</code> rounding.)</li>
+          <li><b>Unreachable:</b> <code>o</code> is pointed at a new order. Order 101 still exists, but nothing can reach it.</li>
+          <li><b>GC runs:</b> later, when the JVM needs space, the garbage collector starts a cycle. Your code doesn't see it.</li>
+          <li><b>Collected:</b> order 101's memory is reused for new objects. No method is called on it.</li>
+        </ol>
+      </div>
+      <div class="view view--behind">
+        <span class="view__tag">Behind the screen</span>
+        <svg viewBox="0 0 360 250" role="img" aria-label="GC roots on the left, heap with two Order objects on the right, reference arrows and mark results">
+          <text x="72" y="24" text-anchor="middle" font-size="10" font-weight="700" class="s-ink2">GC roots</text>
+          <text x="250" y="24" text-anchor="middle" font-size="10" font-weight="700" class="s-ink2">Heap</text>
+          <rect x="12" y="40" width="122" height="54" rx="6" class="s-soft-acc" style="stroke:var(--track);stroke-width:1.5"/>
+          <text x="20" y="56" font-size="9.6" class="mono s-acc" font-weight="700">main() frame</text>
+          <g font-size="9.6" class="mono s-ink">
+            <text x="20" y="80" data-on="1-2">o = (not yet set)</text>
+            <text x="20" y="80" data-on="3">o → #1</text>
+            <text x="20" y="80" data-on="4-6">o → #2</text>
+          </g>
+          <g data-on="1-2">
+            <rect x="12" y="102" width="122" height="44" rx="6" class="s-soft-blue" style="stroke:var(--blue);stroke-width:1.5"/>
+            <text x="20" y="118" font-size="9.4" class="mono s-blue" font-weight="700">Order(…) frame</text>
+            <text x="20" y="136" font-size="9.4" class="mono s-ink">this → #1</text>
+            <path d="M120 132 C140 132, 146 80, 164 76" style="stroke:var(--blue);stroke-width:1.6;fill:none;stroke-dasharray:4 3"/>
+          </g>
+          <rect x="12" y="156" width="122" height="34" rx="6" class="s-card2" style="stroke:var(--line)"/>
+          <text x="20" y="171" font-size="9.4" class="s-ink2" font-weight="700">static fields</text>
+          <text x="20" y="184" font-size="9" class="s-ink2">(also roots)</text>
+          <rect x="150" y="34" width="200" height="158" rx="8" class="s-soft-green" style="stroke:var(--green);stroke-width:1.2"/>
+          <g data-on="1-5">
+            <rect x="166" y="46" width="170" height="58" rx="6" class="s-card" style="stroke:var(--blue);stroke-width:1.5"/>
+            <text x="174" y="62" font-size="9.6" class="mono s-blue" font-weight="700">#1 Order</text>
+          </g>
+          <rect x="166" y="46" width="170" height="58" rx="6" style="fill:none;stroke:var(--red);stroke-width:2;stroke-dasharray:5 4" data-on="4-5"/>
+          <g font-size="9.4" class="mono">
+            <text x="174" y="80" class="s-ink2" data-on="1">id=0 amount=0.0</text>
+            <text x="174" y="95" class="s-ink2" data-on="1">status=null</text>
+            <text x="174" y="80" class="s-ink" data-on="2-5">id=101 amount=499.0</text>
+            <text x="174" y="95" class="s-ink" data-on="2-5">status="NEW"</text>
+          </g>
+          <text x="330" y="62" text-anchor="end" font-size="9" class="s-red" font-weight="700" data-on="4">unreachable</text>
+          <text x="330" y="62" text-anchor="end" font-size="9" class="s-red" font-weight="700" data-on="5">✗ not marked</text>
+          <g data-on="6">
+            <rect x="166" y="46" width="170" height="58" rx="6" style="fill:none;stroke:var(--line);stroke-width:1.2;stroke-dasharray:2 4"/>
+            <text x="251" y="80" text-anchor="middle" font-size="9.6" class="s-ink2">free space</text>
+          </g>
+          <path d="M120 76 H162" style="stroke:var(--green);stroke-width:2" data-on="3"/>
+          <path d="M156 71l7 5-7 5" style="stroke:var(--green);stroke-width:2;fill:none" data-on="3"/>
+          <g data-on="4-6">
+            <rect x="166" y="120" width="170" height="58" rx="6" class="s-card" style="stroke:var(--blue);stroke-width:1.5"/>
+            <text x="174" y="136" font-size="9.6" class="mono s-blue" font-weight="700">#2 Order</text>
+            <text x="174" y="154" font-size="9.4" class="mono s-ink">id=102 amount=99.0</text>
+            <text x="174" y="169" font-size="9.4" class="mono s-ink">status="NEW"</text>
+            <path d="M100 78 C140 78, 140 146, 162 148" style="stroke:var(--green);stroke-width:2;fill:none"/>
+            <path d="M156 143l7 5-7 4" style="stroke:var(--green);stroke-width:2;fill:none"/>
+          </g>
+          <text x="330" y="136" text-anchor="end" font-size="9" class="s-green" font-weight="700" data-on="5-6">✓ marked</text>
+          <g font-size="9.6" class="s-ink2" text-anchor="middle">
+            <text x="180" y="210" data-on="1">Header written, every field zero or null.</text>
+            <text x="180" y="210" data-on="2">The constructor frame sets the fields via this.</text>
+            <text x="180" y="210" data-on="3">Root (main's frame) → #1: reachable.</text>
+            <text x="180" y="210" data-on="4">#1 still exists, but no path from a root.</text>
+            <text x="180" y="210" data-on="5">Mark: follow arrows from roots. #1 isn't found.</text>
+            <text x="180" y="210" data-on="6">Unmarked memory is reclaimed for new objects.</text>
+          </g>
+          <text x="354" y="246" text-anchor="end" class="s-wm">myphatshala.com</text>
+        </svg>
+        <ol class="caps" hidden>
+          <li><code>new</code> allocates object #1 on the heap and zero-fills it. <code>o</code> is not assigned yet.</li>
+          <li>A constructor frame is pushed; through <code>this</code> it writes the real values into #1. Then the frame is popped and the reference is stored in <code>o</code>.</li>
+          <li>main's frame is a GC root and <code>o</code> points at #1, so #1 is reachable.</li>
+          <li><code>o</code> now points at #2. #1 is unchanged in memory, but no chain of references from any root leads to it.</li>
+          <li>When the collector runs, it marks everything reachable from the roots: #2 is marked, #1 is not.</li>
+          <li>Unmarked objects are reclaimed; their memory is reused. Order 101 is gone without any method being called.</li>
+        </ol>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ======================= PART 6: REAL-WORLD USE ======================= -->
+<section class="part" id="real-world">
+  <span class="part-label"><b>6</b> Real-world use</span>
+  <h2>Object lifecycles in real systems</h2>
+  <p>Most bugs here are not about creating objects. They are about holding on to objects (or resources) longer than needed.</p>
+  <!--ANIM2-->
+  <h3 id="animated-example">Watch it with an example: the listener that never leaves (a memory leak)</h3>
+  <p class="anim-intro">Each opened screen registers a listener in a <code>static</code> list. Closing the screen forgets to remove it. Watch why the garbage collector can't free those objects.</p>
+  <div class="anim anim--one" data-frames="6" data-delay="4600">
+    <div class="anim__title">Reachable objects are never collected <span>6 steps</span></div>
+    <div class="anim__views">
+      <div class="view view--story">
+        <span class="view__tag">Animated example</span>
+        <svg viewBox="0 0 360 230" role="img" aria-label="memory leak through a static list">
+          <rect x="6" y="20" width="110" height="70" rx="8" class="s-board" style="stroke:board;stroke-width:1.5"/>
+          <text x="16" y="40" font-size="10" font-weight="700" class="s-chalk">GC roots</text>
+          <text x="16" y="58" font-size="9.5" class="s-kw mono">static listeners</text>
+          <text x="16" y="74" font-size="9.5" class="s-kw mono">main's locals</text>
+          <rect x="150" y="20" width="204" height="42" rx="8" class="s-soft-blue" style="stroke:var(--blue);stroke-width:1.5"/>
+          <text x="160" y="38" font-size="9.5" font-weight="700" class="s-ink mono">#1 ArrayList (listeners)</text>
+          <text data-on="1" x="160" y="54" font-size="9.5" class="s-ink mono">size = 0</text>
+          <text data-on="2" x="160" y="54" font-size="9.5" class="s-ink mono">size = 1</text>
+          <text data-on="3" x="160" y="54" font-size="9.5" class="s-ink mono">size = 2</text>
+          <text data-on="4" x="160" y="54" font-size="9.5" class="s-ink mono">size = 2</text>
+          <text data-on="5" x="160" y="54" font-size="9.5" class="s-ink mono">size = 2</text>
+          <text data-on="6" x="160" y="54" font-size="9.5" class="s-ink mono">size = 0</text>
+          <path d="M116 58 L148 40" style="stroke:var(--blue);stroke-width:2;fill:none"/><path d="M138.8 40.0 L148 40 L143.2 47.8" style="stroke:var(--blue);stroke-width:2;fill:none;stroke-linecap:round;stroke-linejoin:round"/>
+          <g data-on="2-5"><rect x="150" y="80" width="204" height="46" rx="8" class="s-soft-green" style="stroke:var(--green);stroke-width:1.5"/></g>
+          <text data-on="2-5" x="160" y="98" font-size="9.5" font-weight="700" class="s-ink mono">#2 Listener → Screen #4</text>
+          <text data-on="2-5" x="160" y="116" font-size="9" class="s-ink2">(holds the screen's images)</text>
+          <g data-on="2-5"><path d="M252 62 L252 80" style="stroke:var(--green);stroke-width:2;fill:none"/><path d="M256.5 72.0 L252 80 L247.5 72.0" style="stroke:var(--green);stroke-width:2;fill:none;stroke-linecap:round;stroke-linejoin:round"/></g>
+          <g data-on="3-5"><rect x="150" y="136" width="204" height="46" rx="8" class="s-soft-green" style="stroke:var(--green);stroke-width:1.5"/></g>
+          <text data-on="3-5" x="160" y="154" font-size="9.5" font-weight="700" class="s-ink mono">#3 Listener → Screen #5</text>
+          <text data-on="3-5" x="160" y="172" font-size="9" class="s-ink2">(holds the screen's images)</text>
+          <g data-on="3-5"><path d="M252 126 L252 136" style="stroke:var(--green);stroke-width:2;fill:none"/><path d="M256.5 128.0 L252 136 L247.5 128.0" style="stroke:var(--green);stroke-width:2;fill:none;stroke-linecap:round;stroke-linejoin:round"/></g>
+          <g data-on="4-5"><rect x="150" y="80" width="204" height="46" rx="8" class="s-soft-acc" style="stroke:#D64545;stroke-width:1.5"/></g>
+          <text data-on="4-5" x="160" y="98" font-size="9.5" font-weight="700" class="s-red mono">#2 screen closed, still listed</text>
+          <text data-on="4-5" x="160" y="116" font-size="9.5" class="s-red">reachable → NOT collected</text>
+          <text data-on="5" x="180" y="200" font-size="10.5" text-anchor="middle" font-weight="700" class="s-red">GC runs… #2 survives</text>
+          <text data-on="6" x="180" y="200" font-size="10.5" text-anchor="middle" font-weight="700" class="s-green">listeners.remove(l) on close → GC frees them</text>
+          <text x="10" y="200" font-size="1" class="s-ink"></text>
+          <text x="354" y="225" text-anchor="end" class="s-wm">myphatshala.com</text>
+        </svg>
+        <ol class="caps" hidden>
+          <li><b>Start:</b> a <code>static</code> list of listeners. Static fields are <b>GC roots</b>: anything reachable from them stays alive.</li>
+          <li><b>Screen opened:</b> it registers listener #2, which refers to the screen and its images.</li>
+          <li><b>Another screen:</b> listener #3 is added. Fine so far.</li>
+          <li><b>Screen closed:</b> the user leaves the first screen, but the code never removes listener #2 from the list.</li>
+          <li><b>GC can't help:</b> the collector frees only <i>unreachable</i> objects. #2 is still reachable from the static list, so it (and its screen) stays forever. Repeat this a few thousand times and the app runs out of memory.</li>
+          <li><b>Fix:</b> remove the listener when the screen closes. Now nothing refers to those objects, and the next GC frees them. This exact bug is common in Android apps and long-running servers.</li>
+        </ol>
+      </div>
+    </div>
+  </div>
+  <!--/ANIM2-->
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><g class="s-soft-blue" style="stroke:var(--blue)"><rect x="14" y="20" width="20" height="50" rx="4"/><rect x="40" y="20" width="20" height="50" rx="4"/><rect x="66" y="20" width="20" height="50" rx="4"/></g><rect x="92" y="20" width="20" height="50" rx="4" style="fill:none;stroke:var(--red);stroke-dasharray:3 3"/><text x="60" y="84" text-anchor="middle" font-size="8" class="mono s-ink2">connection pool</text></svg></div>
+    <div><h4>1. Database connections</h4><p>A pool holds a few expensive connections. Code borrows one inside try-with-resources, and <code>close()</code> returns it to the pool at once. Forget to close it and the pool runs dry long before memory does.</p>
+      <div class="uc-flow"><span>Request</span><i>→</i><span class="java">try (Connection c = pool.get())</span><i>→</i><span>Returned on close</span></div></div>
+  </div>
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="14" y="16" width="92" height="58" rx="6" class="s-card2"/><g font-size="8.5" class="mono s-ink"><text x="22" y="34">req → Order</text><text x="22" y="48">     → Cart</text><text x="22" y="62">     → Response</text></g></svg></div>
+    <div><h4>2. Short-lived request objects</h4><p>A web request creates dozens of objects (parsed input, DTOs, responses) that become unreachable when the handler method returns. This is the normal, healthy pattern: modern collectors are built for many short-lived objects.</p>
+      <div class="uc-flow"><span>HTTP request</span><i>→</i><span class="java">objects in handler frames</span><i>→</i><span>Garbage after return</span></div></div>
+  </div>
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><circle cx="30" cy="45" r="14" class="s-soft-acc" style="stroke:var(--track)"/><circle cx="90" cy="45" r="14" class="s-soft-blue" style="stroke:var(--blue)"/><path d="M44 45h32" style="stroke:var(--red);stroke-width:2;stroke-dasharray:3 3"/><text x="60" y="80" text-anchor="middle" font-size="8" class="mono s-ink2">listener</text></svg></div>
+    <div><h4>3. Event listeners</h4><p>A screen registers itself as a listener with a long-lived event bus. If it never unregisters, the bus keeps the whole screen (and everything it references) reachable after it is closed.</p>
+      <div class="uc-flow"><span>Screen closed</span><i>→</i><span class="java">bus.unregister(this)</span><i>→</i><span>Screen can be collected</span></div></div>
+  </div>
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="20" y="20" width="80" height="50" rx="6" class="s-board"/><g font-size="8.5" class="mono" style="fill:#9FD3B8"><text x="28" y="40">native buffer</text><text x="28" y="56">Cleaner → free</text></g></svg></div>
+    <div><h4>4. Native memory behind Java objects</h4><p>Some objects own memory outside the heap, such as direct <code>ByteBuffer</code>s used for fast I/O. The JDK uses a cleaner mechanism to free that native memory once the Java object becomes unreachable.</p>
+      <div class="uc-flow"><span>ByteBuffer.allocateDirect</span><i>→</i><span class="java">unreachable</span><i>→</i><span>Native memory freed</span></div></div>
+  </div>
+  <p class="muted">Examples are simplified. Frameworks such as Spring manage many object lifecycles for you (creating, wiring and closing beans), but the same reachability rules apply underneath.</p>
+</section>
+
+<div class="ad-slot" data-slot="mid"></div>
+
+<!-- ======================= PART 7: RUN THE CODE ======================= -->
+<section class="part" id="run">
+  <span class="part-label"><b>7</b> Run the code</span>
+  <h2>Three orders, three endings</h2>
+  <div class="code" data-lang="java" data-file="Main.java"><pre><code>public class Main {
+    static class Order {
+        int id;
+        double amount;
+        String status = "NEW";
+
+        Order(int id, double amount) {
+            System.out.println("  constructor: status is already " + status + ", id is still " + this.id);
+            this.id = id;
+            this.amount = amount;
+        }
+    }
+
+    static double billFor(int id, double price) {
+        Order temp = new Order(id, price);     // only this frame refers to it
+        return temp.amount * 1.18;
+    }
+
+    public static void main(String[] args) {
+        System.out.println("Creating order 101");
+        Order current = new Order(101, 499.0);
+        System.out.println("Created: " + current.id + " " + current.status);
+
+        current = new Order(102, 99.0);        // order 101 is now unreachable
+        System.out.println("Current is now " + current.id);
+
+        double bill = billFor(103, 1000.0);    // order 103 dies with the frame
+        System.out.println("Bill: " + bill);
+
+        current = null;                        // order 102 is now unreachable
+        System.out.println("No orders referenced");
+    }
+}</code></pre><div class="output">Creating order 101
+  constructor: status is already NEW, id is still 0
+Created: 101 NEW
+  constructor: status is already NEW, id is still 0
+Current is now 102
+  constructor: status is already NEW, id is still 0
+Bill: 1180.0
+No orders referenced</div></div>
+  <ul class="anno">
+    <li><code>String status = "NEW";</code><span>A field initializer: it runs before the constructor body, so the body already sees NEW.</span></li>
+    <li><code>id is still 0</code><span>Zero-filled memory: the body hasn't assigned <code>id</code> yet.</span></li>
+    <li><code>Order temp = new Order(id, price);</code><span>Referenced only by billFor's frame, so it becomes unreachable on return.</span></li>
+    <li><code>current = null;</code><span>Drops the last reference to order 102. No output: the JVM never announces garbage.</span></li>
+  </ul>
+  <div class="runner">
+    <script type="application/json">{"lang": "java", "file": "Main.java", "tasks": [
+{"label": "1 · Order lifecycle", "hint": "Press <b>Run</b>. Count how many Order objects were created and note the line where each one became unreachable. Nothing is printed when an object becomes garbage: Java gives no signal.", "code": "public class Main {\n    static class Order {\n        int id;\n        double amount;\n        String status = \"NEW\";\n\n        Order(int id, double amount) {\n            System.out.println(\"  constructor: status is already \" + status + \", id is still \" + this.id);\n            this.id = id;\n            this.amount = amount;\n        }\n    }\n\n    static double billFor(int id, double price) {\n        Order temp = new Order(id, price);     // only this frame refers to it\n        return temp.amount * 1.18;\n    }\n\n    public static void main(String[] args) {\n        System.out.println(\"Creating order 101\");\n        Order current = new Order(101, 499.0);\n        System.out.println(\"Created: \" + current.id + \" \" + current.status);\n\n        current = new Order(102, 99.0);        // order 101 is now unreachable\n        System.out.println(\"Current is now \" + current.id);\n\n        double bill = billFor(103, 1000.0);    // order 103 dies with the frame\n        System.out.println(\"Bill: \" + bill);\n\n        current = null;                        // order 102 is now unreachable\n        System.out.println(\"No orders referenced\");\n    }\n}\n"},
+{"label": "2 · Predict: initialisation order", "hint": "<b>Predict first:</b> write the four lines in the order you expect. Remember: zero-fill, then parent constructor, then field initializers and blocks in source order, then the constructor body.", "code": "public class Main {\n    static class Base {\n        Base() {\n            System.out.println(\"Base constructor\");\n        }\n    }\n\n    static class Shipment extends Base {\n        String city = log(\"field initializer\");\n\n        {\n            log(\"initializer block, city = \" + city);\n        }\n\n        Shipment() {\n            log(\"Shipment constructor\");\n        }\n\n        static String log(String msg) {\n            System.out.println(msg);\n            return \"Pune\";\n        }\n    }\n\n    public static void main(String[] args) {\n        new Shipment();\n    }\n}\n"},
+{"label": "3 · Watch an object get collected", "hint": "A <code>WeakReference</code> doesn't keep its object alive, so <code>get()</code> returns <code>null</code> once the object has been collected. <code>System.gc()</code> is only a request, so in theory the result can differ; on standard JDK 21 collectors it prints true, then false.", "code": "import java.lang.ref.WeakReference;\n\npublic class Main {\n    static class Invoice {\n        long[] lines = new long[100_000];   // make it a bit heavy\n    }\n\n    public static void main(String[] args) {\n        Invoice invoice = new Invoice();\n        WeakReference<Invoice> watcher = new WeakReference<>(invoice);\n\n        System.gc();\n        System.out.println(\"Still referenced, alive after GC? \" + (watcher.get() != null));\n\n        invoice = null;              // the last strong reference is gone\n        System.gc();\n        System.out.println(\"Unreachable, alive after GC?      \" + (watcher.get() != null));\n    }\n}\n"},
+{"label": "4 · Cleaner: the modern safety net", "hint": "<code>close()</code> runs the cleaning action immediately and only once. If someone forgets to close, the Cleaner runs it some time after the object becomes unreachable. Note the action must not refer to the object itself, or it would never become unreachable.", "code": "import java.lang.ref.Cleaner;\n\npublic class Main {\n    static final Cleaner CLEANER = Cleaner.create();\n\n    static class TempFile implements AutoCloseable {\n        private final Cleaner.Cleanable cleanable;\n\n        TempFile(String name) {\n            Runnable action = () -> System.out.println(\"deleting \" + name);\n            cleanable = CLEANER.register(this, action);\n            System.out.println(\"created \" + name);\n        }\n\n        @Override\n        public void close() {\n            cleanable.clean();\n        }\n    }\n\n    public static void main(String[] args) {\n        try (TempFile t = new TempFile(\"gst-report.tmp\")) {\n            System.out.println(\"writing report\");\n        }\n        System.out.println(\"done\");\n    }\n}\n"},
+{"label": "5 · Predict the crash", "hint": "<b>Predict first:</b> after <code>current = null</code> there is no object to read from. Which exception appears, and which line does it name? Java's helpful message even says which variable was null (it shows <code>&lt;local1&gt;</code> when compiled without debug info).", "code": "public class Main {\n    static class Order {\n        double amount = 499;\n    }\n\n    public static void main(String[] args) {\n        Order current = new Order();\n        System.out.println(\"Amount: \" + current.amount);\n        current = null;\n        System.out.println(\"Amount: \" + current.amount);\n    }\n}\n", "_expect": "exception"},
+{"label": "6 · Spot the error", "hint": "Only classes that implement <code>AutoCloseable</code> can be used in try-with-resources. Add <code>implements AutoCloseable</code> and a <code>public void close()</code> method to <code>Printer</code>.", "code": "public class Main {\n    static class Printer {\n        void print(String s) {\n            System.out.println(s);\n        }\n    }\n\n    public static void main(String[] args) {\n        try (Printer p = new Printer()) {\n            p.print(\"invoice #1001\");\n        }\n    }\n}\n", "_expect": "compile-error"}]}</script>
+  </div>
+</section>
+
+<!-- ======================= PART 8: LINE BY LINE ======================= -->
+<section class="part" id="tracer">
+  <span class="part-label"><b>8</b> Line by line</span>
+  <h2>Build a ticket, replace it, lose the old one</h2>
+  <p>Recorded from the real JVM. Watch ticket #1 start with zeros, get its field initializer, then its constructor body, and vanish from the heap the moment <code>t</code> points elsewhere.</p>
+  <div class="tracer">
+    <script type="application/json">{"lang": "java", "code": ["public class Main {", "    static class Ticket {", "        String route;", "        int fare = 50;", "", "        Ticket(String route) {", "            this.route = route;", "            fare = fare + 10;", "        }", "    }", "", "    public static void main(String[] args) {", "        Ticket t = new Ticket(\"Pune-Mumbai\");", "        t = new Ticket(\"Delhi-Agra\");", "        System.out.println(t.route + \" Rs \" + t.fare);", "    }", "}"], "steps": [
+{"line": 13, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "new Main.Ticket(String route)", "vars": [["this", "→ #1 Main.Ticket"], ["route", "→ #2 \"Pune-Mumbai\""]]}], "heap": ["<b>#1</b> Main.Ticket {route=null, fare=0}", "<b>#2</b> String &quot;Pune-Mumbai&quot;", "<b>#3</b> String[0] (args, empty)"], "newVar": "this", "phase": "Allocate + zero", "note": "<code>new</code> grabs memory for Ticket #1 and zero-fills it: <code>route = null</code>, <code>fare = 0</code>. Only then is the constructor frame pushed, with <code>this</code> → #1."},
+{"line": 6, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "new Main.Ticket(String route)", "vars": [["this", "→ #1 Main.Ticket"], ["route", "→ #2 \"Pune-Mumbai\""]]}], "heap": ["<b>#1</b> Main.Ticket {route=null, fare=0}", "<b>#2</b> String &quot;Pune-Mumbai&quot;", "<b>#3</b> String[0] (args, empty)"], "phase": "super()", "note": "The first thing every constructor does is call the parent constructor, here <code>Object()</code>. It has nothing to set up."},
+{"line": 4, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "new Main.Ticket(String route)", "vars": [["this", "→ #1 Main.Ticket"], ["route", "→ #2 \"Pune-Mumbai\""]]}], "heap": ["<b>#1</b> Main.Ticket {route=null, fare=50}", "<b>#2</b> String &quot;Pune-Mumbai&quot;", "<b>#3</b> String[0] (args, empty)"], "phase": "Field initializer", "note": "Now <code>int fare = 50;</code> runs, after super() and before the constructor body. fare goes from 0 to 50."},
+{"line": 7, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "new Main.Ticket(String route)", "vars": [["this", "→ #1 Main.Ticket"], ["route", "→ #2 \"Pune-Mumbai\""]]}], "heap": ["<b>#1</b> Main.Ticket {route=&quot;Pune-Mumbai&quot;, fare=50}", "<b>#2</b> String &quot;Pune-Mumbai&quot;", "<b>#3</b> String[0] (args, empty)"], "phase": "Constructor body", "note": "route is set to the \"Pune-Mumbai\" String."},
+{"line": 8, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "new Main.Ticket(String route)", "vars": [["this", "→ #1 Main.Ticket"], ["route", "→ #2 \"Pune-Mumbai\""]]}], "heap": ["<b>#1</b> Main.Ticket {route=&quot;Pune-Mumbai&quot;, fare=60}", "<b>#2</b> String &quot;Pune-Mumbai&quot;", "<b>#3</b> String[0] (args, empty)"], "phase": "Constructor body", "note": "fare = 50 + 10 = 60. The object is now fully built."},
+{"line": 9, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}], "heap": ["<b>#3</b> String[0] (args, empty)"], "phase": "Constructor returns", "note": "The constructor frame is popped. The new reference sits on main's operand stack for an instant, so the tracer briefly shows no Ticket."},
+{"line": 13, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["t", "→ #1 Main.Ticket"]]}], "heap": ["<b>#1</b> Main.Ticket {route=&quot;Pune-Mumbai&quot;, fare=60}", "<b>#2</b> String &quot;Pune-Mumbai&quot;", "<b>#3</b> String[0] (args, empty)"], "newVar": "t", "phase": "In use", "note": "<code>t</code> refers to #1. The object is reachable from a GC root (main's frame), so it is alive."},
+{"line": 14, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["t", "→ #1 Main.Ticket"]]}, {"frame": "new Main.Ticket(String route)", "vars": [["this", "→ #4 Main.Ticket"], ["route", "→ #5 \"Delhi-Agra\""]]}], "heap": ["<b>#1</b> Main.Ticket {route=&quot;Pune-Mumbai&quot;, fare=60}", "<b>#2</b> String &quot;Pune-Mumbai&quot;", "<b>#3</b> String[0] (args, empty)", "<b>#4</b> Main.Ticket {route=null, fare=0}", "<b>#5</b> String &quot;Delhi-Agra&quot;"], "newVar": "this", "phase": "Second ticket", "note": "Ticket #4 is allocated and zeroed (fare = 0 again; defaults always come first). #1 is still referenced by t."},
+{"line": 6, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["t", "→ #1 Main.Ticket"]]}, {"frame": "new Main.Ticket(String route)", "vars": [["this", "→ #4 Main.Ticket"], ["route", "→ #5 \"Delhi-Agra\""]]}], "heap": ["<b>#1</b> Main.Ticket {route=&quot;Pune-Mumbai&quot;, fare=60}", "<b>#2</b> String &quot;Pune-Mumbai&quot;", "<b>#3</b> String[0] (args, empty)", "<b>#4</b> Main.Ticket {route=null, fare=0}", "<b>#5</b> String &quot;Delhi-Agra&quot;"], "phase": "super()", "note": "Object() runs for #4."},
+{"line": 4, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["t", "→ #1 Main.Ticket"]]}, {"frame": "new Main.Ticket(String route)", "vars": [["this", "→ #4 Main.Ticket"], ["route", "→ #5 \"Delhi-Agra\""]]}], "heap": ["<b>#1</b> Main.Ticket {route=&quot;Pune-Mumbai&quot;, fare=60}", "<b>#2</b> String &quot;Pune-Mumbai&quot;", "<b>#3</b> String[0] (args, empty)", "<b>#4</b> Main.Ticket {route=null, fare=50}", "<b>#5</b> String &quot;Delhi-Agra&quot;"], "phase": "Field initializer", "note": "fare = 50 inside #4."},
+{"line": 7, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["t", "→ #1 Main.Ticket"]]}, {"frame": "new Main.Ticket(String route)", "vars": [["this", "→ #4 Main.Ticket"], ["route", "→ #5 \"Delhi-Agra\""]]}], "heap": ["<b>#1</b> Main.Ticket {route=&quot;Pune-Mumbai&quot;, fare=60}", "<b>#2</b> String &quot;Pune-Mumbai&quot;", "<b>#3</b> String[0] (args, empty)", "<b>#4</b> Main.Ticket {route=&quot;Delhi-Agra&quot;, fare=50}", "<b>#5</b> String &quot;Delhi-Agra&quot;"], "phase": "Constructor body", "note": "route = \"Delhi-Agra\"."},
+{"line": 8, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["t", "→ #1 Main.Ticket"]]}, {"frame": "new Main.Ticket(String route)", "vars": [["this", "→ #4 Main.Ticket"], ["route", "→ #5 \"Delhi-Agra\""]]}], "heap": ["<b>#1</b> Main.Ticket {route=&quot;Pune-Mumbai&quot;, fare=60}", "<b>#2</b> String &quot;Pune-Mumbai&quot;", "<b>#3</b> String[0] (args, empty)", "<b>#4</b> Main.Ticket {route=&quot;Delhi-Agra&quot;, fare=60}", "<b>#5</b> String &quot;Delhi-Agra&quot;"], "phase": "Constructor body", "note": "fare = 60."},
+{"line": 9, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["t", "→ #1 Main.Ticket"]]}], "heap": ["<b>#1</b> Main.Ticket {route=&quot;Pune-Mumbai&quot;, fare=60}", "<b>#2</b> String &quot;Pune-Mumbai&quot;", "<b>#3</b> String[0] (args, empty)"], "phase": "Constructor returns", "note": "Frame popped. t still points to #1 until the assignment finishes."},
+{"line": 14, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["t", "→ #4 Main.Ticket"]]}], "heap": ["<b>#3</b> String[0] (args, empty)", "<b>#4</b> Main.Ticket {route=&quot;Delhi-Agra&quot;, fare=60}", "<b>#5</b> String &quot;Delhi-Agra&quot;"], "newVar": "t", "phase": "Reassignment", "note": "<code>t</code> now points to #4. Nothing refers to Ticket #1 any more, so it is <b>unreachable</b> and drops out of the heap view: it is garbage, waiting for the GC. (The literal \"Pune-Mumbai\" also lives on in the String pool, which this view doesn't show.)"},
+{"line": 15, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["t", "→ #4 Main.Ticket"]]}], "heap": ["<b>#3</b> String[0] (args, empty)", "<b>#4</b> Main.Ticket {route=&quot;Delhi-Agra&quot;, fare=60}", "<b>#5</b> String &quot;Delhi-Agra&quot;"], "out": "Delhi-Agra Rs 60\n", "phase": "Use", "note": "Reads both fields of #4 and prints them."},
+{"line": 16, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["t", "→ #4 Main.Ticket"]]}], "heap": ["<b>#3</b> String[0] (args, empty)", "<b>#4</b> Main.Ticket {route=&quot;Delhi-Agra&quot;, fare=60}", "<b>#5</b> String &quot;Delhi-Agra&quot;"], "phase": "main ends", "note": "main reaches its closing brace."},
+{"line": 16, "phase": "Program ends", "note": "main's frame is popped, so #4 loses its last reference too. When the program exits, the whole heap is released anyway.", "stack": [], "heap": []}]}</script>
+  </div>
+
+<h3 id="worked">Worked examples: real problems, solved and traced in memory</h3>
+  <p class="wx-intro">Three business programs where objects are born, used and abandoned. In each trace, an object disappears from the heap view at the exact step where the last reference to it is lost: that is the moment it becomes garbage.</p>
+  <article class="wx">
+    <div class="wx__head"><span class="wx__num">Example 1</span><span class="wx__tag">Retail · order processing</span></div>
+    <h4>Three ways an order object becomes garbage</h4>
+    <div class="wx__problem"><p class="wx__label">Problem statement</p><p>An order screen creates an order, replaces it with a corrected one, computes a GST bill using a temporary order inside a helper method, and finally clears the current order. Trace when each Order object becomes unreachable.</p></div>
+    <div class="prob__io"><div><small>Input</small><pre>order 1: Rs 100, order 2: Rs 250, bill for order 3: Rs 500 + 18% GST</pre></div><div><small>Expected output</small><pre>Bill: Rs 590.0</pre></div></div>
+    <div class="wx__approach"><p class="wx__label">Approach</p><ol><li><b>Reassignment:</b> pointing <code>current</code> at a new Order abandons the old one.</li><li><b>Scope end:</b> the Order made inside <code>billWithGst</code> is referenced only by that method's local <code>temp</code>; when the frame pops, it is unreachable.</li><li><b>null:</b> setting <code>current = null</code> drops the last reference to order 2.</li></ol></div>
+    <p class="wx__label">Solution: run it live</p>
+    <div class="runner">
+    <script type="application/json">{"lang": "java", "file": "Main.java", "tasks": [{"label": "Run · Three ways an order object becomes garbage", "hint": "Press <b>Run</b>. Then make <code>billWithGst</code> store <code>temp</code> in a static field. Which object would now survive?", "code": "public class Main {\n    static class Order {\n        int id;\n        double amount;\n        Order(int id, double amount) { this.id = id; this.amount = amount; }\n    }\n\n    static double billWithGst(int id, double price) {\n        Order temp = new Order(id, price);\n        return temp.amount * 1.18;\n    }\n\n    public static void main(String[] args) {\n        Order current = new Order(1, 100.0);\n        current = new Order(2, 250.0);\n        double bill = billWithGst(3, 500.0);\n        current = null;\n        System.out.println(\"Bill: Rs \" + bill);\n    }\n}\n"}]}</script>
+    </div>
+    <p class="wx__label">What happens in memory, step by step</p>
+    <p class="wx__how">Recorded from the real JVM: press <b>Next</b> to execute one line at a time. Watch method calls push and pop frames on the stack, and objects (numbered #1, #2 …) appear on the heap.</p>
+    <div class="tracer">
+    <script type="application/json">{"lang": "java", "code": ["public class Main {", "    static class Order {", "        int id;", "        double amount;", "        Order(int id, double amount) { this.id = id; this.amount = amount; }", "    }", "", "    static double billWithGst(int id, double price) {", "        Order temp = new Order(id, price);", "        return temp.amount * 1.18;", "    }", "", "    public static void main(String[] args) {", "        Order current = new Order(1, 100.0);", "        current = new Order(2, 250.0);", "        double bill = billWithGst(3, 500.0);", "        current = null;", "        System.out.println(\"Bill: Rs \" + bill);", "    }", "}"], "steps": [{"line": 14, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "new Main.Order(int id, double amount)", "vars": [["this", "→ #1 Main.Order"], ["id", "1"], ["amount", "100.0"]]}], "heap": ["<b>#1</b> Main.Order {id=0, amount=0.0}", "<b>#2</b> String[0] (args, empty)"], "newVar": "this", "phase": "new Order(1, …)", "note": "Order #1 is allocated with defaults (id 0, amount 0.0) and its constructor frame is pushed."}, {"line": 5, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}], "heap": ["<b>#2</b> String[0] (args, empty)"], "phase": "Constructor done", "note": "The one-line constructor set both fields and returned. The fresh reference is on main's operand stack for a moment, so the view shows no Order."}, {"line": 14, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["current", "→ #1 Main.Order"]]}], "heap": ["<b>#1</b> Main.Order {id=1, amount=100.0}", "<b>#2</b> String[0] (args, empty)"], "newVar": "current", "phase": "Alive", "note": "<code>current</code> → #1. It is reachable from main's frame, a GC root."}, {"line": 15, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["current", "→ #1 Main.Order"]]}, {"frame": "new Main.Order(int id, double amount)", "vars": [["this", "→ #3 Main.Order"], ["id", "2"], ["amount", "250.0"]]}], "heap": ["<b>#1</b> Main.Order {id=1, amount=100.0}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Main.Order {id=0, amount=0.0}"], "newVar": "this", "phase": "new Order(2, …)", "note": "Order #3 is allocated and its constructor runs. #1 is still referenced."}, {"line": 5, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["current", "→ #1 Main.Order"]]}], "heap": ["<b>#1</b> Main.Order {id=1, amount=100.0}", "<b>#2</b> String[0] (args, empty)"], "phase": "Constructor done", "note": "#3 is built; the reference waits on the operand stack."}, {"line": 15, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["current", "→ #3 Main.Order"]]}], "heap": ["<b>#2</b> String[0] (args, empty)", "<b>#3</b> Main.Order {id=2, amount=250.0}"], "newVar": "current", "phase": "Reassignment", "note": "<code>current</code> now points to #3. Nothing refers to #1 any more: it vanishes from the view. Way 1: <b>reassignment</b>."}, {"line": 16, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["current", "→ #3 Main.Order"]]}, {"frame": "billWithGst(int id, double price)", "vars": [["id", "3"], ["price", "500.0"]]}], "heap": ["<b>#2</b> String[0] (args, empty)", "<b>#3</b> Main.Order {id=2, amount=250.0}"], "newVar": "id", "phase": "Call billWithGst", "note": "A frame is pushed with id = 3 and price = 500.0."}, {"line": 9, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["current", "→ #3 Main.Order"]]}, {"frame": "billWithGst(int id, double price)", "vars": [["id", "3"], ["price", "500.0"]]}, {"frame": "new Main.Order(int id, double amount)", "vars": [["this", "→ #4 Main.Order"], ["id", "3"], ["amount", "500.0"]]}], "heap": ["<b>#2</b> String[0] (args, empty)", "<b>#3</b> Main.Order {id=2, amount=250.0}", "<b>#4</b> Main.Order {id=0, amount=0.0}"], "newVar": "this", "phase": "new Order(3, …)", "note": "Order #4 is allocated inside the helper's frame."}, {"line": 5, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["current", "→ #3 Main.Order"]]}, {"frame": "billWithGst(int id, double price)", "vars": [["id", "3"], ["price", "500.0"]]}], "heap": ["<b>#2</b> String[0] (args, empty)", "<b>#3</b> Main.Order {id=2, amount=250.0}"], "phase": "Constructor done", "note": "#4 is built."}, {"line": 9, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["current", "→ #3 Main.Order"]]}, {"frame": "billWithGst(int id, double price)", "vars": [["id", "3"], ["price", "500.0"], ["temp", "→ #4 Main.Order"]]}], "heap": ["<b>#2</b> String[0] (args, empty)", "<b>#3</b> Main.Order {id=2, amount=250.0}", "<b>#4</b> Main.Order {id=3, amount=500.0}"], "newVar": "temp", "phase": "Local temp", "note": "<code>temp</code> → #4. Only billWithGst's frame knows about it."}, {"line": 10, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["current", "→ #3 Main.Order"]]}], "heap": ["<b>#2</b> String[0] (args, empty)", "<b>#3</b> Main.Order {id=2, amount=250.0}"], "phase": "Return", "note": "The method returns 500 × 1.18 and its frame is popped. <code>temp</code> is gone, so #4 is unreachable. Way 2: <b>scope end</b>."}, {"line": 16, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["current", "→ #3 Main.Order"], ["bill", "590.0"]]}], "heap": ["<b>#2</b> String[0] (args, empty)", "<b>#3</b> Main.Order {id=2, amount=250.0}"], "newVar": "bill", "phase": "Store bill", "note": "bill = 590.0, a primitive in main's frame. The returned value is a number, not the object."}, {"line": 17, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["current", "null"], ["bill", "590.0"]]}], "heap": ["<b>#2</b> String[0] (args, empty)"], "newVar": "current", "phase": "null", "note": "<code>current = null</code> drops the only reference to #3. Way 3: <b>nulling</b>. The heap now has only the args array."}, {"line": 18, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["current", "null"], ["bill", "590.0"]]}], "heap": ["<b>#2</b> String[0] (args, empty)"], "out": "Bill: Rs 590.0\n", "phase": "Print", "note": "The bill is printed. Three Order objects were created; none is reachable now."}, {"line": 19, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["current", "null"], ["bill", "590.0"]]}], "heap": ["<b>#2</b> String[0] (args, empty)"], "phase": "main finishes", "note": "main reaches its closing brace."}, {"line": 19, "phase": "Program ends", "note": "main returns, its frame is popped and the program ends.", "stack": [], "heap": []}]}</script>
+    </div>
+  </article>
+  <article class="wx">
+    <div class="wx__head"><span class="wx__num">Example 2</span><span class="wx__tag">Food delivery · rider app</span></div>
+    <h4>Two objects that point at each other still die</h4>
+    <div class="wx__problem"><p class="wx__label">Problem statement</p><p>An order and its rider reference each other (<code>order.rider</code> and <code>rider.delivering</code>). The rider is also in the on-duty list. Show that the pair stays alive while the list holds the rider, and that both become garbage together when the shift ends, even though they still point at each other.</p></div>
+    <div class="prob__io"><div><small>Input</small><pre>order 501, rider &quot;Kabir&quot;, onDuty = 1 slot</pre></div><div><small>Expected output</small><pre>Kabir has order 501
+Shift over</pre></div></div>
+    <div class="wx__approach"><p class="wx__label">Approach</p><ol><li>Create the order and rider, link them both ways, and put the rider in the <code>onDuty</code> array.</li><li>Clear the local variables: the pair is still reachable through <code>onDuty</code>, a path from a GC root.</li><li>Clear the array slot: now no path from any root reaches them. Their references to each other don't count; Java's GC is based on reachability, not on counting references.</li></ol></div>
+    <p class="wx__label">Solution: run it live</p>
+    <div class="runner">
+    <script type="application/json">{"lang": "java", "file": "Main.java", "tasks": [{"label": "Run · Two objects that point at each other still die", "hint": "Press <b>Run</b>. Then remove the line <code>onDuty[0] = r;</code>. At which step do the order and rider become unreachable now?", "code": "public class Main {\n    static class Rider {\n        String name;\n        Order delivering;\n        Rider(String name) { this.name = name; }\n    }\n\n    static class Order {\n        int id;\n        Rider rider;\n        Order(int id) { this.id = id; }\n    }\n\n    public static void main(String[] args) {\n        Rider[] onDuty = new Rider[1];\n        Order o = new Order(501);\n        Rider r = new Rider(\"Kabir\");\n        o.rider = r;\n        r.delivering = o;\n        onDuty[0] = r;\n        o = null;\n        r = null;\n        System.out.println(onDuty[0].name + \" has order \" + onDuty[0].delivering.id);\n        onDuty[0] = null;\n        System.out.println(\"Shift over\");\n    }\n}\n"}]}</script>
+    </div>
+    <p class="wx__label">What happens in memory, step by step</p>
+    <p class="wx__how">Recorded from the real JVM: press <b>Next</b> to execute one line at a time. Watch method calls push and pop frames on the stack, and objects (numbered #1, #2 …) appear on the heap.</p>
+    <div class="tracer">
+    <script type="application/json">{"lang": "java", "code": ["public class Main {", "    static class Rider {", "        String name;", "        Order delivering;", "        Rider(String name) { this.name = name; }", "    }", "", "    static class Order {", "        int id;", "        Rider rider;", "        Order(int id) { this.id = id; }", "    }", "", "    public static void main(String[] args) {", "        Rider[] onDuty = new Rider[1];", "        Order o = new Order(501);", "        Rider r = new Rider(\"Kabir\");", "        o.rider = r;", "        r.delivering = o;", "        onDuty[0] = r;", "        o = null;", "        r = null;", "        System.out.println(onDuty[0].name + \" has order \" + onDuty[0].delivering.id);", "        onDuty[0] = null;", "        System.out.println(\"Shift over\");", "    }", "}"], "steps": [{"line": 15, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["onDuty", "→ #1 Main.Rider[1]"]]}], "heap": ["<b>#1</b> Main.Rider[1] {null}", "<b>#2</b> String[0] (args, empty)"], "newVar": "onDuty", "phase": "On-duty list", "note": "An array #1 with one slot, initially null."}, {"line": 16, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["onDuty", "→ #1 Main.Rider[1]"]]}, {"frame": "new Main.Order(int id)", "vars": [["this", "→ #3 Main.Order"], ["id", "501"]]}], "heap": ["<b>#1</b> Main.Rider[1] {null}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Main.Order {id=0, rider=null}"], "newVar": "this", "phase": "new Order(501)", "note": "Order #3 is allocated (id 0, rider null) and its constructor is pushed."}, {"line": 11, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["onDuty", "→ #1 Main.Rider[1]"]]}], "heap": ["<b>#1</b> Main.Rider[1] {null}", "<b>#2</b> String[0] (args, empty)"], "phase": "Constructor done", "note": "The reference is briefly only on the operand stack."}, {"line": 16, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["onDuty", "→ #1 Main.Rider[1]"], ["o", "→ #3 Main.Order"]]}], "heap": ["<b>#1</b> Main.Rider[1] {null}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Main.Order {id=501, rider=null}"], "newVar": "o", "phase": "Store o", "note": "<code>o</code> → #3, id 501."}, {"line": 17, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["onDuty", "→ #1 Main.Rider[1]"], ["o", "→ #3 Main.Order"]]}, {"frame": "new Main.Rider(String name)", "vars": [["this", "→ #4 Main.Rider"], ["name", "→ #5 \"Kabir\""]]}], "heap": ["<b>#1</b> Main.Rider[1] {null}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Main.Order {id=501, rider=null}", "<b>#4</b> Main.Rider {name=null, delivering=null}", "<b>#5</b> String &quot;Kabir&quot;"], "newVar": "this", "phase": "new Rider", "note": "Rider #4 is allocated with defaults; the constructor gets the \"Kabir\" String (#5)."}, {"line": 5, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["onDuty", "→ #1 Main.Rider[1]"], ["o", "→ #3 Main.Order"]]}], "heap": ["<b>#1</b> Main.Rider[1] {null}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Main.Order {id=501, rider=null}"], "phase": "Constructor done", "note": "Reference on the operand stack for an instant."}, {"line": 17, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["onDuty", "→ #1 Main.Rider[1]"], ["o", "→ #3 Main.Order"], ["r", "→ #4 Main.Rider"]]}], "heap": ["<b>#1</b> Main.Rider[1] {null}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Main.Order {id=501, rider=null}", "<b>#4</b> Main.Rider {name=&quot;Kabir&quot;, delivering=null}", "<b>#5</b> String &quot;Kabir&quot;"], "newVar": "r", "phase": "Store r", "note": "<code>r</code> → #4."}, {"line": 18, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["onDuty", "→ #1 Main.Rider[1]"], ["o", "→ #3 Main.Order"], ["r", "→ #4 Main.Rider"]]}], "heap": ["<b>#1</b> Main.Rider[1] {null}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Main.Order {id=501, rider=→#4}", "<b>#4</b> Main.Rider {name=&quot;Kabir&quot;, delivering=null}", "<b>#5</b> String &quot;Kabir&quot;"], "phase": "Link order → rider", "note": "#3's field <code>rider</code> now points to #4."}, {"line": 19, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["onDuty", "→ #1 Main.Rider[1]"], ["o", "→ #3 Main.Order"], ["r", "→ #4 Main.Rider"]]}], "heap": ["<b>#1</b> Main.Rider[1] {null}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Main.Order {id=501, rider=→#4}", "<b>#4</b> Main.Rider {name=&quot;Kabir&quot;, delivering=→#3}", "<b>#5</b> String &quot;Kabir&quot;"], "phase": "Link rider → order", "note": "#4's field <code>delivering</code> points back to #3. The two objects now reference each other."}, {"line": 20, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["onDuty", "→ #1 Main.Rider[1]"], ["o", "→ #3 Main.Order"], ["r", "→ #4 Main.Rider"]]}], "heap": ["<b>#1</b> Main.Rider[1] {→#4}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Main.Order {id=501, rider=→#4}", "<b>#4</b> Main.Rider {name=&quot;Kabir&quot;, delivering=→#3}", "<b>#5</b> String &quot;Kabir&quot;"], "phase": "On duty", "note": "The array slot onDuty[0] also points to #4."}, {"line": 21, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["onDuty", "→ #1 Main.Rider[1]"], ["o", "null"], ["r", "→ #4 Main.Rider"]]}], "heap": ["<b>#1</b> Main.Rider[1] {→#4}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Main.Order {id=501, rider=→#4}", "<b>#4</b> Main.Rider {name=&quot;Kabir&quot;, delivering=→#3}", "<b>#5</b> String &quot;Kabir&quot;"], "newVar": "o", "phase": "o = null", "note": "main no longer refers to #3 directly. But #3 stays: onDuty → #4 → delivering → #3 is a path from a GC root."}, {"line": 22, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["onDuty", "→ #1 Main.Rider[1]"], ["o", "null"], ["r", "null"]]}], "heap": ["<b>#1</b> Main.Rider[1] {→#4}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Main.Order {id=501, rider=→#4}", "<b>#4</b> Main.Rider {name=&quot;Kabir&quot;, delivering=→#3}", "<b>#5</b> String &quot;Kabir&quot;"], "newVar": "r", "phase": "r = null", "note": "Still alive: the array holds the rider, and the rider holds the order."}, {"line": 23, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["onDuty", "→ #1 Main.Rider[1]"], ["o", "null"], ["r", "null"]]}], "heap": ["<b>#1</b> Main.Rider[1] {→#4}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Main.Order {id=501, rider=→#4}", "<b>#4</b> Main.Rider {name=&quot;Kabir&quot;, delivering=→#3}", "<b>#5</b> String &quot;Kabir&quot;"], "out": "Kabir has order 501\n", "phase": "Print", "note": "Reaches both objects through the array: Kabir has order 501."}, {"line": 24, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["onDuty", "→ #1 Main.Rider[1]"], ["o", "null"], ["r", "null"]]}], "heap": ["<b>#1</b> Main.Rider[1] {null}", "<b>#2</b> String[0] (args, empty)"], "phase": "Shift over", "note": "onDuty[0] = null removes the last path from a root. #3 and #4 still point at each other, but no root reaches them, so both drop out of the view together. This is called an <b>island of isolation</b>. (The \"Kabir\" literal, #5, also disappears from this view, but literals stay in the String pool.)"}, {"line": 25, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["onDuty", "→ #1 Main.Rider[1]"], ["o", "null"], ["r", "null"]]}], "heap": ["<b>#1</b> Main.Rider[1] {null}", "<b>#2</b> String[0] (args, empty)"], "out": "Shift over\n", "phase": "Print", "note": "The program continues; the island is garbage, waiting for the collector."}, {"line": 26, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["onDuty", "→ #1 Main.Rider[1]"], ["o", "null"], ["r", "null"]]}], "heap": ["<b>#1</b> Main.Rider[1] {null}", "<b>#2</b> String[0] (args, empty)"], "phase": "main finishes", "note": "main reaches its closing brace."}, {"line": 26, "phase": "Program ends", "note": "main returns, its frame is popped and the program ends.", "stack": [], "heap": []}]}</script>
+    </div>
+  </article>
+  <article class="wx">
+    <div class="wx__head"><span class="wx__num">Example 3</span><span class="wx__tag">Payments · receipts</span></div>
+    <h4>A temporary builder dies, the receipt is kept by a static list</h4>
+    <div class="wx__problem"><p class="wx__label">Problem statement</p><p>A payment service builds a receipt text for each transaction with a StringBuilder and stores the final String in a static list for the end-of-day report. Trace which objects survive each call.</p></div>
+    <div class="prob__io"><div><small>Input</small><pre>txn 71: Rs 450, txn 72: Rs 1200</pre></div><div><small>Expected output</small><pre>[TXN-71 Rs 450, TXN-72 Rs 1200]</pre></div></div>
+    <div class="wx__approach"><p class="wx__label">Approach</p><ol><li>The StringBuilder is a scratch object: only the local <code>sb</code> refers to it.</li><li>The receipt String is added to the <b>static</b> list <code>receipts</code>. Static fields are GC roots, so whatever they reference stays alive.</li><li>Even after main sets <code>last = null</code>, the receipt survives because the list still holds it.</li></ol></div>
+    <p class="wx__label">Solution: run it live</p>
+    <div class="runner">
+    <script type="application/json">{"lang": "java", "file": "Main.java", "tasks": [{"label": "Run · A temporary builder dies, the receipt is kept by a static list", "hint": "Press <b>Run</b>. Then add <code>receipts.clear();</code> before the print. What prints, and which objects would become garbage?", "code": "import java.util.ArrayList;\nimport java.util.List;\n\npublic class Main {\n    static List<String> receipts = new ArrayList<>();\n\n    static String makeReceipt(int txnId, int amount) {\n        StringBuilder sb = new StringBuilder(\"TXN-\");\n        sb.append(txnId).append(\" Rs \").append(amount);\n        String receipt = sb.toString();\n        receipts.add(receipt);\n        return receipt;\n    }\n\n    public static void main(String[] args) {\n        makeReceipt(71, 450);\n        String last = makeReceipt(72, 1200);\n        last = null;\n        System.out.println(receipts);\n    }\n}\n"}]}</script>
+    </div>
+    <p class="wx__label">What happens in memory, step by step</p>
+    <p class="wx__how">Recorded from the real JVM: press <b>Next</b> to execute one line at a time. Watch method calls push and pop frames on the stack, and objects (numbered #1, #2 …) appear on the heap.</p>
+    <div class="tracer">
+    <script type="application/json">{"lang": "java", "code": ["import java.util.ArrayList;", "import java.util.List;", "", "public class Main {", "    static List<String> receipts = new ArrayList<>();", "", "    static String makeReceipt(int txnId, int amount) {", "        StringBuilder sb = new StringBuilder(\"TXN-\");", "        sb.append(txnId).append(\" Rs \").append(amount);", "        String receipt = sb.toString();", "        receipts.add(receipt);", "        return receipt;", "    }", "", "    public static void main(String[] args) {", "        makeReceipt(71, 450);", "        String last = makeReceipt(72, 1200);", "        last = null;", "        System.out.println(receipts);", "    }", "}"], "steps": [{"line": 16, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "makeReceipt(int txnId, int amount)", "vars": [["txnId", "71"], ["amount", "450"]]}], "heap": ["<b>class</b> static fields of Main: receipts=→#1", "<b>#1</b> ArrayList size 0 []", "<b>#2</b> String[0] (args, empty)"], "newVar": "txnId", "phase": "Call makeReceipt", "note": "Before main ran, class Main was initialised and the static field <code>receipts</code> was set to ArrayList #1. A frame for makeReceipt is pushed with txnId 71 and amount 450."}, {"line": 8, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "makeReceipt(int txnId, int amount)", "vars": [["txnId", "71"], ["amount", "450"], ["sb", "→ #3 StringBuilder"]]}], "heap": ["<b>class</b> static fields of Main: receipts=→#1", "<b>#1</b> ArrayList size 0 []", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> StringBuilder &quot;TXN-&quot; (length 4, capacity 20)"], "newVar": "sb", "phase": "Scratch builder", "note": "StringBuilder #3 starts as \"TXN-\" (capacity 16 + 4 = 20)."}, {"line": 9, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "makeReceipt(int txnId, int amount)", "vars": [["txnId", "71"], ["amount", "450"], ["sb", "→ #3 StringBuilder"]]}], "heap": ["<b>class</b> static fields of Main: receipts=→#1", "<b>#1</b> ArrayList size 0 []", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> StringBuilder &quot;TXN-71 Rs 450&quot; (length 13, capacity 20)"], "phase": "Append", "note": "The builder now holds \"TXN-71 Rs 450\". Still the same object #3."}, {"line": 10, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "makeReceipt(int txnId, int amount)", "vars": [["txnId", "71"], ["amount", "450"], ["sb", "→ #3 StringBuilder"], ["receipt", "→ #4 \"TXN-71 Rs 450\""]]}], "heap": ["<b>class</b> static fields of Main: receipts=→#1", "<b>#1</b> ArrayList size 0 []", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> StringBuilder &quot;TXN-71 Rs 450&quot; (length 13, capacity 20)", "<b>#4</b> String &quot;TXN-71 Rs 450&quot;"], "newVar": "receipt", "phase": "toString", "note": "A new immutable String #4 is created with the text."}, {"line": 11, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "makeReceipt(int txnId, int amount)", "vars": [["txnId", "71"], ["amount", "450"], ["sb", "→ #3 StringBuilder"], ["receipt", "→ #4 \"TXN-71 Rs 450\""]]}], "heap": ["<b>class</b> static fields of Main: receipts=→#1", "<b>#1</b> ArrayList size 1 [&quot;TXN-71 Rs 450&quot;]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> StringBuilder &quot;TXN-71 Rs 450&quot; (length 13, capacity 20)", "<b>#4</b> String &quot;TXN-71 Rs 450&quot;"], "phase": "Keep it", "note": "The list #1 (reachable from a static field, a GC root) now holds #4."}, {"line": 12, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}], "heap": ["<b>class</b> static fields of Main: receipts=→#1", "<b>#1</b> ArrayList size 1 [&quot;TXN-71 Rs 450&quot;]", "<b>#2</b> String[0] (args, empty)", "<b>#4</b> String &quot;TXN-71 Rs 450&quot;"], "phase": "Return", "note": "The frame is popped. #3, the builder, was referenced only by <code>sb</code>, so it is garbage now. #4 survives because the static list holds it."}, {"line": 16, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}], "heap": ["<b>class</b> static fields of Main: receipts=→#1", "<b>#1</b> ArrayList size 1 [&quot;TXN-71 Rs 450&quot;]", "<b>#2</b> String[0] (args, empty)", "<b>#4</b> String &quot;TXN-71 Rs 450&quot;"], "phase": "Result ignored", "note": "main didn't store the returned reference. That doesn't matter: the list keeps #4 alive."}, {"line": 17, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "makeReceipt(int txnId, int amount)", "vars": [["txnId", "72"], ["amount", "1200"]]}], "heap": ["<b>class</b> static fields of Main: receipts=→#1", "<b>#1</b> ArrayList size 1 [&quot;TXN-71 Rs 450&quot;]", "<b>#2</b> String[0] (args, empty)", "<b>#4</b> String &quot;TXN-71 Rs 450&quot;"], "newVar": "txnId", "phase": "Second call", "note": "A fresh frame with txnId 72 and amount 1200."}, {"line": 8, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "makeReceipt(int txnId, int amount)", "vars": [["txnId", "72"], ["amount", "1200"], ["sb", "→ #5 StringBuilder"]]}], "heap": ["<b>class</b> static fields of Main: receipts=→#1", "<b>#1</b> ArrayList size 1 [&quot;TXN-71 Rs 450&quot;]", "<b>#2</b> String[0] (args, empty)", "<b>#4</b> String &quot;TXN-71 Rs 450&quot;", "<b>#5</b> StringBuilder &quot;TXN-&quot; (length 4, capacity 20)"], "newVar": "sb", "phase": "Scratch builder", "note": "A new builder #5. The old #3 is never reused."}, {"line": 9, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "makeReceipt(int txnId, int amount)", "vars": [["txnId", "72"], ["amount", "1200"], ["sb", "→ #5 StringBuilder"]]}], "heap": ["<b>class</b> static fields of Main: receipts=→#1", "<b>#1</b> ArrayList size 1 [&quot;TXN-71 Rs 450&quot;]", "<b>#2</b> String[0] (args, empty)", "<b>#4</b> String &quot;TXN-71 Rs 450&quot;", "<b>#5</b> StringBuilder &quot;TXN-72 Rs 1200&quot; (length 14, capacity 20)"], "phase": "Append", "note": "\"TXN-72 Rs 1200\" (14 characters, still fits in capacity 20)."}, {"line": 10, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "makeReceipt(int txnId, int amount)", "vars": [["txnId", "72"], ["amount", "1200"], ["sb", "→ #5 StringBuilder"], ["receipt", "→ #6 \"TXN-72 Rs 1200\""]]}], "heap": ["<b>class</b> static fields of Main: receipts=→#1", "<b>#1</b> ArrayList size 1 [&quot;TXN-71 Rs 450&quot;]", "<b>#2</b> String[0] (args, empty)", "<b>#4</b> String &quot;TXN-71 Rs 450&quot;", "<b>#5</b> StringBuilder &quot;TXN-72 Rs 1200&quot; (length 14, capacity 20)", "<b>#6</b> String &quot;TXN-72 Rs 1200&quot;"], "newVar": "receipt", "phase": "toString", "note": "String #6 is created."}, {"line": 11, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "makeReceipt(int txnId, int amount)", "vars": [["txnId", "72"], ["amount", "1200"], ["sb", "→ #5 StringBuilder"], ["receipt", "→ #6 \"TXN-72 Rs 1200\""]]}], "heap": ["<b>class</b> static fields of Main: receipts=→#1", "<b>#1</b> ArrayList size 2 [&quot;TXN-71 Rs 450&quot;, &quot;TXN-72 Rs 1200&quot;]", "<b>#2</b> String[0] (args, empty)", "<b>#4</b> String &quot;TXN-71 Rs 450&quot;", "<b>#5</b> StringBuilder &quot;TXN-72 Rs 1200&quot; (length 14, capacity 20)", "<b>#6</b> String &quot;TXN-72 Rs 1200&quot;"], "phase": "Keep it", "note": "The static list now holds 2 receipts."}, {"line": 12, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}], "heap": ["<b>class</b> static fields of Main: receipts=→#1", "<b>#1</b> ArrayList size 2 [&quot;TXN-71 Rs 450&quot;, &quot;TXN-72 Rs 1200&quot;]", "<b>#2</b> String[0] (args, empty)", "<b>#4</b> String &quot;TXN-71 Rs 450&quot;", "<b>#6</b> String &quot;TXN-72 Rs 1200&quot;"], "phase": "Return", "note": "Frame popped: builder #5 becomes garbage, #6 survives in the list."}, {"line": 17, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["last", "→ #6 \"TXN-72 Rs 1200\""]]}], "heap": ["<b>class</b> static fields of Main: receipts=→#1", "<b>#1</b> ArrayList size 2 [&quot;TXN-71 Rs 450&quot;, &quot;TXN-72 Rs 1200&quot;]", "<b>#2</b> String[0] (args, empty)", "<b>#4</b> String &quot;TXN-71 Rs 450&quot;", "<b>#6</b> String &quot;TXN-72 Rs 1200&quot;"], "newVar": "last", "phase": "Store last", "note": "This time main keeps the returned reference: <code>last</code> → #6."}, {"line": 18, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["last", "null"]]}], "heap": ["<b>class</b> static fields of Main: receipts=→#1", "<b>#1</b> ArrayList size 2 [&quot;TXN-71 Rs 450&quot;, &quot;TXN-72 Rs 1200&quot;]", "<b>#2</b> String[0] (args, empty)", "<b>#4</b> String &quot;TXN-71 Rs 450&quot;", "<b>#6</b> String &quot;TXN-72 Rs 1200&quot;"], "newVar": "last", "phase": "last = null", "note": "main drops its reference, but #6 stays: the static list still refers to it. Static collections keep objects alive for as long as the program runs, which is how many memory leaks start (Lesson 8.3)."}, {"line": 19, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["last", "null"]]}], "heap": ["<b>class</b> static fields of Main: receipts=→#1", "<b>#1</b> ArrayList size 2 [&quot;TXN-71 Rs 450&quot;, &quot;TXN-72 Rs 1200&quot;]", "<b>#2</b> String[0] (args, empty)", "<b>#4</b> String &quot;TXN-71 Rs 450&quot;", "<b>#6</b> String &quot;TXN-72 Rs 1200&quot;"], "out": "[TXN-71 Rs 450, TXN-72 Rs 1200]\n", "phase": "Print", "note": "The list prints both receipts."}, {"line": 20, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["last", "null"]]}], "heap": ["<b>class</b> static fields of Main: receipts=→#1", "<b>#1</b> ArrayList size 2 [&quot;TXN-71 Rs 450&quot;, &quot;TXN-72 Rs 1200&quot;]", "<b>#2</b> String[0] (args, empty)", "<b>#4</b> String &quot;TXN-71 Rs 450&quot;", "<b>#6</b> String &quot;TXN-72 Rs 1200&quot;"], "phase": "main finishes", "note": "main reaches its closing brace."}, {"line": 20, "phase": "Program ends", "note": "main returns, its frame is popped and the program ends.", "stack": [], "heap": []}]}</script>
+    </div>
+  </article>
+
+</section>
+
+<!-- ======================= PART 9: QUIZ AND REVISION ======================= -->
+<section class="part" id="quiz">
+  <span class="part-label"><b>9</b> Quiz and revision</span>
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <script type="application/json">[
+      { "q": "In what order do these run for new Child()? (Child extends Parent)", "options": ["Child body, Parent constructor, field initializers", "Parent constructor, Child field initializers, Child constructor body", "Child field initializers, Parent constructor, Child body", "Field initializers of both, then both bodies"], "answer": 1, "why": "The parent constructor runs first (super()), then the child's field initializers and instance blocks in source order, then the child's constructor body." },
+      { "q": "Inside a constructor, before any assignment, an int field holds…", "options": ["Garbage", "0", "null", "It can't be read"], "answer": 1, "why": "new zero-fills the object's memory before the constructor runs, so int fields start at 0 (unless a field initializer has already run)." },
+      { "q": "Order a = new Order(); Order b = a; a = null; Is the Order object eligible for GC?", "options": ["Yes, a is null", "No, b still refers to it", "Only after System.gc()", "Yes, but only if b is also final"], "answer": 1, "why": "An object is eligible only when no chain of references reaches it from a root. b still does." },
+      { "q": "Which of these is NOT a GC root?", "options": ["A local variable of a running method", "A static field of a loaded class", "A field of an unreachable object", "A running thread"], "answer": 2, "why": "Fields of an unreachable object don't count: the object itself can't be reached, so neither can anything only it refers to." },
+      { "q": "Two objects refer to each other, and nothing else refers to them. They are…", "options": ["Kept forever (circular reference)", "Eligible for GC (island of isolation)", "A compile error", "Collected only by finalize()"], "answer": 1, "why": "Java's GC traces reachability from roots; mutual references don't keep an island alive." },
+      { "q": "Since which version is finalize() deprecated?", "options": ["Java 5", "Java 8", "Java 9", "Java 21"], "answer": 2, "why": "Deprecated in Java 9; Java 18 (JEP 421) also marked it for removal." },
+      { "q": "What is the best way to make sure a file is closed even if an exception occurs?", "options": ["Override finalize()", "Call System.gc()", "try-with-resources", "Set the reference to null"], "answer": 2, "why": "try-with-resources calls close() at the end of the block, whether it finishes normally or with an exception." },
+      { "q": "A method creates an object, stores it only in a local variable, and returns. After the return the object is…", "options": ["Destroyed immediately", "Unreachable, so eligible for GC", "Moved to the stack", "Still reachable through the method"], "answer": 1, "why": "The frame is popped, so its local is gone. The object becomes eligible; when it is actually collected is the GC's decision." }
+    ]</script>
+  </div>
+  <h3>Quick revision</h3>
+  <div class="revision">
+    <h3>Lesson 8.2 in one screen</h3>
+    <ul>
+      <li>Lifecycle: created → in use (reachable) → unreachable (eligible) → collected (whenever the GC decides).</li>
+      <li><code>new</code>: allocate + zero-fill, then parent constructor, field initializers and blocks, constructor body.</li>
+      <li>Reachable = a chain of references from a GC root (live frames' locals, static fields, threads).</li>
+      <li>Unreachable via reassignment, <code>null</code>, or scope end. Mutual references don't matter (island of isolation).</li>
+      <li>Nothing runs when an object becomes garbage; there is no destructor in Java.</li>
+      <li><code>finalize()</code>: deprecated in 9, for removal in 18. Don't use it.</li>
+      <li>Release resources with try-with-resources (<code>AutoCloseable</code>); use <code>Cleaner</code> only as a safety net.</li>
+    </ul>
+  </div>
+  <h3>Interview and viva questions</h3>
+  <div class="faq">
+    <details><summary>When does an object become eligible for garbage collection?</summary><p>When it is no longer reachable through any chain of references from a GC root: local variables and parameters of active frames, static fields, live threads and native references. Typical causes are reassigning the variable, setting it to null, or the method that held it returning. Eligibility doesn't mean immediate collection.</p></details>
+    <details><summary>Does Java have destructors?</summary><p>No. Memory is reclaimed by the garbage collector without calling anything on the object. <code>finalize()</code> looked like a destructor but was unreliable and is deprecated. For cleanup of resources, implement <code>AutoCloseable</code> and use try-with-resources.</p></details>
+    <details><summary>Why was finalize() deprecated?</summary><p>There is no guarantee when, on which thread, or whether it runs at all. It delays reclamation (objects with finalizers need extra GC work), exceptions inside it are silently ignored, and it can “resurrect” an object by storing <code>this</code> somewhere. Java 9 deprecated it and Java 18 marked it for removal.</p></details>
+    <details><summary>What is an island of isolation?</summary><p>A group of objects that reference each other but that no GC root can reach, for example an Order and a Rider pointing at each other after every external reference is gone. Because Java's collectors trace from roots instead of counting references, the whole island is garbage.</p></details>
+    <details><summary>How does Cleaner differ from finalize()?</summary><p>You register an object and a separate cleanup action with a <code>Cleaner</code>. The action runs once, either when you call <code>clean()</code> (typically from <code>close()</code>) or some time after the object becomes unreachable. The action never receives the object, so it can't resurrect it. It is meant as a safety net behind try-with-resources, not a replacement.</p></details>
+  </div>
+
+  <h3 id="practice">Practice problems</h3>
+  <p class="prob-intro">These problems are about the life of an object: what runs when it is created, how long it stays reachable, and how its resources are released. Predict the order of the printed lines before you run anything. The last three are business tasks.</p>
+  <div class="probs">
+    <article class="prob"><div class="prob__head"><span class="prob__num">P1</span><span class="prob__tag prob__tag--easy">Easy</span><h4>Count the objects created</h4></div>
+      <p>Count how many <code>Order</code> objects have been created, using a static counter that the constructor increases.</p>
+      <div class="prob__io"><div><small>Input</small><pre>create 3 orders, one of them inside a loop body</pre></div><div><small>Expected output</small><pre>Temporary order 2
+Temporary order 3
+First order id: 1
+Orders created: 3</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="java" data-file="Main.java"><pre><code>public class Main {
+    static class Order {
+        static int created = 0;
+        final int id;
+        Order() {
+            created++;
+            id = created;
+        }
+    }
+
+    public static void main(String[] args) {
+        Order a = new Order();
+        for (int i = 0; i &lt; 2; i++) {
+            Order temp = new Order();
+            System.out.println(&quot;Temporary order &quot; + temp.id);
+        }
+        System.out.println(&quot;First order id: &quot; + a.id);
+        System.out.println(&quot;Orders created: &quot; + Order.created);
+    }
+}</code></pre><div class="output">Temporary order 2
+Temporary order 3
+First order id: 1
+Orders created: 3</div></div>
+        <p><b>How it works:</b> <code>created</code> is <code>static</code>, so there is one copy for the whole class, not one per object. Each <code>new Order()</code> runs the constructor once. The two temporary orders become unreachable at the end of each loop iteration, but they were still created, so the count is 3. Counting creations is not the same as counting live objects.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P2</span><span class="prob__tag prob__tag--easy">Easy</span><h4>What runs first when you say new?</h4></div>
+      <p>Print a line from a field initializer, an instance initializer block and the constructor, and see the order in which they run.</p>
+      <div class="prob__io"><div><small>Input</small><pre>new Invoice()</pre></div><div><small>Expected output</small><pre>1. field initializer, gstRate was 0.0
+2. initializer block, status = null
+3. constructor body
+Ready: DRAFT at 18.0%</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="java" data-file="Main.java"><pre><code>public class Main {
+    static class Invoice {
+        double gstRate = initRate();
+        String status;
+
+        {
+            System.out.println(&quot;2. initializer block, status = &quot; + status);
+        }
+
+        Invoice() {
+            System.out.println(&quot;3. constructor body&quot;);
+            status = &quot;DRAFT&quot;;
+        }
+
+        double initRate() {
+            System.out.println(&quot;1. field initializer, gstRate was &quot; + gstRate);
+            return 18.0;
+        }
+    }
+
+    public static void main(String[] args) {
+        Invoice inv = new Invoice();
+        System.out.println(&quot;Ready: &quot; + inv.status + &quot; at &quot; + inv.gstRate + &quot;%&quot;);
+    }
+}</code></pre><div class="output">1. field initializer, gstRate was 0.0
+2. initializer block, status = null
+3. constructor body
+Ready: DRAFT at 18.0%</div></div>
+        <p><b>How it works:</b> memory is zero-filled first, which is why <code>gstRate</code> is seen as 0.0 and <code>status</code> as null. Then, after the parent constructor, field initializers and initializer blocks run in the order they are written, and finally the constructor body.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P3</span><span class="prob__tag prob__tag--easy">Easy</span><h4>Parent first, then child</h4></div>
+      <p>A <code>SavingsAccount</code> extends <code>Account</code>. Show that the parent's constructor finishes before the child's constructor body starts.</p>
+      <div class="prob__io"><div><small>Input</small><pre>new SavingsAccount(&quot;SB-101&quot;)</pre></div><div><small>Expected output</small><pre>Account part ready: SB-101
+Savings part ready: rate 3.5%
+SB-101 created</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="java" data-file="Main.java"><pre><code>public class Main {
+    static class Account {
+        String number;
+        Account(String number) {
+            this.number = number;
+            System.out.println(&quot;Account part ready: &quot; + number);
+        }
+    }
+
+    static class SavingsAccount extends Account {
+        double rate;
+        SavingsAccount(String number) {
+            super(number);
+            rate = 3.5;
+            System.out.println(&quot;Savings part ready: rate &quot; + rate + &quot;%&quot;);
+        }
+    }
+
+    public static void main(String[] args) {
+        SavingsAccount s = new SavingsAccount(&quot;SB-101&quot;);
+        System.out.println(s.number + &quot; created&quot;);
+    }
+}</code></pre><div class="output">Account part ready: SB-101
+Savings part ready: rate 3.5%
+SB-101 created</div></div>
+        <p><b>How it works:</b> there is <b>one</b> object on the heap with both the <code>number</code> and <code>rate</code> fields. Its constructors run from the top of the hierarchy down: <code>super(number)</code> must be the first statement, so the Account part is set up before the SavingsAccount part.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P4</span><span class="prob__tag prob__tag--medium">Medium</span><h4>Resources close in reverse order</h4></div>
+      <p>Open a database connection and then a file inside one try-with-resources statement. Show the order in which they are closed.</p>
+      <div class="prob__io"><div><small>Input</small><pre>Resource(&quot;db&quot;), Resource(&quot;file&quot;)</pre></div><div><small>Expected output</small><pre>open db
+open file
+export orders from db to file
+close file
+close db
+both released</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="java" data-file="Main.java"><pre><code>public class Main {
+    static class Resource implements AutoCloseable {
+        final String name;
+        Resource(String name) {
+            this.name = name;
+            System.out.println(&quot;open &quot; + name);
+        }
+        @Override
+        public void close() {
+            System.out.println(&quot;close &quot; + name);
+        }
+    }
+
+    public static void main(String[] args) {
+        try (Resource db = new Resource(&quot;db&quot;);
+             Resource file = new Resource(&quot;file&quot;)) {
+            System.out.println(&quot;export orders from &quot; + db.name + &quot; to &quot; + file.name);
+        }
+        System.out.println(&quot;both released&quot;);
+    }
+}</code></pre><div class="output">open db
+open file
+export orders from db to file
+close file
+close db
+both released</div></div>
+        <p><b>How it works:</b> resources are closed automatically when the try block ends, in the <b>reverse</b> order of opening, because the file may depend on the connection. This is the deterministic, modern way to release resources; you never wait for the garbage collector.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P5</span><span class="prob__tag prob__tag--medium">Medium</span><h4>Close still runs when something fails</h4></div>
+      <p>An export fails half-way with an exception. Show that the connection is still closed before the error is handled.</p>
+      <div class="prob__io"><div><small>Input</small><pre>export throws IllegalStateException</pre></div><div><small>Expected output</small><pre>connection opened
+exporting row 1
+connection closed
+export failed: disk full</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="java" data-file="Main.java"><pre><code>public class Main {
+    static class Connection implements AutoCloseable {
+        Connection() { System.out.println(&quot;connection opened&quot;); }
+        @Override
+        public void close() { System.out.println(&quot;connection closed&quot;); }
+    }
+
+    static void export(Connection c) {
+        System.out.println(&quot;exporting row 1&quot;);
+        throw new IllegalStateException(&quot;disk full&quot;);
+    }
+
+    public static void main(String[] args) {
+        try (Connection c = new Connection()) {
+            export(c);
+        } catch (IllegalStateException e) {
+            System.out.println(&quot;export failed: &quot; + e.getMessage());
+        }
+    }
+}</code></pre><div class="output">connection opened
+exporting row 1
+connection closed
+export failed: disk full</div></div>
+        <p><b>How it works:</b> when <code>export</code> throws, Java first closes the resource declared in the try header, then runs the matching catch block. Without try-with-resources a failed export would leak the connection until someone noticed the pool was empty. (Exceptions are covered fully in Module 9.)</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P6</span><span class="prob__tag prob__tag--medium">Medium</span><h4>Recently viewed: old items fall out</h4></div>
+      <p>Keep only the last 3 products a user viewed in a fixed-size array. When a 4th arrives, the oldest is overwritten and becomes unreachable. Print the list after each view.</p>
+      <div class="prob__io"><div><small>Input</small><pre>views: &quot;Phone&quot;, &quot;Cover&quot;, &quot;Charger&quot;, &quot;Earbuds&quot;, &quot;Stand&quot;</pre></div><div><small>Expected output</small><pre>[Phone, null, null]
+[Phone, Cover, null]
+[Phone, Cover, Charger]
+[Earbuds, Cover, Charger]  dropped Phone
+[Earbuds, Stand, Charger]  dropped Cover</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="java" data-file="Main.java"><pre><code>import java.util.Arrays;
+
+public class Main {
+    public static void main(String[] args) {
+        String[] recent = new String[3];
+        int next = 0;
+        String[] views = {&quot;Phone&quot;, &quot;Cover&quot;, &quot;Charger&quot;, &quot;Earbuds&quot;, &quot;Stand&quot;};
+        for (String product : views) {
+            String dropped = recent[next];
+            recent[next] = product;
+            next = (next + 1) % recent.length;
+            System.out.println(Arrays.toString(recent) + (dropped != null ? &quot;  dropped &quot; + dropped : &quot;&quot;));
+        }
+    }
+}</code></pre><div class="output">[Phone, null, null]
+[Phone, Cover, null]
+[Phone, Cover, Charger]
+[Earbuds, Cover, Charger]  dropped Phone
+[Earbuds, Stand, Charger]  dropped Cover</div></div>
+        <p><b>How it works:</b> a <b>ring buffer</b>: <code>next</code> cycles 0, 1, 2, 0, 1… Overwriting a slot removes the array's reference to the old product, so (if nothing else refers to it) it becomes garbage. Memory stays bounded at 3 slots however many products the user views, unlike a list that only ever grows.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P7</span><span class="prob__tag prob__tag--business">Business problem</span><h4>Ticket counter with live and total counts</h4></div>
+      <p>A railway booking desk issues tickets. Track how many tickets were ever issued and how many are still active, where a ticket stops being active when it is cancelled (closed). Use try-with-resources for a ticket that is used once and released.</p>
+      <div class="prob__io"><div><small>Input</small><pre>issue T1, T2; T3 used in try-with-resources; cancel T1</pre></div><div><small>Expected output</small><pre>Using PNR1003, active = 3
+PNR1003 released
+PNR1001 released
+Issued: 3, active: 1
+Still holding PNR1002</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="java" data-file="Main.java"><pre><code>public class Main {
+    static class Ticket implements AutoCloseable {
+        static int issued = 0;
+        static int active = 0;
+        final String pnr;
+
+        Ticket() {
+            issued++;
+            active++;
+            pnr = &quot;PNR&quot; + (1000 + issued);
+        }
+
+        @Override
+        public void close() {
+            active--;
+            System.out.println(pnr + &quot; released&quot;);
+        }
+    }
+
+    public static void main(String[] args) {
+        Ticket t1 = new Ticket();
+        Ticket t2 = new Ticket();
+        try (Ticket t3 = new Ticket()) {
+            System.out.println(&quot;Using &quot; + t3.pnr + &quot;, active = &quot; + Ticket.active);
+        }
+        t1.close();
+        t1 = null;
+        System.out.println(&quot;Issued: &quot; + Ticket.issued + &quot;, active: &quot; + Ticket.active);
+        System.out.println(&quot;Still holding &quot; + t2.pnr);
+    }
+}</code></pre><div class="output">Using PNR1003, active = 3
+PNR1003 released
+PNR1001 released
+Issued: 3, active: 1
+Still holding PNR1002</div></div>
+        <p><b>How it works:</b></p><ol><li>Two <code>static</code> counters belong to the class, not to any ticket.</li><li>“Active” is a <b>business</b> state that we manage ourselves with <code>close()</code>. Garbage collection is not a signal you can count on: nothing tells you when (or whether) an unreachable ticket is collected.</li><li>Setting <code>t1 = null</code> after closing it makes the object unreachable; it is not what released it.</li></ol>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P8</span><span class="prob__tag prob__tag--business">Business problem</span><h4>Object pool for expensive payment clients</h4></div>
+      <p>Creating a payment-gateway client is slow (it sets up a secure connection), so a service keeps a small pool of 2 clients and reuses them for 5 payments instead of creating 5 objects. Print which client handles each payment.</p>
+      <div class="prob__io"><div><small>Input</small><pre>payments: 499, 1250, 80, 3000, 640 (Rs)</pre></div><div><small>Expected output</small><pre>client 1 paid Rs 499
+client 2 paid Rs 1250
+client 1 paid Rs 80
+client 2 paid Rs 3000
+client 1 paid Rs 640
+Clients created: 2
+Client 1 handled 3, client 2 handled 2</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="java" data-file="Main.java"><pre><code>public class Main {
+    static class GatewayClient {
+        static int created = 0;
+        final int number;
+        int handled = 0;
+        GatewayClient() {
+            created++;
+            number = created;
+        }
+        void pay(int amount) {
+            handled++;
+            System.out.println(&quot;client &quot; + number + &quot; paid Rs &quot; + amount);
+        }
+    }
+
+    public static void main(String[] args) {
+        GatewayClient[] pool = {new GatewayClient(), new GatewayClient()};
+        int[] payments = {499, 1250, 80, 3000, 640};
+        for (int i = 0; i &lt; payments.length; i++) {
+            GatewayClient c = pool[i % pool.length];   // borrow
+            c.pay(payments[i]);
+        }
+        System.out.println(&quot;Clients created: &quot; + GatewayClient.created);
+        System.out.println(&quot;Client 1 handled &quot; + pool[0].handled + &quot;, client 2 handled &quot; + pool[1].handled);
+    }
+}</code></pre><div class="output">client 1 paid Rs 499
+client 2 paid Rs 1250
+client 1 paid Rs 80
+client 2 paid Rs 3000
+client 1 paid Rs 640
+Clients created: 2
+Client 1 handled 3, client 2 handled 2</div></div>
+        <p><b>How it works:</b></p><ol><li>Only 2 objects are ever created; the pool array keeps them reachable, so they live for the whole program.</li><li>Pooling makes sense for objects that are <b>expensive to create</b> or hold scarce resources (database connections, threads). For small ordinary objects it doesn't pay off: the JVM allocates and collects short-lived objects very cheaply.</li><li>Real pools also handle borrowing by many threads at once; here we just rotate with <code>i % pool.length</code>.</li></ol>
+      </details>
+    </article>
+  </div>
+
+
+  <h3 id="scenarios">Real-world scenario questions (asked in company interviews)</h3>
+  <p class="scn-intro">Interviewers use lifecycle questions to see whether you can tell memory problems from resource problems. Decide your answer first, then open the model answer.</p>
+  <div class="scenarios">
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Campus interview · GC eligibility</span><span class="scn__tag scn__tag--level">Fresher</span></div>
+      <h4>How many objects are eligible?</h4>
+      <p class="scn__situation">The interviewer writes: <code>Order a = new Order(); Order b = new Order(); Order c = a; a = null; b = c; c = null;</code> and asks: after the last line, how many Order objects are eligible for garbage collection, and which ones?</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> can you track references step by step instead of guessing?</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <p>Call the objects X (first new) and Y (second new).</p>
+        <ul>
+          <li>After <code>c = a</code>: X is referenced by a and c; Y by b.</li>
+          <li><code>a = null</code>: X still has c.</li>
+          <li><code>b = c</code>: b now points to X, so Y has <b>no</b> references: eligible.</li>
+          <li><code>c = null</code>: X still has b. So exactly <b>one</b> object, Y, is eligible.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> counting null assignments. Count objects that have lost every path from a root.</p>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Fintech · connection pool</span><span class="scn__tag scn__tag--level">1–3 years</span></div>
+      <h4>“Timeout waiting for a connection”</h4>
+      <p class="scn__situation">A loan service starts failing after a few hours with errors saying no database connection is available from the pool, yet the heap is only 30% used. A code review finds methods that get a connection, run a query, and close it at the end of the method, except when an exception is thrown. What's wrong and how do you fix it?</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> do you know the GC doesn't manage resources, and do you reach for try-with-resources?</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>Each failed query skips <code>close()</code>, so that connection is never returned to the pool. The Connection object may even be garbage collected, but the pool still counts it as borrowed. After enough failures the pool is empty.</li>
+          <li>Fix: <code>try (Connection c = ds.getConnection(); PreparedStatement ps = …)</code>. Both are closed, in reverse order, on every path.</li>
+          <li>Turn on the pool's leak detection (most pools can log where a connection was borrowed and not returned).</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> “add a finalizer that closes it” or “increase the pool size”. Both hide the leak.</p>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">SaaS · Java upgrade</span><span class="scn__tag scn__tag--level">3+ years</span></div>
+      <h4>Upgrading a class that overrides finalize()</h4>
+      <p class="scn__situation">While moving a document-processing service from Java 8 to Java 21, the build shows <code>[removal] finalize() in Object has been deprecated and marked for removal</code> in a class that wraps a native PDF library handle. Under load, the service sometimes runs out of native memory even though the Java heap is fine. What is your plan?</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> do you understand why finalization is unreliable and know the modern replacement?</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>The native handle is only freed when the finalizer runs, which depends on GC timing. A small Java wrapper object barely uses heap, so the GC has no reason to run often, while native memory fills up.</li>
+          <li>Make the wrapper <code>AutoCloseable</code> and free the handle in <code>close()</code>; change callers to try-with-resources so release is immediate.</li>
+          <li>Register a <code>Cleaner</code> action (holding only the handle, never <code>this</code>) as a safety net for callers that forget.</li>
+          <li>Test with <code>java --finalization=disabled</code> to prove nothing still depends on finalizers.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> calling <code>System.gc()</code> to “trigger” finalizers.</p>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">E-commerce · user sessions</span><span class="scn__tag scn__tag--level">1–3 years</span></div>
+      <h4>Logged-out users still in memory</h4>
+      <p class="scn__situation">A shopping site keeps a <code>static Map&lt;String, Session&gt;</code> of active sessions. Each Session holds the user's cart and recently viewed products. Memory grows every day and drops only after a restart. Logout sets the controller's <code>session</code> variable to null. Why doesn't that free anything?</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> do you understand that any reachable path keeps an object alive?</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>Setting one local variable to null removes only that reference. The static map is a GC root, and it still maps the session ID to the Session, which reaches the cart and products. All of it stays reachable.</li>
+          <li>On logout, <code>sessions.remove(id)</code>. Also expire idle sessions with a timeout, since many users never log out.</li>
+          <li>Better, use the web framework's session management, or a cache with a size limit and expiry, instead of a hand-made static map.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> believing that nulling a variable deletes the object.</p>
+      </div></details>
+    </article>
+  </div>
+</section>
+
+<nav class="lesson-nav" id="lesson-nav" aria-label="Lesson navigation"></nav>
+<div class="ad-slot" data-slot="bottom"></div>
+</article>
+
+<aside class="lesson-side">
+  <nav class="toc" aria-label="In this lesson">
+    <h4>In this lesson</h4>
+    <ol>
+      <li><a href="#story">The story</a></li>
+      <li><a href="#definition">Definition</a></li>
+      <li><a href="#types">Types and ways to use it</a></li>
+      <li><a href="#steps">Step by step</a></li>
+      <li><a href="#animation">See it happen</a></li>
+      <li><a href="#real-world">Real-world use</a></li>
+      <li><a href="#run">Run the code</a></li>
+      <li><a href="#tracer">Line by line</a></li>
+      <li><a href="#worked">Worked examples</a></li>
+      <li><a href="#quiz">Quiz and revision</a></li>
+      <li><a href="#practice">Practice problems</a></li>
+      <li><a href="#scenarios">Industry scenarios</a></li>
+    </ol>
+  </nav>
+  <div class="ad-slot" data-slot="side"></div>
+  <div class="outline" id="outline"></div>
+</aside>
+</div>
+</main>
+
+<footer class="site-footer">
+  <div class="wrap">
+    <div><h4>MyPhatshala</h4><p>Free programming and IT lessons that show what happens behind the screen.</p></div>
+    <div><h4>Learn</h4><a href="../../../../#tracks">All courses</a><a href="../../">Core Java syllabus</a></div>
+    <div><h4>Site</h4><a href="../../../../about.html">About</a><a href="../../../../contact.html">Contact</a><a href="../../../../privacy.html">Privacy policy</a><a href="../../../../disclaimer.html">Disclaimer</a></div>
+    <div class="copyright">© MyPhatshala. All lesson content, diagrams and animations are original. Please do not copy without permission.</div>
+  </div>
+</footer>
+
+<script src="../../../../data/courses/core-java.js"></script>
+<script src="../../../../assets/js/lesson.js"></script>
+<script src="../../../../assets/js/ads.js"></script>
+<script src="../../../../assets/js/site.js"></script>
+</body>
+</html>

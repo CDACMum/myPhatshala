@@ -1,0 +1,250 @@
+<!--META {
+"course": "core-java", "module": "14-modern-java", "lesson": "04-optional",
+"title": "Optional", "courseTitle": "Core Java", "number": "14.4",
+"track": "#E8772E", "trackId": "programming", "trackTitle": "Programming Languages", "level": "Intermediate",
+"minutes": 20,
+"description": "Java Optional explained: why null causes NullPointerException, Optional.of, ofNullable and empty, orElse vs orElseGet, orElseThrow, ifPresent, map, filter and flatMap, Optional from streams, and where not to use Optional. With animations, a JVM tracer, {{NPROB}} practice problems, quiz and interview scenarios.",
+"ogTitle": "Optional in Java: no more NullPointerException surprises",
+"ogDescription": "See a lookup return a full or empty box, chain map and orElse safely, and solve {{NPROB}} problems.",
+"lead": "<code>NullPointerException</code> is the most common crash in Java. It happens because a method quietly returned <code>null</code> and a caller forgot to check. <code>Optional</code> makes “there might be no result” part of the return type, and gives you safe ways to provide defaults, transform values and fail with clear errors. You'll learn how to use it well, and where not to use it.",
+"chips": ["Module 14 · Modern Java", "⏱ 20 min", "Intermediate", "{{NPROB}} practice problems"]
+} META-->
+<part n="1" id="story" label="The story">
+  <h2>The crash that only happened to new students</h2>
+  <div class="story">
+    <p class="narration">Riya's canteen app greets students by name: <code>findStudent(roll).getName()</code>. It works for everyone already registered. On admission day, the app crashes for every new student, because <code>findStudent</code> returns <code>null</code> for them.</p>
+    <div class="scene">
+      <svg viewBox="0 0 640 170" role="img" aria-label="Left: a method returns null and the caller crashes. Right: a method returns a box that is either full or empty, and the caller handles both">
+        <g font-size="10.5">
+          <text x="14" y="24" font-weight="700" class="s-red">returns null</text>
+          <rect x="14" y="40" width="120" height="44" rx="8" class="s-card2" style="stroke:var(--line)"/><text x="74" y="67" text-anchor="middle" class="s-ink" font-family="monospace">findStudent()</text>
+          <path d="M136 62h40" style="stroke:var(--ink-3);stroke-width:1.5"/><path d="M170 56l8 6-8 6" style="fill:none;stroke:var(--ink-3);stroke-width:1.5"/>
+          <text x="210" y="67" text-anchor="middle" class="s-red" font-family="monospace" font-weight="700">null</text>
+          <text x="14" y="118" class="s-red" font-weight="700">.getName() → NullPointerException</text>
+          <path d="M318 20v130" style="stroke:var(--line);stroke-width:1;stroke-dasharray:4 4"/>
+          <text x="340" y="24" font-weight="700" class="s-green">returns Optional</text>
+          <rect x="340" y="40" width="120" height="44" rx="8" class="s-card2" style="stroke:var(--line)"/><text x="400" y="67" text-anchor="middle" class="s-ink" font-family="monospace">findStudent()</text>
+          <rect x="490" y="34" width="130" height="34" rx="8" class="s-soft-green" style="stroke:var(--green)"/><text x="555" y="56" text-anchor="middle" class="s-ink">[ Asha ]</text>
+          <rect x="490" y="78" width="130" height="34" rx="8" class="s-soft-acc" style="stroke:var(--track)"/><text x="555" y="100" text-anchor="middle" class="s-ink2">[ empty ]</text>
+          <path d="M462 62l24-12M462 62l24 30" style="stroke:var(--ink-3);stroke-width:1.5"/>
+          <text x="340" y="140" class="s-green">.map(Student::name).orElse("Guest")</text>
+        </g>
+        <text x="632" y="166" text-anchor="end" class="s-wm">myphatshala.com</text>
+      </svg>
+    </div>
+    <riya>Sir, I can add <code>if (s != null)</code> everywhere. But how will I remember every place?</riya>
+    <arjun>You won't. Nobody does. Make the method return <code>Optional&lt;Student&gt;</code>. Then the type itself tells every caller: “this might be empty, handle it”.</arjun>
+    <riya>And handling it means more ifs?</riya>
+    <arjun>No: <code>map</code>, <code>orElse</code>, <code>orElseThrow</code>. Let's look inside the box.</arjun>
+  </div>
+</part>
+
+<part n="2" id="definition" label="Definition">
+  <h2>What is Optional?</h2>
+  <div class="def">
+    <div class="def__formal"><small>Formal definition (write this in exams)</small>
+      <p><code>java.util.Optional&lt;T&gt;</code> is a container object that may or may not contain a non-null value of type T. It is intended mainly as a <b>method return type</b> where there may be no result, to make the absence explicit and avoid returning <code>null</code>. An Optional is created with <code>Optional.of(value)</code> (value must be non-null), <code>Optional.ofNullable(value)</code> or <code>Optional.empty()</code>. Its value is accessed through methods such as <code>orElse</code>, <code>orElseGet</code>, <code>orElseThrow</code> and <code>ifPresent</code>, and transformed with <code>map</code>, <code>filter</code> and <code>flatMap</code>, which return Optionals. Calling <code>get()</code> on an empty Optional throws <code>NoSuchElementException</code>.</p></div>
+    <div class="def__simple"><small>In simple words</small>
+      <p>Optional is a gift box that might be empty. You're not allowed to assume there's something inside; you say what to do in both cases.</p></div>
+  </div>
+  <h3>Words you'll meet in this lesson</h3>
+  <div class="terms">
+    <div class="term"><b>Empty</b><span>An Optional with no value. Not the same as null.</span></div>
+    <div class="term"><b>Present</b><span>An Optional holding a non-null value.</span></div>
+    <div class="term"><b>Fallback</b><span>The value to use when empty: <code>orElse("Guest")</code>.</span></div>
+    <div class="term"><b>Lazy fallback</b><span><code>orElseGet(supplier)</code> computes it only when needed.</span></div>
+    <div class="term"><b>Fail fast</b><span><code>orElseThrow</code>: stop with a clear error when a value is required.</span></div>
+    <div class="term"><b>flatMap</b><span>Chain a step that itself returns an Optional.</span></div>
+  </div>
+  <h3>null vs Optional</h3>
+  <div class="table-wrap">
+  <table class="compare" style="min-width:560px">
+    <thead><tr><th></th><th>Returning <code>null</code></th><th>Returning <code>Optional</code></th></tr></thead>
+    <tbody>
+      <tr><td>Does the signature warn callers?</td><td>No</td><td>Yes: <code>Optional&lt;Student&gt;</code></td></tr>
+      <tr><td>Forgetting to check</td><td>NullPointerException later</td><td>Code doesn't compile without unwrapping</td></tr>
+      <tr><td>Default value</td><td><code>s != null ? s.name : "Guest"</code></td><td><code>.map(Student::name).orElse("Guest")</code></td></tr>
+      <tr><td>Chaining lookups</td><td>Nested null checks</td><td><code>map</code> / <code>flatMap</code> chain</td></tr>
+      <tr><td>Cost</td><td>None</td><td>One small object per result</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <exam><b>Exam tip:</b> “Optional is a container that may or may not hold a non-null value, introduced in Java 8 to represent optional return values and reduce NullPointerExceptions. <code>of</code> throws on null; <code>ofNullable</code> doesn't. <code>orElse</code> always evaluates its argument; <code>orElseGet</code> evaluates only when empty.”</exam>
+</part>
+
+{{AD}}
+
+<part n="3" id="types" label="Types and ways to use it">
+  <h2>The Optional toolkit</h2>
+  {{CODE_API}}
+  <div class="cards">
+    <div class="card"><svg class="ic" viewBox="0 0 40 40" fill="none" stroke="var(--green)" stroke-width="2"><rect x="8" y="12" width="24" height="18" rx="3"/><path d="M8 18h24"/></svg><h4>Create</h4><p><code>of</code> for definite values, <code>ofNullable</code> at boundaries (map lookups, old APIs), <code>empty</code> for “nothing”.</p><span class="tag">wrap</span></div>
+    <div class="card"><svg class="ic" viewBox="0 0 40 40" fill="none" stroke="var(--blue)" stroke-width="2"><path d="M8 20h24M26 14l6 6-6 6"/></svg><h4>Transform</h4><p><code>map</code>, <code>filter</code>, <code>flatMap</code> work only when a value is present; empty passes through.</p><span class="tag">chain</span></div>
+    <div class="card"><svg class="ic" viewBox="0 0 40 40" fill="none" stroke="var(--track)" stroke-width="2"><path d="M12 28l8-16 8 16"/></svg><h4>Unwrap</h4><p><code>orElse</code>, <code>orElseGet</code> for defaults; <code>orElseThrow</code> when the value is required.</p><span class="tag">get the value</span></div>
+    <div class="card"><svg class="ic" viewBox="0 0 40 40" fill="none" stroke="var(--ink-3)" stroke-width="2"><circle cx="20" cy="20" r="11"/><path d="M15 20l4 4 7-8"/></svg><h4>Act</h4><p><code>ifPresent</code> and <code>ifPresentOrElse</code> run code without unwrapping.</p><span class="tag">side effects</span></div>
+  </div>
+  <h3>Why not just call get()?</h3>
+  {{CODE_GET}}
+  <warn><b>Use Optional for return values, not everywhere.</b> Don't make fields, method parameters or collection elements Optional (<code>List&lt;Optional&lt;X&gt;&gt;</code>): it's not Serializable, adds noise, and an empty list is already a fine “nothing”. And never return <code>null</code> from a method whose type is Optional.</warn>
+</part>
+
+<part n="4" id="steps" label="Step by step">
+  <h2>What happens in <code>find(id).map(f).orElse(d)</code></h2>
+  <ol class="stepper">
+    <li><h4>The finder returns a box</h4>
+      <div class="code" data-lang="java" data-file="Main.java"><pre><code>Optional&lt;String&gt; name = findName("98100");</code></pre></div>
+      <span class="behind">Inside: <code>Optional.ofNullable(map.get(phone))</code>: a box holding the name, or the shared empty box.</span></li>
+    <li><h4>map checks the box</h4>
+      <span class="behind">If a value is present, <code>map</code> calls your function and wraps the result (via ofNullable) in a new Optional. If empty, it returns empty without calling it.</span></li>
+    <li><h4>filter can empty it</h4>
+      <span class="behind">If you add <code>.filter(test)</code>, a present value that fails the test becomes empty.</span></li>
+    <li><h4>orElse unwraps</h4>
+      <span class="behind">Present: return the value. Empty: return the fallback. Either way you get a plain value, never null (unless the fallback is null).</span></li>
+    <li><h4>Or fail clearly</h4>
+      <div class="code" data-lang="java" data-file="Main.java"><pre><code>.orElseThrow(() -&gt; new IllegalArgumentException("unknown id " + id))</code></pre></div>
+      <span class="behind">When there's no sensible default, throwing a meaningful exception at this point is much easier to debug than an NPE three methods later.</span></li>
+  </ol>
+</part>
+
+<part n="5" id="animation" label="See it happen">
+  <h2>null vs Optional: both views</h2>
+  <p>Left: what the caller sees with null and with Optional. Right: the Optional objects on the heap and what each method does with a full or empty box.</p>
+  {{ANIM}}
+</part>
+
+<part n="6" id="real-world" label="Real-world use">
+  <h2>Optional in real systems</h2>
+  <p>Data-access layers, configuration lookups and stream results are the most common places you'll meet Optional.</p>
+  {{ANIM2}}
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><ellipse cx="60" cy="28" rx="30" ry="9" class="s-soft-blue" style="stroke:var(--blue)"/><path d="M30 28v34c0 5 13 9 30 9s30-4 30-9V28" class="s-soft-blue" style="stroke:var(--blue)"/></svg></div>
+    <div><h4>1. Database lookups</h4><p>Repository methods like <code>findById(id)</code> in Spring Data return <code>Optional&lt;Customer&gt;</code>: the record may not exist.</p>
+      <div class="uc-flow"><span>findById(42)</span><i>→</i><span class="java">Optional&lt;Customer&gt;</span><i>→</i><span>orElseThrow(NotFound)</span></div></div>
+  </div>
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="30" y="18" width="60" height="54" rx="6" class="s-board"/><path d="M40 34h40M40 46h28M40 58h36" style="stroke:var(--chalk);stroke-width:2"/></svg></div>
+    <div><h4>2. Configuration</h4><p>Optional settings get defaults; required ones fail at startup with a clear message.</p>
+      <div class="uc-flow"><span>config.get("timeout")</span><i>→</i><span class="java">orElse("30s")</span><i>→</i><span>value</span></div></div>
+  </div>
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><path d="M14 45h20l10-14 12 28 10-14h40" style="fill:none;stroke:var(--track);stroke-width:2.5"/></svg></div>
+    <div><h4>3. Stream results</h4><p><code>findFirst</code>, <code>min</code>, <code>max</code> and <code>reduce</code> return Optional because a stream can be empty.</p>
+      <div class="uc-flow"><span>today's orders</span><i>→</i><span class="java">max(byAmount)</span><i>→</i><span>Optional&lt;Order&gt;</span></div></div>
+  </div>
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="22" y="22" width="76" height="46" rx="8" class="s-soft-green" style="stroke:var(--green)"/><text x="60" y="51" text-anchor="middle" class="s-green" font-weight="700">₹50 off</text></svg></div>
+    <div><h4>4. Optional user input</h4><p>Coupons, referral codes and nicknames may or may not be supplied; Optional chains turn them into discounts or display names.</p>
+      <div class="uc-flow"><span>coupon code</span><i>→</i><span class="java">filter(valid).map(off)</span><i>→</i><span>orElse(0)</span></div></div>
+  </div>
+  <p class="muted">Simplified: APIs that return many results return an empty list, not an Optional list.</p>
+</part>
+
+{{AD}}
+
+<part n="7" id="run" label="Run the code">
+  <h2>Greeting customers by phone number</h2>
+  {{CODE_RUN}}
+  <ul class="anno">
+    <li><code>Optional.ofNullable(customers.get(phone))</code><span>Map lookups return null when the key is missing; wrap at the boundary.</span></li>
+    <li><code>.map(name -&gt; "Welcome back, " + name)</code><span>Runs only when the customer exists.</span></li>
+    <li><code>.orElse("Welcome! Please sign up")</code><span>The answer for unknown numbers.</span></li>
+    <li><code>ifPresentOrElse(..., ...)</code><span>One action for present, another for empty.</span></li>
+  </ul>
+  {{RUNNER}}
+</part>
+
+<part n="8" id="tracer" label="Line by line">
+  <h2>A full box and an empty box</h2>
+  <p>Recorded from the real JVM. Watch two Optional objects appear: one holding “Asha”, and the shared empty one. On the empty box, <code>map</code>'s lambda never runs.</p>
+  {{TRACER}}
+
+{{WORKED}}
+</part>
+
+<part n="9" id="quiz" label="Quiz and revision">
+  <h2>Check yourself</h2>
+  {{QUIZ}}
+  <h3>Quick revision</h3>
+  <div class="revision">
+    <h3>Lesson 14.4 in one screen</h3>
+    <ul>
+      <li>Optional = a box that holds one non-null value or nothing; use it as a return type.</li>
+      <li>Create: <code>of</code> (non-null), <code>ofNullable</code>, <code>empty</code>.</li>
+      <li>Unwrap: <code>orElse</code>, <code>orElseGet</code> (lazy), <code>orElseThrow</code>.</li>
+      <li>Act: <code>ifPresent</code>, <code>ifPresentOrElse</code>. Avoid bare <code>get()</code>.</li>
+      <li>Transform: <code>map</code>, <code>filter</code>, <code>flatMap</code>; empty passes through untouched.</li>
+      <li>Streams' <code>findFirst</code>, <code>min</code>, <code>max</code> return Optional.</li>
+      <li>Not for fields, parameters or collections; never return null as an Optional.</li>
+    </ul>
+  </div>
+  <h3>Interview and viva questions</h3>
+  <div class="faq">
+    <details><summary>What problem does Optional solve?</summary><p>It makes the possible absence of a result explicit in a method's return type, so callers are forced to handle the empty case, reducing NullPointerExceptions. It also provides a fluent API (map, filter, orElse) for working with possibly-missing values.</p></details>
+    <details><summary>Difference between orElse and orElseGet?</summary><p><code>orElse(x)</code> takes an already-evaluated value, so the expression is computed even when the Optional has a value. <code>orElseGet(supplier)</code> calls the supplier only when the Optional is empty. Use orElseGet when the default is expensive or has side effects.</p></details>
+    <details><summary>Difference between map and flatMap on Optional?</summary><p><code>map</code> applies a function returning a plain value and wraps it; <code>flatMap</code> applies a function that already returns an Optional, avoiding <code>Optional&lt;Optional&lt;T&gt;&gt;</code>. Use flatMap to chain lookups that each may be empty.</p></details>
+    <details><summary>Should you use Optional as a field or parameter?</summary><p>Generally no. Optional isn't Serializable, adds allocation, and as a parameter it forces callers to wrap values. Prefer overloading or nullable parameters documented clearly for inputs, and plain nullable fields with Optional-returning getters.</p></details>
+    <details><summary>Is Optional.get() bad?</summary><p>It throws NoSuchElementException on empty, so <code>isPresent()</code> + <code>get()</code> is just a disguised null check. Prefer orElse/orElseThrow/ifPresent/map. Java 10 added <code>orElseThrow()</code> as a clearer name for the same behaviour as get().</p></details>
+  </div>
+
+{{PRACTICE}}
+
+  <h3 id="scenarios">Real-world scenario questions (asked in company interviews)</h3>
+  <p class="scn-intro">Optional questions test whether you can remove NPEs without making the code worse.</p>
+  <div class="scenarios">
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Production · NPE</span><span class="scn__tag scn__tag--level">Fresher</span></div>
+      <h4>NullPointerException on the order-tracking page</h4>
+      <p class="scn__situation">The tracking page calls <code>order.getRider().getPhone()</code>. Orders that aren't assigned to a rider yet crash the page. How would you fix it so the page shows “Rider not assigned yet”?</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> chaining optional relationships.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>Make the getter honest: <code>Optional&lt;Rider&gt; rider()</code>.</li>
+          <li>Page code: <code>order.rider().map(Rider::phone).orElse("Rider not assigned yet")</code>.</li>
+          <li>Search for other callers of <code>getRider()</code>; the new type makes the compiler point them out.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> wrapping the whole page in <code>try { … } catch (NullPointerException e)</code>.</p>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Performance · defaults</span><span class="scn__tag scn__tag--level">Junior</span></div>
+      <h4>Every request hits the pricing service</h4>
+      <p class="scn__situation">Code reads <code>cachedPrice(id).orElse(pricingService.fetch(id))</code>. Monitoring shows the pricing service is called on every request, even when the cache has the price. Why?</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> orElse vs orElseGet.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li><code>orElse</code>'s argument is evaluated before the call, so <code>fetch(id)</code> always runs.</li>
+          <li>Use <code>orElseGet(() -&gt; pricingService.fetch(id))</code>: the supplier runs only on a cache miss.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> adding an if-isPresent around it; orElseGet already expresses it.</p>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Code review · misuse</span><span class="scn__tag scn__tag--level">Junior</span></div>
+      <h4>Optional everywhere</h4>
+      <p class="scn__situation">A pull request changes every entity field to <code>Optional&lt;...&gt;</code> and every method parameter too, “to remove nulls from the codebase”. Serialization of sessions now fails. What feedback would you give?</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> knowing Optional's intended scope.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>Optional is designed for return types. It's not Serializable, so fields break serialization and many frameworks.</li>
+          <li>Keep fields as plain (possibly null) references and expose <code>Optional</code>-returning getters for the optional ones.</li>
+          <li>For parameters, use overloads or validate non-null inputs with <code>Objects.requireNonNull</code>.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> approving because it “looks modern”.</p>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">API design · errors</span><span class="scn__tag scn__tag--level">Mid</span></div>
+      <h4>Empty Optional or exception?</h4>
+      <p class="scn__situation">A <code>PaymentService.getPayment(id)</code> is called from refunds (where the id must exist) and from a search box (where it may not). Should it return <code>Optional&lt;Payment&gt;</code> or throw when not found?</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> designing for callers.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>Return <code>Optional&lt;Payment&gt;</code> from the lookup: “not found” is a normal outcome for search.</li>
+          <li>Refunds call <code>getPayment(id).orElseThrow(() -&gt; new PaymentNotFound(id))</code>, choosing their own exception and message.</li>
+          <li>One method serves both cases; each caller decides what absence means.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> returning null for search and throwing for refunds from two near-identical methods.</p>
+      </div></details>
+    </article>
+  </div>
+</part>

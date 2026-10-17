@@ -1,0 +1,254 @@
+<!--META {
+"course": "core-java", "module": "12-multithreading", "lesson": "06-executor-service",
+"title": "ExecutorService and thread pools", "courseTitle": "Core Java", "number": "12.6",
+"track": "#E8772E", "trackId": "programming", "trackTitle": "Programming Languages", "level": "Intermediate",
+"minutes": 25,
+"description": "ExecutorService and thread pools in Java: Executors factory methods, submit(), Callable vs Runnable, Future.get() with timeouts, invokeAll, shutdown() and awaitTermination(), RejectedExecutionException, CompletableFuture and Java 21 virtual threads. With animations, a JVM tracer, {{NPROB}} practice problems, quiz and interview scenarios.",
+"ogTitle": "ExecutorService in Java: thread pools, Callable and Future",
+"ogDescription": "Watch two pooled workers handle many tasks, collect results with Futures, and solve {{NPROB}} problems.",
+"lead": "So far you created a <code>new Thread</code> for every job. Real servers never do that: thousands of tasks would mean thousands of threads. Instead they hand tasks to a <b>thread pool</b>, a few long-lived workers that take jobs from a queue. You'll use <code>ExecutorService</code> to run Runnables and Callables, get results back through <code>Future</code>s, set timeouts, shut pools down correctly, and meet CompletableFuture and virtual threads.",
+"chips": ["Module 12 · Multithreading", "⏱ 25 min", "Intermediate", "{{NPROB}} practice problems"]
+} META-->
+<part n="1" id="story" label="The story">
+  <h2>One thread per order? The server disagrees</h2>
+  <div class="story">
+    <p class="narration">Riya's canteen app goes viral during exam week. Her server creates a new thread for every incoming order. At lunchtime 5,000 orders arrive in a minute, the server runs out of memory, and nobody gets lunch.</p>
+    <div class="scene">
+      <svg viewBox="0 0 640 170" role="img" aria-label="Left: thousands of threads, one per order, overwhelm a server. Right: a queue of orders feeding four reusable workers">
+        <g font-size="10.5">
+          <text x="14" y="24" font-weight="700" class="s-red">new Thread per order</text>
+          <g style="stroke:var(--red);stroke-width:1.2">
+            <path d="M20 40v40M30 40v40M40 40v40M50 40v40M60 40v40M70 40v40M80 40v40M90 40v40M100 40v40M110 40v40M120 40v40M130 40v40M140 40v40M150 40v40M160 40v40M170 40v40M180 40v40M190 40v40M200 40v40M210 40v40M220 40v40M230 40v40M240 40v40M250 40v40M260 40v40"/>
+          </g>
+          <text x="14" y="104" class="s-red">5,000 threads × own stack = out of memory</text>
+          <path d="M318 20v130" style="stroke:var(--line);stroke-width:1;stroke-dasharray:4 4"/>
+          <text x="340" y="24" font-weight="700" class="s-green">a pool of 4 workers + a queue</text>
+          <rect x="340" y="44" width="130" height="40" rx="6" class="s-soft-acc" style="stroke:var(--track)"/>
+          <text x="405" y="68" text-anchor="middle" class="s-acc" font-weight="700">orders queue</text>
+          <path d="M472 64h30" style="stroke:var(--ink-3);stroke-width:1.5"/><path d="M496 58l8 6-8 6" style="fill:none;stroke:var(--ink-3);stroke-width:1.5"/>
+          <rect x="510" y="36" width="50" height="22" rx="5" class="s-soft-blue" style="stroke:var(--blue)"/><rect x="570" y="36" width="50" height="22" rx="5" class="s-soft-blue" style="stroke:var(--blue)"/>
+          <rect x="510" y="66" width="50" height="22" rx="5" class="s-soft-blue" style="stroke:var(--blue)"/><rect x="570" y="66" width="50" height="22" rx="5" class="s-soft-blue" style="stroke:var(--blue)"/>
+          <text x="340" y="112" class="s-green">same 4 threads serve every order</text>
+        </g>
+        <text x="632" y="166" text-anchor="end" class="s-wm">myphatshala.com</text>
+      </svg>
+    </div>
+    <riya>Sir, threads were supposed to make it faster!</riya>
+    <arjun>Threads cost memory and switching time. Thousands of them help nobody. Keep a few <b>workers</b> and a <b>queue</b> of orders: each worker finishes an order and takes the next.</arjun>
+    <riya>Do I write that queue and the workers myself?</riya>
+    <arjun>No. Java has it ready: <code>ExecutorService</code>. You submit tasks; it runs them on a pool and gives you a <code>Future</code> for each result.</arjun>
+  </div>
+</part>
+
+<part n="2" id="definition" label="Definition">
+  <h2>What are ExecutorService and thread pools?</h2>
+  <div class="def">
+    <div class="def__formal"><small>Formal definition (write this in exams)</small>
+      <p>An <b>executor</b> separates task submission from task execution. <code>java.util.concurrent.ExecutorService</code> is an executor that manages a <b>thread pool</b>: a set of reusable worker threads that take submitted tasks from a queue and run them. Tasks are <code>Runnable</code> (no result) or <code>Callable&lt;V&gt;</code> (returns a <code>V</code> and may throw checked exceptions). <code>submit()</code> returns a <code>Future&lt;V&gt;</code>, which represents the pending result: <code>get()</code> waits for it, <code>isDone()</code> checks it, and <code>cancel()</code> attempts to stop the task. A pool is ended with <code>shutdown()</code> (finish queued tasks, accept no new ones) or <code>shutdownNow()</code> (interrupt running tasks).</p></div>
+    <div class="def__simple"><small>In simple words</small>
+      <p>A thread pool is a call centre: a fixed team of agents (threads) and a waiting line (queue). You don't hire a new agent for every call. You get a ticket (Future) to collect your answer later.</p></div>
+  </div>
+  <h3>Words you'll meet in this lesson</h3>
+  <div class="terms">
+    <div class="term"><b>ExecutorService</b><span>Runs tasks on a pool; you never call <code>new Thread</code>.</span></div>
+    <div class="term"><b>Thread pool</b><span>Reusable worker threads plus a task queue.</span></div>
+    <div class="term"><b>Callable&lt;V&gt;</b><span>A task whose <code>call()</code> returns a value.</span></div>
+    <div class="term"><b>Future&lt;V&gt;</b><span>A handle to a result that may not be ready yet.</span></div>
+    <div class="term"><b>shutdown()</b><span>No new tasks; finish the queued ones; then the workers end.</span></div>
+    <div class="term"><b>CompletableFuture</b><span>A Future you can chain steps onto, without blocking.</span></div>
+  </div>
+  <h3>Runnable vs Callable</h3>
+  <div class="table-wrap">
+  <table class="compare" style="min-width:540px">
+    <thead><tr><th></th><th><code>Runnable</code></th><th><code>Callable&lt;V&gt;</code></th></tr></thead>
+    <tbody>
+      <tr><td>Method</td><td><code>void run()</code></td><td><code>V call() throws Exception</code></td></tr>
+      <tr><td>Returns a result</td><td>No</td><td>Yes</td></tr>
+      <tr><td>Checked exceptions</td><td>Must catch inside</td><td>Allowed; reach you via <code>get()</code></td></tr>
+      <tr><td>Use with <code>new Thread</code></td><td>Yes</td><td>No (needs an executor)</td></tr>
+      <tr><td>Lambda example</td><td><code>() -&gt; send(sms)</code></td><td><code>() -&gt; fetchPrice(shop)</code></td></tr>
+    </tbody>
+  </table>
+  </div>
+  <exam><b>Exam tip:</b> “A thread pool reuses a fixed number of threads to execute many tasks, reducing thread-creation overhead and limiting resource use.” And: <code>Future.get()</code> blocks; a failed task's exception arrives wrapped in <code>ExecutionException</code>.</exam>
+</part>
+
+{{AD}}
+
+<part n="3" id="types" label="Types and ways to use it">
+  <h2>Pools and how they reuse threads</h2>
+  <h3>Five jobs, two workers</h3>
+  {{CODE_POOL_NAMES}}
+  <p class="muted">One real run. Your order of lines and which worker took which job will differ, but you'll only ever see two thread names.</p>
+
+  <h3>Kinds of executors</h3>
+  <div class="cards">
+    <div class="card"><svg class="ic" viewBox="0 0 40 40" fill="none" stroke="var(--blue)" stroke-width="2"><rect x="8" y="10" width="10" height="20" rx="2"/><rect x="22" y="10" width="10" height="20" rx="2"/></svg><h4>Fixed pool</h4><p>Exactly <i>n</i> workers. The default choice for steady server work.</p><span class="tag">newFixedThreadPool(n)</span></div>
+    <div class="card"><svg class="ic" viewBox="0 0 40 40" fill="none" stroke="var(--green)" stroke-width="2"><rect x="15" y="10" width="10" height="20" rx="2"/></svg><h4>Single thread</h4><p>One worker: tasks run one at a time, in submission order.</p><span class="tag">newSingleThreadExecutor()</span></div>
+    <div class="card"><svg class="ic" viewBox="0 0 40 40" fill="none" stroke="var(--track)" stroke-width="2"><circle cx="20" cy="20" r="11"/><path d="M20 13v7h6"/></svg><h4>Scheduled</h4><p>Run after a delay or repeatedly: reminders, cleanups, reports.</p><span class="tag">newScheduledThreadPool(n)</span></div>
+    <div class="card"><svg class="ic" viewBox="0 0 40 40" fill="none" stroke="var(--ink-3)" stroke-width="2"><path d="M10 28c6-16 14-16 20 0"/><circle cx="20" cy="14" r="3"/></svg><h4>Virtual threads</h4><p>Java 21: very cheap threads, one per task, ideal for I/O-heavy work.</p><span class="tag">newVirtualThreadPerTaskExecutor()</span></div>
+  </div>
+  {{CODE_FACTORIES}}
+  <warn><b>Always shut pools down.</b> Pool threads are normal (non-daemon) threads. Forget <code>shutdown()</code> and your program never exits; in a server, forgetting it on short-lived pools leaks threads until memory runs out. Use try/finally, or in Java 21 a try-with-resources block (<code>ExecutorService</code> is <code>AutoCloseable</code>).</warn>
+</part>
+
+<part n="4" id="steps" label="Step by step">
+  <h2>The life of a submitted task</h2>
+  <ol class="stepper">
+    <li><h4>Create the pool</h4>
+      <div class="code" data-lang="java" data-file="Main.java"><pre><code>ExecutorService pool = Executors.newFixedThreadPool(4);</code></pre></div>
+      <span class="behind">A <code>ThreadPoolExecutor</code> object with an empty queue. Worker threads are started as the first tasks arrive.</span></li>
+    <li><h4>submit()</h4>
+      <div class="code" data-lang="java" data-file="Main.java"><pre><code>Future&lt;Integer&gt; f = pool.submit(() -&gt; fetchPrice("BuyNow"));</code></pre></div>
+      <span class="behind">The Callable is wrapped in a <code>FutureTask</code>. If a worker is free (or the pool may start one), it runs; otherwise it joins the queue. <code>submit</code> returns at once.</span></li>
+    <li><h4>A worker runs it</h4>
+      <span class="behind">The worker calls <code>call()</code>. The result (or the exception) is stored inside the FutureTask, which becomes done, and any thread waiting in <code>get()</code> is woken.</span></li>
+    <li><h4>The worker loops</h4>
+      <span class="behind">Instead of ending, the worker takes the next task from the queue, or waits for one (like the consumer in Lesson 12.5).</span></li>
+    <li><h4>shutdown()</h4>
+      <span class="behind">New submissions are rejected with <code>RejectedExecutionException</code>. Queued tasks still run. When the queue is empty, workers exit; <code>awaitTermination</code> lets you wait for that moment.</span></li>
+  </ol>
+</part>
+
+<part n="5" id="animation" label="See it happen">
+  <h2>Submit, queue, reuse: both views</h2>
+  <p>Left: the code you write and the Futures you hold. Right: inside the pool, the task queue and two worker threads that never get replaced.</p>
+  {{ANIM}}
+</part>
+
+<part n="6" id="real-world" label="Real-world use">
+  <h2>Pools power every Java server</h2>
+  <p>Web servers, database connection handling, message consumers and schedulers are all built on executors.</p>
+  {{ANIM2}}
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="20" y="20" width="22" height="50" rx="4" class="s-soft-blue" style="stroke:var(--blue)"/><rect x="49" y="20" width="22" height="50" rx="4" class="s-soft-blue" style="stroke:var(--blue)"/><rect x="78" y="20" width="22" height="50" rx="4" class="s-soft-blue" style="stroke:var(--blue)"/></svg></div>
+    <div><h4>1. Web request handling</h4><p>Servers like Tomcat keep a pool of request threads (often a couple of hundred). Each request borrows a worker and returns it when the response is sent.</p>
+      <div class="uc-flow"><span>HTTP request</span><i>→</i><span class="java">request pool</span><i>→</i><span>response</span></div></div>
+  </div>
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><circle cx="30" cy="45" r="12" class="s-soft-acc" style="stroke:var(--track)"/><circle cx="60" cy="45" r="12" class="s-soft-acc" style="stroke:var(--track)"/><circle cx="90" cy="45" r="12" class="s-soft-acc" style="stroke:var(--track)"/></svg></div>
+    <div><h4>2. Fan-out calls</h4><p>A product page calls price, stock, reviews and delivery-estimate services at once and combines the answers with Futures or CompletableFuture.</p>
+      <div class="uc-flow"><span>4 services</span><i>→</i><span class="java">CompletableFuture.allOf</span><i>→</i><span>one page</span></div></div>
+  </div>
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><circle cx="60" cy="45" r="26" class="s-card" style="stroke:var(--line)"/><path d="M60 45V27M60 45l13 8" style="stroke:var(--track);stroke-width:2.5"/></svg></div>
+    <div><h4>3. Scheduled jobs</h4><p>Send EMI reminders every morning, clear expired carts every 10 minutes, refresh exchange rates every hour.</p>
+      <div class="uc-flow"><span>every 10 min</span><i>→</i><span class="java">scheduleAtFixedRate</span><i>→</i><span>carts cleaned</span></div></div>
+  </div>
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><path d="M20 60c10-30 30-30 40 0s30 30 40 0" style="fill:none;stroke:var(--green);stroke-width:2.5"/></svg></div>
+    <div><h4>4. Virtual threads for I/O</h4><p>Since Java 21, services that mostly wait on databases and APIs can run one cheap virtual thread per request, handling far more concurrent requests with simple blocking code.</p>
+      <div class="uc-flow"><span>10,000 requests</span><i>→</i><span class="java">virtual threads</span><i>→</i><span>few OS threads</span></div></div>
+  </div>
+  <p class="muted">Sizes and timings are illustrative. Frameworks such as Spring configure and manage these executors for you, but they are the same ExecutorService underneath.</p>
+</part>
+
+{{AD}}
+
+<part n="7" id="run" label="Run the code">
+  <h2>Three shop prices, fetched in parallel</h2>
+  {{CODE_RUN}}
+  <ul class="anno">
+    <li><code>Executors.newFixedThreadPool(3)</code><span>Three workers, so all three calls can run at the same time.</span></li>
+    <li><code>pool.submit(() -&gt; fetchPrice(s))</code><span>A Callable: it returns the price, and may throw <code>InterruptedException</code> (allowed in <code>call()</code>).</span></li>
+    <li><code>prices.get(i).get()</code><span>Read results in shop order; each <code>get</code> waits only if that price isn't ready.</span></li>
+    <li><code>pool.shutdown()</code><span>Lets the JVM exit once the workers are idle.</span></li>
+  </ul>
+  {{RUNNER}}
+</part>
+
+<part n="8" id="tracer" label="Line by line">
+  <h2>Two Callables, two Futures</h2>
+  <p>Recorded from the real JVM, following <b>main</b>. Watch the pool, the Callable objects and the Future objects appear on the heap; the prices are computed on pool threads and come back through <code>get()</code>.</p>
+  {{TRACER}}
+
+{{WORKED}}
+</part>
+
+<part n="9" id="quiz" label="Quiz and revision">
+  <h2>Check yourself</h2>
+  {{QUIZ}}
+  <h3>Quick revision</h3>
+  <div class="revision">
+    <h3>Lesson 12.6 in one screen</h3>
+    <ul>
+      <li>A thread pool = reusable workers + a task queue. Create it with <code>Executors.newFixedThreadPool(n)</code> and friends.</li>
+      <li><code>submit(Runnable | Callable)</code> returns a <code>Future</code>; <code>execute(Runnable)</code> returns nothing.</li>
+      <li><code>Callable&lt;V&gt;</code> returns a value and may throw checked exceptions.</li>
+      <li><code>get()</code> waits; <code>get(t, unit)</code> may throw <code>TimeoutException</code>; failures come as <code>ExecutionException</code>.</li>
+      <li><code>invokeAll</code> runs a list of Callables and returns Futures in the same order.</li>
+      <li>Always <code>shutdown()</code>; <code>awaitTermination</code> waits; submitting afterwards throws <code>RejectedExecutionException</code>.</li>
+      <li>CompletableFuture chains async steps; Java 21 virtual threads make one-thread-per-task cheap for I/O work.</li>
+    </ul>
+  </div>
+  <h3>Interview and viva questions</h3>
+  <div class="faq">
+    <details><summary>Why use a thread pool instead of creating threads?</summary><p>Creating and destroying threads is costly, and unlimited threads exhaust memory and waste CPU on switching. A pool reuses a bounded number of threads, queues extra work, and centralises lifecycle management (shutdown, naming, error handling).</p></details>
+    <details><summary>Difference between submit() and execute()?</summary><p><code>execute(Runnable)</code> comes from <code>Executor</code> and returns nothing; an exception in the task goes to the thread's uncaught-exception handler. <code>submit()</code> accepts Runnable or Callable and returns a Future; exceptions are captured and rethrown by <code>get()</code> as ExecutionException.</p></details>
+    <details><summary>Difference between shutdown() and shutdownNow()?</summary><p><code>shutdown()</code> stops accepting tasks but lets queued and running tasks finish. <code>shutdownNow()</code> also interrupts running tasks and returns the list of tasks that never started. Neither waits; use <code>awaitTermination</code> for that.</p></details>
+    <details><summary>How do you choose the pool size?</summary><p>For CPU-bound work, about the number of cores (<code>availableProcessors()</code>). For I/O-bound work, more threads, roughly cores × (1 + wait time / compute time), or virtual threads. Always measure under realistic load.</p></details>
+    <details><summary>What is the difference between Future and CompletableFuture?</summary><p>A Future can only be polled or waited on with <code>get()</code>. A CompletableFuture can also be completed manually and lets you attach callbacks (<code>thenApply</code>, <code>thenCombine</code>, <code>exceptionally</code>) that run when the result arrives, so you can compose async steps without blocking threads.</p></details>
+  </div>
+
+{{PRACTICE}}
+
+  <h3 id="scenarios">Real-world scenario questions (asked in company interviews)</h3>
+  <p class="scn-intro">Executors are where most production concurrency lives, so interviewers probe how you size, protect and shut them down.</p>
+  <div class="scenarios">
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Backend · resource leak</span><span class="scn__tag scn__tag--level">Fresher</span></div>
+      <h4>Thread count keeps climbing</h4>
+      <p class="scn__situation">Each time a report is requested, the code does <code>Executors.newFixedThreadPool(4)</code>, submits the work and returns. After a day the service has 20,000 threads and crashes. What's wrong?</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> pool lifecycle.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>A new pool per request is never shut down, so its 4 threads live forever.</li>
+          <li>Create one shared pool at startup and reuse it; shut it down when the application stops.</li>
+          <li>If a short-lived pool is really needed, close it in finally (or try-with-resources in Java 21).</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> calling <code>System.gc()</code>; live threads are never garbage collected.</p>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Debugging · silent failure</span><span class="scn__tag scn__tag--level">Junior</span></div>
+      <h4>Refunds that silently never happen</h4>
+      <p class="scn__situation">Refund tasks are submitted with <code>pool.submit(refundTask)</code> and the Future is ignored. Some refunds never complete and nothing appears in the logs. Why, and how do you fix it?</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> exception handling with submit().</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li><code>submit</code> captures exceptions inside the Future; if nobody calls <code>get()</code>, the failure is swallowed.</li>
+          <li>Catch and log inside the task (with refund id), or keep the Futures and check them, or use CompletableFuture with <code>exceptionally</code>/<code>whenComplete</code>.</li>
+          <li>Add retries and an alert for failed refunds.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> assuming “no error in the logs” means success.</p>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Performance · sizing</span><span class="scn__tag scn__tag--level">Mid</span></div>
+      <h4>Sizing pools for two kinds of work</h4>
+      <p class="scn__situation">An 8-core server does image compression (pure CPU) and calls a partner API (mostly waiting, ~200 ms). Both use one pool of 8 threads. API calls queue up and pages are slow. What would you change?</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> CPU-bound vs I/O-bound sizing and isolation.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>Separate the workloads into two pools, so slow API calls can't starve compression (bulkheading).</li>
+          <li>CPU pool ≈ 8 threads; I/O pool much larger (or virtual threads), since those threads mostly wait.</li>
+          <li>Add timeouts on API calls and bounded queues with a rejection policy.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> one giant pool of 500 threads for everything; CPU work would thrash.</p>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Release · shutdown</span><span class="scn__tag scn__tag--level">Mid</span></div>
+      <h4>Orders lost during deployment</h4>
+      <p class="scn__situation">During a deployment, the app is stopped while order-confirmation tasks are still in the executor's queue. Some customers never get confirmations. Design a graceful shutdown.</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> shutdown(), awaitTermination() and durability.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>On stop: stop taking new requests, call <code>shutdown()</code>, then <code>awaitTermination(30, SECONDS)</code>; only then call <code>shutdownNow()</code> and log the tasks it returns.</li>
+          <li>For anything that must not be lost, store it durably first (database or message broker) and process from there, so a restart can resume.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> relying on an in-memory queue for work that must survive a restart.</p>
+      </div></details>
+    </article>
+  </div>
+</part>

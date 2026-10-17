@@ -1,0 +1,969 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Serialization and deserialization | MyPhatshala</title>
+<meta name="description" content="Java serialization and deserialization: Serializable, ObjectOutputStream.writeObject, ObjectInputStream.readObject, transient and static fields, object graphs and shared references, serialVersionUID and InvalidClassException, NotSerializableException, constructors not running, and security risks with untrusted data. With animations, a JVM tracer, 9 practice problems, quiz and interview scenarios.">
+<meta name="mp:minutes" content="24">
+<link rel="canonical" href="https://myphatshala.com/courses/core-java/13-file-io/04-serialization/">
+<meta property="og:title" content="Serialization in Java: saving objects to files · MyPhatshala">
+<meta property="og:description" content="Turn a Customer object into bytes and back, see what transient skips, watch shared references survive, and solve 9 problems.">
+<link rel="icon" href="../../../../assets/img/logo.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Fraunces:ital,opsz,wght@0,9..144,600;0,9..144,700;1,9..144,600&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../../../../assets/css/style.css">
+<link rel="stylesheet" href="../../../../assets/css/lesson.css">
+<script src="../../../../assets/js/config.js"></script>
+<script>try { const t = localStorage.getItem("mp-theme"); if (t) document.documentElement.dataset.theme = t; } catch (e) {}</script>
+<script type="application/ld+json">{"@context": "https://schema.org", "@type": "LearningResource", "name": "Serialization and deserialization", "learningResourceType": "Lesson", "educationalLevel": "Intermediate", "isAccessibleForFree": true, "inLanguage": "en", "isPartOf": {"@type": "Course", "name": "Core Java", "provider": {"@type": "Organization", "name": "MyPhatshala"}}}</script>
+</head>
+<body style="--track:#E8772E" data-lesson="13-file-io/04-serialization" data-course-root="../../">
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="site-header">
+  <div class="wrap">
+    <a class="brand" href="../../../../" aria-label="MyPhatshala home"><img src="../../../../assets/img/logo.svg" width="34" height="34" alt=""><span>My<b>Phatshala</b></span></a>
+    <nav class="nav" aria-label="Main">
+      <a href="../../../../#tracks">All courses</a>
+      <a href="../../">Core Java syllabus</a>
+      <button class="theme-btn" id="theme-btn" aria-label="Toggle dark mode"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg></button>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+<section class="lesson-hero">
+  <div class="wrap">
+    <nav class="crumbs" aria-label="Breadcrumb"><a href="../../../../">Home</a><span>›</span><a href="../../../../#track-programming">Programming Languages</a><span>›</span><a href="../../">Core Java</a><span>›</span><b>Lesson 13.4</b></nav>
+    <h1>Serialization and deserialization</h1>
+    <p class="lead">Files so far held text and raw bytes. But your program's data lives in <b>objects</b>: customers, carts, game progress. <b>Serialization</b> turns a whole object, with everything it points to, into bytes you can save or send, and <b>deserialization</b> rebuilds it later. You'll learn how to opt in, how to keep secrets out with <code>transient</code>, what <code>serialVersionUID</code> protects, and why reading serialized data from strangers is dangerous.</p>
+    <div class="lesson-meta"><span>Module 13 · File Handling and I/O</span><span>⏱ 24 min</span><span>Intermediate</span><span>9 practice problems</span></div>
+  </div>
+</section>
+
+<div class="wrap lesson-layout">
+<article class="lesson-main">
+<!-- ======================= PART 1: THE STORY ======================= -->
+<section class="part" id="story">
+  <span class="part-label"><b>1</b> The story</span>
+  <h2>The cart that vanished</h2>
+  <div class="story">
+    <p class="narration">Riya's canteen app lets students build a cart before paying. If the app closes, the cart disappears and students have to add everything again. She could write each item as text, but the cart has items, quantities, a coupon and the student's details, all objects pointing to objects.</p>
+    <div class="scene">
+      <svg viewBox="0 0 640 170" role="img" aria-label="An object made of linked boxes is flattened into a row of bytes in a file, then rebuilt into the same shape">
+        <g font-size="10.5">
+          <rect x="14" y="30" width="110" height="40" rx="8" class="s-soft-green" style="stroke:var(--green)"/><text x="69" y="55" text-anchor="middle" class="s-ink" font-weight="700">Cart</text>
+          <rect x="14" y="100" width="50" height="34" rx="6" class="s-soft-green" style="stroke:var(--green)"/><text x="39" y="122" text-anchor="middle" class="s-ink">item</text>
+          <rect x="74" y="100" width="50" height="34" rx="6" class="s-soft-green" style="stroke:var(--green)"/><text x="99" y="122" text-anchor="middle" class="s-ink">item</text>
+          <path d="M50 70v28M90 70v28" style="stroke:var(--green);stroke-width:1.5"/>
+          <path d="M136 84h50" style="stroke:var(--ink-3);stroke-width:1.5"/><path d="M180 78l8 6-8 6" style="fill:none;stroke:var(--ink-3);stroke-width:1.5"/>
+          <text x="160" y="72" text-anchor="middle" class="s-acc">serialize</text>
+          <rect x="196" y="62" width="250" height="44" rx="8" class="s-soft-acc" style="stroke:var(--track)"/>
+          <text x="321" y="89" text-anchor="middle" class="s-ink" font-family="monospace" font-size="12">AC ED 00 05 73 72 00 04 43 61 …</text>
+          <text x="321" y="126" text-anchor="middle" class="s-ink2">cart.ser</text>
+          <path d="M454 84h50" style="stroke:var(--ink-3);stroke-width:1.5"/><path d="M498 78l8 6-8 6" style="fill:none;stroke:var(--ink-3);stroke-width:1.5"/>
+          <text x="478" y="72" text-anchor="middle" class="s-blue">deserialize</text>
+          <rect x="514" y="30" width="110" height="40" rx="8" class="s-soft-blue" style="stroke:var(--blue)"/><text x="569" y="55" text-anchor="middle" class="s-ink" font-weight="700">Cart</text>
+          <rect x="514" y="100" width="50" height="34" rx="6" class="s-soft-blue" style="stroke:var(--blue)"/><text x="539" y="122" text-anchor="middle" class="s-ink">item</text>
+          <rect x="574" y="100" width="50" height="34" rx="6" class="s-soft-blue" style="stroke:var(--blue)"/><text x="599" y="122" text-anchor="middle" class="s-ink">item</text>
+          <path d="M550 70v28M590 70v28" style="stroke:var(--blue);stroke-width:1.5"/>
+        </g>
+        <text x="632" y="166" text-anchor="end" class="s-wm">myphatshala.com</text>
+      </svg>
+    </div>
+    <div class="panel">
+      <div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#FCE6D6"/><path d="M14 64c2-12 9-18 18-18s16 6 18 18z" fill="#2E5AAC"/><circle cx="32" cy="29" r="12" fill="#C68B5E"/><path d="M19 29c0-10 6-15 13-15s13 5 13 15c-3-5-7-8-13-8s-10 3-13 8z" fill="#2A1B14"/><path d="M43 27c3 6 3 14 0 20" stroke="#2A1B14" stroke-width="4" fill="none" stroke-linecap="round"/><circle cx="27.5" cy="30" r="1.5" fill="#2A1B14"/><circle cx="36.5" cy="30" r="1.5" fill="#2A1B14"/><path d="M28 35q4 3 8 0" stroke="#2A1B14" stroke-width="1.6" fill="none" stroke-linecap="round"/><circle cx="32" cy="24" r="1.2" fill="#D64545"/></svg></div>
+      <div class="bubble"><b class="who">Riya</b><p>Sir, can't I just save the whole cart object as it is?</p></div>
+    </div>
+    <div class="panel panel--right">
+      <div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#DDEFE6"/><path d="M12 64c2-12 10-18 20-18s18 6 20 18z" fill="#F4F1EA"/><path d="M28 46l4 8 4-8" fill="#2F7D5B"/><circle cx="32" cy="28" r="12" fill="#B57A50"/><path d="M20 26c0-8 5-13 12-13s12 5 12 13c-2-3-6-5-12-5s-10 2-12 5z" fill="#5A5A5A"/><path d="M22 32c1 8 5 11 10 11s9-3 10-11c-2 3-6 4-10 4s-8-1-10-4z" fill="#5A5A5A"/><circle cx="27" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><circle cx="37" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><path d="M30.4 29h3.2" stroke="#1B2433" stroke-width="1.4"/><circle cx="27" cy="29" r="1.1" fill="#1B2433"/><circle cx="37" cy="29" r="1.1" fill="#1B2433"/></svg></div>
+      <div class="bubble"><b class="who">Arjun Sir</b><p>You can. Mark the class <code>Serializable</code> and an <code>ObjectOutputStream</code> will flatten the cart and everything it points to into bytes.</p></div>
+    </div>
+    <div class="panel">
+      <div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#FCE6D6"/><path d="M14 64c2-12 9-18 18-18s16 6 18 18z" fill="#2E5AAC"/><circle cx="32" cy="29" r="12" fill="#C68B5E"/><path d="M19 29c0-10 6-15 13-15s13 5 13 15c-3-5-7-8-13-8s-10 3-13 8z" fill="#2A1B14"/><path d="M43 27c3 6 3 14 0 20" stroke="#2A1B14" stroke-width="4" fill="none" stroke-linecap="round"/><circle cx="27.5" cy="30" r="1.5" fill="#2A1B14"/><circle cx="36.5" cy="30" r="1.5" fill="#2A1B14"/><path d="M28 35q4 3 8 0" stroke="#2A1B14" stroke-width="1.6" fill="none" stroke-linecap="round"/><circle cx="32" cy="24" r="1.2" fill="#D64545"/></svg></div>
+      <div class="bubble"><b class="who">Riya</b><p>And the student's UPI PIN that's stored in there?</p></div>
+    </div>
+    <div class="panel panel--right">
+      <div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#DDEFE6"/><path d="M12 64c2-12 10-18 20-18s18 6 20 18z" fill="#F4F1EA"/><path d="M28 46l4 8 4-8" fill="#2F7D5B"/><circle cx="32" cy="28" r="12" fill="#B57A50"/><path d="M20 26c0-8 5-13 12-13s12 5 12 13c-2-3-6-5-12-5s-10 2-12 5z" fill="#5A5A5A"/><path d="M22 32c1 8 5 11 10 11s9-3 10-11c-2 3-6 4-10 4s-8-1-10-4z" fill="#5A5A5A"/><circle cx="27" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><circle cx="37" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><path d="M30.4 29h3.2" stroke="#1B2433" stroke-width="1.4"/><circle cx="27" cy="29" r="1.1" fill="#1B2433"/><circle cx="37" cy="29" r="1.1" fill="#1B2433"/></svg></div>
+      <div class="bubble"><b class="who">Arjun Sir</b><p>That must <i>never</i> reach a file. Mark it <code>transient</code>. Let's see exactly what gets written.</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- ======================= PART 2: DEFINITION ======================= -->
+<section class="part" id="definition">
+  <span class="part-label"><b>2</b> Definition</span>
+  <h2>What are serialization and deserialization?</h2>
+  <div class="def">
+    <div class="def__formal"><small>Formal definition (write this in exams)</small>
+      <p><b>Serialization</b> is the process of converting an object's state, together with the objects it references (its <b>object graph</b>), into a sequence of bytes that can be stored or transmitted. <b>Deserialization</b> reconstructs new objects with the same state from those bytes. In Java, a class opts in by implementing the marker interface <code>java.io.Serializable</code>; objects are written with <code>ObjectOutputStream.writeObject()</code> and read with <code>ObjectInputStream.readObject()</code>. Fields declared <code>transient</code> and <code>static</code> fields are not serialized. A <code>serialVersionUID</code> identifies the version of the class and is checked during deserialization; a mismatch causes <code>InvalidClassException</code>.</p></div>
+    <div class="def__simple"><small>In simple words</small>
+      <p>Serialization packs an object flat into a box of bytes. Deserialization unpacks the box and builds an identical object, a twin, not the original.</p></div>
+  </div>
+  <h3>Words you'll meet in this lesson</h3>
+  <div class="terms">
+    <div class="term"><b>Serializable</b><span>Marker interface: “objects of this class may be serialized”.</span></div>
+    <div class="term"><b>Object graph</b><span>An object plus everything reachable from its reference fields.</span></div>
+    <div class="term"><b>transient</b><span>Field modifier: skip this field when serializing.</span></div>
+    <div class="term"><b>serialVersionUID</b><span>A <code>long</code> that labels the class version stored in the bytes.</span></div>
+    <div class="term"><b>Magic number</b><span>Every stream begins with <code>AC ED 00 05</code>.</span></div>
+    <div class="term"><b>Persistence</b><span>Keeping data after the program ends.</span></div>
+  </div>
+  <h3>What gets saved?</h3>
+  <div class="table-wrap">
+  <table class="compare" style="min-width:540px">
+    <thead><tr><th>Field</th><th>Saved?</th><th>After reading</th></tr></thead>
+    <tbody>
+      <tr><td>Normal instance field (<code>int points</code>)</td><td>Yes</td><td>Saved value</td></tr>
+      <tr><td>Reference to a Serializable object</td><td>Yes, the whole object</td><td>A new equal object</td></tr>
+      <tr><td>Reference to a non-Serializable object</td><td>—</td><td><code>NotSerializableException</code> while writing</td></tr>
+      <tr><td><code>transient</code> field</td><td>No</td><td>Default: <code>null</code>, 0, false</td></tr>
+      <tr><td><code>static</code> field</td><td>No</td><td>Whatever the class has now</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <div class="callout callout--exam"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19V5a2 2 0 0 1 2-2h12v18H6a2 2 0 0 1-2-2zm0 0a2 2 0 0 1 2-2h12"/></svg><p><b>Exam tip:</b> “<code>Serializable</code> is a marker interface. <code>transient</code> and <code>static</code> fields are not serialized. Deserialization does not call the constructor of a serializable class. Declare <code>private static final long serialVersionUID</code> to control version compatibility.”</p></div>
+</section>
+
+<div class="ad-slot" data-slot="mid"></div>
+
+<!-- ======================= PART 3: TYPES AND WAYS TO USE IT ======================= -->
+<section class="part" id="types">
+  <span class="part-label"><b>3</b> Types and ways to use it</span>
+  <h2>The rules in one class</h2>
+  <div class="code" data-lang="java" data-file="Main.java"><pre><code>class Customer implements Serializable {          // 1. opt in (marker interface)
+    private static final long serialVersionUID = 1L; // 2. version number of the format
+    String name;                                     //    saved
+    int points;                                      //    saved
+    Address home;                                    // 3. must be Serializable too
+    transient String otp;                            // 4. skipped, comes back null
+    static int count;                                // 5. class data, never saved
+}</code></pre></div>
+  <div class="cards">
+    <div class="card"><svg class="ic" viewBox="0 0 40 40" fill="none" stroke="var(--green)" stroke-width="2"><rect x="8" y="10" width="24" height="20" rx="3"/><path d="M14 20l4 4 8-8"/></svg><h4>Default serialization</h4><p>Implement Serializable; Java writes all non-transient fields. Enough for most cases.</p><span class="tag">writeObject</span></div>
+    <div class="card"><svg class="ic" viewBox="0 0 40 40" fill="none" stroke="var(--red)" stroke-width="2"><rect x="11" y="18" width="18" height="13" rx="2"/><path d="M15 18v-4a5 5 0 0110 0v4"/></svg><h4>transient</h4><p>Leave out secrets (PINs, passwords), caches and things that can't be serialized (open files, threads).</p><span class="tag">skip a field</span></div>
+    <div class="card"><svg class="ic" viewBox="0 0 40 40" fill="none" stroke="var(--track)" stroke-width="2"><path d="M12 28V12h16v16"/><path d="M12 20h16"/></svg><h4>Custom writeObject/readObject</h4><p>Private methods in your class to encrypt, validate or convert fields yourself.</p><span class="tag">advanced</span></div>
+    <div class="card"><svg class="ic" viewBox="0 0 40 40" fill="none" stroke="var(--blue)" stroke-width="2"><path d="M10 14h20M10 20h14M10 26h18"/><path d="M8 8h24v24H8z"/></svg><h4>JSON instead</h4><p>For APIs and long-term storage, text formats (JSON with Jackson/Gson) are readable, language-neutral and safer.</p><span class="tag">common today</span></div>
+  </div>
+  <h3>When the class changes</h3>
+  <p>If you serialize with one version of a class and read with another whose <code>serialVersionUID</code> differs (or, if you didn't declare one, whose computed UID changed because you edited the class), reading fails:</p>
+  <div class="code" data-lang="text" data-file="console"><pre><code>java.io.InvalidClassException: Customer; local class incompatible:
+    stream classdesc serialVersionUID = 1, local class serialVersionUID = 2</code></pre></div>
+  <div class="callout callout--warn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3 2 21h20L12 3z"/><path d="M12 10v5M12 18v.5"/></svg><p><b>Never deserialize data you don't trust.</b> <code>readObject</code> can create objects of any serializable class on your classpath, without running constructors. Attackers have used crafted byte streams to run code on servers. Accept JSON (validated) from outside, or use deserialization filters (<code>ObjectInputFilter</code>) to allow only expected classes.</p></div>
+</section>
+
+<!-- ======================= PART 4: STEP BY STEP ======================= -->
+<section class="part" id="steps">
+  <span class="part-label"><b>4</b> Step by step</span>
+  <h2>What writeObject and readObject do</h2>
+  <ol class="stepper">
+    <li><h4>Open an object stream</h4>
+      <div class="code" data-lang="java" data-file="Main.java"><pre><code>ObjectOutputStream out = new ObjectOutputStream(new FileOutputStream("cart.ser"));</code></pre></div>
+      <span class="behind">It wraps a byte stream and immediately writes the header <code>AC ED 00 05</code>.</span></li>
+    <li><h4>writeObject(cart)</h4>
+      <span class="behind">It checks the class implements Serializable, writes a class description (name, serialVersionUID, field names and types), then the values of each non-transient, non-static field.</span></li>
+    <li><h4>Follow references</h4>
+      <span class="behind">For each reference field it serializes the referenced object the same way, recursively. Objects already written in this stream are stored as a short back-reference, so cycles and shared objects work.</span></li>
+    <li><h4>readObject()</h4>
+      <div class="code" data-lang="java" data-file="Main.java"><pre><code>Cart cart = (Cart) in.readObject();</code></pre></div>
+      <span class="behind">It reads the class description, checks the UID, allocates a new object <b>without calling its constructor</b>, and sets the fields from the stream. Transient fields keep default values.</span></li>
+    <li><h4>Cast and use</h4>
+      <span class="behind"><code>readObject</code> returns <code>Object</code>; you cast it. It throws <code>ClassNotFoundException</code> if the class isn't available, and <code>InvalidClassException</code> if the versions don't match.</span></li>
+  </ol>
+</section>
+
+<!-- ======================= PART 5: SEE IT HAPPEN ======================= -->
+<section class="part" id="animation">
+  <span class="part-label"><b>5</b> See it happen</span>
+  <h2>Object to bytes and back: both views</h2>
+  <p>Left: a Customer saved to a file and read back later. Right: how serialization walks an object graph and keeps a shared object shared.</p>
+  <div class="anim" data-frames="6">
+    <div class="anim__title">Serialization, both views <span>6 steps</span></div>
+    <div class="anim__views">
+      <div class="view view--see">
+        <span class="view__tag">What you see</span>
+        <svg viewBox="0 0 360 250" role="img" aria-label="A Customer object is serialized to bytes in a file and later deserialized into a new, equal object; the transient OTP is not saved">
+          <rect x="8" y="8" width="344" height="36" rx="8" class="s-board" style="stroke:board;stroke-width:1.5"/>
+          <text data-on="1" x="16" y="31" font-size="9.2" class="s-chalk mono">Customer c = new Customer("Asha", 120);</text>
+          <text data-on="2" x="16" y="31" font-size="9.2" class="s-chalk mono">out.writeObject(c);   // ObjectOutputStream</text>
+          <text data-on="3" x="16" y="31" font-size="9.2" class="s-chalk mono">// customer.ser on disk</text>
+          <text data-on="4" x="16" y="31" font-size="9.2" class="s-chalk mono">// the program ends: c is gone</text>
+          <text data-on="5" x="16" y="31" font-size="9.2" class="s-chalk mono">Customer back = (Customer) in.readObject();</text>
+          <text data-on="6" x="16" y="31" font-size="9.2" class="s-chalk mono">back == c ?   // false: a new object</text>
+          <g data-on="1-3"><rect x="10" y="60" width="150" height="96" rx="8" class="s-soft-green" style="stroke:var(--green);stroke-width:1.5"/></g>
+          <text data-on="1-3" x="20" y="78" font-size="9.5" font-weight="700" class="s-green">Customer c</text>
+          <text data-on="1-3" x="20" y="100" font-size="9" class="s-ink mono">name   "Asha"</text>
+          <text data-on="1-3" x="20" y="118" font-size="9" class="s-ink mono">points 120</text>
+          <text data-on="1-3" x="20" y="136" font-size="9" class="s-red mono">otp    "4821" (transient)</text>
+          <text data-on="4" x="20" y="110" font-size="10" class="s-ink3">(object gone)</text>
+          <g data-on="2-"><rect x="186" y="60" width="166" height="96" rx="8" class="s-soft-acc" style="stroke:var(--track);stroke-width:1.5"/></g>
+          <text data-on="2-" x="196" y="78" font-size="9.2" font-weight="700" class="s-acc">customer.ser (bytes)</text>
+          <text data-on="2-" x="196" y="100" font-size="9" class="s-ink mono">AC ED 00 05 73 72 …</text>
+          <text data-on="2-" x="196" y="118" font-size="8.8" class="s-ink2">class name, fields:</text>
+          <text data-on="2-" x="196" y="136" font-size="8.8" class="s-ink mono">"Asha", 120 (no otp)</text>
+          <g data-on="2"><path d="M160 108 L184 108" style="stroke:var(--track);stroke-width:2;fill:none"/><path d="M176.0 103.5 L184 108 L176.0 112.5" style="stroke:var(--track);stroke-width:2;fill:none;stroke-linecap:round;stroke-linejoin:round"/></g>
+          <g data-on="5-"><rect x="10" y="166" width="150" height="60" rx="8" class="s-soft-blue" style="stroke:var(--blue);stroke-width:1.5"/></g>
+          <text data-on="5-" x="20" y="184" font-size="9.5" font-weight="700" class="s-blue">Customer back</text>
+          <text data-on="5-" x="20" y="202" font-size="9" class="s-ink mono">"Asha", 120</text>
+          <text data-on="5-" x="20" y="218" font-size="9" class="s-red mono">otp = null</text>
+          <g data-on="5"><path d="M268 156 L162 190" style="stroke:var(--blue);stroke-width:2;fill:none"/><path d="M171.0 191.8 L162 190 L168.2 183.3" style="stroke:var(--blue);stroke-width:2;fill:none;stroke-linecap:round;stroke-linejoin:round"/></g>
+          <text data-on="6" x="186" y="196" font-size="9.5" class="s-ink2">a new object with the</text>
+          <text data-on="6" x="186" y="212" font-size="9.5" class="s-ink2">same state; not c itself</text>
+          <text data-on="1" x="180" y="240" font-size="10.5" text-anchor="middle" class="s-ink2">An object in memory.</text>
+          <text data-on="2" x="180" y="240" font-size="10.5" text-anchor="middle" class="s-ink2">Serialize: object → bytes.</text>
+          <text data-on="3" x="180" y="240" font-size="10.5" text-anchor="middle" class="s-ink2">Bytes saved in a file.</text>
+          <text data-on="4" x="180" y="240" font-size="10.5" text-anchor="middle" class="s-ink2">Program ends; memory is gone.</text>
+          <text data-on="5" x="180" y="240" font-size="10.5" text-anchor="middle" class="s-ink2">Deserialize: bytes → object.</text>
+          <text data-on="6" x="180" y="240" font-size="10.5" text-anchor="middle" class="s-ink2">Same data, new object.</text>
+          <text x="354" y="245" text-anchor="end" class="s-wm">myphatshala.com</text>
+        </svg>
+        <ol class="caps" hidden>
+          <li>A <code>Customer</code> object lives on the heap with a name, loyalty points and a one-time password. Objects disappear when the program ends.</li>
+          <li><code>ObjectOutputStream.writeObject(c)</code> <b>serializes</b> it: turns the object's state into a sequence of bytes.</li>
+          <li>The bytes go into customer.ser. They start with the magic number AC ED, then the class name and field values. The OTP field is <code>transient</code>, so it's skipped.</li>
+          <li>The program can now end. Only the file remains.</li>
+          <li>Later (even in another program), <code>ObjectInputStream.readObject()</code> <b>deserializes</b> the bytes into a brand-new Customer. No constructor of Customer runs.</li>
+          <li>The new object has the saved name and points; the transient OTP comes back as its default value, <code>null</code>. It is a different object from the original: <code>back == c</code> would be false.</li>
+        </ol>
+      </div>
+      <div class="view view--behind">
+        <span class="view__tag">Behind the screen</span>
+        <svg viewBox="0 0 360 250" role="img" aria-label="Serialization walks the object graph: a Customer referencing an Address that is shared by two fields is written once and restored as one object">
+          <rect x="6" y="6" width="170" height="200" rx="8" class="s-soft-blue" style="stroke:var(--blue);stroke-width:1.5"/>
+          <text x="16" y="24" font-size="10" font-weight="700" class="s-blue">HEAP (before)</text>
+          <rect x="16" y="34" width="150" height="70" rx="8" class="s-card" style="stroke:var(--line);stroke-width:1.5"/>
+          <text x="24" y="52" font-size="9.5" font-weight="700" class="s-ink mono">#1 Customer</text>
+          <text x="24" y="70" font-size="9" class="s-ink mono">home → #2</text>
+          <text x="24" y="88" font-size="9" class="s-ink mono">work → #2</text>
+          <rect x="16" y="130" width="150" height="44" rx="8" class="s-card" style="stroke:var(--line);stroke-width:1.5"/>
+          <text x="24" y="148" font-size="9.5" font-weight="700" class="s-ink mono">#2 Address</text>
+          <text x="24" y="164" font-size="9" class="s-ink mono">city "Pune"</text>
+          <path d="M90 104 L90 128" style="stroke:var(--ink-3);stroke-width:2;fill:none"/><path d="M94.5 120.0 L90 128 L85.5 120.0" style="stroke:var(--ink-3);stroke-width:2;fill:none;stroke-linecap:round;stroke-linejoin:round"/>
+          <rect x="186" y="6" width="168" height="200" rx="8" class="s-card2" style="stroke:var(--line);stroke-width:1.5"/>
+          <text x="196" y="24" font-size="10" font-weight="700" class="s-ink2">stream / file</text>
+          <text data-on="2-" x="196" y="48" font-size="8.8" class="s-ink mono">Customer: class + fields</text>
+          <text data-on="3-" x="196" y="68" font-size="8.8" class="s-ink mono">Address #2: "Pune"</text>
+          <text data-on="4-" x="196" y="88" font-size="8.8" class="s-ink mono">home again: handle → #2</text>
+          <g data-on="2"><rect x="16" y="34" width="150" height="70" rx="8" class="" style="stroke:#D64545;stroke-width:2.2;fill:none"/></g>
+          <g data-on="3"><rect x="16" y="130" width="150" height="44" rx="8" class="" style="stroke:#D64545;stroke-width:2.2;fill:none"/></g>
+          <g data-on="5-"><rect x="196" y="116" width="150" height="80" rx="8" class="s-soft-green" style="stroke:var(--green);stroke-width:1.5"/></g>
+          <text data-on="5-" x="204" y="134" font-size="9" font-weight="700" class="s-green">HEAP (after read)</text>
+          <text data-on="5-" x="204" y="152" font-size="9" class="s-ink mono">#3 Customer</text>
+          <text data-on="5-" x="204" y="168" font-size="9" class="s-ink mono">home, work → #4</text>
+          <text data-on="5-" x="204" y="186" font-size="9" class="s-ink mono">#4 Address "Pune"</text>
+          <text data-on="6" x="16" y="196" font-size="8.8" class="s-ink3">static fields: not saved</text>
+          <text data-on="1" x="180" y="236" font-size="10.5" text-anchor="middle" class="s-ink2">An object graph.</text>
+          <text data-on="2" x="180" y="236" font-size="10.5" text-anchor="middle" class="s-ink2">Write the Customer.</text>
+          <text data-on="3" x="180" y="236" font-size="10.5" text-anchor="middle" class="s-ink2">Follow its reference: Address.</text>
+          <text data-on="4" x="180" y="236" font-size="10.5" text-anchor="middle" class="s-ink2">Seen before: just a handle.</text>
+          <text data-on="5" x="180" y="236" font-size="10.5" text-anchor="middle" class="s-ink2">Read: new objects, same shape.</text>
+          <text data-on="6" x="180" y="236" font-size="10.5" text-anchor="middle" class="s-ink2">Shared stays shared.</text>
+          <text x="354" y="245" text-anchor="end" class="s-wm">myphatshala.com</text>
+        </svg>
+        <ol class="caps" hidden>
+          <li>Objects usually point to other objects. Here both <code>home</code> and <code>work</code> refer to the same Address #2.</li>
+          <li><code>writeObject</code> writes the Customer's class description and its non-transient, non-static fields.</li>
+          <li>A reference field means the referenced object must be written too, so it follows <code>home</code> to Address #2. Every object reached this way must be <code>Serializable</code>.</li>
+          <li><code>work</code> points to an object already written, so only a short back-reference (a <b>handle</b>) is stored. Each object is written once.</li>
+          <li><code>readObject</code> recreates the whole graph as new objects: Customer #3 and Address #4.</li>
+          <li>Because of the handle, both fields of #3 point to the same #4, just as before. Static fields belong to the class, not the object, so they are never part of the bytes.</li>
+        </ol>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ======================= PART 6: REAL-WORLD USE ======================= -->
+<section class="part" id="real-world">
+  <span class="part-label"><b>6</b> Real-world use</span>
+  <h2>Where serialization is used</h2>
+  <p>Java serialization still appears in caches, sessions and older systems, and the same idea, turning objects into bytes, is everywhere in modern formats such as JSON and Protocol Buffers.</p>
+  <!--ANIM2-->
+  <h3 id="animated-example">Watch it with an example: a shopping cart that survives an app restart</h3>
+  <p class="anim-intro">A shopping app saves the customer's cart when the app is closed and restores it when it opens again.</p>
+  <div class="anim anim--one" data-frames="5" data-delay="4600">
+    <div class="anim__title">Save the cart, restore the cart <span>5 steps</span></div>
+    <div class="anim__views">
+      <div class="view view--story">
+        <span class="view__tag">Animated example</span>
+        <svg viewBox="0 0 360 230" role="img" aria-label="A Cart object is serialized when the app closes and deserialized when it starts again">
+          <g data-on="1-2"><rect x="10" y="14" width="150" height="110" rx="8" class="s-soft-green" style="stroke:var(--green);stroke-width:1.5"/></g>
+          <text data-on="1-2" x="20" y="32" font-size="9.5" font-weight="700" class="s-green">Cart (in memory)</text>
+          <text data-on="1-2" x="20" y="56" font-size="9" class="s-ink mono">phone cover  Rs 299</text>
+          <text data-on="1-2" x="20" y="76" font-size="9" class="s-ink mono">charger      Rs 799</text>
+          <text data-on="1-2" x="20" y="96" font-size="9" class="s-ink mono">earphones    Rs 1499</text>
+          <text data-on="3" x="20" y="70" font-size="11" font-weight="700" class="s-ink3">app closed</text>
+          <g data-on="2-"><rect x="196" y="40" width="156" height="50" rx="8" class="s-soft-acc" style="stroke:var(--track);stroke-width:1.5"/></g>
+          <text data-on="2-" x="206" y="60" font-size="10" font-weight="700" class="s-acc mono">cart.ser</text>
+          <text data-on="2-" x="206" y="78" font-size="9" class="s-ink3">412 bytes</text>
+          <g data-on="2"><path d="M160 64 L194 64" style="stroke:var(--track);stroke-width:2;fill:none"/><path d="M186.0 59.5 L194 64 L186.0 68.5" style="stroke:var(--track);stroke-width:2;fill:none;stroke-linecap:round;stroke-linejoin:round"/></g>
+          <g data-on="4-"><rect x="10" y="118" width="150" height="70" rx="8" class="s-soft-blue" style="stroke:var(--blue);stroke-width:1.5"/></g>
+          <text data-on="4-" x="20" y="136" font-size="9.5" font-weight="700" class="s-blue">Cart (restored)</text>
+          <text data-on="4-" x="20" y="156" font-size="9.5" class="s-ink mono">3 items, Rs 2597</text>
+          <text data-on="5" x="20" y="176" font-size="9" class="s-ink2">coupon: re-checked</text>
+          <g data-on="4"><path d="M270 90 L162 140" style="stroke:var(--blue);stroke-width:2;fill:none"/><path d="M171.2 140.7 L162 140 L167.4 132.6" style="stroke:var(--blue);stroke-width:2;fill:none;stroke-linecap:round;stroke-linejoin:round"/></g>
+          <text data-on="1" x="180" y="206" font-size="10.5" text-anchor="middle" class="s-ink2">Cart with 3 items.</text>
+          <text data-on="2" x="180" y="206" font-size="10.5" text-anchor="middle" class="s-ink2">App closing: writeObject.</text>
+          <text data-on="3" x="180" y="206" font-size="10.5" text-anchor="middle" class="s-ink2">App closed.</text>
+          <text data-on="4" x="180" y="206" font-size="10.5" text-anchor="middle" class="s-ink2">App opens: readObject.</text>
+          <text data-on="5" x="180" y="206" font-size="10.5" text-anchor="middle" class="s-ink2">Restored and validated.</text>
+          <text x="354" y="225" text-anchor="end" class="s-wm">myphatshala.com</text>
+        </svg>
+        <ol class="caps" hidden>
+          <li>While shopping, the cart is an object with a list of items.</li>
+          <li>When the app closes, it writes the cart with <code>writeObject</code> to cart.ser in the app's private storage. (Illustrative size.)</li>
+          <li>The app process ends; only the file remains.</li>
+          <li>Next launch, <code>readObject</code> rebuilds the cart: same items, same prices as when it was saved.</li>
+          <li>Saved prices may be old, so the app re-checks prices and coupons with the server. Many real apps save such state as JSON instead of Java serialization, for reasons you'll see in Part 3.</li>
+        </ol>
+      </div>
+    </div>
+  </div>
+  <!--/ANIM2-->
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="20" y="22" width="34" height="46" rx="5" class="s-soft-green" style="stroke:var(--green)"/><rect x="66" y="22" width="34" height="46" rx="5" class="s-soft-green" style="stroke:var(--green)"/><path d="M54 45h12" style="stroke:var(--ink-3);stroke-width:2"/></svg></div>
+    <div><h4>1. Web sessions across servers</h4><p>Some servers serialize HTTP session objects (logged-in user, cart) to share them across machines or survive restarts.</p>
+      <div class="uc-flow"><span>session</span><i>→</i><span class="java">serialize</span><i>→</i><span>other server</span></div></div>
+  </div>
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="30" y="18" width="60" height="54" rx="6" class="s-soft-blue" style="stroke:var(--blue)"/><path d="M40 34h40M40 46h40M40 58h24" style="stroke:var(--blue);stroke-width:2"/></svg></div>
+    <div><h4>2. Caches</h4><p>Distributed caches store objects as bytes; Java serialization or a faster format turns them into bytes and back.</p>
+      <div class="uc-flow"><span>product object</span><i>→</i><span class="java">bytes</span><i>→</i><span>cache server</span></div></div>
+  </div>
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><circle cx="60" cy="45" r="24" class="s-soft-acc" style="stroke:var(--track)"/><path d="M48 45h24M60 33v24" style="stroke:var(--track);stroke-width:3"/></svg></div>
+    <div><h4>3. Saving app state</h4><p>Games, desktop tools and mobile apps save progress and drafts so users can continue later.</p>
+      <div class="uc-flow"><span>quit game</span><i>→</i><span class="java">writeObject(progress)</span><i>→</i><span>save.dat</span></div></div>
+  </div>
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="18" y="20" width="84" height="50" rx="6" class="s-card" style="stroke:var(--line)"/><text x="60" y="51" text-anchor="middle" class="s-ink" font-family="monospace" font-size="12">{"id":1}</text></svg></div>
+    <div><h4>4. APIs (with JSON)</h4><p>REST APIs serialize Java objects to JSON text and deserialize requests back into objects: the same idea in a portable, safer format.</p>
+      <div class="uc-flow"><span>Order object</span><i>→</i><span class="java">Jackson</span><i>→</i><span>JSON response</span></div></div>
+  </div>
+  <p class="muted">Simplified. New systems usually prefer JSON or Protocol Buffers over Java's built-in serialization, mainly for safety and compatibility with other languages.</p>
+</section>
+
+<div class="ad-slot" data-slot="mid"></div>
+
+<!-- ======================= PART 7: RUN THE CODE ======================= -->
+<section class="part" id="run">
+  <span class="part-label"><b>7</b> Run the code</span>
+  <h2>Save a customer, load a twin</h2>
+  <div class="code" data-lang="java" data-file="Main.java"><pre><code>import java.io.*;
+
+class Customer implements Serializable {
+    private static final long serialVersionUID = 1L;
+    String name;
+    int points;
+    transient String otp;
+
+    Customer(String name, int points, String otp) {
+        this.name = name;
+        this.points = points;
+        this.otp = otp;
+    }
+}
+
+public class Main {
+    public static void main(String[] args) throws IOException, ClassNotFoundException {
+        Customer c = new Customer("Asha", 120, "4821");
+        try (ObjectOutputStream out = new ObjectOutputStream(new FileOutputStream("customer.ser"))) {
+            out.writeObject(c);
+        }
+        System.out.println("saved " + new File("customer.ser").length() + " bytes");
+        try (ObjectInputStream in = new ObjectInputStream(new FileInputStream("customer.ser"))) {
+            Customer back = (Customer) in.readObject();
+            System.out.println(back.name + ", " + back.points + " points, otp=" + back.otp);
+            System.out.println("same object? " + (back == c));
+        }
+    }
+}</code></pre><div class="output">saved 77 bytes
+Asha, 120 points, otp=null
+same object? false</div></div>
+  <ul class="anno">
+    <li><code>implements Serializable</code><span>Without it, <code>writeObject</code> throws <code>NotSerializableException</code>.</span></li>
+    <li><code>transient String otp</code><span>Not written; comes back as <code>null</code>.</span></li>
+    <li><code>(Customer) in.readObject()</code><span>Returns Object, so cast. Throws <code>ClassNotFoundException</code> (checked) if the class is missing.</span></li>
+    <li><code>back == c</code><span>false: deserialization always creates new objects.</span></li>
+  </ul>
+  <div class="runner">
+    <script type="application/json">{
+ "lang": "java",
+ "file": "Main.java",
+ "tasks": [
+  {
+   "label": "1 · Save and restore a customer",
+   "hint": "Press <b>Run</b>. Then remove <code>transient</code> from <code>otp</code> and compare the file size and the restored OTP.",
+   "code": "import java.io.*;\n\nclass Customer implements Serializable {\n    private static final long serialVersionUID = 1L;\n    String name;\n    int points;\n    transient String otp;\n\n    Customer(String name, int points, String otp) {\n        this.name = name;\n        this.points = points;\n        this.otp = otp;\n    }\n}\n\npublic class Main {\n    public static void main(String[] args) throws IOException, ClassNotFoundException {\n        Customer c = new Customer(\"Asha\", 120, \"4821\");\n        try (ObjectOutputStream out = new ObjectOutputStream(new FileOutputStream(\"customer.ser\"))) {\n            out.writeObject(c);\n        }\n        System.out.println(\"saved \" + new File(\"customer.ser\").length() + \" bytes\");\n        try (ObjectInputStream in = new ObjectInputStream(new FileInputStream(\"customer.ser\"))) {\n            Customer back = (Customer) in.readObject();\n            System.out.println(back.name + \", \" + back.points + \" points, otp=\" + back.otp);\n        }\n    }\n}\n"
+  },
+  {
+   "label": "2 · Predict: does the constructor print?",
+   "hint": "<b>Predict first:</b> how many times is “constructor called” printed? Deserialization builds the object differently.",
+   "code": "import java.io.*;\n\nclass Pass implements Serializable {\n    private static final long serialVersionUID = 1L;\n    String holder;\n    Pass(String h) {\n        holder = h;\n        System.out.println(\"constructor called for \" + h);\n    }\n}\n\npublic class Main {\n    public static void main(String[] args) throws Exception {\n        try (ObjectOutputStream out = new ObjectOutputStream(new FileOutputStream(\"pass.ser\"))) {\n            out.writeObject(new Pass(\"Meena\"));\n        }\n        try (ObjectInputStream in = new ObjectInputStream(new FileInputStream(\"pass.ser\"))) {\n            Pass p = (Pass) in.readObject();\n            System.out.println(\"loaded pass for \" + p.holder);\n        }\n    }\n}\n"
+  },
+  {
+   "label": "3 · Predict: two references, one object?",
+   "hint": "<b>Predict first:</b> after reading, is <code>a == b</code>? Then write the same object twice and read twice.",
+   "code": "import java.io.*;\nimport java.util.*;\n\npublic class Main {\n    @SuppressWarnings(\"unchecked\")\n    public static void main(String[] args) throws Exception {\n        List<String> shared = new ArrayList<>(List.of(\"tea\", \"coffee\"));\n        List<List<String>> menus = List.of(shared, shared);\n        try (ObjectOutputStream out = new ObjectOutputStream(new FileOutputStream(\"m.ser\"))) {\n            out.writeObject(new ArrayList<>(menus));\n        }\n        try (ObjectInputStream in = new ObjectInputStream(new FileInputStream(\"m.ser\"))) {\n            List<List<String>> back = (List<List<String>>) in.readObject();\n            System.out.println(\"same inner list? \" + (back.get(0) == back.get(1)));\n        }\n    }\n}\n"
+  },
+  {
+   "label": "4 · Crash: not serializable",
+   "hint": "<code>Wallet</code> doesn't implement <code>Serializable</code>. Read the exception, then add <code>implements Serializable</code>.",
+   "code": "import java.io.*;\n\nclass Wallet {\n    int balance = 500;\n}\n\npublic class Main {\n    public static void main(String[] args) throws IOException {\n        try (ObjectOutputStream out = new ObjectOutputStream(new FileOutputStream(\"w.ser\"))) {\n            out.writeObject(new Wallet());\n        }\n        System.out.println(\"saved\");\n    }\n}\n",
+   "_expect": "exception"
+  },
+  {
+   "label": "5 · Spot the error",
+   "hint": "<code>readObject()</code> returns <code>Object</code>. Cast it: <code>(String) in.readObject()</code>. It also throws <code>ClassNotFoundException</code>, which main must declare.",
+   "code": "import java.io.*;\n\npublic class Main {\n    public static void main(String[] args) throws Exception {\n        try (ObjectOutputStream out = new ObjectOutputStream(new FileOutputStream(\"n.ser\"))) {\n            out.writeObject(\"Asha\");\n        }\n        try (ObjectInputStream in = new ObjectInputStream(new FileInputStream(\"n.ser\"))) {\n            String name = in.readObject();\n            System.out.println(name);\n        }\n    }\n}\n",
+   "_expect": "compile-error"
+  }
+ ]
+}</script>
+  </div>
+</section>
+
+<!-- ======================= PART 8: LINE BY LINE ======================= -->
+<section class="part" id="tracer">
+  <span class="part-label"><b>8</b> Line by line</span>
+  <h2>A Customer saved and restored</h2>
+  <p>Recorded from the real JVM. Watch a second Customer object appear on the heap after <code>readObject</code>: same name and points, OTP <code>null</code>, different object number.</p>
+  <div class="tracer">
+    <script type="application/json">{"lang": "java", "code": ["import java.io.*;", "", "class Customer implements Serializable {", "    private static final long serialVersionUID = 1L;", "    String name;", "    int points;", "    transient String otp;", "", "    Customer(String name, int points, String otp) {", "        this.name = name;", "        this.points = points;", "        this.otp = otp;", "    }", "}", "", "public class Main {", "    public static void main(String[] args) throws IOException, ClassNotFoundException {", "        Customer c = new Customer(\"Asha\", 120, \"4821\");", "        try (ObjectOutputStream out = new ObjectOutputStream(new FileOutputStream(\"customer.ser\"))) {", "            out.writeObject(c);", "        }", "        Customer back;", "        try (ObjectInputStream in = new ObjectInputStream(new FileInputStream(\"customer.ser\"))) {", "            back = (Customer) in.readObject();", "        }", "        System.out.println(back.name + \", \" + back.points + \" points, otp=\" + back.otp + \", same object? \" + (back == c));", "    }", "}"], "steps": [{"line": 18, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "new Customer(String name, int points, String otp)", "vars": [["this", "→ #1 Customer"], ["name", "→ #2 \"Asha\""], ["points", "120"], ["otp", "→ #3 \"4821\""]]}], "heap": ["<b>#1</b> Customer {name=null, points=0, otp=null}", "<b>#2</b> String &quot;Asha&quot;", "<b>#3</b> String &quot;4821&quot;", "<b>#4</b> String[0] (args, empty)"], "newVar": "this", "phase": "Original", "note": "A Customer object (#n) with name, points and a transient OTP."}, {"line": 9, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "new Customer(String name, int points, String otp)", "vars": [["this", "→ #1 Customer"], ["name", "→ #2 \"Asha\""], ["points", "120"], ["otp", "→ #3 \"4821\""]]}], "heap": ["<b>#1</b> Customer {name=null, points=0, otp=null}", "<b>#2</b> String &quot;Asha&quot;", "<b>#3</b> String &quot;4821&quot;", "<b>#4</b> String[0] (args, empty)"], "phase": "Constructor", "note": "The constructor starts. The new object already exists, with default values (0, null, false) in its fields."}, {"line": 10, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "new Customer(String name, int points, String otp)", "vars": [["this", "→ #1 Customer"], ["name", "→ #2 \"Asha\""], ["points", "120"], ["otp", "→ #3 \"4821\""]]}], "heap": ["<b>#1</b> Customer {name=&quot;Asha&quot;, points=0, otp=null}", "<b>#2</b> String &quot;Asha&quot;", "<b>#3</b> String &quot;4821&quot;", "<b>#4</b> String[0] (args, empty)"], "phase": "Update", "note": "Object <b>#1</b> changes: Customer {name=&quot;Asha&quot;, points=0, otp=null}."}, {"line": 11, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "new Customer(String name, int points, String otp)", "vars": [["this", "→ #1 Customer"], ["name", "→ #2 \"Asha\""], ["points", "120"], ["otp", "→ #3 \"4821\""]]}], "heap": ["<b>#1</b> Customer {name=&quot;Asha&quot;, points=120, otp=null}", "<b>#2</b> String &quot;Asha&quot;", "<b>#3</b> String &quot;4821&quot;", "<b>#4</b> String[0] (args, empty)"], "phase": "Update", "note": "Object <b>#1</b> changes: Customer {name=&quot;Asha&quot;, points=120, otp=null}."}, {"line": 12, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "new Customer(String name, int points, String otp)", "vars": [["this", "→ #1 Customer"], ["name", "→ #2 \"Asha\""], ["points", "120"], ["otp", "→ #3 \"4821\""]]}], "heap": ["<b>#1</b> Customer {name=&quot;Asha&quot;, points=120, otp=&quot;4821&quot;}", "<b>#2</b> String &quot;Asha&quot;", "<b>#3</b> String &quot;4821&quot;", "<b>#4</b> String[0] (args, empty)"], "phase": "Update", "note": "Object <b>#1</b> changes: Customer {name=&quot;Asha&quot;, points=120, otp=&quot;4821&quot;}."}, {"line": 13, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}], "heap": ["<b>#4</b> String[0] (args, empty)"], "phase": "Return", "note": "<code>new Customer()</code> returns and its frame is popped."}, {"line": 18, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["c", "→ #1 Customer"]]}], "heap": ["<b>#1</b> Customer {name=&quot;Asha&quot;, points=120, otp=&quot;4821&quot;}", "<b>#2</b> String &quot;Asha&quot;", "<b>#3</b> String &quot;4821&quot;", "<b>#4</b> String[0] (args, empty)"], "newVar": "c", "phase": "Original", "note": "A Customer object (#n) with name, points and a transient OTP."}, {"line": 19, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["c", "→ #1 Customer"], ["out", "→ #5 ObjectOutputStream"]]}], "heap": ["<b>#1</b> Customer {name=&quot;Asha&quot;, points=120, otp=&quot;4821&quot;}", "<b>#2</b> String &quot;Asha&quot;", "<b>#3</b> String &quot;4821&quot;", "<b>#4</b> String[0] (args, empty)", "<b>#5</b> ObjectOutputStream"], "newVar": "out", "phase": "Output", "note": "An ObjectOutputStream over a FileOutputStream. It immediately writes the stream header (AC ED 00 05)."}, {"line": 20, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["c", "→ #1 Customer"], ["out", "→ #5 ObjectOutputStream"]]}], "heap": ["<b>#1</b> Customer {name=&quot;Asha&quot;, points=120, otp=&quot;4821&quot;}", "<b>#2</b> String &quot;Asha&quot;", "<b>#3</b> String &quot;4821&quot;", "<b>#4</b> String[0] (args, empty)", "<b>#5</b> ObjectOutputStream"], "phase": "Serialize", "note": "The class description and the fields name and points are written. otp is transient, so it's skipped."}, {"line": 21, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["c", "→ #1 Customer"]]}], "heap": ["<b>#1</b> Customer {name=&quot;Asha&quot;, points=120, otp=&quot;4821&quot;}", "<b>#2</b> String &quot;Asha&quot;", "<b>#3</b> String &quot;4821&quot;", "<b>#4</b> String[0] (args, empty)"], "phase": "Closed", "note": "The file is complete."}, {"line": 23, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["c", "→ #1 Customer"], ["in", "→ #6 ObjectInputStream"]]}], "heap": ["<b>#1</b> Customer {name=&quot;Asha&quot;, points=120, otp=&quot;4821&quot;}", "<b>#2</b> String &quot;Asha&quot;", "<b>#3</b> String &quot;4821&quot;", "<b>#4</b> String[0] (args, empty)", "<b>#6</b> ObjectInputStream"], "newVar": "in", "phase": "Input", "note": "An ObjectInputStream reads and checks the header."}, {"line": 24, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["c", "→ #1 Customer"], ["in", "→ #6 ObjectInputStream"], ["back", "→ #7 Customer"]]}], "heap": ["<b>#1</b> Customer {name=&quot;Asha&quot;, points=120, otp=&quot;4821&quot;}", "<b>#2</b> String &quot;Asha&quot;", "<b>#3</b> String &quot;4821&quot;", "<b>#4</b> String[0] (args, empty)", "<b>#6</b> ObjectInputStream", "<b>#7</b> Customer {name=&quot;Asha&quot;, points=120, otp=null}", "<b>#8</b> String &quot;Asha&quot;"], "newVar": "back", "phase": "Deserialize", "note": "<code>readObject</code> creates a brand-new Customer without calling its constructor and fills in the saved fields. It returns Object, so we cast."}, {"line": 25, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["c", "→ #1 Customer"], ["back", "→ #7 Customer"]]}], "heap": ["<b>#1</b> Customer {name=&quot;Asha&quot;, points=120, otp=&quot;4821&quot;}", "<b>#2</b> String &quot;Asha&quot;", "<b>#3</b> String &quot;4821&quot;", "<b>#4</b> String[0] (args, empty)", "<b>#7</b> Customer {name=&quot;Asha&quot;, points=120, otp=null}", "<b>#8</b> String &quot;Asha&quot;"], "phase": "Step", "note": "End of the block."}, {"line": 26, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["c", "→ #1 Customer"], ["back", "→ #7 Customer"]]}], "heap": ["<b>#1</b> Customer {name=&quot;Asha&quot;, points=120, otp=&quot;4821&quot;}", "<b>#2</b> String &quot;Asha&quot;", "<b>#3</b> String &quot;4821&quot;", "<b>#4</b> String[0] (args, empty)", "<b>#7</b> Customer {name=&quot;Asha&quot;, points=120, otp=null}", "<b>#8</b> String &quot;Asha&quot;"], "out": "Asha, 120 points, otp=null, same object? false\n", "phase": "Compare", "note": "Same name and points; otp is null; and it's a different object from <code>c</code>. Prints <code>Asha, 120 points, otp=null, same object? false</code>."}, {"line": 27, "phase": "Program ends", "note": "<code>main</code> returns, its frame is popped and the program ends.", "stack": [], "heap": []}]}</script>
+  </div>
+
+<h3 id="worked">Worked examples: real problems, solved and traced in memory</h3>
+  <p class="wx-intro">Three cases you'll meet: saving game progress, protecting a secret with <code>transient</code>, and saving a whole list of objects in one call. Watch new objects appear on the heap when they are read back.</p>
+  <article class="wx">
+    <div class="wx__head"><span class="wx__num">Example 1</span><span class="wx__tag">Gaming · progress</span></div>
+    <h4>Save and load game progress</h4>
+    <div class="wx__problem"><p class="wx__label">Problem statement</p><p>A quiz game must save the player's progress (name, level, score, list of badges) when they quit and restore it next time. Make the class serializable, save it, load it, and show the restored progress.</p></div>
+    <div class="prob__io"><div><small>Input</small><pre>Ravi, level 7, score 4350, badges: Speed, Streak</pre></div><div><small>Expected output</small><pre>Ravi is on level 7 with 4350 points
+badges: [Speed, Streak]</pre></div></div>
+    <div class="wx__approach"><p class="wx__label">Approach</p><ol><li><code>Progress implements Serializable</code>, with a <code>serialVersionUID</code>.</li><li>Fields include an <code>ArrayList&lt;String&gt;</code>, which is itself serializable.</li><li>Write with ObjectOutputStream, read with ObjectInputStream, cast the result.</li></ol></div>
+    <p class="wx__label">Solution: run it live</p>
+    <div class="runner">
+    <script type="application/json">{"lang": "java", "file": "Main.java", "tasks": [{"label": "Run · Save and load game progress", "hint": "Press <b>Run</b>. Then add a field <code>transient int livesLeft = 3;</code> and print it after loading: it comes back as 0.", "code": "import java.io.*;\nimport java.util.*;\n\nclass Progress implements Serializable {\n    private static final long serialVersionUID = 1L;\n    String player;\n    int level;\n    int score;\n    List<String> badges = new ArrayList<>();\n}\n\npublic class Main {\n    public static void main(String[] args) throws IOException, ClassNotFoundException {\n        Progress p = new Progress();\n        p.player = \"Ravi\";\n        p.level = 7;\n        p.score = 4350;\n        p.badges.add(\"Speed\");\n        p.badges.add(\"Streak\");\n        try (ObjectOutputStream out = new ObjectOutputStream(new FileOutputStream(\"save.dat\"))) {\n            out.writeObject(p);\n        }\n        Progress loaded;\n        try (ObjectInputStream in = new ObjectInputStream(new FileInputStream(\"save.dat\"))) {\n            loaded = (Progress) in.readObject();\n        }\n        System.out.println(loaded.player + \" is on level \" + loaded.level + \" with \" + loaded.score + \" points\");\n        System.out.println(\"badges: \" + loaded.badges);\n    }\n}\n"}]}</script>
+    </div>
+    <p class="wx__label">What happens in memory, step by step</p>
+    <p class="wx__how">Recorded from the real JVM: press <b>Next</b> to execute one line at a time. Watch method calls push and pop frames on the stack, and objects (numbered #1, #2 …) appear on the heap.</p>
+    <div class="tracer">
+    <script type="application/json">{"lang": "java", "code": ["import java.io.*;", "import java.util.*;", "", "class Progress implements Serializable {", "    private static final long serialVersionUID = 1L;", "    String player;", "    int level;", "    int score;", "    List<String> badges = new ArrayList<>();", "}", "", "public class Main {", "    public static void main(String[] args) throws IOException, ClassNotFoundException {", "        Progress p = new Progress();", "        p.player = \"Ravi\";", "        p.level = 7;", "        p.score = 4350;", "        p.badges.add(\"Speed\");", "        p.badges.add(\"Streak\");", "        try (ObjectOutputStream out = new ObjectOutputStream(new FileOutputStream(\"save.dat\"))) {", "            out.writeObject(p);", "        }", "        Progress loaded;", "        try (ObjectInputStream in = new ObjectInputStream(new FileInputStream(\"save.dat\"))) {", "            loaded = (Progress) in.readObject();", "        }", "        System.out.println(loaded.player + \" is on level \" + loaded.level + \" with \" + loaded.score + \" points\");", "        System.out.println(\"badges: \" + loaded.badges);", "    }", "}"], "steps": [{"line": 14, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "new Progress()", "vars": [["this", "→ #1 Progress"]]}], "heap": ["<b>#1</b> Progress {player=null, level=0, score=0, badges=null}", "<b>#2</b> String[0] (args, empty)"], "newVar": "this", "phase": "Progress", "note": "A Progress object with an empty badges list."}, {"line": 4, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "new Progress()", "vars": [["this", "→ #1 Progress"]]}], "heap": ["<b>#1</b> Progress {player=null, level=0, score=0, badges=null}", "<b>#2</b> String[0] (args, empty)"], "phase": "Step", "note": "This line runs; nothing visible changes."}, {"line": 9, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}], "heap": ["<b>#2</b> String[0] (args, empty)"], "phase": "Return", "note": "<code>new Progress()</code> returns and its frame is popped."}, {"line": 14, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["p", "→ #1 Progress"]]}], "heap": ["<b>#1</b> Progress {player=null, level=0, score=0, badges=→#3}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> ArrayList size 0, capacity 0 []"], "newVar": "p", "phase": "Progress", "note": "A Progress object with an empty badges list."}, {"line": 15, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["p", "→ #1 Progress"]]}], "heap": ["<b>#1</b> Progress {player=&quot;Ravi&quot;, level=0, score=0, badges=→#3}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> ArrayList size 0, capacity 0 []", "<b>#4</b> String &quot;Ravi&quot;"], "phase": "Update", "note": "Object <b>#1</b> changes: Progress {player=&quot;Ravi&quot;, level=0, score=0, badges=→#3}. New object <b>#4</b> on the heap: String &quot;Ravi&quot;."}, {"line": 16, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["p", "→ #1 Progress"]]}], "heap": ["<b>#1</b> Progress {player=&quot;Ravi&quot;, level=7, score=0, badges=→#3}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> ArrayList size 0, capacity 0 []", "<b>#4</b> String &quot;Ravi&quot;"], "phase": "Update", "note": "Object <b>#1</b> changes: Progress {player=&quot;Ravi&quot;, level=7, score=0, badges=→#3}."}, {"line": 17, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["p", "→ #1 Progress"]]}], "heap": ["<b>#1</b> Progress {player=&quot;Ravi&quot;, level=7, score=4350, badges=→#3}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> ArrayList size 0, capacity 0 []", "<b>#4</b> String &quot;Ravi&quot;"], "phase": "Update", "note": "Object <b>#1</b> changes: Progress {player=&quot;Ravi&quot;, level=7, score=4350, badges=→#3}."}, {"line": 18, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["p", "→ #1 Progress"]]}], "heap": ["<b>#1</b> Progress {player=&quot;Ravi&quot;, level=7, score=4350, badges=→#3}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> ArrayList size 1, capacity 10 [&quot;Speed&quot;]", "<b>#4</b> String &quot;Ravi&quot;", "<b>#5</b> String &quot;Speed&quot;"], "phase": "Update", "note": "Object <b>#3</b> changes: ArrayList size 1, capacity 10 [&quot;Speed&quot;]. New object <b>#5</b> on the heap: String &quot;Speed&quot;."}, {"line": 19, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["p", "→ #1 Progress"]]}], "heap": ["<b>#1</b> Progress {player=&quot;Ravi&quot;, level=7, score=4350, badges=→#3}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> ArrayList size 2, capacity 10 [&quot;Speed&quot;, &quot;Streak&quot;]", "<b>#4</b> String &quot;Ravi&quot;", "<b>#5</b> String &quot;Speed&quot;", "<b>#6</b> String &quot;Streak&quot;"], "phase": "Badges", "note": "The list now holds two strings. Object <b>#3</b> changes: ArrayList size 2, capacity 10 [&quot;Speed&quot;, &quot;Streak&quot;]. New object <b>#6</b> on the heap: String &quot;Streak&quot;."}, {"line": 20, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["p", "→ #1 Progress"], ["out", "→ #7 ObjectOutputStream"]]}], "heap": ["<b>#1</b> Progress {player=&quot;Ravi&quot;, level=7, score=4350, badges=→#3}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> ArrayList size 2, capacity 10 [&quot;Speed&quot;, &quot;Streak&quot;]", "<b>#4</b> String &quot;Ravi&quot;", "<b>#5</b> String &quot;Speed&quot;", "<b>#6</b> String &quot;Streak&quot;", "<b>#7</b> ObjectOutputStream"], "newVar": "out", "phase": "Assign", "note": "Now <code>out</code> = → #7 ObjectOutputStream. New object <b>#7</b> on the heap: ObjectOutputStream."}, {"line": 21, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["p", "→ #1 Progress"], ["out", "→ #7 ObjectOutputStream"]]}], "heap": ["<b>#1</b> Progress {player=&quot;Ravi&quot;, level=7, score=4350, badges=→#3}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> ArrayList size 2, capacity 10 [&quot;Speed&quot;, &quot;Streak&quot;]", "<b>#4</b> String &quot;Ravi&quot;", "<b>#5</b> String &quot;Speed&quot;", "<b>#6</b> String &quot;Streak&quot;", "<b>#7</b> ObjectOutputStream"], "phase": "Save", "note": "The Progress object, its ArrayList and both Strings are written: the whole graph."}, {"line": 22, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["p", "→ #1 Progress"]]}], "heap": ["<b>#1</b> Progress {player=&quot;Ravi&quot;, level=7, score=4350, badges=→#3}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> ArrayList size 2, capacity 10 [&quot;Speed&quot;, &quot;Streak&quot;]", "<b>#4</b> String &quot;Ravi&quot;", "<b>#5</b> String &quot;Speed&quot;", "<b>#6</b> String &quot;Streak&quot;"], "phase": "Step", "note": "End of the block."}, {"line": 24, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["p", "→ #1 Progress"], ["in", "→ #8 ObjectInputStream"]]}], "heap": ["<b>#1</b> Progress {player=&quot;Ravi&quot;, level=7, score=4350, badges=→#3}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> ArrayList size 2, capacity 10 [&quot;Speed&quot;, &quot;Streak&quot;]", "<b>#4</b> String &quot;Ravi&quot;", "<b>#5</b> String &quot;Speed&quot;", "<b>#6</b> String &quot;Streak&quot;", "<b>#8</b> ObjectInputStream"], "newVar": "in", "phase": "Assign", "note": "Now <code>in</code> = → #8 ObjectInputStream. New object <b>#8</b> on the heap: ObjectInputStream."}, {"line": 25, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["p", "→ #1 Progress"], ["in", "→ #8 ObjectInputStream"], ["loaded", "→ #9 Progress"]]}], "heap": ["<b>#1</b> Progress {player=&quot;Ravi&quot;, level=7, score=4350, badges=→#3}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> ArrayList size 2, capacity 10 [&quot;Speed&quot;, &quot;Streak&quot;]", "<b>#4</b> String &quot;Ravi&quot;", "<b>#5</b> String &quot;Speed&quot;", "<b>#6</b> String &quot;Streak&quot;", "<b>#8</b> ObjectInputStream", "<b>#9</b> Progress {player=&quot;Ravi&quot;, level=7, score=4350, badges=→#10}", "<b>#10</b> ArrayList size 2, capacity 2 [&quot;Speed&quot;, &quot;Streak&quot;]", "<b>#11</b> String &quot;Ravi&quot;", "<b>#12</b> String &quot;Speed&quot;", "<b>#13</b> String &quot;Streak&quot;"], "newVar": "loaded", "phase": "Load", "note": "A new Progress, a new ArrayList and new Strings are created from the bytes."}, {"line": 26, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["p", "→ #1 Progress"], ["loaded", "→ #9 Progress"]]}], "heap": ["<b>#1</b> Progress {player=&quot;Ravi&quot;, level=7, score=4350, badges=→#3}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> ArrayList size 2, capacity 10 [&quot;Speed&quot;, &quot;Streak&quot;]", "<b>#4</b> String &quot;Ravi&quot;", "<b>#5</b> String &quot;Speed&quot;", "<b>#6</b> String &quot;Streak&quot;", "<b>#9</b> Progress {player=&quot;Ravi&quot;, level=7, score=4350, badges=→#10}", "<b>#10</b> ArrayList size 2, capacity 2 [&quot;Speed&quot;, &quot;Streak&quot;]", "<b>#11</b> String &quot;Ravi&quot;", "<b>#12</b> String &quot;Speed&quot;", "<b>#13</b> String &quot;Streak&quot;"], "phase": "Step", "note": "End of the block."}, {"line": 27, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["p", "→ #1 Progress"], ["loaded", "→ #9 Progress"]]}], "heap": ["<b>#1</b> Progress {player=&quot;Ravi&quot;, level=7, score=4350, badges=→#3}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> ArrayList size 2, capacity 10 [&quot;Speed&quot;, &quot;Streak&quot;]", "<b>#4</b> String &quot;Ravi&quot;", "<b>#5</b> String &quot;Speed&quot;", "<b>#6</b> String &quot;Streak&quot;", "<b>#9</b> Progress {player=&quot;Ravi&quot;, level=7, score=4350, badges=→#10}", "<b>#10</b> ArrayList size 2, capacity 2 [&quot;Speed&quot;, &quot;Streak&quot;]", "<b>#11</b> String &quot;Ravi&quot;", "<b>#12</b> String &quot;Speed&quot;", "<b>#13</b> String &quot;Streak&quot;"], "out": "Ravi is on level 7 with 4350 points\n", "phase": "Restored", "note": "Ravi, level 7, 4350 points. Prints <code>Ravi is on level 7 with 4350 points</code>."}, {"line": 28, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["p", "→ #1 Progress"], ["loaded", "→ #9 Progress"]]}], "heap": ["<b>#1</b> Progress {player=&quot;Ravi&quot;, level=7, score=4350, badges=→#3}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> ArrayList size 2, capacity 10 [&quot;Speed&quot;, &quot;Streak&quot;]", "<b>#4</b> String &quot;Ravi&quot;", "<b>#5</b> String &quot;Speed&quot;", "<b>#6</b> String &quot;Streak&quot;", "<b>#9</b> Progress {player=&quot;Ravi&quot;, level=7, score=4350, badges=→#10}", "<b>#10</b> ArrayList size 2, capacity 2 [&quot;Speed&quot;, &quot;Streak&quot;]", "<b>#11</b> String &quot;Ravi&quot;", "<b>#12</b> String &quot;Speed&quot;", "<b>#13</b> String &quot;Streak&quot;"], "out": "badges: [Speed, Streak]\n", "phase": "List too", "note": "The badges list came back with both items. Prints <code>badges: [Speed, Streak]</code>."}, {"line": 29, "phase": "Program ends", "note": "<code>main</code> returns, its frame is popped and the program ends.", "stack": [], "heap": []}]}</script>
+  </div>
+  </article>
+  <article class="wx">
+    <div class="wx__head"><span class="wx__num">Example 2</span><span class="wx__tag">Banking · security</span></div>
+    <h4>Never save the PIN: transient</h4>
+    <div class="wx__problem"><p class="wx__label">Problem statement</p><p>A banking app caches a <code>Session</code> object to disk so a user doesn't have to re-select their account. The session holds the account number, the last screen and the user's PIN. The PIN must never be written to disk.</p></div>
+    <div class="prob__io"><div><small>Input</small><pre>account XX4521, screen statements, PIN 7391</pre></div><div><small>Expected output</small><pre>file mentions account? true
+file mentions PIN?     false
+restored: XX4521, statements, pin=null</pre></div></div>
+    <div class="wx__approach"><p class="wx__label">Approach</p><ol><li>Mark <code>pin</code> as <code>transient</code>.</li><li>Serialize, then look inside the raw bytes for the PIN text to prove it's absent.</li><li>Deserialize and show the PIN came back as null.</li></ol></div>
+    <p class="wx__label">Solution: run it live</p>
+    <div class="runner">
+    <script type="application/json">{"lang": "java", "file": "Main.java", "tasks": [{"label": "Run · Never save the PIN: transient", "hint": "Press <b>Run</b>. Then remove <code>transient</code> and run again: the PIN is now readable inside the file. That's why secrets must never be serialized.", "code": "import java.io.*;\nimport java.nio.charset.StandardCharsets;\nimport java.nio.file.*;\n\nclass Session implements Serializable {\n    private static final long serialVersionUID = 1L;\n    String account = \"XX4521\";\n    String lastScreen = \"statements\";\n    transient String pin = \"7391\";\n}\n\npublic class Main {\n    public static void main(String[] args) throws IOException, ClassNotFoundException {\n        try (ObjectOutputStream out = new ObjectOutputStream(new FileOutputStream(\"session.ser\"))) {\n            out.writeObject(new Session());\n        }\n        String raw = new String(Files.readAllBytes(Path.of(\"session.ser\")), StandardCharsets.ISO_8859_1);\n        System.out.println(\"file mentions account? \" + raw.contains(\"XX4521\"));\n        System.out.println(\"file mentions PIN?     \" + raw.contains(\"7391\"));\n        Session s;\n        try (ObjectInputStream in = new ObjectInputStream(new FileInputStream(\"session.ser\"))) {\n            s = (Session) in.readObject();\n        }\n        System.out.println(\"restored: \" + s.account + \", \" + s.lastScreen + \", pin=\" + s.pin);\n    }\n}\n"}]}</script>
+    </div>
+    <p class="wx__label">What happens in memory, step by step</p>
+    <p class="wx__how">Recorded from the real JVM: press <b>Next</b> to execute one line at a time. Watch method calls push and pop frames on the stack, and objects (numbered #1, #2 …) appear on the heap.</p>
+    <div class="tracer">
+    <script type="application/json">{"lang": "java", "code": ["import java.io.*;", "import java.nio.charset.StandardCharsets;", "import java.nio.file.*;", "", "class Session implements Serializable {", "    private static final long serialVersionUID = 1L;", "    String account = \"XX4521\";", "    String lastScreen = \"statements\";", "    transient String pin = \"7391\";", "}", "", "public class Main {", "    public static void main(String[] args) throws IOException, ClassNotFoundException {", "        try (ObjectOutputStream out = new ObjectOutputStream(new FileOutputStream(\"session.ser\"))) {", "            out.writeObject(new Session());", "        }", "        String raw = new String(Files.readAllBytes(Path.of(\"session.ser\")), StandardCharsets.ISO_8859_1);", "        System.out.println(\"file mentions account? \" + raw.contains(\"XX4521\"));", "        System.out.println(\"file mentions PIN?     \" + raw.contains(\"7391\"));", "        Session s;", "        try (ObjectInputStream in = new ObjectInputStream(new FileInputStream(\"session.ser\"))) {", "            s = (Session) in.readObject();", "        }", "        System.out.println(\"restored: \" + s.account + \", \" + s.lastScreen + \", pin=\" + s.pin);", "    }", "}"], "steps": [{"line": 14, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["out", "→ #1 ObjectOutputStream"]]}], "heap": ["<b>#1</b> ObjectOutputStream", "<b>#2</b> String[0] (args, empty)"], "newVar": "out", "phase": "Stream", "note": "An ObjectOutputStream on session.ser."}, {"line": 15, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["out", "→ #1 ObjectOutputStream"]]}, {"frame": "new Session()", "vars": [["this", "→ #3 Session"]]}], "heap": ["<b>#1</b> ObjectOutputStream", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Session {account=null, lastScreen=null, pin=null}"], "newVar": "this", "phase": "Write", "note": "A new Session is serialized: account and lastScreen are written, pin is skipped."}, {"line": 5, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["out", "→ #1 ObjectOutputStream"]]}, {"frame": "new Session()", "vars": [["this", "→ #3 Session"]]}], "heap": ["<b>#1</b> ObjectOutputStream", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Session {account=null, lastScreen=null, pin=null}"], "phase": "Step", "note": "This line runs; nothing visible changes."}, {"line": 7, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["out", "→ #1 ObjectOutputStream"]]}, {"frame": "new Session()", "vars": [["this", "→ #3 Session"]]}], "heap": ["<b>#1</b> ObjectOutputStream", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Session {account=&quot;XX4521&quot;, lastScreen=null, pin=null}", "<b>#4</b> String &quot;XX4521&quot;"], "phase": "Update", "note": "Object <b>#3</b> changes: Session {account=&quot;XX4521&quot;, lastScreen=null, pin=null}. New object <b>#4</b> on the heap: String &quot;XX4521&quot;."}, {"line": 8, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["out", "→ #1 ObjectOutputStream"]]}, {"frame": "new Session()", "vars": [["this", "→ #3 Session"]]}], "heap": ["<b>#1</b> ObjectOutputStream", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Session {account=&quot;XX4521&quot;, lastScreen=&quot;statements&quot;, pin=null}", "<b>#4</b> String &quot;XX4521&quot;", "<b>#5</b> String &quot;statements&quot;"], "phase": "Update", "note": "Object <b>#3</b> changes: Session {account=&quot;XX4521&quot;, lastScreen=&quot;statements&quot;, pin=null}. New object <b>#5</b> on the heap: String &quot;statements&quot;."}, {"line": 9, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["out", "→ #1 ObjectOutputStream"]]}], "heap": ["<b>#1</b> ObjectOutputStream", "<b>#2</b> String[0] (args, empty)"], "phase": "Return", "note": "<code>new Session()</code> returns and its frame is popped."}, {"line": 15, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["out", "→ #1 ObjectOutputStream"]]}], "heap": ["<b>#1</b> ObjectOutputStream", "<b>#2</b> String[0] (args, empty)"], "phase": "Write", "note": "A new Session is serialized: account and lastScreen are written, pin is skipped."}, {"line": 16, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}], "heap": ["<b>#2</b> String[0] (args, empty)"], "phase": "Step", "note": "End of the block."}, {"line": 17, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["raw", "→ #6 \"¬í\u0000\u0005sr\u0000\u0007Session\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0001\u0002\u0000\u0002L\u0000\u0007accountt\u0000\u0012Ljava/lang/String;L\u0000\\nlastScreenq\u0000~\u0000\u0001xpt\u0000\u0006XX4521t\u0000\\nstatements\""]]}], "heap": ["<b>#2</b> String[0] (args, empty)", "<b>#6</b> String &quot;¬í\u0000\u0005sr\u0000\u0007Session\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0001\u0002\u0000\u0002L\u0000\u0007accountt\u0000\u0012Ljava/lang/String;L\u0000\\nlastScreenq\u0000~\u0000\u0001xpt\u0000\u0006XX4521t\u0000\\nstatements&quot;"], "newVar": "raw", "phase": "Inspect", "note": "The raw bytes are read as Latin-1 text so we can search them."}, {"line": 18, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["raw", "→ #6 \"¬í\u0000\u0005sr\u0000\u0007Session\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0001\u0002\u0000\u0002L\u0000\u0007accountt\u0000\u0012Ljava/lang/String;L\u0000\\nlastScreenq\u0000~\u0000\u0001xpt\u0000\u0006XX4521t\u0000\\nstatements\""]]}], "heap": ["<b>#2</b> String[0] (args, empty)", "<b>#6</b> String &quot;¬í\u0000\u0005sr\u0000\u0007Session\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0001\u0002\u0000\u0002L\u0000\u0007accountt\u0000\u0012Ljava/lang/String;L\u0000\\nlastScreenq\u0000~\u0000\u0001xpt\u0000\u0006XX4521t\u0000\\nstatements&quot;"], "out": "file mentions account? true\n", "phase": "Account", "note": "The account string is visible in the file: serialized data is not encrypted. Prints <code>file mentions account? true</code>."}, {"line": 19, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["raw", "→ #6 \"¬í\u0000\u0005sr\u0000\u0007Session\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0001\u0002\u0000\u0002L\u0000\u0007accountt\u0000\u0012Ljava/lang/String;L\u0000\\nlastScreenq\u0000~\u0000\u0001xpt\u0000\u0006XX4521t\u0000\\nstatements\""]]}], "heap": ["<b>#2</b> String[0] (args, empty)", "<b>#6</b> String &quot;¬í\u0000\u0005sr\u0000\u0007Session\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0001\u0002\u0000\u0002L\u0000\u0007accountt\u0000\u0012Ljava/lang/String;L\u0000\\nlastScreenq\u0000~\u0000\u0001xpt\u0000\u0006XX4521t\u0000\\nstatements&quot;"], "out": "file mentions PIN?     false\n", "phase": "PIN", "note": "The PIN does not appear anywhere. Prints <code>file mentions PIN?     false</code>."}, {"line": 21, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["raw", "→ #6 \"¬í\u0000\u0005sr\u0000\u0007Session\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0001\u0002\u0000\u0002L\u0000\u0007accountt\u0000\u0012Ljava/lang/String;L\u0000\\nlastScreenq\u0000~\u0000\u0001xpt\u0000\u0006XX4521t\u0000\\nstatements\""], ["in", "→ #7 ObjectInputStream"]]}], "heap": ["<b>#2</b> String[0] (args, empty)", "<b>#6</b> String &quot;¬í\u0000\u0005sr\u0000\u0007Session\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0001\u0002\u0000\u0002L\u0000\u0007accountt\u0000\u0012Ljava/lang/String;L\u0000\\nlastScreenq\u0000~\u0000\u0001xpt\u0000\u0006XX4521t\u0000\\nstatements&quot;", "<b>#7</b> ObjectInputStream"], "newVar": "in", "phase": "Assign", "note": "Now <code>in</code> = → #7 ObjectInputStream. New object <b>#7</b> on the heap: ObjectInputStream."}, {"line": 22, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["raw", "→ #6 \"¬í\u0000\u0005sr\u0000\u0007Session\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0001\u0002\u0000\u0002L\u0000\u0007accountt\u0000\u0012Ljava/lang/String;L\u0000\\nlastScreenq\u0000~\u0000\u0001xpt\u0000\u0006XX4521t\u0000\\nstatements\""], ["in", "→ #7 ObjectInputStream"], ["s", "→ #8 Session"]]}], "heap": ["<b>#2</b> String[0] (args, empty)", "<b>#6</b> String &quot;¬í\u0000\u0005sr\u0000\u0007Session\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0001\u0002\u0000\u0002L\u0000\u0007accountt\u0000\u0012Ljava/lang/String;L\u0000\\nlastScreenq\u0000~\u0000\u0001xpt\u0000\u0006XX4521t\u0000\\nstatements&quot;", "<b>#7</b> ObjectInputStream", "<b>#8</b> Session {account=&quot;XX4521&quot;, lastScreen=&quot;statements&quot;, pin=null}", "<b>#9</b> String &quot;XX4521&quot;", "<b>#10</b> String &quot;statements&quot;"], "newVar": "s", "phase": "Read", "note": "A new Session is built from the bytes. Field initializers don't run either, so pin stays null."}, {"line": 23, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["raw", "→ #6 \"¬í\u0000\u0005sr\u0000\u0007Session\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0001\u0002\u0000\u0002L\u0000\u0007accountt\u0000\u0012Ljava/lang/String;L\u0000\\nlastScreenq\u0000~\u0000\u0001xpt\u0000\u0006XX4521t\u0000\\nstatements\""], ["s", "→ #8 Session"]]}], "heap": ["<b>#2</b> String[0] (args, empty)", "<b>#6</b> String &quot;¬í\u0000\u0005sr\u0000\u0007Session\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0001\u0002\u0000\u0002L\u0000\u0007accountt\u0000\u0012Ljava/lang/String;L\u0000\\nlastScreenq\u0000~\u0000\u0001xpt\u0000\u0006XX4521t\u0000\\nstatements&quot;", "<b>#8</b> Session {account=&quot;XX4521&quot;, lastScreen=&quot;statements&quot;, pin=null}", "<b>#9</b> String &quot;XX4521&quot;", "<b>#10</b> String &quot;statements&quot;"], "phase": "Step", "note": "End of the block."}, {"line": 24, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["raw", "→ #6 \"¬í\u0000\u0005sr\u0000\u0007Session\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0001\u0002\u0000\u0002L\u0000\u0007accountt\u0000\u0012Ljava/lang/String;L\u0000\\nlastScreenq\u0000~\u0000\u0001xpt\u0000\u0006XX4521t\u0000\\nstatements\""], ["s", "→ #8 Session"]]}], "heap": ["<b>#2</b> String[0] (args, empty)", "<b>#6</b> String &quot;¬í\u0000\u0005sr\u0000\u0007Session\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0001\u0002\u0000\u0002L\u0000\u0007accountt\u0000\u0012Ljava/lang/String;L\u0000\\nlastScreenq\u0000~\u0000\u0001xpt\u0000\u0006XX4521t\u0000\\nstatements&quot;", "<b>#8</b> Session {account=&quot;XX4521&quot;, lastScreen=&quot;statements&quot;, pin=null}", "<b>#9</b> String &quot;XX4521&quot;", "<b>#10</b> String &quot;statements&quot;"], "out": "restored: XX4521, statements, pin=null\n", "phase": "Result", "note": "pin=null. Prints <code>restored: XX4521, statements, pin=null</code>."}, {"line": 25, "phase": "Program ends", "note": "<code>main</code> returns, its frame is popped and the program ends.", "stack": [], "heap": []}]}</script>
+  </div>
+  </article>
+  <article class="wx">
+    <div class="wx__head"><span class="wx__num">Example 3</span><span class="wx__tag">E-commerce · catalogue</span></div>
+    <h4>Save a whole product list in one call</h4>
+    <div class="wx__problem"><p class="wx__label">Problem statement</p><p>A shop caches its product catalogue (a list of Product objects) to a file so it can start quickly without waiting for the server. Save the list with one <code>writeObject</code> call, reload it, and print the cheapest product.</p></div>
+    <div class="prob__io"><div><small>Input</small><pre>Rice 5kg Rs 450, Oil 1L Rs 165, Sugar 1kg Rs 48</pre></div><div><small>Expected output</small><pre>3 products loaded; cheapest: Sugar 1kg Rs 48</pre></div></div>
+    <div class="wx__approach"><p class="wx__label">Approach</p><ol><li><code>Product implements Serializable</code>.</li><li><code>ArrayList</code> is serializable, so writing the list writes every product in it.</li><li>Read it back and cast to <code>List&lt;Product&gt;</code> (an unchecked cast, so add <code>@SuppressWarnings</code>).</li></ol></div>
+    <p class="wx__label">Solution: run it live</p>
+    <div class="runner">
+    <script type="application/json">{"lang": "java", "file": "Main.java", "tasks": [{"label": "Run · Save a whole product list in one call", "hint": "Press <b>Run</b>. Then remove <code>implements Serializable</code> from Product: writing fails with <code>NotSerializableException: Product</code>, because every object in the graph must be serializable.", "code": "import java.io.*;\nimport java.util.*;\n\nclass Product implements Serializable {\n    private static final long serialVersionUID = 1L;\n    String name;\n    int price;\n\n    Product(String name, int price) {\n        this.name = name;\n        this.price = price;\n    }\n}\n\npublic class Main {\n    @SuppressWarnings(\"unchecked\")\n    public static void main(String[] args) throws IOException, ClassNotFoundException {\n        List<Product> catalogue = new ArrayList<>();\n        catalogue.add(new Product(\"Rice 5kg\", 450));\n        catalogue.add(new Product(\"Oil 1L\", 165));\n        catalogue.add(new Product(\"Sugar 1kg\", 48));\n        try (ObjectOutputStream out = new ObjectOutputStream(new FileOutputStream(\"catalogue.ser\"))) {\n            out.writeObject(catalogue);\n        }\n        List<Product> cached;\n        try (ObjectInputStream in = new ObjectInputStream(new FileInputStream(\"catalogue.ser\"))) {\n            cached = (List<Product>) in.readObject();\n        }\n        Product cheapest = cached.get(0);\n        for (Product p : cached) if (p.price < cheapest.price) cheapest = p;\n        System.out.println(cached.size() + \" products loaded; cheapest: \" + cheapest.name + \" Rs \" + cheapest.price);\n    }\n}\n"}]}</script>
+    </div>
+    <p class="wx__label">What happens in memory, step by step</p>
+    <p class="wx__how">Recorded from the real JVM: press <b>Next</b> to execute one line at a time. Watch method calls push and pop frames on the stack, and objects (numbered #1, #2 …) appear on the heap.</p>
+    <div class="tracer">
+    <script type="application/json">{"lang": "java", "code": ["import java.io.*;", "import java.util.*;", "", "class Product implements Serializable {", "    private static final long serialVersionUID = 1L;", "    String name;", "    int price;", "", "    Product(String name, int price) {", "        this.name = name;", "        this.price = price;", "    }", "}", "", "public class Main {", "    @SuppressWarnings(\"unchecked\")", "    public static void main(String[] args) throws IOException, ClassNotFoundException {", "        List<Product> catalogue = new ArrayList<>();", "        catalogue.add(new Product(\"Rice 5kg\", 450));", "        catalogue.add(new Product(\"Oil 1L\", 165));", "        catalogue.add(new Product(\"Sugar 1kg\", 48));", "        try (ObjectOutputStream out = new ObjectOutputStream(new FileOutputStream(\"catalogue.ser\"))) {", "            out.writeObject(catalogue);", "        }", "        List<Product> cached;", "        try (ObjectInputStream in = new ObjectInputStream(new FileInputStream(\"catalogue.ser\"))) {", "            cached = (List<Product>) in.readObject();", "        }", "        Product cheapest = cached.get(0);", "        for (Product p : cached) if (p.price < cheapest.price) cheapest = p;", "        System.out.println(cached.size() + \" products loaded; cheapest: \" + cheapest.name + \" Rs \" + cheapest.price);", "    }", "}"], "steps": [{"line": 18, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["catalogue", "→ #1 ArrayList"]]}], "heap": ["<b>#1</b> ArrayList size 0, capacity 0 []", "<b>#2</b> String[0] (args, empty)"], "newVar": "catalogue", "phase": "List", "note": "An empty ArrayList."}, {"line": 19, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["catalogue", "→ #1 ArrayList"]]}, {"frame": "new Product(String name, int price)", "vars": [["this", "→ #3 Product"], ["name", "→ #4 \"Rice 5kg\""], ["price", "450"]]}], "heap": ["<b>#1</b> ArrayList size 0, capacity 0 []", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Product {name=null, price=0}", "<b>#4</b> String &quot;Rice 5kg&quot;"], "newVar": "this", "phase": "Call", "note": "<code>new Product()</code> is called: a new frame is pushed with <code>this</code> = → #3 Product, <code>name</code> = → #4 &quot;Rice 5kg&quot;, <code>price</code> = 450. New object <b>#3</b> on the heap: Product {name=null, price=0}. New object <b>#4</b> on the heap: String &quot;Rice 5kg&quot;."}, {"line": 9, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["catalogue", "→ #1 ArrayList"]]}, {"frame": "new Product(String name, int price)", "vars": [["this", "→ #3 Product"], ["name", "→ #4 \"Rice 5kg\""], ["price", "450"]]}], "heap": ["<b>#1</b> ArrayList size 0, capacity 0 []", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Product {name=null, price=0}", "<b>#4</b> String &quot;Rice 5kg&quot;"], "phase": "Constructor", "note": "The constructor starts. The new object already exists, with default values (0, null, false) in its fields."}, {"line": 10, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["catalogue", "→ #1 ArrayList"]]}, {"frame": "new Product(String name, int price)", "vars": [["this", "→ #3 Product"], ["name", "→ #4 \"Rice 5kg\""], ["price", "450"]]}], "heap": ["<b>#1</b> ArrayList size 0, capacity 0 []", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Product {name=&quot;Rice 5kg&quot;, price=0}", "<b>#4</b> String &quot;Rice 5kg&quot;"], "phase": "Update", "note": "Object <b>#3</b> changes: Product {name=&quot;Rice 5kg&quot;, price=0}."}, {"line": 11, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["catalogue", "→ #1 ArrayList"]]}, {"frame": "new Product(String name, int price)", "vars": [["this", "→ #3 Product"], ["name", "→ #4 \"Rice 5kg\""], ["price", "450"]]}], "heap": ["<b>#1</b> ArrayList size 0, capacity 0 []", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Product {name=&quot;Rice 5kg&quot;, price=450}", "<b>#4</b> String &quot;Rice 5kg&quot;"], "phase": "Update", "note": "Object <b>#3</b> changes: Product {name=&quot;Rice 5kg&quot;, price=450}."}, {"line": 12, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["catalogue", "→ #1 ArrayList"]]}], "heap": ["<b>#1</b> ArrayList size 0, capacity 0 []", "<b>#2</b> String[0] (args, empty)"], "phase": "Return", "note": "<code>new Product()</code> returns and its frame is popped."}, {"line": 19, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["catalogue", "→ #1 ArrayList"]]}], "heap": ["<b>#1</b> ArrayList size 1, capacity 10 [→#3]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Product {name=&quot;Rice 5kg&quot;, price=450}", "<b>#4</b> String &quot;Rice 5kg&quot;"], "phase": "Update", "note": "Object <b>#1</b> changes: ArrayList size 1, capacity 10 [→#3]."}, {"line": 20, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["catalogue", "→ #1 ArrayList"]]}, {"frame": "new Product(String name, int price)", "vars": [["this", "→ #5 Product"], ["name", "→ #6 \"Oil 1L\""], ["price", "165"]]}], "heap": ["<b>#1</b> ArrayList size 1, capacity 10 [→#3]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Product {name=&quot;Rice 5kg&quot;, price=450}", "<b>#4</b> String &quot;Rice 5kg&quot;", "<b>#5</b> Product {name=null, price=0}", "<b>#6</b> String &quot;Oil 1L&quot;"], "newVar": "this", "phase": "Call", "note": "<code>new Product()</code> is called: a new frame is pushed with <code>this</code> = → #5 Product, <code>name</code> = → #6 &quot;Oil 1L&quot;, <code>price</code> = 165. New object <b>#5</b> on the heap: Product {name=null, price=0}. New object <b>#6</b> on the heap: String &quot;Oil 1L&quot;."}, {"line": 9, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["catalogue", "→ #1 ArrayList"]]}, {"frame": "new Product(String name, int price)", "vars": [["this", "→ #5 Product"], ["name", "→ #6 \"Oil 1L\""], ["price", "165"]]}], "heap": ["<b>#1</b> ArrayList size 1, capacity 10 [→#3]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Product {name=&quot;Rice 5kg&quot;, price=450}", "<b>#4</b> String &quot;Rice 5kg&quot;", "<b>#5</b> Product {name=null, price=0}", "<b>#6</b> String &quot;Oil 1L&quot;"], "phase": "Constructor", "note": "The constructor starts. The new object already exists, with default values (0, null, false) in its fields."}, {"line": 10, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["catalogue", "→ #1 ArrayList"]]}, {"frame": "new Product(String name, int price)", "vars": [["this", "→ #5 Product"], ["name", "→ #6 \"Oil 1L\""], ["price", "165"]]}], "heap": ["<b>#1</b> ArrayList size 1, capacity 10 [→#3]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Product {name=&quot;Rice 5kg&quot;, price=450}", "<b>#4</b> String &quot;Rice 5kg&quot;", "<b>#5</b> Product {name=&quot;Oil 1L&quot;, price=0}", "<b>#6</b> String &quot;Oil 1L&quot;"], "phase": "Update", "note": "Object <b>#5</b> changes: Product {name=&quot;Oil 1L&quot;, price=0}."}, {"line": 11, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["catalogue", "→ #1 ArrayList"]]}, {"frame": "new Product(String name, int price)", "vars": [["this", "→ #5 Product"], ["name", "→ #6 \"Oil 1L\""], ["price", "165"]]}], "heap": ["<b>#1</b> ArrayList size 1, capacity 10 [→#3]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Product {name=&quot;Rice 5kg&quot;, price=450}", "<b>#4</b> String &quot;Rice 5kg&quot;", "<b>#5</b> Product {name=&quot;Oil 1L&quot;, price=165}", "<b>#6</b> String &quot;Oil 1L&quot;"], "phase": "Update", "note": "Object <b>#5</b> changes: Product {name=&quot;Oil 1L&quot;, price=165}."}, {"line": 12, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["catalogue", "→ #1 ArrayList"]]}], "heap": ["<b>#1</b> ArrayList size 1, capacity 10 [→#3]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Product {name=&quot;Rice 5kg&quot;, price=450}", "<b>#4</b> String &quot;Rice 5kg&quot;"], "phase": "Return", "note": "<code>new Product()</code> returns and its frame is popped."}, {"line": 20, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["catalogue", "→ #1 ArrayList"]]}], "heap": ["<b>#1</b> ArrayList size 2, capacity 10 [→#3, →#5]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Product {name=&quot;Rice 5kg&quot;, price=450}", "<b>#4</b> String &quot;Rice 5kg&quot;", "<b>#5</b> Product {name=&quot;Oil 1L&quot;, price=165}", "<b>#6</b> String &quot;Oil 1L&quot;"], "phase": "Update", "note": "Object <b>#1</b> changes: ArrayList size 2, capacity 10 [→#3, →#5]."}, {"line": 21, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["catalogue", "→ #1 ArrayList"]]}, {"frame": "new Product(String name, int price)", "vars": [["this", "→ #7 Product"], ["name", "→ #8 \"Sugar 1kg\""], ["price", "48"]]}], "heap": ["<b>#1</b> ArrayList size 2, capacity 10 [→#3, →#5]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Product {name=&quot;Rice 5kg&quot;, price=450}", "<b>#4</b> String &quot;Rice 5kg&quot;", "<b>#5</b> Product {name=&quot;Oil 1L&quot;, price=165}", "<b>#6</b> String &quot;Oil 1L&quot;", "<b>#7</b> Product {name=null, price=0}", "<b>#8</b> String &quot;Sugar 1kg&quot;"], "newVar": "this", "phase": "Filled", "note": "Three Product objects in the list. <code>new Product()</code> is called: a new frame is pushed with <code>this</code> = → #7 Product, <code>name</code> = → #8 &quot;Sugar 1kg&quot;, <code>price</code> = 48. New object <b>#7</b> on the heap: Product {name=null, price=0}. New object <b>#8</b> on the heap: String &quot;Sugar 1kg&quot;."}, {"line": 9, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["catalogue", "→ #1 ArrayList"]]}, {"frame": "new Product(String name, int price)", "vars": [["this", "→ #7 Product"], ["name", "→ #8 \"Sugar 1kg\""], ["price", "48"]]}], "heap": ["<b>#1</b> ArrayList size 2, capacity 10 [→#3, →#5]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Product {name=&quot;Rice 5kg&quot;, price=450}", "<b>#4</b> String &quot;Rice 5kg&quot;", "<b>#5</b> Product {name=&quot;Oil 1L&quot;, price=165}", "<b>#6</b> String &quot;Oil 1L&quot;", "<b>#7</b> Product {name=null, price=0}", "<b>#8</b> String &quot;Sugar 1kg&quot;"], "phase": "Constructor", "note": "The constructor starts. The new object already exists, with default values (0, null, false) in its fields."}, {"line": 10, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["catalogue", "→ #1 ArrayList"]]}, {"frame": "new Product(String name, int price)", "vars": [["this", "→ #7 Product"], ["name", "→ #8 \"Sugar 1kg\""], ["price", "48"]]}], "heap": ["<b>#1</b> ArrayList size 2, capacity 10 [→#3, →#5]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Product {name=&quot;Rice 5kg&quot;, price=450}", "<b>#4</b> String &quot;Rice 5kg&quot;", "<b>#5</b> Product {name=&quot;Oil 1L&quot;, price=165}", "<b>#6</b> String &quot;Oil 1L&quot;", "<b>#7</b> Product {name=&quot;Sugar 1kg&quot;, price=0}", "<b>#8</b> String &quot;Sugar 1kg&quot;"], "phase": "Update", "note": "Object <b>#7</b> changes: Product {name=&quot;Sugar 1kg&quot;, price=0}."}, {"line": 11, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["catalogue", "→ #1 ArrayList"]]}, {"frame": "new Product(String name, int price)", "vars": [["this", "→ #7 Product"], ["name", "→ #8 \"Sugar 1kg\""], ["price", "48"]]}], "heap": ["<b>#1</b> ArrayList size 2, capacity 10 [→#3, →#5]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Product {name=&quot;Rice 5kg&quot;, price=450}", "<b>#4</b> String &quot;Rice 5kg&quot;", "<b>#5</b> Product {name=&quot;Oil 1L&quot;, price=165}", "<b>#6</b> String &quot;Oil 1L&quot;", "<b>#7</b> Product {name=&quot;Sugar 1kg&quot;, price=48}", "<b>#8</b> String &quot;Sugar 1kg&quot;"], "phase": "Update", "note": "Object <b>#7</b> changes: Product {name=&quot;Sugar 1kg&quot;, price=48}."}, {"line": 12, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["catalogue", "→ #1 ArrayList"]]}], "heap": ["<b>#1</b> ArrayList size 2, capacity 10 [→#3, →#5]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Product {name=&quot;Rice 5kg&quot;, price=450}", "<b>#4</b> String &quot;Rice 5kg&quot;", "<b>#5</b> Product {name=&quot;Oil 1L&quot;, price=165}", "<b>#6</b> String &quot;Oil 1L&quot;"], "phase": "Return", "note": "<code>new Product()</code> returns and its frame is popped."}, {"line": 21, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["catalogue", "→ #1 ArrayList"]]}], "heap": ["<b>#1</b> ArrayList size 3, capacity 10 [→#3, →#5, →#7]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Product {name=&quot;Rice 5kg&quot;, price=450}", "<b>#4</b> String &quot;Rice 5kg&quot;", "<b>#5</b> Product {name=&quot;Oil 1L&quot;, price=165}", "<b>#6</b> String &quot;Oil 1L&quot;", "<b>#7</b> Product {name=&quot;Sugar 1kg&quot;, price=48}", "<b>#8</b> String &quot;Sugar 1kg&quot;"], "phase": "Filled", "note": "Three Product objects in the list. Object <b>#1</b> changes: ArrayList size 3, capacity 10 [→#3, →#5, →#7]."}, {"line": 22, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["catalogue", "→ #1 ArrayList"], ["out", "→ #9 ObjectOutputStream"]]}], "heap": ["<b>#1</b> ArrayList size 3, capacity 10 [→#3, →#5, →#7]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Product {name=&quot;Rice 5kg&quot;, price=450}", "<b>#4</b> String &quot;Rice 5kg&quot;", "<b>#5</b> Product {name=&quot;Oil 1L&quot;, price=165}", "<b>#6</b> String &quot;Oil 1L&quot;", "<b>#7</b> Product {name=&quot;Sugar 1kg&quot;, price=48}", "<b>#8</b> String &quot;Sugar 1kg&quot;", "<b>#9</b> ObjectOutputStream"], "newVar": "out", "phase": "Assign", "note": "Now <code>out</code> = → #9 ObjectOutputStream. New object <b>#9</b> on the heap: ObjectOutputStream."}, {"line": 23, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["catalogue", "→ #1 ArrayList"], ["out", "→ #9 ObjectOutputStream"]]}], "heap": ["<b>#1</b> ArrayList size 3, capacity 10 [→#3, →#5, →#7]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Product {name=&quot;Rice 5kg&quot;, price=450}", "<b>#4</b> String &quot;Rice 5kg&quot;", "<b>#5</b> Product {name=&quot;Oil 1L&quot;, price=165}", "<b>#6</b> String &quot;Oil 1L&quot;", "<b>#7</b> Product {name=&quot;Sugar 1kg&quot;, price=48}", "<b>#8</b> String &quot;Sugar 1kg&quot;", "<b>#9</b> ObjectOutputStream"], "phase": "One call", "note": "Writing the list writes its size and then each Product: the whole graph."}, {"line": 24, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["catalogue", "→ #1 ArrayList"]]}], "heap": ["<b>#1</b> ArrayList size 3, capacity 10 [→#3, →#5, →#7]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Product {name=&quot;Rice 5kg&quot;, price=450}", "<b>#4</b> String &quot;Rice 5kg&quot;", "<b>#5</b> Product {name=&quot;Oil 1L&quot;, price=165}", "<b>#6</b> String &quot;Oil 1L&quot;", "<b>#7</b> Product {name=&quot;Sugar 1kg&quot;, price=48}", "<b>#8</b> String &quot;Sugar 1kg&quot;"], "phase": "Step", "note": "End of the block."}, {"line": 26, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["catalogue", "→ #1 ArrayList"], ["in", "→ #10 ObjectInputStream"]]}], "heap": ["<b>#1</b> ArrayList size 3, capacity 10 [→#3, →#5, →#7]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Product {name=&quot;Rice 5kg&quot;, price=450}", "<b>#4</b> String &quot;Rice 5kg&quot;", "<b>#5</b> Product {name=&quot;Oil 1L&quot;, price=165}", "<b>#6</b> String &quot;Oil 1L&quot;", "<b>#7</b> Product {name=&quot;Sugar 1kg&quot;, price=48}", "<b>#8</b> String &quot;Sugar 1kg&quot;", "<b>#10</b> ObjectInputStream"], "newVar": "in", "phase": "Assign", "note": "Now <code>in</code> = → #10 ObjectInputStream. New object <b>#10</b> on the heap: ObjectInputStream."}, {"line": 27, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["catalogue", "→ #1 ArrayList"], ["in", "→ #10 ObjectInputStream"], ["cached", "→ #11 ArrayList"]]}], "heap": ["<b>#1</b> ArrayList size 3, capacity 10 [→#3, →#5, →#7]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Product {name=&quot;Rice 5kg&quot;, price=450}", "<b>#4</b> String &quot;Rice 5kg&quot;", "<b>#5</b> Product {name=&quot;Oil 1L&quot;, price=165}", "<b>#6</b> String &quot;Oil 1L&quot;", "<b>#7</b> Product {name=&quot;Sugar 1kg&quot;, price=48}", "<b>#8</b> String &quot;Sugar 1kg&quot;", "<b>#10</b> ObjectInputStream", "<b>#11</b> ArrayList size 3, capacity 3 [→#12, →#13, →#14]", "<b>#12</b> Product {name=&quot;Rice 5kg&quot;, price=450}", "<b>#13</b> Product {name=&quot;Oil 1L&quot;, price=165}", "<b>#14</b> Product {name=&quot;Sugar 1kg&quot;, price=48}", "<b>#15</b> String &quot;Rice 5kg&quot;", "<b>#16</b> String &quot;Oil 1L&quot;", "<b>#17</b> String &quot;Sugar 1kg&quot;"], "newVar": "cached", "phase": "Read", "note": "A new list with three new Products."}, {"line": 28, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["catalogue", "→ #1 ArrayList"], ["cached", "→ #11 ArrayList"]]}], "heap": ["<b>#1</b> ArrayList size 3, capacity 10 [→#3, →#5, →#7]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Product {name=&quot;Rice 5kg&quot;, price=450}", "<b>#4</b> String &quot;Rice 5kg&quot;", "<b>#5</b> Product {name=&quot;Oil 1L&quot;, price=165}", "<b>#6</b> String &quot;Oil 1L&quot;", "<b>#7</b> Product {name=&quot;Sugar 1kg&quot;, price=48}", "<b>#8</b> String &quot;Sugar 1kg&quot;", "<b>#11</b> ArrayList size 3, capacity 3 [→#12, →#13, →#14]", "<b>#12</b> Product {name=&quot;Rice 5kg&quot;, price=450}", "<b>#13</b> Product {name=&quot;Oil 1L&quot;, price=165}", "<b>#14</b> Product {name=&quot;Sugar 1kg&quot;, price=48}", "<b>#15</b> String &quot;Rice 5kg&quot;", "<b>#16</b> String &quot;Oil 1L&quot;", "<b>#17</b> String &quot;Sugar 1kg&quot;"], "phase": "Step", "note": "End of the block."}, {"line": 29, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["catalogue", "→ #1 ArrayList"], ["cached", "→ #11 ArrayList"], ["cheapest", "→ #12 Product"]]}], "heap": ["<b>#1</b> ArrayList size 3, capacity 10 [→#3, →#5, →#7]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Product {name=&quot;Rice 5kg&quot;, price=450}", "<b>#4</b> String &quot;Rice 5kg&quot;", "<b>#5</b> Product {name=&quot;Oil 1L&quot;, price=165}", "<b>#6</b> String &quot;Oil 1L&quot;", "<b>#7</b> Product {name=&quot;Sugar 1kg&quot;, price=48}", "<b>#8</b> String &quot;Sugar 1kg&quot;", "<b>#11</b> ArrayList size 3, capacity 3 [→#12, →#13, →#14]", "<b>#12</b> Product {name=&quot;Rice 5kg&quot;, price=450}", "<b>#13</b> Product {name=&quot;Oil 1L&quot;, price=165}", "<b>#14</b> Product {name=&quot;Sugar 1kg&quot;, price=48}", "<b>#15</b> String &quot;Rice 5kg&quot;", "<b>#16</b> String &quot;Oil 1L&quot;", "<b>#17</b> String &quot;Sugar 1kg&quot;"], "newVar": "cheapest", "phase": "Search", "note": "Start with the first product as the cheapest so far. Now <code>cheapest</code> = → #12 Product."}, {"line": 30, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["catalogue", "→ #1 ArrayList"], ["cached", "→ #11 ArrayList"], ["cheapest", "→ #14 Product"]]}], "heap": ["<b>#1</b> ArrayList size 3, capacity 10 [→#3, →#5, →#7]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Product {name=&quot;Rice 5kg&quot;, price=450}", "<b>#4</b> String &quot;Rice 5kg&quot;", "<b>#5</b> Product {name=&quot;Oil 1L&quot;, price=165}", "<b>#6</b> String &quot;Oil 1L&quot;", "<b>#7</b> Product {name=&quot;Sugar 1kg&quot;, price=48}", "<b>#8</b> String &quot;Sugar 1kg&quot;", "<b>#11</b> ArrayList size 3, capacity 3 [→#12, →#13, →#14]", "<b>#12</b> Product {name=&quot;Rice 5kg&quot;, price=450}", "<b>#13</b> Product {name=&quot;Oil 1L&quot;, price=165}", "<b>#14</b> Product {name=&quot;Sugar 1kg&quot;, price=48}", "<b>#15</b> String &quot;Rice 5kg&quot;", "<b>#16</b> String &quot;Oil 1L&quot;", "<b>#17</b> String &quot;Sugar 1kg&quot;"], "newVar": "cheapest", "phase": "Loop", "note": "Compare each product's price. Now <code>cheapest</code> = → #14 Product."}, {"line": 31, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["catalogue", "→ #1 ArrayList"], ["cached", "→ #11 ArrayList"], ["cheapest", "→ #14 Product"]]}], "heap": ["<b>#1</b> ArrayList size 3, capacity 10 [→#3, →#5, →#7]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Product {name=&quot;Rice 5kg&quot;, price=450}", "<b>#4</b> String &quot;Rice 5kg&quot;", "<b>#5</b> Product {name=&quot;Oil 1L&quot;, price=165}", "<b>#6</b> String &quot;Oil 1L&quot;", "<b>#7</b> Product {name=&quot;Sugar 1kg&quot;, price=48}", "<b>#8</b> String &quot;Sugar 1kg&quot;", "<b>#11</b> ArrayList size 3, capacity 3 [→#12, →#13, →#14]", "<b>#12</b> Product {name=&quot;Rice 5kg&quot;, price=450}", "<b>#13</b> Product {name=&quot;Oil 1L&quot;, price=165}", "<b>#14</b> Product {name=&quot;Sugar 1kg&quot;, price=48}", "<b>#15</b> String &quot;Rice 5kg&quot;", "<b>#16</b> String &quot;Oil 1L&quot;", "<b>#17</b> String &quot;Sugar 1kg&quot;"], "out": "3 products loaded; cheapest: Sugar 1kg Rs 48\n", "phase": "Result", "note": "3 products; Sugar 1kg is cheapest. Prints <code>3 products loaded; cheapest: Sugar 1kg Rs 48</code>."}, {"line": 32, "phase": "Program ends", "note": "<code>main</code> returns, its frame is popped and the program ends.", "stack": [], "heap": []}]}</script>
+  </div>
+  </article>
+
+</section>
+
+<!-- ======================= PART 9: QUIZ AND REVISION ======================= -->
+<section class="part" id="quiz">
+  <span class="part-label"><b>9</b> Quiz and revision</span>
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <script type="application/json">[
+ {
+  "q": "What is serialization?",
+  "options": [
+   "Sorting objects",
+   "Converting an object's state into a byte stream",
+   "Encrypting a file",
+   "Running threads in order"
+  ],
+  "answer": 1,
+  "why": "Deserialization is the reverse: bytes back into an object."
+ },
+ {
+  "q": "Serializable has how many methods?",
+  "options": [
+   "0 (it's a marker interface)",
+   "1",
+   "2",
+   "3"
+  ],
+  "answer": 0,
+  "why": "It just marks the class as allowed to be serialized."
+ },
+ {
+  "q": "A transient field after deserialization holds…",
+  "options": [
+   "its saved value",
+   "its type's default value (null, 0, false)",
+   "a random value",
+   "it throws"
+  ],
+  "answer": 1,
+  "why": "transient fields are skipped when writing."
+ },
+ {
+  "q": "Are static fields serialized?",
+  "options": [
+   "Yes",
+   "No",
+   "Only if final",
+   "Only primitives"
+  ],
+  "answer": 1,
+  "why": "They belong to the class, not to the object's state."
+ },
+ {
+  "q": "Writing an object whose field refers to a non-serializable class throws…",
+  "options": [
+   "ClassCastException",
+   "NotSerializableException",
+   "InvalidClassException",
+   "Nothing"
+  ],
+  "answer": 1,
+  "why": "Every object in the graph must be serializable (or the field transient)."
+ },
+ {
+  "q": "What is serialVersionUID for?",
+  "options": [
+   "Encrypting the stream",
+   "Checking that the class used to read is compatible with the one that wrote",
+   "Counting objects",
+   "Thread safety"
+  ],
+  "answer": 1,
+  "why": "A mismatch causes InvalidClassException."
+ },
+ {
+  "q": "Does deserialization run the constructor of a Serializable class?",
+  "options": [
+   "Yes, always",
+   "No",
+   "Only the default constructor",
+   "Only if public"
+  ],
+  "answer": 1,
+  "why": "The object is created without it (only the first non-serializable superclass's no-arg constructor runs)."
+ },
+ {
+  "q": "Why should you never deserialize data from untrusted sources?",
+  "options": [
+   "It's slow",
+   "Crafted byte streams can trigger dangerous code in classes on the classpath",
+   "It's deprecated",
+   "It loses transient fields"
+  ],
+  "answer": 1,
+  "why": "Deserialization attacks have caused major security incidents; prefer JSON with validation, or use deserialization filters."
+ }
+]</script>
+  </div>
+  <h3>Quick revision</h3>
+  <div class="revision">
+    <h3>Lesson 13.4 in one screen</h3>
+    <ul>
+      <li>Serialization: object graph → bytes. Deserialization: bytes → new objects.</li>
+      <li>Opt in with the marker interface <code>Serializable</code>; every object in the graph must be serializable.</li>
+      <li><code>ObjectOutputStream.writeObject</code>, <code>ObjectInputStream.readObject</code> (returns Object; cast it).</li>
+      <li><code>transient</code> and <code>static</code> fields are not saved; transient comes back as the default value.</li>
+      <li>Constructors of serializable classes don't run on deserialization.</li>
+      <li>Declare <code>serialVersionUID</code>; a mismatch gives <code>InvalidClassException</code>.</li>
+      <li>Never deserialize untrusted data; prefer JSON for external data.</li>
+    </ul>
+  </div>
+  <h3>Interview and viva questions</h3>
+  <div class="faq">
+    <details><summary>What is serialization, and why is Serializable a marker interface?</summary><p>Serialization converts an object's state into bytes for storage or transfer. <code>Serializable</code> has no methods: it only marks a class as permitted, so classes don't get serialized (and their internals exposed) by accident.</p></details>
+    <details><summary>What is the use of the transient keyword?</summary><p>It excludes a field from serialization. Use it for secrets (passwords, PINs), derived or cached values that can be recomputed, and fields whose types aren't serializable (threads, streams, connections). After deserialization the field has its default value.</p></details>
+    <details><summary>What is serialVersionUID and what happens if you don't declare it?</summary><p>It's a version number stored in the stream and checked when reading. If you don't declare one, Java computes it from the class's structure, so small changes (adding a method or field) change it and old files can no longer be read (<code>InvalidClassException</code>). Declaring it explicitly keeps compatible changes working.</p></details>
+    <details><summary>Is the constructor called during deserialization?</summary><p>Not for the serializable class or its serializable superclasses. The JVM calls only the no-arg constructor of the first non-serializable superclass (often <code>Object</code>), then restores fields from the stream. Validation in constructors is therefore bypassed.</p></details>
+    <details><summary>What are the risks of Java serialization?</summary><p>Deserializing untrusted data can instantiate unexpected classes and trigger “gadget chains” leading to remote code execution. It's also Java-only, fragile across class changes, and exposes private fields in the bytes. Mitigate with ObjectInputFilter allow-lists, or use JSON/Protocol Buffers with validation.</p></details>
+  </div>
+
+  <h3 id="practice">Practice problems</h3>
+  <p class="prob-intro">Serialize objects, control what's saved with <code>transient</code>, and handle the exceptions. Each program writes and reads its own file. The last three are business tasks.</p>
+  <div class="probs">
+    <article class="prob"><div class="prob__head"><span class="prob__num">P1</span><span class="prob__tag prob__tag--easy">Easy</span><h4>Save and load one object</h4></div>
+      <p>Make a serializable <code>Book</code> (title, price). Save one and load it back.</p>
+      <div class="prob__io"><div><small>Input</small><pre>Java Basics, 399</pre></div><div><small>Expected output</small><pre>Java Basics Rs 399</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="java" data-file="Main.java"><pre><code>import java.io.*;
+
+class Book implements Serializable {
+    private static final long serialVersionUID = 1L;
+    String title;
+    int price;
+}
+
+public class Main {
+    public static void main(String[] args) throws Exception {
+        Book b = new Book();
+        b.title = &quot;Java Basics&quot;;
+        b.price = 399;
+        try (ObjectOutputStream out = new ObjectOutputStream(new FileOutputStream(&quot;book.ser&quot;))) {
+            out.writeObject(b);
+        }
+        try (ObjectInputStream in = new ObjectInputStream(new FileInputStream(&quot;book.ser&quot;))) {
+            Book copy = (Book) in.readObject();
+            System.out.println(copy.title + &quot; Rs &quot; + copy.price);
+        }
+    }
+}</code></pre><div class="output">Java Basics Rs 399</div></div>
+        <p><b>How it works:</b> <code>Serializable</code> is a marker interface: no methods, it just gives permission. <code>readObject</code> returns Object, so cast it.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P2</span><span class="prob__tag prob__tag--easy">Easy</span><h4>transient fields come back empty</h4></div>
+      <p>Serialize a <code>Login</code> with a username and a transient password and print both after loading.</p>
+      <div class="prob__io"><div><small>Input</small><pre>asha / secret123</pre></div><div><small>Expected output</small><pre>user=asha, password=null</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="java" data-file="Main.java"><pre><code>import java.io.*;
+
+class Login implements Serializable {
+    private static final long serialVersionUID = 1L;
+    String user = &quot;asha&quot;;
+    transient String password = &quot;secret123&quot;;
+}
+
+public class Main {
+    public static void main(String[] args) throws Exception {
+        try (ObjectOutputStream out = new ObjectOutputStream(new FileOutputStream(&quot;login.ser&quot;))) {
+            out.writeObject(new Login());
+        }
+        try (ObjectInputStream in = new ObjectInputStream(new FileInputStream(&quot;login.ser&quot;))) {
+            Login l = (Login) in.readObject();
+            System.out.println(&quot;user=&quot; + l.user + &quot;, password=&quot; + l.password);
+        }
+    }
+}</code></pre><div class="output">user=asha, password=null</div></div>
+        <p><b>How it works:</b> transient fields get default values after deserialization (null, 0, false). Initializers like <code>= "secret123"</code> don't run for a deserialized object.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P3</span><span class="prob__tag prob__tag--easy">Easy</span><h4>The magic number</h4></div>
+      <p>Serialize a String and print the first four bytes of the file in hex.</p>
+      <div class="prob__io"><div><small>Input</small><pre>&quot;hello&quot;</pre></div><div><small>Expected output</small><pre>AC ED 00 05 (12 bytes)</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="java" data-file="Main.java"><pre><code>import java.io.*;
+import java.nio.file.*;
+
+public class Main {
+    public static void main(String[] args) throws IOException {
+        try (ObjectOutputStream out = new ObjectOutputStream(new FileOutputStream(&quot;s.ser&quot;))) {
+            out.writeObject(&quot;hello&quot;);
+        }
+        byte[] b = Files.readAllBytes(Path.of(&quot;s.ser&quot;));
+        System.out.printf(&quot;%02X %02X %02X %02X (%d bytes)%n&quot;, b[0], b[1], b[2], b[3], b.length);
+    }
+}</code></pre><div class="output">AC ED 00 05 (12 bytes)</div></div>
+        <p><b>How it works:</b> every Java serialization stream starts with the magic number <code>AC ED</code> and version <code>00 05</code>. Security tools look for these bytes in network traffic.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P4</span><span class="prob__tag prob__tag--medium">Medium</span><h4>Constructors don&#x27;t run</h4></div>
+      <p>Show that deserialization does not call the class's constructor: count constructor calls in a static counter.</p>
+      <div class="prob__io"><div><small>Input</small><pre>(none)</pre></div><div><small>Expected output</small><pre>seat 14, constructor calls: 1</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="java" data-file="Main.java"><pre><code>import java.io.*;
+
+class Ticket implements Serializable {
+    private static final long serialVersionUID = 1L;
+    static int made = 0;
+    int seat;
+    Ticket(int seat) { this.seat = seat; made++; }
+}
+
+public class Main {
+    public static void main(String[] args) throws Exception {
+        try (ObjectOutputStream out = new ObjectOutputStream(new FileOutputStream(&quot;t.ser&quot;))) {
+            out.writeObject(new Ticket(14));
+        }
+        try (ObjectInputStream in = new ObjectInputStream(new FileInputStream(&quot;t.ser&quot;))) {
+            Ticket t = (Ticket) in.readObject();
+            System.out.println(&quot;seat &quot; + t.seat + &quot;, constructor calls: &quot; + Ticket.made);
+        }
+    }
+}</code></pre><div class="output">seat 14, constructor calls: 1</div></div>
+        <p><b>How it works:</b> the JVM creates the object without running Ticket's constructor and then fills in the fields from the stream. So any validation in your constructor is skipped; that's one reason deserializing untrusted data is risky.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P5</span><span class="prob__tag prob__tag--medium">Medium</span><h4>Static fields aren&#x27;t saved</h4></div>
+      <p>Serialize an object, change a static field, deserialize, and show the static value is the current one, not the saved one.</p>
+      <div class="prob__io"><div><small>Input</small><pre>(none)</pre></div><div><small>Expected output</small><pre>user=meena, theme=dark</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="java" data-file="Main.java"><pre><code>import java.io.*;
+
+class Config implements Serializable {
+    private static final long serialVersionUID = 1L;
+    static String theme = &quot;light&quot;;
+    String user = &quot;meena&quot;;
+}
+
+public class Main {
+    public static void main(String[] args) throws Exception {
+        try (ObjectOutputStream out = new ObjectOutputStream(new FileOutputStream(&quot;cfg.ser&quot;))) {
+            out.writeObject(new Config());
+        }
+        Config.theme = &quot;dark&quot;;
+        try (ObjectInputStream in = new ObjectInputStream(new FileInputStream(&quot;cfg.ser&quot;))) {
+            Config c = (Config) in.readObject();
+            System.out.println(&quot;user=&quot; + c.user + &quot;, theme=&quot; + Config.theme);
+        }
+    }
+}</code></pre><div class="output">user=meena, theme=dark</div></div>
+        <p><b>How it works:</b> serialization saves an object's state; static fields belong to the class, so they're not part of it.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P6</span><span class="prob__tag prob__tag--medium">Medium</span><h4>Catch NotSerializableException</h4></div>
+      <p>A serializable <code>Order</code> has a field of a non-serializable type <code>Printer</code>. Catch the exception and print which class caused it.</p>
+      <div class="prob__io"><div><small>Input</small><pre>(none)</pre></div><div><small>Expected output</small><pre>cannot save: Printer is not Serializable</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="java" data-file="Main.java"><pre><code>import java.io.*;
+
+class Printer {
+    String model = &quot;TP-80&quot;;
+}
+
+class Order implements Serializable {
+    private static final long serialVersionUID = 1L;
+    int id = 501;
+    Printer printer = new Printer();
+}
+
+public class Main {
+    public static void main(String[] args) throws IOException {
+        try (ObjectOutputStream out = new ObjectOutputStream(new FileOutputStream(&quot;o.ser&quot;))) {
+            out.writeObject(new Order());
+        } catch (NotSerializableException e) {
+            System.out.println(&quot;cannot save: &quot; + e.getMessage() + &quot; is not Serializable&quot;);
+        }
+    }
+}</code></pre><div class="output">cannot save: Printer is not Serializable</div></div>
+        <p><b>How it works:</b> the whole object graph must be serializable. Fix it by making Printer serializable, or by marking the field <code>transient</code> and recreating it after loading.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P7</span><span class="prob__tag prob__tag--business">Business problem</span><h4>Persist a customer list</h4></div>
+      <p>Save three customers (name, city, loyalty points) as one list, reload it, and print the total points.</p>
+      <div class="prob__io"><div><small>Input</small><pre>3 customers</pre></div><div><small>Expected output</small><pre>3 customers, 495 points in total</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="java" data-file="Main.java"><pre><code>import java.io.*;
+import java.util.*;
+
+class Customer implements Serializable {
+    private static final long serialVersionUID = 1L;
+    String name, city;
+    int points;
+    Customer(String n, String c, int p) { name = n; city = c; points = p; }
+}
+
+public class Main {
+    @SuppressWarnings(&quot;unchecked&quot;)
+    public static void main(String[] args) throws Exception {
+        List&lt;Customer&gt; list = new ArrayList&lt;&gt;(List.of(
+            new Customer(&quot;Asha&quot;, &quot;Pune&quot;, 120), new Customer(&quot;Ravi&quot;, &quot;Nagpur&quot;, 300), new Customer(&quot;Imran&quot;, &quot;Pune&quot;, 75)));
+        try (ObjectOutputStream out = new ObjectOutputStream(new FileOutputStream(&quot;customers.ser&quot;))) {
+            out.writeObject(list);
+        }
+        try (ObjectInputStream in = new ObjectInputStream(new FileInputStream(&quot;customers.ser&quot;))) {
+            List&lt;Customer&gt; loaded = (List&lt;Customer&gt;) in.readObject();
+            int total = 0;
+            for (Customer c : loaded) total += c.points;
+            System.out.println(loaded.size() + &quot; customers, &quot; + total + &quot; points in total&quot;);
+        }
+    }
+}</code></pre><div class="output">3 customers, 495 points in total</div></div>
+        <p><b>How it works:</b> collections serialize their elements, so one call saves everything. Remember the cast from Object is unchecked: the file could contain anything.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P8</span><span class="prob__tag prob__tag--business">Business problem</span><h4>Shared address saved once</h4></div>
+      <p>Two employees share one office Address object. Serialize both in one stream and show they still share the same Address after loading.</p>
+      <div class="prob__io"><div><small>Input</small><pre>2 employees, 1 office</pre></div><div><small>Expected output</small><pre>same office object? true, city Mumbai</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="java" data-file="Main.java"><pre><code>import java.io.*;
+
+class Address implements Serializable {
+    private static final long serialVersionUID = 1L;
+    String city = &quot;Mumbai&quot;;
+}
+
+class Employee implements Serializable {
+    private static final long serialVersionUID = 1L;
+    String name;
+    Address office;
+    Employee(String n, Address a) { name = n; office = a; }
+}
+
+public class Main {
+    public static void main(String[] args) throws Exception {
+        Address hq = new Address();
+        try (ObjectOutputStream out = new ObjectOutputStream(new FileOutputStream(&quot;staff.ser&quot;))) {
+            out.writeObject(new Employee(&quot;Asha&quot;, hq));
+            out.writeObject(new Employee(&quot;Ravi&quot;, hq));
+        }
+        try (ObjectInputStream in = new ObjectInputStream(new FileInputStream(&quot;staff.ser&quot;))) {
+            Employee a = (Employee) in.readObject();
+            Employee r = (Employee) in.readObject();
+            System.out.println(&quot;same office object? &quot; + (a.office == r.office) + &quot;, city &quot; + r.office.city);
+        }
+    }
+}</code></pre><div class="output">same office object? true, city Mumbai</div></div>
+        <p><b>How it works:</b> within one stream, an object that was already written is stored as a back-reference, so sharing is preserved. Objects must be read in the same order they were written.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P9</span><span class="prob__tag prob__tag--business">Business problem</span><h4>Version check with serialVersionUID</h4></div>
+      <p>Print the serialVersionUID that Java uses for a class, so a team can fix it explicitly before shipping.</p>
+      <div class="prob__io"><div><small>Input</small><pre>class Invoice</pre></div><div><small>Expected output</small><pre>Invoice serialVersionUID = 202610
+fields saved: 2</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="java" data-file="Main.java"><pre><code>import java.io.*;
+
+class Invoice implements Serializable {
+    private static final long serialVersionUID = 2026_10L;
+    String number;
+    double amount;
+}
+
+public class Main {
+    public static void main(String[] args) {
+        ObjectStreamClass desc = ObjectStreamClass.lookup(Invoice.class);
+        System.out.println(desc.getName() + &quot; serialVersionUID = &quot; + desc.getSerialVersionUID());
+        System.out.println(&quot;fields saved: &quot; + desc.getFields().length);
+    }
+}</code></pre><div class="output">Invoice serialVersionUID = 202610
+fields saved: 2</div></div>
+        <p><b>How it works:</b> the UID is stored in every serialized stream. When reading, Java compares it with the current class; if they differ you get <code>InvalidClassException</code>. Declaring it yourself keeps compatible changes (like adding a field) from breaking old files.</p>
+      </details>
+    </article>
+  </div>
+
+
+
+  <h3 id="scenarios">Real-world scenario questions (asked in company interviews)</h3>
+  <p class="scn-intro">Serialization questions test both mechanics and judgement: when to use it, and when not to.</p>
+  <div class="scenarios">
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Release · compatibility</span><span class="scn__tag scn__tag--level">Junior</span></div>
+      <h4>After the update, saved carts won't load</h4>
+      <p class="scn__situation">A desktop billing app saves open bills with Java serialization. After a release that added one field to <code>Bill</code>, every saved bill fails with <code>InvalidClassException: local class incompatible</code>. What happened, and how do you prevent it?</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> serialVersionUID.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li><code>Bill</code> had no declared serialVersionUID, so Java computed one; adding a field changed it and old streams no longer match.</li>
+          <li>Declare <code>private static final long serialVersionUID</code> from the first release. Adding a field is then a compatible change: old data loads with the new field at its default.</li>
+          <li>For this release, re-add the old computed UID (find it with the <code>serialver</code> tool) to recover existing files.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> telling users to delete their saved bills.</p>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Security · data leak</span><span class="scn__tag scn__tag--level">Fresher</span></div>
+      <h4>Card numbers found in session files</h4>
+      <p class="scn__situation">A security audit finds full card numbers inside the server's serialized session files on disk. The session object holds a <code>PaymentInfo</code> field. What would you change?</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> transient and handling sensitive data.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>Serialization writes every non-transient field in plain bytes; there's no encryption.</li>
+          <li>Don't keep card data in the session at all: store a token from the payment gateway. If a field must exist, mark it <code>transient</code>.</li>
+          <li>Encrypt session storage and restrict file permissions.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> making the field <code>private</code> and assuming that hides it; private fields are serialized too.</p>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Security · attack</span><span class="scn__tag scn__tag--level">Mid</span></div>
+      <h4>An endpoint that accepts serialized objects</h4>
+      <p class="scn__situation">An internal API receives orders as Java-serialized objects in the HTTP body and calls <code>readObject()</code>. The team wants to expose it to partners. What's your advice?</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> deserialization vulnerabilities.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>Deserializing attacker-controlled bytes can instantiate arbitrary classes from the classpath and lead to remote code execution.</li>
+          <li>Switch the API to JSON with a strict schema and validation; it's also language-neutral for partners.</li>
+          <li>If Java serialization must stay, apply an <code>ObjectInputFilter</code> allow-list of expected classes, size limits, and authentication.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> “we only accept our Order class”. The cast happens <i>after</i> readObject has already built the objects.</p>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Design · graphs</span><span class="scn__tag scn__tag--level">Mid</span></div>
+      <h4>Serialized files are huge and slow</h4>
+      <p class="scn__situation">A <code>Customer</code> object is cached by serializing it, but each file is several MB. Investigation shows Customer has a reference to a shared <code>CatalogService</code> that holds the entire product catalogue. Explain and fix.</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> object graphs and transient.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>Serialization follows every reference, so the whole catalogue is written with each customer.</li>
+          <li>Mark service references <code>transient</code> and re-inject them after loading, or serialize a small DTO with only the customer's data.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> compressing the files and ignoring the design problem.</p>
+      </div></details>
+    </article>
+  </div>
+</section>
+
+<nav class="lesson-nav" id="lesson-nav" aria-label="Lesson navigation"></nav>
+<div class="ad-slot" data-slot="bottom"></div>
+</article>
+
+<aside class="lesson-side">
+  <nav class="toc" aria-label="In this lesson">
+    <h4>In this lesson</h4>
+    <ol>
+      <li><a href="#story">The story</a></li>
+      <li><a href="#definition">Definition</a></li>
+      <li><a href="#types">Types and ways to use it</a></li>
+      <li><a href="#steps">Step by step</a></li>
+      <li><a href="#animation">See it happen</a></li>
+      <li><a href="#real-world">Real-world use</a></li>
+      <li><a href="#run">Run the code</a></li>
+      <li><a href="#tracer">Line by line</a></li>
+      <li><a href="#worked">Worked examples</a></li>
+      <li><a href="#quiz">Quiz and revision</a></li>
+      <li><a href="#practice">Practice problems</a></li>
+      <li><a href="#scenarios">Industry scenarios</a></li>
+    </ol>
+  </nav>
+  <div class="ad-slot" data-slot="side"></div>
+  <div class="outline" id="outline"></div>
+</aside>
+</div>
+</main>
+
+<footer class="site-footer">
+  <div class="wrap">
+    <div><h4>MyPhatshala</h4><p>Free programming and IT lessons that show what happens behind the screen.</p></div>
+    <div><h4>Learn</h4><a href="../../../../#tracks">All courses</a><a href="../../">Core Java syllabus</a></div>
+    <div><h4>Site</h4><a href="../../../../about.html">About</a><a href="../../../../contact.html">Contact</a><a href="../../../../privacy.html">Privacy policy</a><a href="../../../../disclaimer.html">Disclaimer</a></div>
+    <div class="copyright">© MyPhatshala. All lesson content, diagrams and animations are original. Please do not copy without permission.</div>
+  </div>
+</footer>
+
+<script src="../../../../data/courses/core-java.js"></script>
+<script src="../../../../assets/js/lesson.js"></script>
+<script src="../../../../assets/js/ads.js"></script>
+<script src="../../../../assets/js/site.js"></script>
+</body>
+</html>

@@ -1,0 +1,1180 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Method overriding | MyPhatshala</title>
+<meta name="description" content="Java method overriding explained: same signature in the child class, the @Override annotation and the mistakes it catches, the rules (access can&#x27;t be narrower, covariant return types, checked exceptions can&#x27;t widen), why static, private and final methods can&#x27;t be overridden, static method hiding, and a first look at dynamic dispatch. With animations, a tracer, JVM-traced worked examples, 10 practice problems, quiz and industry scenarios.">
+<meta name="mp:minutes" content="24">
+<link rel="canonical" href="https://myphatshala.com/courses/core-java/07-oop-pillars/04-method-overriding/">
+<meta property="og:title" content="Java method overriding: rules, @Override and dynamic dispatch · MyPhatshala">
+<meta property="og:description" content="See the JVM pick the child&#x27;s version of a method at run time, learn every overriding rule with real compiler errors, and solve 10 problems including business tasks.">
+<link rel="icon" href="../../../../assets/img/logo.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Fraunces:ital,opsz,wght@0,9..144,600;0,9..144,700;1,9..144,600&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../../../../assets/css/style.css">
+<link rel="stylesheet" href="../../../../assets/css/lesson.css">
+<script src="../../../../assets/js/config.js"></script>
+<script>try { const t = localStorage.getItem("mp-theme"); if (t) document.documentElement.dataset.theme = t; } catch (e) {}</script>
+<script type="application/ld+json">{"@context": "https://schema.org", "@type": "LearningResource", "name": "Method overriding", "learningResourceType": "Lesson", "educationalLevel": "Beginner", "isAccessibleForFree": true, "inLanguage": "en", "isPartOf": {"@type": "Course", "name": "Core Java", "provider": {"@type": "Organization", "name": "MyPhatshala"}}}</script>
+</head>
+<body style="--track:#E8772E" data-lesson="07-oop-pillars/04-method-overriding" data-course-root="../../">
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="site-header">
+  <div class="wrap">
+    <a class="brand" href="../../../../" aria-label="MyPhatshala home"><img src="../../../../assets/img/logo.svg" width="34" height="34" alt=""><span>My<b>Phatshala</b></span></a>
+    <nav class="nav" aria-label="Main">
+      <a href="../../../../#tracks">All courses</a>
+      <a href="../../">Core Java syllabus</a>
+      <button class="theme-btn" id="theme-btn" aria-label="Toggle dark mode"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg></button>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+<section class="lesson-hero">
+  <div class="wrap">
+    <nav class="crumbs" aria-label="Breadcrumb"><a href="../../../../">Home</a><span>›</span><a href="../../../../#track-programming">Programming Languages</a><span>›</span><a href="../../">Core Java</a><span>›</span><b>Lesson 7.4</b></nav>
+    <h1>Method overriding</h1>
+    <p class="lead">Every payment has a fee, but a UPI payment's fee is zero and a card's is 1.8%. Instead of a long if-else on the payment type, each class can supply its own version of <code>fee()</code>. That's method overriding. You'll learn the exact rules javac enforces, how <code>@Override</code> catches silent bugs, why static methods are hidden rather than overridden, how the JVM picks the version at run time, and then practise with 10 problems.</p>
+    <div class="lesson-meta"><span>Module 7 · OOP Pillars</span><span>⏱ 24 min</span><span>Intermediate</span><span>10 practice problems</span></div>
+  </div>
+</section>
+
+<div class="wrap lesson-layout">
+<article class="lesson-main">
+<!-- ======================= PART 1: THE STORY ======================= -->
+<section class="part" id="story">
+  <span class="part-label"><b>1</b> The story</span>
+  <h2>The if-else that kept growing</h2>
+  <div class="story">
+    <p class="narration">Riya's fest ticketing app charges a convenience fee. Her <code>fee()</code> method has <code>if (type.equals("CARD"))</code>, <code>else if (type.equals("UPI"))</code>, <code>else if ("WALLET")</code>. When the team adds net banking, three different files need a new <code>else if</code>, and one is missed: net banking users pay the card fee.</p>
+    <div class="scene">
+      <svg viewBox="0 0 640 170" role="img" aria-label="Left: one fee method with a growing if-else chain on the payment type. Right: a Payment parent class with fee(), and Card, UPI and Wallet classes each supplying their own fee().">
+        <g font-size="10">
+          <rect x="16" y="22" width="270" height="128" rx="10" class="s-board"/>
+          <g font-size="9.8" class="mono">
+            <text x="28" y="42" class="s-chalk">double fee(String type) {</text>
+            <text x="28" y="60" style="fill:#F5C77E">  if (type.equals("CARD")) ...</text>
+            <text x="28" y="78" style="fill:#F5C77E">  else if (type.equals("UPI")) ...</text>
+            <text x="28" y="96" style="fill:#F5C77E">  else if (type.equals("WALLET"))</text>
+            <text x="28" y="114" style="fill:#FF9B8A">  // NETBANKING forgotten!</text>
+            <text x="28" y="132" class="s-chalk">}</text>
+          </g>
+          <path d="M300 86 H340" style="stroke:var(--track);stroke-width:2.5"/><path d="M334 80l8 6-8 6" style="stroke:var(--track);stroke-width:2.5;fill:none"/>
+          <rect x="420" y="20" width="140" height="40" rx="6" class="s-soft-blue" style="stroke:var(--blue);stroke-width:1.5"/>
+          <text x="490" y="36" text-anchor="middle" class="mono s-blue" font-weight="700">Payment</text>
+          <text x="490" y="51" text-anchor="middle" class="mono s-ink2" font-size="9">fee() → 2%</text>
+          <g class="s-soft-acc" style="stroke:var(--track);stroke-width:1.3"><rect x="352" y="104" width="86" height="40" rx="6"/><rect x="448" y="104" width="86" height="40" rx="6"/><rect x="544" y="104" width="86" height="40" rx="6"/></g>
+          <g class="mono" text-anchor="middle" font-size="9.4"><text x="395" y="120" class="s-ink" font-weight="700">Card</text><text x="491" y="120" class="s-ink" font-weight="700">Upi</text><text x="587" y="120" class="s-ink" font-weight="700">NetBanking</text></g>
+          <g class="mono s-acc" text-anchor="middle" font-size="9"><text x="395" y="135">fee() → 1.8%</text><text x="491" y="135">fee() → 0</text><text x="587" y="135">fee() → Rs 10</text></g>
+          <g style="stroke:var(--track);stroke-width:1.5;fill:none"><path d="M395 104 L460 62"/><path d="M491 104 V62"/><path d="M587 104 L520 62"/></g>
+          <text x="490" y="162" text-anchor="middle" class="s-ink2">a new method = one new class, nothing else changes</text>
+        </g>
+        <text x="632" y="166" text-anchor="end" class="s-wm">myphatshala.com</text>
+      </svg>
+    </div>
+    <div class="panel">
+      <div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#FCE6D6"/><path d="M14 64c2-12 9-18 18-18s16 6 18 18z" fill="#2E5AAC"/><circle cx="32" cy="29" r="12" fill="#C68B5E"/><path d="M19 29c0-10 6-15 13-15s13 5 13 15c-3-5-7-8-13-8s-10 3-13 8z" fill="#2A1B14"/><path d="M43 27c3 6 3 14 0 20" stroke="#2A1B14" stroke-width="4" fill="none" stroke-linecap="round"/><circle cx="27.5" cy="30" r="1.5" fill="#2A1B14"/><circle cx="36.5" cy="30" r="1.5" fill="#2A1B14"/><path d="M28 35q4 3 8 0" stroke="#2A1B14" stroke-width="1.6" fill="none" stroke-linecap="round"/><circle cx="32" cy="24" r="1.2" fill="#D64545"/></svg></div>
+      <div class="bubble"><b class="who">Riya</b><p>Sir, every new payment type means hunting for every if-else in the code.</p></div>
+    </div>
+    <div class="panel panel--right">
+      <div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#DDEFE6"/><path d="M12 64c2-12 10-18 20-18s18 6 20 18z" fill="#F4F1EA"/><path d="M28 46l4 8 4-8" fill="#2F7D5B"/><circle cx="32" cy="28" r="12" fill="#B57A50"/><path d="M20 26c0-8 5-13 12-13s12 5 12 13c-2-3-6-5-12-5s-10 2-12 5z" fill="#5A5A5A"/><path d="M22 32c1 8 5 11 10 11s9-3 10-11c-2 3-6 4-10 4s-8-1-10-4z" fill="#5A5A5A"/><circle cx="27" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><circle cx="37" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><path d="M30.4 29h3.2" stroke="#1B2433" stroke-width="1.4"/><circle cx="27" cy="29" r="1.1" fill="#1B2433"/><circle cx="37" cy="29" r="1.1" fill="#1B2433"/></svg></div>
+      <div class="bubble"><b class="who">Arjun Sir</b><p>Let each payment class answer for itself. <code>Payment</code> has a default <code>fee()</code>, and <code>UpiPayment</code> writes its own <code>fee()</code> with the same name and parameters. That's <b>overriding</b>.</p></div>
+    </div>
+    <div class="panel">
+      <div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#FCE6D6"/><path d="M14 64c2-12 9-18 18-18s16 6 18 18z" fill="#2E5AAC"/><circle cx="32" cy="29" r="12" fill="#C68B5E"/><path d="M19 29c0-10 6-15 13-15s13 5 13 15c-3-5-7-8-13-8s-10 3-13 8z" fill="#2A1B14"/><path d="M43 27c3 6 3 14 0 20" stroke="#2A1B14" stroke-width="4" fill="none" stroke-linecap="round"/><circle cx="27.5" cy="30" r="1.5" fill="#2A1B14"/><circle cx="36.5" cy="30" r="1.5" fill="#2A1B14"/><path d="M28 35q4 3 8 0" stroke="#2A1B14" stroke-width="1.6" fill="none" stroke-linecap="round"/><circle cx="32" cy="24" r="1.2" fill="#D64545"/></svg></div>
+      <div class="bubble"><b class="who">Riya</b><p>And how does Java know which <code>fee()</code> to run?</p></div>
+    </div>
+    <div class="panel panel--right">
+      <div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#DDEFE6"/><path d="M12 64c2-12 10-18 20-18s18 6 20 18z" fill="#F4F1EA"/><path d="M28 46l4 8 4-8" fill="#2F7D5B"/><circle cx="32" cy="28" r="12" fill="#B57A50"/><path d="M20 26c0-8 5-13 12-13s12 5 12 13c-2-3-6-5-12-5s-10 2-12 5z" fill="#5A5A5A"/><path d="M22 32c1 8 5 11 10 11s9-3 10-11c-2 3-6 4-10 4s-8-1-10-4z" fill="#5A5A5A"/><circle cx="27" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><circle cx="37" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><path d="M30.4 29h3.2" stroke="#1B2433" stroke-width="1.4"/><circle cx="27" cy="29" r="1.1" fill="#1B2433"/><circle cx="37" cy="29" r="1.1" fill="#1B2433"/></svg></div>
+      <div class="bubble"><b class="who">Arjun Sir</b><p>At run time it looks at the actual object. A UPI object runs the UPI version, even through a <code>Payment</code> variable. Net banking becomes one new class, and no old code changes.</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- ======================= PART 2: DEFINITION ======================= -->
+<section class="part" id="definition">
+  <span class="part-label"><b>2</b> Definition</span>
+  <h2>What is method overriding?</h2>
+  <div class="def">
+    <div class="def__formal"><small>Formal definition (write this in exams)</small>
+      <p><b>Method overriding</b> occurs when a subclass declares an <b>instance method</b> with the same name and the same parameter list (the same <b>signature</b>) as an accessible instance method of its superclass, with a compatible return type. The subclass's version replaces the inherited one for objects of the subclass, and the JVM chooses which version to execute at <b>run time</b> based on the actual class of the object (<b>dynamic method dispatch</b>). Static, private and final methods cannot be overridden.</p></div>
+    <div class="def__simple"><small>In simple words</small>
+      <p>The parent says "every payment has a fee". Each child says "here's how <b>my</b> fee is calculated". Same question, different answer depending on who you ask.</p></div>
+  </div>
+  <h3>Words you'll meet in this lesson</h3>
+  <div class="terms">
+    <div class="term"><b>Signature</b><span>Method name + parameter types, in order. The return type is not part of it.</span></div>
+    <div class="term"><b>@Override</b><span>An annotation asking javac to confirm the method really overrides something.</span></div>
+    <div class="term"><b>Covariant return</b><span>The override may return a <b>subclass</b> of the parent's return type.</span></div>
+    <div class="term"><b>Method hiding</b><span>A static method with the same signature in a child: chosen by the variable's type, not overridden.</span></div>
+    <div class="term"><b>Dynamic dispatch</b><span>Choosing the method version at run time from the object's class.</span></div>
+    <div class="term"><b>Overloading</b><span>Same name, <b>different</b> parameters; chosen at compile time (Lesson 5.4).</span></div>
+  </div>
+  <h3>The overriding rules</h3>
+  <table class="facts">
+    <tr><th>Signature</th><td>Exactly the same name and parameter types. Different parameters = overloading, not overriding.</td></tr>
+    <tr><th>Return type</th><td>Same, or a subtype (covariant) for objects. For primitives it must be identical.</td></tr>
+    <tr><th>Access</th><td>Same or <b>wider</b>: protected → public is fine; public → package-private is an error ("weaker access privileges").</td></tr>
+    <tr><th>Checked exceptions</th><td>The override may throw fewer or narrower checked exceptions, never new or broader ones. Unchecked ones are free.</td></tr>
+    <tr><th>Can't override</th><td><code>final</code> (error), <code>static</code> (hidden instead), <code>private</code> (not inherited; a same-named method is just a new method)</td></tr>
+    <tr><th>Which version runs</th><td>Decided at run time by the <b>object's</b> class, not the variable's type</td></tr>
+  </table>
+  <div class="callout callout--exam"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19V5a2 2 0 0 1 2-2h12v18H6a2 2 0 0 1-2-2zm0 0a2 2 0 0 1 2-2h12"/></svg><p><b>Exam tip:</b> for access, remember the order <code>private</code> &lt; default &lt; <code>protected</code> &lt; <code>public</code>. An overriding method can move <b>right</b> (wider) but never left. And constructors are never overridden, because they aren't inherited.</p></div>
+</section>
+
+<div class="ad-slot" data-slot="mid"></div>
+
+<!-- ======================= PART 3: TYPES AND WAYS TO USE IT ======================= -->
+<section class="part" id="types">
+  <span class="part-label"><b>3</b> Types and ways to use it</span>
+  <h2>Three ways to override</h2>
+  <div class="cards">
+    <div class="card"><svg class="ic" viewBox="0 0 40 40" fill="none" stroke="var(--track)" stroke-width="2"><rect x="6" y="6" width="28" height="12" rx="2"/><rect x="6" y="22" width="28" height="12" rx="2"/><path d="M14 12h12M14 28h12"/></svg><h4>Replace</h4><p>The child's version does something entirely different: UPI's fee is just 0.</p><span class="tag">new logic</span></div>
+    <div class="card"><svg class="ic" viewBox="0 0 40 40" fill="none" stroke="var(--blue)" stroke-width="2"><rect x="6" y="6" width="28" height="12" rx="2"/><path d="M20 18v6"/><rect x="6" y="24" width="28" height="10" rx="2"/><path d="M16 29h8M20 25v8"/></svg><h4>Extend</h4><p>Call <code>super.m()</code> and add to it: a manager's salary = employee's + allowance.</p><span class="tag">super.m() + more</span></div>
+    <div class="card"><svg class="ic" viewBox="0 0 40 40" fill="none" stroke="var(--green)" stroke-width="2"><path d="M8 30L20 8l12 22z"/><path d="M14 30L20 19l6 11"/></svg><h4>Narrow the return</h4><p>Parent returns <code>Shape</code>, child returns <code>Circle</code>: callers of the child get the exact type.</p><span class="tag">covariant return</span></div>
+  </div>
+  <h3>The rules, compiled</h3>
+  <div class="code" data-lang="java" data-file="Main.java"><pre><code>class Document {
+    protected String name = "doc";
+
+    protected String title() { return "Document"; }    // will be widened
+
+    Document copy() { return new Document(); }         // will be narrowed
+
+    void print() throws Exception { System.out.println("printing " + name); }
+}
+
+class Invoice extends Document {
+    @Override
+    public String title() { return "Tax Invoice"; }    // protected → public: wider, OK
+
+    @Override
+    Invoice copy() { return new Invoice(); }           // covariant: Invoice is a Document
+
+    @Override
+    void print() { System.out.println("printing invoice"); }   // throws nothing: narrower, OK
+}
+
+public class Main {
+    public static void main(String[] args) throws Exception {
+        Invoice inv = new Invoice();
+        System.out.println(inv.title());
+        Invoice copy = inv.copy();                     // no cast needed
+        System.out.println(copy.getClass().getSimpleName());
+        Document d = inv;
+        d.print();                                     // the Invoice version runs
+    }
+}</code></pre><div class="output">Tax Invoice
+Invoice
+printing invoice</div></div>
+  <h3>The compile errors you'll meet</h3>
+  <div class="table-wrap">
+  <table class="compare" style="min-width:600px">
+    <thead><tr><th>Mistake in the child</th><th>javac says</th></tr></thead>
+    <tbody>
+      <tr><td><code>@Override</code> on <code>fees()</code> (typo) or a different parameter type</td><td><code>method does not override or implement a method from a supertype</code></td></tr>
+      <tr><td>Parent <code>public double fee()</code>, child <code>double fee()</code></td><td><code>attempting to assign weaker access privileges; was public</code></td></tr>
+      <tr><td>Parent returns <code>double</code>, child returns <code>int</code></td><td><code>return type int is not compatible with double</code></td></tr>
+      <tr><td>Parent throws <code>IOException</code>, child throws <code>Exception</code></td><td><code>overridden method does not throw Exception</code></td></tr>
+      <tr><td>Parent method is <code>final</code></td><td><code>overridden method is final</code></td></tr>
+      <tr><td>Parent method is <code>static</code>, child's is not (or the reverse)</td><td><code>overridden method is static</code> / <code>overriding method is static</code></td></tr>
+    </tbody>
+  </table>
+  </div>
+  <div class="callout callout--warn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3 2 21h20L12 3z"/><path d="M12 10v5M12 18v.5"/></svg><p><b>The silent bug @Override catches:</b> <code>public boolean equals(Account other)</code> looks like it overrides <code>Object.equals</code>, but the parameter type differs, so it's an <b>overload</b>. Collections like <code>HashSet</code> call <code>equals(Object)</code> and never use yours. With <code>@Override</code> on it, javac reports the mistake immediately. Put <code>@Override</code> on every overriding method.</p></div>
+</section>
+
+<!-- ======================= PART 4: STEP BY STEP ======================= -->
+<section class="part" id="steps">
+  <span class="part-label"><b>4</b> Step by step</span>
+  <h2>Writing an override correctly</h2>
+  <ol class="stepper">
+    <li><h4>Start from the parent's method</h4>
+      <div class="code" data-lang="java" data-file="Payment.java"><pre><code>class Payment {
+    protected final double amount;
+    Payment(double amount) { this.amount = amount; }
+    double fee() { return amount * 0.02; }        // default: 2%
+}</code></pre></div>
+      <span class="behind">The parent's version is the default. Any child that doesn't override <code>fee()</code> simply inherits it.</span></li>
+    <li><h4>Copy the signature exactly, add @Override</h4>
+      <div class="code" data-lang="java" data-file="UpiPayment.java"><pre><code>class UpiPayment extends Payment {
+    UpiPayment(double amount) { super(amount); }
+
+    @Override
+    double fee() { return 0; }
+}</code></pre></div>
+      <span class="behind"><code>@Override</code> generates no code. It asks javac to check that a matching parent method exists, turning silent mistakes into compile errors.</span></li>
+    <li><h4>Keep or widen access, keep or narrow the return type</h4>
+      <p>A caller holding a <code>Payment</code> variable must be able to call <code>fee()</code> and use the result as a <code>double</code>. So the child may not hide the method behind narrower access or return something incompatible.</p>
+      <span class="behind">These rules exist so that a child object can be used <b>anywhere</b> a parent object is expected without surprises (the Liskov substitution principle).</span></li>
+    <li><h4>Don't add checked exceptions</h4>
+      <p>A caller of <code>Payment.fee()</code> handles only the exceptions <code>Payment.fee()</code> declares. If an override could throw a new checked exception, that caller would be unprepared.</p>
+      <span class="behind">The same reasoning: substitutability. Unchecked exceptions (<code>RuntimeException</code> and its children) aren't checked by javac, so they're allowed (Module 9).</span></li>
+    <li><h4>Let the JVM choose at run time</h4>
+      <div class="code" data-lang="java" data-file="Main.java"><pre><code>Payment p = new UpiPayment(1000);
+System.out.println(p.fee());    // 0.0, not 20.0</code></pre></div>
+      <span class="behind">javac compiles <code>p.fee()</code> as an <code>invokevirtual</code> instruction. At run time the JVM looks at the object's class (UpiPayment) and runs the most specific <code>fee()</code> it finds there, walking up to parents only if needed. Lesson 7.5 goes deeper.</span></li>
+  </ol>
+</section>
+
+<!-- ======================= PART 5: SEE IT HAPPEN ======================= -->
+<section class="part" id="animation">
+  <span class="part-label"><b>5</b> See it happen</span>
+  <h2>The object decides which fee() runs: both views</h2>
+  <p>Left: the call and its result. Right: the variable, the object, and where the JVM finds the method.</p>
+  <div class="anim" data-frames="6">
+    <div class="anim__title">Overriding <code>fee()</code> <span>6 steps</span></div>
+    <div class="anim__views">
+      <div class="view view--see">
+        <span class="view__tag">What you see</span>
+        <svg viewBox="0 0 360 250" role="img" aria-label="Each call and its console result">
+          <rect x="10" y="12" width="340" height="40" rx="8" class="s-board"/>
+          <g font-size="11" class="mono s-chalk">
+            <text x="22" y="37" data-on="1">Payment p = new Payment(1000);</text>
+            <text x="22" y="37" data-on="2">Payment p = new CardPayment(1000);</text>
+            <text x="22" y="37" data-on="3">Payment p = new UpiPayment(1000);</text>
+            <text x="22" y="37" data-on="4">@Override double fees() { ... }</text>
+            <text x="22" y="37" data-on="5">Payment p = new UpiPayment(500);</text>
+            <text x="22" y="37" data-on="6">for (Payment p : payments) ...</text>
+          </g>
+          <rect x="10" y="62" width="340" height="130" rx="8" style="fill:#0F1512"/>
+          <g font-size="11" class="mono" style="fill:#B9F5D0">
+            <text x="24" y="90" data-on="1">p.fee() → 20.0</text>
+            <text x="24" y="90" data-on="2">p.fee() → 18.0</text>
+            <text x="24" y="90" data-on="3">p.fee() → 0.0</text>
+            <text x="24" y="90" data-on="5">p.info()          → Payment</text>
+            <text x="24" y="112" data-on="5">UpiPayment.info() → UPI</text>
+            <text x="24" y="90" data-on="6">CardPayment 18.0</text>
+            <text x="24" y="112" data-on="6">UpiPayment 0.0</text>
+            <text x="24" y="134" data-on="6">WalletPayment 20.0</text>
+          </g>
+          <g font-size="10.4" class="mono" style="fill:#FF9B8A" data-on="4">
+            <text x="24" y="90">error: method does not override</text>
+            <text x="24" y="108">or implement a method from</text>
+            <text x="24" y="126">a supertype</text>
+          </g>
+          <g font-size="10.2" class="s-ink2" text-anchor="middle">
+            <text x="180" y="222" data-on="1">The parent's default: 2% of 1000.</text>
+            <text x="180" y="222" data-on="2">Same variable type, different object: 1.8%.</text>
+            <text x="180" y="222" data-on="3">UPI's own version: zero fee.</text>
+            <text x="180" y="222" data-on="4">A typo in the name is caught at compile time.</text>
+            <text x="180" y="222" data-on="5">Static methods follow the variable, not the object.</text>
+            <text x="180" y="222" data-on="6">One loop, each object answers for itself.</text>
+          </g>
+          <text x="354" y="246" text-anchor="end" class="s-wm">myphatshala.com</text>
+        </svg>
+        <ol class="caps" hidden>
+          <li><b>Default:</b> a plain <code>Payment</code> uses the parent's <code>fee()</code>: 2% of Rs 1,000 = 20.0.</li>
+          <li><b>Override:</b> the variable is still a <code>Payment</code>, but the object is a <code>CardPayment</code>, so its version runs: 18.0.</li>
+          <li><b>Another override:</b> a <code>UpiPayment</code> object returns 0.0.</li>
+          <li><b>@Override:</b> a misspelt <code>fees()</code> would silently be a new method. With <code>@Override</code>, javac refuses it.</li>
+          <li><b>Static hiding:</b> <code>info()</code> is static in both classes. <code>p.info()</code> uses the variable's type, Payment, even though the object is UPI.</li>
+          <li><b>The payoff:</b> one loop over a <code>Payment[]</code> gets the right fee from each object. Wallet didn't override, so it inherits 2%.</li>
+        </ol>
+      </div>
+      <div class="view view--behind">
+        <span class="view__tag">Behind the screen</span>
+        <svg viewBox="0 0 360 250" role="img" aria-label="Variable p pointing to an object; an arrow from the object to its class, and the method found there or in the parent class">
+          <text x="44" y="22" text-anchor="middle" font-size="10" font-weight="700" class="s-ink2">Stack</text>
+          <text x="128" y="22" text-anchor="middle" font-size="10" font-weight="700" class="s-ink2">Heap</text>
+          <text x="282" y="22" text-anchor="middle" font-size="10" font-weight="700" class="s-ink2">Classes (methods)</text>
+          <g data-on="1-3,5">
+            <rect x="10" y="64" width="68" height="28" rx="6" class="s-card2"/>
+            <text x="18" y="82" font-size="9.6" class="mono s-blue" font-weight="700">p : Payment</text>
+            <path d="M78 78 H92" style="stroke:var(--blue);stroke-width:2"/><path d="M88 74l5 4-5 4" style="stroke:var(--blue);stroke-width:2;fill:none"/>
+            <rect x="96" y="62" width="74" height="32" rx="6" class="s-soft-acc" style="stroke:var(--track)"/>
+            <g font-size="9" class="mono s-acc" font-weight="700" text-anchor="middle">
+              <text x="133" y="76" data-on="1">#1 Payment</text>
+              <text x="133" y="76" data-on="2">#2 Card…</text>
+              <text x="133" y="76" data-on="3,5">#3 Upi…</text>
+            </g>
+            <text x="133" y="88" text-anchor="middle" font-size="8.6" class="mono s-ink2" data-on="1-3">amount 1000.0</text><text x="133" y="88" text-anchor="middle" font-size="8.6" class="mono s-ink2" data-on="5">amount 500.0</text>
+          </g>
+          <g font-size="9.4" class="mono" font-weight="700">
+            <rect x="206" y="34" width="146" height="36" rx="6" class="s-soft-blue" style="stroke:var(--blue)"/>
+            <text x="214" y="49" class="s-blue">Payment</text>
+            <text x="214" y="63" class="s-ink2" font-weight="400">fee() 2%   static info()</text>
+            <rect x="206" y="84" width="146" height="30" rx="6" class="s-card2" style="stroke:var(--line)"/>
+            <text x="214" y="98" class="s-ink">CardPayment</text><text x="214" y="109" class="s-ink2" font-weight="400" font-size="8.6">fee() 1.8%</text>
+            <rect x="206" y="120" width="146" height="30" rx="6" class="s-card2" style="stroke:var(--line)"/>
+            <text x="214" y="134" class="s-ink">UpiPayment</text><text x="214" y="145" class="s-ink2" font-weight="400" font-size="8.6">fee() 0   static info()</text>
+            <rect x="206" y="156" width="146" height="26" rx="6" class="s-card2" style="stroke:var(--line)"/>
+            <text x="214" y="173" class="s-ink">WalletPayment</text><text x="300" y="173" class="s-ink2" font-weight="400" font-size="8.6">(none)</text>
+          </g>
+          <rect x="206" y="34" width="146" height="36" rx="6" data-on="1" style="fill:none;stroke:var(--green);stroke-width:2.5"/>
+          <rect x="206" y="84" width="146" height="30" rx="6" data-on="2" style="fill:none;stroke:var(--green);stroke-width:2.5"/>
+          <rect x="206" y="120" width="146" height="30" rx="6" data-on="3" style="fill:none;stroke:var(--green);stroke-width:2.5"/>
+          <rect x="206" y="34" width="146" height="36" rx="6" data-on="5" style="fill:none;stroke:var(--track);stroke-width:2.5"/>
+          <g style="stroke:var(--green);stroke-width:1.8;fill:none">
+            <path d="M170 74 C188 66, 190 54, 204 52" data-on="1"/>
+            <path d="M170 78 C188 82, 190 98, 204 99" data-on="2"/>
+            <path d="M170 82 C188 96, 190 128, 204 134" data-on="3"/>
+          </g>
+          <g data-on="5">
+            <path d="M44 64 C44 40, 150 30, 204 46" style="stroke:var(--track);stroke-width:1.8;fill:none;stroke-dasharray:4 3"/>
+            <text x="12" y="112" font-size="8.8" class="s-acc" font-weight="700">static: chosen by</text>
+            <text x="12" y="124" font-size="8.8" class="s-acc" font-weight="700">the variable's type</text>
+          </g>
+          <g data-on="4">
+            <rect x="10" y="56" width="180" height="56" rx="6" class="s-card2" style="stroke:#D64545"/>
+            <text x="18" y="74" font-size="9.4" class="mono s-red" font-weight="700">fees() ≠ fee()</text>
+            <text x="18" y="90" font-size="8.8" class="s-ink2">no parent method named fees()</text>
+            <text x="18" y="104" font-size="8.8" class="s-ink2">→ javac stops; no class file</text>
+          </g>
+          <g data-on="6" font-size="9" class="mono" font-weight="700">
+            <rect x="10" y="48" width="160" height="22" rx="5" class="s-card2"/><text x="18" y="63" class="s-ink">[0] Card → 1.8% ✓</text>
+            <rect x="10" y="76" width="160" height="22" rx="5" class="s-card2"/><text x="18" y="91" class="s-ink">[1] Upi → 0 ✓</text>
+            <rect x="10" y="104" width="160" height="22" rx="5" class="s-card2"/><text x="18" y="119" class="s-ink">[2] Wallet → up → 2%</text>
+            <path d="M170 115 C190 130, 196 100, 204 60" style="stroke:var(--blue);stroke-width:1.6;fill:none;stroke-dasharray:3 3"/>
+          </g>
+          <g font-size="9.6" class="s-ink2" text-anchor="middle">
+            <text x="180" y="204" data-on="1">Object's class is Payment: use Payment.fee().</text>
+            <text x="180" y="204" data-on="2">Object's class is CardPayment: its fee() wins.</text>
+            <text x="180" y="204" data-on="3">Variable type is ignored for instance methods.</text>
+            <text x="180" y="204" data-on="4">Checked by the compiler, before any object exists.</text>
+            <text x="180" y="204" data-on="5">Static calls are fixed at compile time.</text>
+            <text x="180" y="204" data-on="6">Not found in the class? The JVM walks up.</text>
+          </g>
+          <text x="354" y="246" text-anchor="end" class="s-wm">myphatshala.com</text>
+        </svg>
+        <ol class="caps" hidden>
+          <li>The call <code>p.fee()</code> follows <code>p</code> to the object, the object to its class (Payment), and runs that class's <code>fee()</code>.</li>
+          <li>Same variable type, but now the object's class is CardPayment, which has its own <code>fee()</code>. The JVM uses it.</li>
+          <li>For UpiPayment the search also stops at the object's own class. The <b>variable's</b> declared type doesn't matter for instance methods.</li>
+          <li><code>@Override</code> is a compile-time check. A misspelt name never reaches the JVM.</li>
+          <li><code>static</code> methods belong to classes, not objects. javac decides from the variable's type (Payment) and the object is never consulted. That's hiding, not overriding.</li>
+          <li>For each element the JVM starts at the object's class. WalletPayment has no <code>fee()</code>, so the search moves up to Payment's.</li>
+        </ol>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ======================= PART 6: REAL-WORLD USE ======================= -->
+<section class="part" id="real-world">
+  <span class="part-label"><b>6</b> Real-world use</span>
+  <h2>Overriding in real systems</h2>
+  <p>Overriding is how frameworks let your code plug in: they call a method, and your class's version runs.</p>
+  <!--ANIM2-->
+  <h3 id="animated-example">Watch it with an example: month-end interest at a bank</h3>
+  <p class="anim-intro">One month-end job calls <code>a.interest()</code> on every account. Savings and fixed deposits override the method; a current account doesn't. Watch which version runs for each object.</p>
+  <div class="anim anim--one" data-frames="6" data-delay="4600">
+    <div class="anim__title">One call, the account's own interest() <span>6 steps</span></div>
+    <div class="anim__views">
+      <div class="view view--story">
+        <span class="view__tag">Animated example</span>
+        <svg viewBox="0 0 360 230" role="img" aria-label="method overriding for bank interest">
+          <rect x="6" y="14" width="348" height="30" rx="8" class="s-board" style="stroke:board;stroke-width:1.5"/>
+          <text data-on="1" x="14" y="34" font-size="10.5" class="s-chalk mono">Account a = new Savings(100000);</text>
+          <text data-on="2" x="14" y="34" font-size="10.5" class="s-chalk mono">a.interest();</text>
+          <text data-on="3" x="14" y="34" font-size="10.5" class="s-chalk mono">a = new FixedDeposit(100000);</text>
+          <text data-on="4" x="14" y="34" font-size="10.5" class="s-chalk mono">a = new Current(100000);</text>
+          <text data-on="5" x="14" y="34" font-size="10.5" class="s-chalk mono">@Override double intrest() {…}</text>
+          <text data-on="6" x="14" y="34" font-size="10.5" class="s-chalk mono">total += a.interest(); // each</text>
+          <rect x="10" y="62" width="118" height="30" rx="8" class="s-soft-blue" style="stroke:var(--blue);stroke-width:1.5"/>
+          <text x="18" y="81" font-size="10" font-weight="700" class="s-blue mono">a : Account</text>
+          <text data-on="1" x="18" y="108" font-size="9.5" class="s-ink2 mono">→ Savings</text>
+          <text data-on="2" x="18" y="108" font-size="9.5" class="s-ink2 mono">→ Savings</text>
+          <text data-on="3" x="18" y="108" font-size="9.5" class="s-ink2 mono">→ FixedDeposit</text>
+          <text data-on="4" x="18" y="108" font-size="9.5" class="s-ink2 mono">→ Current</text>
+          <text data-on="6" x="18" y="108" font-size="9.5" class="s-ink2 mono">→ each account</text>
+          <rect x="176" y="58" width="176" height="28" rx="8" class="s-card2" style="stroke:var(--line);stroke-width:1.5"/>
+          <text x="184" y="76" font-size="10" font-weight="700" class="s-ink mono">Account</text>
+          <text x="344" y="76" font-size="9" text-anchor="end" class="s-ink2">interest() → 0</text>
+          <rect x="176" y="92" width="176" height="28" rx="8" class="s-card2" style="stroke:var(--line);stroke-width:1.5"/>
+          <text x="184" y="110" font-size="10" font-weight="700" class="s-ink mono">Savings</text>
+          <text x="344" y="110" font-size="9" text-anchor="end" class="s-ink2">3.5% of balance</text>
+          <rect x="176" y="126" width="176" height="28" rx="8" class="s-card2" style="stroke:var(--line);stroke-width:1.5"/>
+          <text x="184" y="144" font-size="10" font-weight="700" class="s-ink mono">FixedDeposit</text>
+          <text x="344" y="144" font-size="9" text-anchor="end" class="s-ink2">7% of balance</text>
+          <rect x="176" y="160" width="176" height="28" rx="8" class="s-card2" style="stroke:var(--line);stroke-width:1.5"/>
+          <text x="184" y="178" font-size="10" font-weight="700" class="s-ink mono">Current</text>
+          <text x="344" y="178" font-size="9" text-anchor="end" class="s-ink2">(no override)</text>
+          <g data-on="2"><rect x="176" y="92" width="176" height="28" rx="8" class="" style="stroke:var(--green);stroke-width:2.5;fill:none"/></g>
+          <g data-on="3"><rect x="176" y="126" width="176" height="28" rx="8" class="" style="stroke:var(--green);stroke-width:2.5;fill:none"/></g>
+          <g data-on="4"><rect x="176" y="160" width="176" height="28" rx="8" class="" style="stroke:var(--track);stroke-width:2.5;fill:none"/></g>
+          <g data-on="4"><rect x="176" y="58" width="176" height="28" rx="8" class="" style="stroke:var(--green);stroke-width:2.5;fill:none"/></g>
+          <g data-on="2"><path d="M128 77 L174 104" style="stroke:var(--green);stroke-width:2;fill:none"/><path d="M169.4 96.1 L174 104 L164.8 103.8" style="stroke:var(--green);stroke-width:2;fill:none;stroke-linecap:round;stroke-linejoin:round"/></g>
+          <g data-on="3"><path d="M128 77 L174 138" style="stroke:var(--green);stroke-width:2;fill:none"/><path d="M172.8 128.9 L174 138 L165.6 134.3" style="stroke:var(--green);stroke-width:2;fill:none;stroke-linecap:round;stroke-linejoin:round"/></g>
+          <g data-on="4"><path d="M128 77 L174 172" style="stroke:var(--track);stroke-width:2;fill:none"/><path d="M174.6 162.8 L174 172 L166.5 166.8" style="stroke:var(--track);stroke-width:2;fill:none;stroke-linecap:round;stroke-linejoin:round"/></g>
+          <g data-on="4"><path d="M170 168 L170 76" style="stroke:var(--green);stroke-width:2;fill:none;stroke-dasharray:5 4"/><path d="M165.5 84.0 L170 76 L174.5 84.0" style="stroke:var(--green);stroke-width:2;fill:none;stroke-linecap:round;stroke-linejoin:round"/></g>
+          <text data-on="2" x="10" y="134" font-size="13" font-weight="700" class="s-green mono">3500.0</text>
+          <text data-on="3" x="10" y="134" font-size="13" font-weight="700" class="s-green mono">7000.0</text>
+          <text data-on="4" x="10" y="134" font-size="13" font-weight="700" class="s-green mono">0.0</text>
+          <text data-on="4" x="10" y="152" font-size="9.5" class="s-ink2">inherited from Account</text>
+          <g data-on="5">
+            <text x="10" y="128" font-size="9.5" class="s-red mono">error: method does</text>
+            <text x="10" y="141.775" font-size="9.5" class="s-red mono">not override or</text>
+            <text x="10" y="155.55" font-size="9.5" class="s-red mono">implement a method</text>
+            <text x="10" y="169.325" font-size="9.5" class="s-red mono">from a supertype</text>
+          </g>
+          <g data-on="6">
+            <text x="10" y="128" font-size="11" font-weight="700" class="s-green mono">3500 + 7000 + 0</text>
+            <text x="10" y="143.95" font-size="11" font-weight="700" class="s-green mono">= 10500.0</text>
+          </g>
+          <text data-on="1" x="180" y="212" font-size="10" text-anchor="middle" class="s-ink2">The variable's type is Account; the object is Savings.</text>
+          <text data-on="2" x="180" y="212" font-size="10" text-anchor="middle" class="s-ink2">Savings overrides interest(): 100000 × 3.5 / 100.</text>
+          <text data-on="3" x="180" y="212" font-size="10" text-anchor="middle" class="s-ink2">Same call, new object: FixedDeposit's version.</text>
+          <text data-on="4" x="180" y="212" font-size="10" text-anchor="middle" class="s-ink2">Current has no override, so the JVM walks up.</text>
+          <text data-on="5" x="180" y="212" font-size="10" text-anchor="middle" class="s-ink2">A typo with @Override never reaches the bank.</text>
+          <text data-on="6" x="180" y="212" font-size="10" text-anchor="middle" class="s-ink2">One loop pays every account the right interest.</text>
+          <text x="354" y="225" text-anchor="end" class="s-wm">myphatshala.com</text>
+        </svg>
+        <ol class="caps" hidden>
+          <li><b>Setup:</b> the month-end job holds every account in a variable of type <code>Account</code>. Here it holds a Savings account with Rs 1,00,000.</li>
+          <li><b>Override runs:</b> <code>a.interest()</code> runs Savings' version, chosen by the object's class: 1,00,000 × 3.5 / 100 = 3,500.</li>
+          <li><b>Another object:</b> the same variable now holds a FixedDeposit. The same call runs FixedDeposit's override: 7,000.</li>
+          <li><b>No override:</b> Current doesn't declare <code>interest()</code>, so the JVM searches up to Account and uses its default of 0.</li>
+          <li><b>@Override catches typos:</b> a misspelt <code>intrest()</code> would silently be a new method and customers would get Account's 0%. With <code>@Override</code>, javac refuses to compile it.</li>
+          <li><b>The payoff:</b> one loop adds 3,500 + 7,000 + 0. Adding a senior-citizen account later means one new class with its own override; the job doesn't change.</li>
+        </ol>
+      </div>
+    </div>
+  </div>
+  <!--/ANIM2-->
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="16" y="16" width="88" height="58" rx="6" class="s-board"/><g font-size="7.6" class="mono" style="fill:#9FD3B8"><text x="22" y="34">@Override</text><text x="22" y="48">toString() {</text><text x="28" y="62" style="fill:#F5C77E">"Order#812 Rs 499"</text></g></svg></div>
+    <div><h4>1. toString, equals and hashCode</h4><p>Almost every domain class overrides <code>toString()</code> for readable logs, and <code>equals()</code>/<code>hashCode()</code> so collections compare by value (Lesson 10.3).</p>
+      <div class="uc-flow"><span>log.info(order)</span><i>→</i><span class="java">order.toString()</span><i>→</i><span>Order#812 Rs 499</span></div></div>
+  </div>
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="14" y="20" width="40" height="50" rx="6" class="s-soft-blue"/><rect x="66" y="20" width="40" height="50" rx="6" class="s-soft-acc"/><text x="34" y="48" text-anchor="middle" font-size="8" class="mono s-blue">UPI</text><text x="86" y="48" text-anchor="middle" font-size="8" class="mono s-acc">Card</text></svg></div>
+    <div><h4>2. Payment and pricing rules</h4><p>Checkout code calls <code>method.fee(amount)</code> or <code>offer.discount(cart)</code>. Each payment method or offer class overrides the calculation; checkout never changes when a new one is added.</p>
+      <div class="uc-flow"><span>Checkout</span><i>→</i><span class="java">payment.fee()</span><i>→</i><span>right fee per method</span></div></div>
+  </div>
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="14" y="16" width="92" height="58" rx="6" class="s-card2"/><g font-size="7.6" class="mono s-ink2"><text x="20" y="32">class Worker extends</text><text x="20" y="44">  Thread {</text><text x="20" y="58" class="s-acc">  run() { … }</text><text x="20" y="70">}</text></g></svg></div>
+    <div><h4>3. Thread's run() and other callbacks</h4><p>Extending <code>Thread</code> and overriding <code>run()</code> is the classic way to give a thread its job (Module 12). Many libraries work like this: they call a method you override.</p>
+      <div class="uc-flow"><span>thread.start()</span><i>→</i><span class="java">your run()</span><i>→</i><span>work on a new thread</span></div></div>
+  </div>
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="20" y="14" width="80" height="22" rx="4" class="s-soft-green"/><rect x="20" y="44" width="80" height="22" rx="4" class="s-card2"/><text x="60" y="29" text-anchor="middle" font-size="8" class="mono s-green">real SMS sender</text><text x="60" y="59" text-anchor="middle" font-size="8" class="mono s-ink2">FakeSender (test)</text></svg></div>
+    <div><h4>4. Test doubles</h4><p>In tests, a fake class extends the real SMS or email sender and overrides <code>send()</code> to record the message instead of contacting a gateway. The code under test can't tell the difference.</p>
+      <div class="uc-flow"><span>OrderService</span><i>→</i><span class="java">sender.send()</span><i>→</i><span>fake records it</span></div></div>
+  </div>
+  <p class="muted">Examples are simplified. Many modern codebases implement interfaces (Lesson 7.7) rather than extend classes for these plug-in points, but the dispatch mechanism is the same.</p>
+</section>
+
+<div class="ad-slot" data-slot="mid"></div>
+
+<!-- ======================= PART 7: RUN THE CODE ======================= -->
+<section class="part" id="run">
+  <span class="part-label"><b>7</b> Run the code</span>
+  <h2>Fees, the overriding way</h2>
+  <div class="code" data-lang="java" data-file="Main.java"><pre><code>class Payment {
+    protected final double amount;
+
+    Payment(double amount) {
+        this.amount = amount;
+    }
+
+    double fee() {
+        return amount * 0.02;
+    }
+}
+
+class CardPayment extends Payment {
+    CardPayment(double amount) { super(amount); }
+
+    @Override
+    double fee() {
+        return amount * 0.018;
+    }
+}
+
+class UpiPayment extends Payment {
+    UpiPayment(double amount) { super(amount); }
+
+    @Override
+    double fee() {
+        return 0;
+    }
+}
+
+class WalletPayment extends Payment {
+    WalletPayment(double amount) { super(amount); }
+}
+
+public class Main {
+    public static void main(String[] args) {
+        Payment[] payments = {
+            new CardPayment(1000), new UpiPayment(1000), new WalletPayment(1000)
+        };
+        for (Payment p : payments) {
+            System.out.println(p.getClass().getSimpleName() + " fee: Rs " + p.fee());
+        }
+    }
+}</code></pre><div class="output">CardPayment fee: Rs 18.0
+UpiPayment fee: Rs 0.0
+WalletPayment fee: Rs 20.0</div></div>
+  <ul class="anno">
+    <li><code>double fee()</code> in Payment<span>The default rule; WalletPayment inherits it unchanged.</span></li>
+    <li><code>@Override double fee()</code><span>Same signature and return type; javac confirms a parent method exists.</span></li>
+    <li><code>Payment p</code><span>The loop only knows "a Payment". The object decides which <code>fee()</code> runs.</span></li>
+    <li><code>getClass().getSimpleName()</code><span>Shows the object's real class at run time.</span></li>
+  </ul>
+  <div class="runner">
+    <script type="application/json">{
+      "lang": "java", "file": "Main.java",
+      "tasks": [
+        { "label": "1 · Fees per payment", "hint": "Press <b>Run</b>. Then add <code>class NetBanking extends Payment</code> with a flat Rs 10 fee and add it to the array. Did you change any existing class?",
+          "code": "class Payment {\n    protected final double amount;\n\n    Payment(double amount) {\n        this.amount = amount;\n    }\n\n    double fee() {\n        return amount * 0.02;\n    }\n}\n\nclass CardPayment extends Payment {\n    CardPayment(double amount) { super(amount); }\n\n    @Override\n    double fee() {\n        return amount * 0.018;\n    }\n}\n\nclass UpiPayment extends Payment {\n    UpiPayment(double amount) { super(amount); }\n\n    @Override\n    double fee() {\n        return 0;\n    }\n}\n\nclass WalletPayment extends Payment {\n    WalletPayment(double amount) { super(amount); }\n}\n\npublic class Main {\n    public static void main(String[] args) {\n        Payment[] payments = {\n            new CardPayment(1000), new UpiPayment(1000), new WalletPayment(1000)\n        };\n        for (Payment p : payments) {\n            System.out.println(p.getClass().getSimpleName() + \" fee: Rs \" + p.fee());\n        }\n    }\n}\n" },
+        { "label": "2 · Predict: static hiding", "hint": "<b>Predict first:</b> <code>label()</code> is static, <code>rate()</code> is not. Which version does each call on <code>t</code> use?",
+          "code": "class Tax {\n    static String label() { return \"Tax\"; }\n    double rate() { return 0.18; }\n}\n\nclass ExportTax extends Tax {\n    static String label() { return \"Export\"; }\n    @Override\n    double rate() { return 0.0; }\n}\n\npublic class Main {\n    public static void main(String[] args) {\n        Tax t = new ExportTax();\n        System.out.println(t.label() + \" \" + t.rate());\n        System.out.println(ExportTax.label());\n    }\n}\n" },
+        { "label": "3 · Predict: equals overload trap", "hint": "<b>Predict first:</b> <code>equals(Account)</code> doesn't override <code>equals(Object)</code>. Which call uses it? Then change the parameter to <code>Object</code>, cast inside, and add <code>@Override</code>.",
+          "code": "class Account {\n    String no;\n    Account(String no) { this.no = no; }\n\n    public boolean equals(Account other) {\n        return no.equals(other.no);\n    }\n}\n\npublic class Main {\n    public static void main(String[] args) {\n        Account a = new Account(\"SB-1\");\n        Account b = new Account(\"SB-1\");\n        Object o = b;\n        System.out.println(a.equals(b));\n        System.out.println(a.equals(o));\n    }\n}\n" },
+        { "label": "4 · Predict the crash", "hint": "<b>Predict first:</b> the override throws an <b>unchecked</b> exception, which the rules allow. Which line crashes? Fix it by returning the base fee when the amount is too small.",
+          "code": "class Payment {\n    double amount;\n    Payment(double amount) { this.amount = amount; }\n    double fee() { return amount * 0.02; }\n}\n\nclass InternationalPayment extends Payment {\n    InternationalPayment(double amount) { super(amount); }\n\n    @Override\n    double fee() {\n        if (amount < 100) {\n            throw new IllegalStateException(\"Minimum international amount is Rs 100\");\n        }\n        return amount * 0.035;\n    }\n}\n\npublic class Main {\n    public static void main(String[] args) {\n        Payment[] list = { new InternationalPayment(5000), new InternationalPayment(50) };\n        for (Payment p : list) {\n            System.out.println(\"Fee: \" + p.fee());\n        }\n    }\n}\n", "_expect": "exception" },
+        { "label": "5 · Spot the error: weaker access", "hint": "The parent's method is <code>public</code>, so the override can't be package-private. Add <code>public</code> to CardPayment's <code>fee()</code>.",
+          "code": "class Payment {\n    public double fee() { return 20; }\n}\n\nclass CardPayment extends Payment {\n    @Override\n    double fee() { return 18; }\n}\n\npublic class Main {\n    public static void main(String[] args) {\n        System.out.println(new CardPayment().fee());\n    }\n}\n", "_expect": "compile-error" },
+        { "label": "6 · Spot the error: final method", "hint": "<code>final</code> means children may not override this method (Lesson 7.8). Remove the override, or remove <code>final</code> if the design allows it.",
+          "code": "class Account {\n    final double interestRate() { return 3.5; }\n}\n\nclass PremiumAccount extends Account {\n    @Override\n    double interestRate() { return 6.0; }\n}\n\npublic class Main {\n    public static void main(String[] args) {\n        System.out.println(new PremiumAccount().interestRate());\n    }\n}\n", "_expect": "compile-error" }
+      ]
+    }</script>
+  </div>
+</section>
+
+<!-- ======================= PART 8: LINE BY LINE ======================= -->
+<section class="part" id="tracer">
+  <span class="part-label"><b>8</b> Line by line</span>
+  <h2>One variable, two objects, two fee() versions</h2>
+  <p>Watch the frame label: the same line <code>p.fee()</code> runs <code>Payment.fee</code> first and <code>Upi.fee</code> the second time.</p>
+  <div class="tracer">
+    <script type="application/json">{
+      "lang": "java",
+      "code": [
+        "class Payment {",
+        "    double fee() {",
+        "        return 20;",
+        "    }",
+        "}",
+        "",
+        "class Upi extends Payment {",
+        "    @Override",
+        "    double fee() {",
+        "        return 0;",
+        "    }",
+        "}",
+        "",
+        "public class Main {",
+        "    public static void main(String[] args) {",
+        "        Payment p = new Payment();",
+        "        System.out.println(p.fee());",
+        "        p = new Upi();",
+        "        System.out.println(p.fee());",
+        "    }",
+        "}"
+      ],
+      "steps": [
+        { "line": 16, "phase": "Create", "note": "<code>p</code> is declared as Payment and refers to a Payment object #1.", "stack": [{ "frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["p", "→ #1 Payment"]] }], "heap": ["String[0] (empty array)", "#1 Payment {}"], "newVar": "p" },
+        { "line": 3, "phase": "Dispatch", "note": "The JVM checks #1's class: Payment. It runs <code>Payment.fee()</code>.", "stack": [{ "frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["p", "→ #1 Payment"]] }, { "frame": "Payment.fee()", "vars": [["this", "→ #1 Payment"]] }], "heap": ["String[0] (empty array)", "#1 Payment {}"] },
+        { "line": 17, "phase": "Print", "note": "20.0 comes back (the int literal 20 was widened to double) and is printed.", "stack": [{ "frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["p", "→ #1 Payment"]] }], "heap": ["String[0] (empty array)", "#1 Payment {}"], "out": "20.0\n" },
+        { "line": 18, "phase": "Reassign", "note": "The <b>same variable</b> (still type Payment) now refers to a new Upi object #2. #1 has no references left.", "stack": [{ "frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["p", "→ #2 Upi"]] }], "heap": ["String[0] (empty array)", "#2 Upi {}"] },
+        { "line": 10, "phase": "Dispatch", "note": "Same source line, but #2's class is Upi, which overrides <code>fee()</code>. So <code>Upi.fee()</code> runs.", "stack": [{ "frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["p", "→ #2 Upi"]] }, { "frame": "Upi.fee()", "vars": [["this", "→ #2 Upi"]] }], "heap": ["String[0] (empty array)", "#2 Upi {}"] },
+        { "line": 19, "phase": "Print", "note": "0.0 is printed. The variable's type never changed; the object did.", "stack": [{ "frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["p", "→ #2 Upi"]] }], "heap": ["String[0] (empty array)", "#2 Upi {}"], "out": "0.0\n" },
+        { "line": 20, "phase": "Program ends", "note": "main returns and the program ends.", "stack": [], "heap": [] }
+      ]
+    }</script>
+  </div>
+
+<h3 id="worked">Worked examples: real problems, solved and traced in memory</h3>
+  <p class="wx-intro">Three business problems solved with overriding. Run each solution, then step through it: the frame label shows which class's version of a method is actually running, so you can watch the JVM pick the override at run time.</p>
+  <article class="wx">
+    <div class="wx__head"><span class="wx__num">Example 1</span><span class="wx__tag">Fintech · checkout</span></div>
+    <h4>One loop, the right fee for every payment</h4>
+    <div class="wx__problem"><p class="wx__label">Problem statement</p><p>A checkout page lists the convenience fee for each payment option on a Rs 1,000 order. Card charges 1.8%, UPI charges nothing, and any other method uses the default 2%.</p></div>
+    <div class="prob__io"><div><small>Input</small><pre>order amount Rs 1000 (a field); options: Card, UPI, Wallet</pre></div><div><small>Expected output</small><pre>18.0
+0.0
+20.0</pre></div></div>
+    <div class="wx__approach"><p class="wx__label">Approach</p><ol><li>Put the default rule in <code>Payment.fee()</code>.</li><li><code>Card</code> and <code>Upi</code> override <code>fee()</code>; <code>Wallet</code> doesn't.</li><li>Loop over a <code>Payment[]</code> and call <code>fee()</code>; watch which version's frame appears.</li></ol></div>
+    <p class="wx__label">Solution: run it live</p>
+    <div class="runner">
+    <script type="application/json">{"lang": "java", "file": "Main.java", "tasks": [{"label": "Run · One loop, the right fee for every payment", "hint": "Press <b>Run</b>. Then add <code>class NetBanking extends Payment</code> with a flat fee of 10 and put one in the array.", "code": "class Payment {\n    double amount = 1000;\n\n    double fee() {\n        return amount * 0.02;\n    }\n}\n\nclass Card extends Payment {\n    @Override\n    double fee() {\n        return amount * 0.018;\n    }\n}\n\nclass Upi extends Payment {\n    @Override\n    double fee() {\n        return 0;\n    }\n}\n\nclass Wallet extends Payment {\n}\n\npublic class Main {\n    public static void main(String[] args) {\n        Payment[] options = { new Card(), new Upi(), new Wallet() };\n        for (Payment p : options) {\n            System.out.println(p.fee());\n        }\n    }\n}\n"}]}</script>
+    </div>
+    <p class="wx__label">What happens in memory, step by step</p>
+    <p class="wx__how">Recorded from the real JVM: press <b>Next</b> to execute one line at a time. Watch method calls push and pop frames on the stack, and objects (numbered #1, #2 …) appear on the heap.</p>
+    <div class="tracer">
+    <script type="application/json">{"lang": "java", "code": ["class Payment {", "    double amount = 1000;", "", "    double fee() {", "        return amount * 0.02;", "    }", "}", "", "class Card extends Payment {", "    @Override", "    double fee() {", "        return amount * 0.018;", "    }", "}", "", "class Upi extends Payment {", "    @Override", "    double fee() {", "        return 0;", "    }", "}", "", "class Wallet extends Payment {", "}", "", "public class Main {", "    public static void main(String[] args) {", "        Payment[] options = { new Card(), new Upi(), new Wallet() };", "        for (Payment p : options) {", "            System.out.println(p.fee());", "        }", "    }", "}"], "steps": [{"line": 28, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "new Card()", "vars": [["this", "→ #1 Card"]]}], "heap": ["<b>#1</b> Card {amount=0.0}", "<b>#2</b> String[0] (args, empty)"], "newVar": "this", "phase": "new Card", "note": "Object #1 (a Card) is allocated with amount=0.0. Its javac-supplied constructor frame is pushed."}, {"line": 9, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "new Card()", "vars": [["this", "→ #1 Card"]]}, {"frame": "new Payment()", "vars": [["this", "→ #1 Card"]]}], "heap": ["<b>#1</b> Card {amount=0.0}", "<b>#2</b> String[0] (args, empty)"], "newVar": "this", "phase": "Parent constructor", "note": "The hidden <code>super()</code> pushes Payment's constructor frame for the same object."}, {"line": 1, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "new Card()", "vars": [["this", "→ #1 Card"]]}, {"frame": "new Payment()", "vars": [["this", "→ #1 Card"]]}], "heap": ["<b>#1</b> Card {amount=0.0}", "<b>#2</b> String[0] (args, empty)"], "phase": "Object first", "note": "Payment's constructor first runs Object's constructor."}, {"line": 2, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "new Card()", "vars": [["this", "→ #1 Card"]]}], "heap": ["<b>#1</b> Card {amount=1000.0}", "<b>#2</b> String[0] (args, empty)"], "phase": "Field initializer", "note": "<code>amount = 1000</code> is declared in Payment, so it runs inside Payment's constructor. #1's amount becomes 1000.0."}, {"line": 9, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}], "heap": ["<b>#2</b> String[0] (args, empty)"], "phase": "Card ready", "note": "Both constructor frames are popped."}, {"line": 28, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "new Upi()", "vars": [["this", "→ #3 Upi"]]}], "heap": ["<b>#2</b> String[0] (args, empty)", "<b>#3</b> Upi {amount=0.0}"], "newVar": "this", "phase": "new Upi", "note": "Object #3, a Upi, is allocated. (#2 is the args array.)"}, {"line": 16, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "new Upi()", "vars": [["this", "→ #3 Upi"]]}, {"frame": "new Payment()", "vars": [["this", "→ #3 Upi"]]}], "heap": ["<b>#2</b> String[0] (args, empty)", "<b>#3</b> Upi {amount=0.0}"], "newVar": "this", "phase": "Parent constructor", "note": "Payment's constructor runs for #3."}, {"line": 1, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "new Upi()", "vars": [["this", "→ #3 Upi"]]}, {"frame": "new Payment()", "vars": [["this", "→ #3 Upi"]]}], "heap": ["<b>#2</b> String[0] (args, empty)", "<b>#3</b> Upi {amount=0.0}"], "phase": "Object first", "note": "Object's constructor."}, {"line": 2, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "new Upi()", "vars": [["this", "→ #3 Upi"]]}], "heap": ["<b>#2</b> String[0] (args, empty)", "<b>#3</b> Upi {amount=1000.0}"], "phase": "Field initializer", "note": "#3's amount = 1000.0."}, {"line": 16, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}], "heap": ["<b>#2</b> String[0] (args, empty)"], "phase": "Upi ready", "note": "Frames popped."}, {"line": 28, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "new Wallet()", "vars": [["this", "→ #4 Wallet"]]}], "heap": ["<b>#2</b> String[0] (args, empty)", "<b>#4</b> Wallet {amount=0.0}"], "newVar": "this", "phase": "new Wallet", "note": "Object #4, a Wallet."}, {"line": 23, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "new Wallet()", "vars": [["this", "→ #4 Wallet"]]}, {"frame": "new Payment()", "vars": [["this", "→ #4 Wallet"]]}], "heap": ["<b>#2</b> String[0] (args, empty)", "<b>#4</b> Wallet {amount=0.0}"], "newVar": "this", "phase": "Parent constructor", "note": "Payment's constructor runs for #4."}, {"line": 1, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "new Wallet()", "vars": [["this", "→ #4 Wallet"]]}, {"frame": "new Payment()", "vars": [["this", "→ #4 Wallet"]]}], "heap": ["<b>#2</b> String[0] (args, empty)", "<b>#4</b> Wallet {amount=0.0}"], "phase": "Object first", "note": "Object's constructor."}, {"line": 2, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "new Wallet()", "vars": [["this", "→ #4 Wallet"]]}], "heap": ["<b>#2</b> String[0] (args, empty)", "<b>#4</b> Wallet {amount=1000.0}"], "phase": "Field initializer", "note": "#4's amount = 1000.0."}, {"line": 23, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}], "heap": ["<b>#2</b> String[0] (args, empty)"], "phase": "Wallet ready", "note": "Frames popped."}, {"line": 28, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["options", "→ #5 Payment[3]"]]}], "heap": ["<b>#1</b> Card {amount=1000.0}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Upi {amount=1000.0}", "<b>#4</b> Wallet {amount=1000.0}", "<b>#5</b> Payment[3] {→#1, →#3, →#4}"], "newVar": "options", "phase": "Array", "note": "Array #5 of type Payment[] holds references to three objects of three different classes."}, {"line": 29, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["options", "→ #5 Payment[3]"], ["p", "→ #1 Card"]]}], "heap": ["<b>#1</b> Card {amount=1000.0}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Upi {amount=1000.0}", "<b>#4</b> Wallet {amount=1000.0}", "<b>#5</b> Payment[3] {→#1, →#3, →#4}"], "newVar": "p", "phase": "First option", "note": "<code>p</code> (type Payment) → #1, a Card."}, {"line": 30, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["options", "→ #5 Payment[3]"], ["p", "→ #1 Card"]]}, {"frame": "Card.fee()", "vars": [["this", "→ #1 Card"]]}], "heap": ["<b>#1</b> Card {amount=1000.0}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Upi {amount=1000.0}", "<b>#4</b> Wallet {amount=1000.0}", "<b>#5</b> Payment[3] {→#1, →#3, →#4}"], "newVar": "this", "phase": "Dispatch", "note": "The JVM checks #1's class, Card, and finds an override. The frame is <code>Card.fee</code>."}, {"line": 12, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["options", "→ #5 Payment[3]"], ["p", "→ #1 Card"]]}], "heap": ["<b>#1</b> Card {amount=1000.0}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Upi {amount=1000.0}", "<b>#4</b> Wallet {amount=1000.0}", "<b>#5</b> Payment[3] {→#1, →#3, →#4}"], "phase": "Return", "note": "1000 × 0.018 = 18.0; the frame is popped."}, {"line": 30, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["options", "→ #5 Payment[3]"]]}], "heap": ["<b>#1</b> Card {amount=1000.0}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Upi {amount=1000.0}", "<b>#4</b> Wallet {amount=1000.0}", "<b>#5</b> Payment[3] {→#1, →#3, →#4}"], "out": "18.0\n", "phase": "Print", "note": "18.0."}, {"line": 29, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["options", "→ #5 Payment[3]"], ["p", "→ #3 Upi"]]}], "heap": ["<b>#1</b> Card {amount=1000.0}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Upi {amount=1000.0}", "<b>#4</b> Wallet {amount=1000.0}", "<b>#5</b> Payment[3] {→#1, →#3, →#4}"], "newVar": "p", "phase": "Second option", "note": "p → #3, a Upi."}, {"line": 30, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["options", "→ #5 Payment[3]"], ["p", "→ #3 Upi"]]}, {"frame": "Upi.fee()", "vars": [["this", "→ #3 Upi"]]}], "heap": ["<b>#1</b> Card {amount=1000.0}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Upi {amount=1000.0}", "<b>#4</b> Wallet {amount=1000.0}", "<b>#5</b> Payment[3] {→#1, →#3, →#4}"], "newVar": "this", "phase": "Dispatch", "note": "Same line of code, but now <code>Upi.fee</code> is pushed."}, {"line": 19, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["options", "→ #5 Payment[3]"], ["p", "→ #3 Upi"]]}], "heap": ["<b>#1</b> Card {amount=1000.0}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Upi {amount=1000.0}", "<b>#4</b> Wallet {amount=1000.0}", "<b>#5</b> Payment[3] {→#1, →#3, →#4}"], "phase": "Return", "note": "0 (widened to 0.0)."}, {"line": 30, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["options", "→ #5 Payment[3]"]]}], "heap": ["<b>#1</b> Card {amount=1000.0}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Upi {amount=1000.0}", "<b>#4</b> Wallet {amount=1000.0}", "<b>#5</b> Payment[3] {→#1, →#3, →#4}"], "out": "0.0\n", "phase": "Print", "note": "0.0."}, {"line": 29, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["options", "→ #5 Payment[3]"], ["p", "→ #4 Wallet"]]}], "heap": ["<b>#1</b> Card {amount=1000.0}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Upi {amount=1000.0}", "<b>#4</b> Wallet {amount=1000.0}", "<b>#5</b> Payment[3] {→#1, →#3, →#4}"], "newVar": "p", "phase": "Third option", "note": "p → #4, a Wallet."}, {"line": 30, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["options", "→ #5 Payment[3]"], ["p", "→ #4 Wallet"]]}, {"frame": "Payment.fee()", "vars": [["this", "→ #4 Wallet"]]}], "heap": ["<b>#1</b> Card {amount=1000.0}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Upi {amount=1000.0}", "<b>#4</b> Wallet {amount=1000.0}", "<b>#5</b> Payment[3] {→#1, →#3, →#4}"], "newVar": "this", "phase": "Dispatch", "note": "Wallet has no <code>fee()</code>, so the JVM walks up to Payment's. The frame is <code>Payment.fee</code> with <code>this</code> → the Wallet."}, {"line": 5, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["options", "→ #5 Payment[3]"], ["p", "→ #4 Wallet"]]}], "heap": ["<b>#1</b> Card {amount=1000.0}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Upi {amount=1000.0}", "<b>#4</b> Wallet {amount=1000.0}", "<b>#5</b> Payment[3] {→#1, →#3, →#4}"], "phase": "Return", "note": "1000 × 0.02 = 20.0."}, {"line": 30, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["options", "→ #5 Payment[3]"]]}], "heap": ["<b>#1</b> Card {amount=1000.0}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Upi {amount=1000.0}", "<b>#4</b> Wallet {amount=1000.0}", "<b>#5</b> Payment[3] {→#1, →#3, →#4}"], "out": "20.0\n", "phase": "Print", "note": "20.0. One loop, three classes, no if-else."}, {"line": 29, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["options", "→ #5 Payment[3]"]]}], "heap": ["<b>#1</b> Card {amount=1000.0}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Upi {amount=1000.0}", "<b>#4</b> Wallet {amount=1000.0}", "<b>#5</b> Payment[3] {→#1, →#3, →#4}"], "phase": "Loop ends", "note": "No more elements."}, {"line": 32, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["options", "→ #5 Payment[3]"]]}], "heap": ["<b>#1</b> Card {amount=1000.0}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Upi {amount=1000.0}", "<b>#4</b> Wallet {amount=1000.0}", "<b>#5</b> Payment[3] {→#1, →#3, →#4}"], "phase": "main finishes", "note": "main reaches its closing brace."}, {"line": 32, "phase": "Program ends", "note": "main returns, its frame is popped and the program ends.", "stack": [], "heap": []}]}</script>
+    </div>
+  </article>
+  <article class="wx">
+    <div class="wx__head"><span class="wx__num">Example 2</span><span class="wx__tag">Banking · savings rules</span></div>
+    <h4>A withdraw override that adds a minimum-balance rule</h4>
+    <div class="wx__problem"><p class="wx__label">Problem statement</p><p>Every account allows a withdrawal if the balance covers it. A savings account must also keep Rs 1,000 in the account. Override <code>withdraw</code> in <code>Savings</code> so it checks its extra rule and then reuses the parent's logic.</p></div>
+    <div class="prob__io"><div><small>Input</small><pre>Savings balance 5000; withdraw 4500, then 3000</pre></div><div><small>Expected output</small><pre>false
+true
+2000.0</pre></div></div>
+    <div class="wx__approach"><p class="wx__label">Approach</p><ol><li><code>Account.withdraw</code> checks the balance and debits.</li><li><code>Savings.withdraw</code> first checks the minimum-balance rule.</li><li>If that passes, it calls <code>super.withdraw(amount)</code> instead of repeating the debit code.</li></ol></div>
+    <p class="wx__label">Solution: run it live</p>
+    <div class="runner">
+    <script type="application/json">{"lang": "java", "file": "Main.java", "tasks": [{"label": "Run · A withdraw override that adds a minimum-balance rule", "hint": "Press <b>Run</b>. Then change the second withdrawal to 4000. Which rule refuses it?", "code": "class Account {\n    double balance;\n\n    Account(double balance) {\n        this.balance = balance;\n    }\n\n    boolean withdraw(double amount) {\n        if (amount > balance) return false;\n        balance -= amount;\n        return true;\n    }\n}\n\nclass Savings extends Account {\n    Savings(double balance) { super(balance); }\n\n    @Override\n    boolean withdraw(double amount) {\n        if (balance - amount < 1000) return false;\n        return super.withdraw(amount);\n    }\n}\n\npublic class Main {\n    public static void main(String[] args) {\n        Account acc = new Savings(5000);\n        System.out.println(acc.withdraw(4500));\n        System.out.println(acc.withdraw(3000));\n        System.out.println(acc.balance);\n    }\n}\n"}]}</script>
+    </div>
+    <p class="wx__label">What happens in memory, step by step</p>
+    <p class="wx__how">Recorded from the real JVM: press <b>Next</b> to execute one line at a time. Watch method calls push and pop frames on the stack, and objects (numbered #1, #2 …) appear on the heap.</p>
+    <div class="tracer">
+    <script type="application/json">{"lang": "java", "code": ["class Account {", "    double balance;", "", "    Account(double balance) {", "        this.balance = balance;", "    }", "", "    boolean withdraw(double amount) {", "        if (amount > balance) return false;", "        balance -= amount;", "        return true;", "    }", "}", "", "class Savings extends Account {", "    Savings(double balance) { super(balance); }", "", "    @Override", "    boolean withdraw(double amount) {", "        if (balance - amount < 1000) return false;", "        return super.withdraw(amount);", "    }", "}", "", "public class Main {", "    public static void main(String[] args) {", "        Account acc = new Savings(5000);", "        System.out.println(acc.withdraw(4500));", "        System.out.println(acc.withdraw(3000));", "        System.out.println(acc.balance);", "    }", "}"], "steps": [{"line": 27, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "new Savings(double balance)", "vars": [["this", "→ #1 Savings"], ["balance", "5000.0"]]}], "heap": ["<b>#1</b> Savings {balance=0.0}", "<b>#2</b> String[0] (args, empty)"], "newVar": "this", "phase": "new Savings", "note": "Object #1 (a Savings) is allocated; Savings' constructor frame is pushed with balance = 5000.0."}, {"line": 16, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "new Savings(double balance)", "vars": [["this", "→ #1 Savings"], ["balance", "5000.0"]]}, {"frame": "new Account(double balance)", "vars": [["this", "→ #1 Savings"], ["balance", "5000.0"]]}], "heap": ["<b>#1</b> Savings {balance=0.0}", "<b>#2</b> String[0] (args, empty)"], "newVar": "this", "phase": "super(balance)", "note": "Account's constructor frame is pushed for the same object."}, {"line": 4, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "new Savings(double balance)", "vars": [["this", "→ #1 Savings"], ["balance", "5000.0"]]}, {"frame": "new Account(double balance)", "vars": [["this", "→ #1 Savings"], ["balance", "5000.0"]]}], "heap": ["<b>#1</b> Savings {balance=0.0}", "<b>#2</b> String[0] (args, empty)"], "phase": "Object first", "note": "Object's constructor runs."}, {"line": 5, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "new Savings(double balance)", "vars": [["this", "→ #1 Savings"], ["balance", "5000.0"]]}, {"frame": "new Account(double balance)", "vars": [["this", "→ #1 Savings"], ["balance", "5000.0"]]}], "heap": ["<b>#1</b> Savings {balance=5000.0}", "<b>#2</b> String[0] (args, empty)"], "phase": "Set balance", "note": "#1's balance = 5000.0."}, {"line": 6, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "new Savings(double balance)", "vars": [["this", "→ #1 Savings"], ["balance", "5000.0"]]}], "heap": ["<b>#1</b> Savings {balance=5000.0}", "<b>#2</b> String[0] (args, empty)"], "phase": "Pop", "note": "Account's constructor ends."}, {"line": 16, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}], "heap": ["<b>#2</b> String[0] (args, empty)"], "phase": "Pop", "note": "Savings' constructor ends."}, {"line": 27, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["acc", "→ #1 Savings"]]}], "heap": ["<b>#1</b> Savings {balance=5000.0}", "<b>#2</b> String[0] (args, empty)"], "newVar": "acc", "phase": "Assign acc", "note": "The variable's type is Account, but the object is a Savings."}, {"line": 28, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["acc", "→ #1 Savings"]]}, {"frame": "Savings.withdraw(double amount)", "vars": [["this", "→ #1 Savings"], ["amount", "4500.0"]]}], "heap": ["<b>#1</b> Savings {balance=5000.0}", "<b>#2</b> String[0] (args, empty)"], "newVar": "this", "phase": "Dispatch", "note": "<code>acc.withdraw(4500)</code> runs <b>Savings</b>' override, because of the object's class."}, {"line": 20, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["acc", "→ #1 Savings"]]}], "heap": ["<b>#1</b> Savings {balance=5000.0}", "<b>#2</b> String[0] (args, empty)"], "phase": "Rule fails", "note": "5000 − 4500 = 500 is below 1000, so it returns false at once. Account's version never runs."}, {"line": 28, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["acc", "→ #1 Savings"]]}], "heap": ["<b>#1</b> Savings {balance=5000.0}", "<b>#2</b> String[0] (args, empty)"], "out": "false\n", "phase": "Print", "note": "false."}, {"line": 29, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["acc", "→ #1 Savings"]]}, {"frame": "Savings.withdraw(double amount)", "vars": [["this", "→ #1 Savings"], ["amount", "3000.0"]]}], "heap": ["<b>#1</b> Savings {balance=5000.0}", "<b>#2</b> String[0] (args, empty)"], "newVar": "this", "phase": "Second try", "note": "Savings' withdraw again, amount = 3000.0."}, {"line": 20, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["acc", "→ #1 Savings"]]}, {"frame": "Savings.withdraw(double amount)", "vars": [["this", "→ #1 Savings"], ["amount", "3000.0"]]}], "heap": ["<b>#1</b> Savings {balance=5000.0}", "<b>#2</b> String[0] (args, empty)"], "phase": "Rule passes", "note": "5000 − 3000 = 2000, not below 1000."}, {"line": 21, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["acc", "→ #1 Savings"]]}, {"frame": "Savings.withdraw(double amount)", "vars": [["this", "→ #1 Savings"], ["amount", "3000.0"]]}, {"frame": "Account.withdraw(double amount)", "vars": [["this", "→ #1 Savings"], ["amount", "3000.0"]]}], "heap": ["<b>#1</b> Savings {balance=5000.0}", "<b>#2</b> String[0] (args, empty)"], "newVar": "this", "phase": "super.withdraw", "note": "Calls Account's version on the same object: a second frame, <code>Account.withdraw</code>."}, {"line": 9, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["acc", "→ #1 Savings"]]}, {"frame": "Savings.withdraw(double amount)", "vars": [["this", "→ #1 Savings"], ["amount", "3000.0"]]}, {"frame": "Account.withdraw(double amount)", "vars": [["this", "→ #1 Savings"], ["amount", "3000.0"]]}], "heap": ["<b>#1</b> Savings {balance=5000.0}", "<b>#2</b> String[0] (args, empty)"], "phase": "Parent's check", "note": "3000 &gt; 5000? No."}, {"line": 10, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["acc", "→ #1 Savings"]]}, {"frame": "Savings.withdraw(double amount)", "vars": [["this", "→ #1 Savings"], ["amount", "3000.0"]]}, {"frame": "Account.withdraw(double amount)", "vars": [["this", "→ #1 Savings"], ["amount", "3000.0"]]}], "heap": ["<b>#1</b> Savings {balance=2000.0}", "<b>#2</b> String[0] (args, empty)"], "phase": "Debit", "note": "balance becomes 2000.0, written by the parent's code."}, {"line": 11, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["acc", "→ #1 Savings"]]}, {"frame": "Savings.withdraw(double amount)", "vars": [["this", "→ #1 Savings"], ["amount", "3000.0"]]}], "heap": ["<b>#1</b> Savings {balance=2000.0}", "<b>#2</b> String[0] (args, empty)"], "phase": "Return true", "note": "Account's frame is popped."}, {"line": 21, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["acc", "→ #1 Savings"]]}], "heap": ["<b>#1</b> Savings {balance=2000.0}", "<b>#2</b> String[0] (args, empty)"], "phase": "Return", "note": "Savings passes the parent's answer back; its frame is popped."}, {"line": 29, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["acc", "→ #1 Savings"]]}], "heap": ["<b>#1</b> Savings {balance=2000.0}", "<b>#2</b> String[0] (args, empty)"], "out": "true\n", "phase": "Print", "note": "true."}, {"line": 30, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["acc", "→ #1 Savings"]]}], "heap": ["<b>#1</b> Savings {balance=2000.0}", "<b>#2</b> String[0] (args, empty)"], "out": "2000.0\n", "phase": "Print balance", "note": "2000.0. The minimum Rs 1,000 was respected."}, {"line": 31, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["acc", "→ #1 Savings"]]}], "heap": ["<b>#1</b> Savings {balance=2000.0}", "<b>#2</b> String[0] (args, empty)"], "phase": "main finishes", "note": "main reaches its closing brace."}, {"line": 31, "phase": "Program ends", "note": "main returns, its frame is popped and the program ends.", "stack": [], "heap": []}]}</script>
+    </div>
+  </article>
+  <article class="wx">
+    <div class="wx__head"><span class="wx__num">Example 3</span><span class="wx__tag">Exports · GST invoices</span></div>
+    <h4>Static label vs overridden rate</h4>
+    <div class="wx__problem"><p class="wx__label">Problem statement</p><p>Domestic invoices charge 18% GST; export invoices are zero-rated. Each class also has a static <code>label()</code>. Through a variable of type <code>Invoice</code> holding an export invoice, which label and which rate do you get?</p></div>
+    <div class="prob__io"><div><small>Input</small><pre>Invoice inv = new ExportInvoice(); amount Rs 50000</pre></div><div><small>Expected output</small><pre>GST invoice, tax 0.0</pre></div></div>
+    <div class="wx__approach"><p class="wx__label">Approach</p><ol><li><code>rate()</code> is an instance method: overridden, chosen by the object.</li><li><code>label()</code> is static: hidden, chosen by the variable's type at compile time.</li><li>Trace both calls and compare their frames: the static call has no <code>this</code>.</li></ol></div>
+    <p class="wx__label">Solution: run it live</p>
+    <div class="runner">
+    <script type="application/json">{"lang": "java", "file": "Main.java", "tasks": [{"label": "Run · Static label vs overridden rate", "hint": "Press <b>Run</b>. Then change the variable's type to <code>ExportInvoice</code>. Which output changes?", "code": "class Invoice {\n    static String label() {\n        return \"GST invoice\";\n    }\n\n    double rate() {\n        return 0.18;\n    }\n}\n\nclass ExportInvoice extends Invoice {\n    static String label() {\n        return \"Export invoice\";\n    }\n\n    @Override\n    double rate() {\n        return 0.0;\n    }\n}\n\npublic class Main {\n    public static void main(String[] args) {\n        Invoice inv = new ExportInvoice();\n        double tax = 50000 * inv.rate();\n        System.out.println(inv.label() + \", tax \" + tax);\n    }\n}\n"}]}</script>
+    </div>
+    <p class="wx__label">What happens in memory, step by step</p>
+    <p class="wx__how">Recorded from the real JVM: press <b>Next</b> to execute one line at a time. Watch method calls push and pop frames on the stack, and objects (numbered #1, #2 …) appear on the heap.</p>
+    <div class="tracer">
+    <script type="application/json">{"lang": "java", "code": ["class Invoice {", "    static String label() {", "        return \"GST invoice\";", "    }", "", "    double rate() {", "        return 0.18;", "    }", "}", "", "class ExportInvoice extends Invoice {", "    static String label() {", "        return \"Export invoice\";", "    }", "", "    @Override", "    double rate() {", "        return 0.0;", "    }", "}", "", "public class Main {", "    public static void main(String[] args) {", "        Invoice inv = new ExportInvoice();", "        double tax = 50000 * inv.rate();", "        System.out.println(inv.label() + \", tax \" + tax);", "    }", "}"], "steps": [{"line": 24, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "new ExportInvoice()", "vars": [["this", "→ #1 ExportInvoice"]]}], "heap": ["<b>#1</b> ExportInvoice {}", "<b>#2</b> String[0] (args, empty)"], "newVar": "this", "phase": "new ExportInvoice", "note": "Object #1 has no fields. Its constructor frame is pushed."}, {"line": 11, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "new ExportInvoice()", "vars": [["this", "→ #1 ExportInvoice"]]}, {"frame": "new Invoice()", "vars": [["this", "→ #1 ExportInvoice"]]}], "heap": ["<b>#1</b> ExportInvoice {}", "<b>#2</b> String[0] (args, empty)"], "newVar": "this", "phase": "Parent constructor", "note": "Invoice's constructor runs first."}, {"line": 1, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "new ExportInvoice()", "vars": [["this", "→ #1 ExportInvoice"]]}], "heap": ["<b>#1</b> ExportInvoice {}", "<b>#2</b> String[0] (args, empty)"], "phase": "Pop", "note": "Invoice's constructor ends."}, {"line": 11, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}], "heap": ["<b>#2</b> String[0] (args, empty)"], "phase": "Pop", "note": "ExportInvoice's constructor ends."}, {"line": 24, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["inv", "→ #1 ExportInvoice"]]}], "heap": ["<b>#1</b> ExportInvoice {}", "<b>#2</b> String[0] (args, empty)"], "newVar": "inv", "phase": "Assign inv", "note": "Variable type Invoice, object ExportInvoice."}, {"line": 25, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["inv", "→ #1 ExportInvoice"]]}, {"frame": "ExportInvoice.rate()", "vars": [["this", "→ #1 ExportInvoice"]]}], "heap": ["<b>#1</b> ExportInvoice {}", "<b>#2</b> String[0] (args, empty)"], "newVar": "this", "phase": "Instance call", "note": "<code>inv.rate()</code> is dispatched on the object: <code>ExportInvoice.rate</code> runs, with <code>this</code> → #1."}, {"line": 18, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["inv", "→ #1 ExportInvoice"]]}], "heap": ["<b>#1</b> ExportInvoice {}", "<b>#2</b> String[0] (args, empty)"], "phase": "Return", "note": "0.0."}, {"line": 25, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["inv", "→ #1 ExportInvoice"], ["tax", "0.0"]]}], "heap": ["<b>#1</b> ExportInvoice {}", "<b>#2</b> String[0] (args, empty)"], "newVar": "tax", "phase": "Tax", "note": "50000 × 0.0 = 0.0."}, {"line": 26, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["inv", "→ #1 ExportInvoice"], ["tax", "0.0"]]}, {"frame": "Invoice.label()", "vars": []}], "heap": ["<b>#1</b> ExportInvoice {}", "<b>#2</b> String[0] (args, empty)"], "phase": "Static call", "note": "<code>inv.label()</code> was fixed by javac as <code>Invoice.label()</code> from the variable's type. Notice the frame has <b>no</b> <code>this</code>: the object isn't involved at all."}, {"line": 3, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["inv", "→ #1 ExportInvoice"], ["tax", "0.0"]]}], "heap": ["<b>#1</b> ExportInvoice {}", "<b>#2</b> String[0] (args, empty)"], "phase": "Return", "note": "\"GST invoice\", not \"Export invoice\"."}, {"line": 26, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["inv", "→ #1 ExportInvoice"], ["tax", "0.0"]]}], "heap": ["<b>#1</b> ExportInvoice {}", "<b>#2</b> String[0] (args, empty)"], "out": "GST invoice, tax 0.0\n", "phase": "Print", "note": "The rate was overridden; the label was only hidden."}, {"line": 27, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["inv", "→ #1 ExportInvoice"], ["tax", "0.0"]]}], "heap": ["<b>#1</b> ExportInvoice {}", "<b>#2</b> String[0] (args, empty)"], "phase": "main finishes", "note": "main reaches its closing brace."}, {"line": 27, "phase": "Program ends", "note": "main returns, its frame is popped and the program ends.", "stack": [], "heap": []}]}</script>
+    </div>
+  </article>
+
+</section>
+
+<!-- ======================= PART 9: QUIZ AND REVISION ======================= -->
+<section class="part" id="quiz">
+  <span class="part-label"><b>9</b> Quiz and revision</span>
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <script type="application/json">[
+      { "q": "Which must be the same for a method to override its parent's?", "options": ["Only the name", "Name and parameter types", "Name and return type only", "Name, parameters and access modifier exactly"], "answer": 1, "why": "The signature (name + parameter types) must match. The return type may be covariant and access may be wider." },
+      { "q": "Parent: protected void save(). Which child declaration is a valid override?", "options": ["private void save()", "void save()", "public void save()", "static void save()"], "answer": 2, "why": "Access can stay the same or get wider: protected → public is fine. Package-private and private are narrower." },
+      { "q": "Parent: Shape create(). Child: Circle create(), where Circle extends Shape. This is…", "options": ["A compile error", "A covariant return override", "Overloading", "Method hiding"], "answer": 1, "why": "Since Java 5, an override may return a subtype of the parent's return type." },
+      { "q": "Parent: void read() throws IOException. Which override does NOT compile?", "options": ["void read()", "void read() throws FileNotFoundException", "void read() throws Exception", "void read() throws RuntimeException"], "answer": 2, "why": "Exception is broader than IOException. Narrower checked exceptions, none, or unchecked ones are fine." },
+      { "q": "What does @Override do?", "options": ["Makes the method run faster", "Forces javac to check that the method overrides a parent method", "Makes the method final", "Is required for overriding to work"], "answer": 1, "why": "It's optional, but it turns typos and signature mismatches into compile errors." },
+      { "q": "A and B both declare static void show(). A ref = new B(); ref.show(); runs…", "options": ["B's show()", "A's show()", "Both", "Compile error"], "answer": 1, "why": "Static methods are hidden, not overridden. The call is decided by the variable's type, A." },
+      { "q": "Can a private method be overridden?", "options": ["Yes, with @Override", "No; a same-named method in the child is a separate new method", "Only if the child is in the same package", "Only if it's also final"], "answer": 1, "why": "Private methods aren't inherited, so there's nothing to override. @Override on it is a compile error." },
+      { "q": "Payment p = new UpiPayment(); p.fee(); Which fee() runs?", "options": ["Payment's, because p is a Payment", "UpiPayment's, because the object is a UpiPayment", "Whichever was declared first", "Compile error"], "answer": 1, "why": "Instance method calls are dispatched at run time on the object's actual class." }
+    ]</script>
+  </div>
+  <h3>Quick revision</h3>
+  <div class="revision">
+    <h3>Lesson 7.4 in one screen</h3>
+    <ul>
+      <li>Overriding: same signature as an inherited instance method; the child's version replaces it.</li>
+      <li>Return: same or a subtype (covariant). Access: same or wider. Checked exceptions: same, fewer or narrower.</li>
+      <li>Always write <code>@Override</code>: javac then catches typos and wrong parameter types.</li>
+      <li><code>final</code> methods can't be overridden; <code>private</code> ones aren't inherited.</li>
+      <li><code>static</code> methods are hidden, chosen by the variable's type at compile time.</li>
+      <li>Instance methods are dispatched at run time by the object's class (dynamic dispatch).</li>
+      <li>Use <code>super.m()</code> inside the override to reuse the parent's version.</li>
+    </ul>
+  </div>
+  <h3>Interview and viva questions</h3>
+  <div class="faq">
+    <details><summary>What is the difference between overloading and overriding?</summary><p>Overloading: same method name, <b>different</b> parameter lists, usually in the same class; javac picks the version at compile time from the argument types. Overriding: same signature in a subclass; the JVM picks the version at run time from the object's class. Overloading is compile-time polymorphism, overriding is runtime polymorphism (Lesson 7.5).</p></details>
+    <details><summary>Can we override a static method?</summary><p>No. A static method with the same signature in the child <b>hides</b> the parent's. Which one runs is decided at compile time by the reference type, not the object, so there's no runtime polymorphism. Also, a static method can't hide an instance method or vice versa: javac reports an error.</p></details>
+    <details><summary>Why can't an overriding method have weaker access or throw broader checked exceptions?</summary><p>Because a child object must be usable wherever the parent is expected. Code calling <code>payment.fee()</code> through a parent reference relies on the parent's promises: that the method is accessible and throws only the declared checked exceptions. Narrower access or new exceptions would break those callers.</p></details>
+    <details><summary>Can we override the main method or a constructor?</summary><p>Constructors aren't inherited, so they can't be overridden. <code>main</code> is static, so a <code>main</code> in a child class hides the parent's rather than overriding it; the JVM runs whichever class you launch.</p></details>
+    <details><summary>Is @Override mandatory?</summary><p>No, overriding works without it. But it's strongly recommended: it documents intent and makes javac verify that a matching parent method exists, catching mistakes like <code>equals(Account)</code> instead of <code>equals(Object)</code> or a misspelt name.</p></details>
+  </div>
+
+  <h3 id="practice">Practice problems</h3>
+  <p class="prob-intro">In each problem, decide which method the parent provides as a default and which children must override it. Put <code>@Override</code> on every override. The last three are business problems.</p>
+  <div class="probs">
+    <article class="prob"><div class="prob__head"><span class="prob__num">P1</span><span class="prob__tag prob__tag--easy">Easy</span><h4>Animal sounds</h4></div>
+      <p><code>Animal</code> has <code>sound()</code> returning "...". <code>Cow</code> and <code>Cat</code> override it. Loop over an <code>Animal[]</code> with one of each (including a plain Animal) and print the sounds.</p>
+      <div class="prob__io"><div><small>Input</small><pre>Animal, Cow, Cat</pre></div><div><small>Expected output</small><pre>Animal: ...
+Cow: Moo
+Cat: Meow</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="java" data-file="Main.java"><pre><code>class Animal {
+    String sound() {
+        return &quot;...&quot;;
+    }
+}
+
+class Cow extends Animal {
+    @Override
+    String sound() {
+        return &quot;Moo&quot;;
+    }
+}
+
+class Cat extends Animal {
+    @Override
+    String sound() {
+        return &quot;Meow&quot;;
+    }
+}
+
+public class Main {
+    public static void main(String[] args) {
+        Animal[] animals = { new Animal(), new Cow(), new Cat() };
+        for (Animal a : animals) {
+            System.out.println(a.getClass().getSimpleName() + &quot;: &quot; + a.sound());
+        }
+    }
+}</code></pre><div class="output">Animal: ...
+Cow: Moo
+Cat: Meow</div></div>
+        <p><b>How it works:</b> every element is used through an <code>Animal</code> variable, yet each object runs its own <code>sound()</code>. The plain Animal falls back to the parent's default.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P2</span><span class="prob__tag prob__tag--easy">Easy</span><h4>Override toString for readable output</h4></div>
+      <p>Printing a <code>Book</code> object shows something like <code>Book@1b6d3586</code>. Override <code>toString()</code> so <code>System.out.println(book)</code> prints the title and price.</p>
+      <div class="prob__io"><div><small>Input</small><pre>&quot;Wings of Fire&quot;, Rs 299</pre></div><div><small>Expected output</small><pre>Wings of Fire (Rs 299.0)
+In cart: Wings of Fire (Rs 299.0)</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="java" data-file="Main.java"><pre><code>class Book {
+    private final String title;
+    private final double price;
+
+    Book(String title, double price) {
+        this.title = title;
+        this.price = price;
+    }
+
+    @Override
+    public String toString() {
+        return title + &quot; (Rs &quot; + price + &quot;)&quot;;
+    }
+}
+
+public class Main {
+    public static void main(String[] args) {
+        Book b = new Book(&quot;Wings of Fire&quot;, 299);
+        System.out.println(b);
+        System.out.println(&quot;In cart: &quot; + b);
+    }
+}</code></pre><div class="output">Wings of Fire (Rs 299.0)
+In cart: Wings of Fire (Rs 299.0)</div></div>
+        <p><b>How it works:</b> <code>println</code> and string concatenation call <code>toString()</code>, inherited from <code>Object</code>. Our override replaces it. It must be <code>public</code>, because Object's version is public and access can't be narrowed.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P3</span><span class="prob__tag prob__tag--easy">Easy</span><h4>Extend, don&#x27;t replace</h4></div>
+      <p><code>Report.header()</code> returns the company name. <code>SalesReport</code> overrides it to return the parent's header followed by " - Sales". Use <code>super</code>.</p>
+      <div class="prob__io"><div><small>Input</small><pre>company &quot;Shree Traders&quot;</pre></div><div><small>Expected output</small><pre>Shree Traders - Sales
+Shree Traders</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="java" data-file="Main.java"><pre><code>class Report {
+    String header() {
+        return &quot;Shree Traders&quot;;
+    }
+}
+
+class SalesReport extends Report {
+    @Override
+    String header() {
+        return super.header() + &quot; - Sales&quot;;
+    }
+}
+
+public class Main {
+    public static void main(String[] args) {
+        Report r = new SalesReport();
+        System.out.println(r.header());
+        System.out.println(new Report().header());
+    }
+}</code></pre><div class="output">Shree Traders - Sales
+Shree Traders</div></div>
+        <p><b>How it works:</b> the override reuses the parent's text with <code>super.header()</code>. Through the <code>Report</code> variable <code>r</code>, the SalesReport version still runs, because the object decides.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P4</span><span class="prob__tag prob__tag--easy">Easy</span><h4>Covariant return</h4></div>
+      <p><code>Shape.copy()</code> returns a <code>Shape</code>. In <code>Circle</code>, override it to return a <code>Circle</code>, so callers can use <code>radius</code> without a cast.</p>
+      <div class="prob__io"><div><small>Input</small><pre>Circle radius 7</pre></div><div><small>Expected output</small><pre>original 7.0, copy 10.0</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="java" data-file="Main.java"><pre><code>class Shape {
+    Shape copy() {
+        return new Shape();
+    }
+}
+
+class Circle extends Shape {
+    double radius;
+
+    Circle(double radius) {
+        this.radius = radius;
+    }
+
+    @Override
+    Circle copy() {
+        return new Circle(radius);
+    }
+}
+
+public class Main {
+    public static void main(String[] args) {
+        Circle c = new Circle(7);
+        Circle c2 = c.copy();
+        c2.radius = 10;
+        System.out.println(&quot;original &quot; + c.radius + &quot;, copy &quot; + c2.radius);
+    }
+}</code></pre><div class="output">original 7.0, copy 10.0</div></div>
+        <p><b>How it works:</b> the override returns <code>Circle</code>, a subtype of <code>Shape</code>: a covariant return, allowed since Java 5. Code holding a Circle gets a Circle back, with no cast. Changing the copy doesn't affect the original because <code>copy()</code> creates a new object.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P5</span><span class="prob__tag prob__tag--medium">Medium</span><h4>Static hiding vs overriding</h4></div>
+      <p>Both <code>Vehicle</code> and <code>Bus</code> have a static <code>category()</code> and an instance <code>maxSpeed()</code>. Call both through a <code>Vehicle</code> variable that holds a Bus, and through a <code>Bus</code> variable. Predict first.</p>
+      <div class="prob__io"><div><small>Input</small><pre>Vehicle v = new Bus(); Bus b = new Bus();</pre></div><div><small>Expected output</small><pre>v: Vehicle, 80
+b: Bus, 80</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="java" data-file="Main.java"><pre><code>class Vehicle {
+    static String category() { return &quot;Vehicle&quot;; }
+    int maxSpeed() { return 100; }
+}
+
+class Bus extends Vehicle {
+    static String category() { return &quot;Bus&quot;; }
+
+    @Override
+    int maxSpeed() { return 80; }
+}
+
+public class Main {
+    public static void main(String[] args) {
+        Vehicle v = new Bus();
+        Bus b = new Bus();
+        System.out.println(&quot;v: &quot; + v.category() + &quot;, &quot; + v.maxSpeed());
+        System.out.println(&quot;b: &quot; + b.category() + &quot;, &quot; + b.maxSpeed());
+    }
+}</code></pre><div class="output">v: Vehicle, 80
+b: Bus, 80</div></div>
+        <p><b>How it works:</b> <code>maxSpeed()</code> is an instance method, so the object (a Bus) decides: 80 both times. <code>category()</code> is static, so javac decides from the variable's type: "Vehicle" through <code>v</code>, "Bus" through <code>b</code>. Prefer <code>Vehicle.category()</code> to make static calls obvious.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P6</span><span class="prob__tag prob__tag--medium">Medium</span><h4>Widen access while overriding</h4></div>
+      <p><code>Sensor.read()</code> is <code>protected</code>. A <code>TemperatureSensor</code> overrides it as <code>public</code> so that any class can call it. Show it works, and note which direction is allowed.</p>
+      <div class="prob__io"><div><small>Input</small><pre>temperature reading 31.5</pre></div><div><small>Expected output</small><pre>Temperature: 31.5 C
+Via Sensor: 31.5</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="java" data-file="Main.java"><pre><code>class Sensor {
+    protected double read() {
+        return 0;
+    }
+}
+
+class TemperatureSensor extends Sensor {
+    @Override
+    public double read() {
+        return 31.5;
+    }
+}
+
+public class Main {
+    public static void main(String[] args) {
+        TemperatureSensor t = new TemperatureSensor();
+        System.out.println(&quot;Temperature: &quot; + t.read() + &quot; C&quot;);
+        Sensor s = t;
+        System.out.println(&quot;Via Sensor: &quot; + s.read());
+    }
+}</code></pre><div class="output">Temperature: 31.5 C
+Via Sensor: 31.5</div></div>
+        <p><b>How it works:</b> protected → public makes the method <b>more</b> accessible, which is allowed. The opposite (public → protected) would be "attempting to assign weaker access privileges", because callers using the parent type might lose access.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P7</span><span class="prob__tag prob__tag--medium">Medium</span><h4>Fix the equals overload</h4></div>
+      <p>Two <code>Customer</code> objects with the same mobile number should be equal, including inside a <code>HashSet</code>. Write a correct <code>equals(Object)</code> and <code>hashCode()</code> with <code>@Override</code>, and show the set keeps only one.</p>
+      <div class="prob__io"><div><small>Input</small><pre>Customer(&quot;98200 12345&quot;), Customer(&quot;98200 12345&quot;)</pre></div><div><small>Expected output</small><pre>Customers in set: 1</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="java" data-file="Main.java"><pre><code>import java.util.HashSet;
+import java.util.Set;
+
+class Customer {
+    private final String mobile;
+
+    Customer(String mobile) {
+        this.mobile = mobile;
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (!(o instanceof Customer)) return false;
+        Customer other = (Customer) o;
+        return mobile.equals(other.mobile);
+    }
+
+    @Override
+    public int hashCode() {
+        return mobile.hashCode();
+    }
+}
+
+public class Main {
+    public static void main(String[] args) {
+        Set&lt;Customer&gt; set = new HashSet&lt;&gt;();
+        set.add(new Customer(&quot;98200 12345&quot;));
+        set.add(new Customer(&quot;98200 12345&quot;));
+        System.out.println(&quot;Customers in set: &quot; + set.size());
+    }
+}</code></pre><div class="output">Customers in set: 1</div></div>
+        <p><b>How it works:</b> the parameter type must be <code>Object</code> to override Object's <code>equals</code>; <code>@Override</code> guarantees we got it right. HashSet first uses <code>hashCode()</code> to find the bucket, then <code>equals</code> to compare, so both must be overridden together (Lesson 10.3, 11.6).</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P8</span><span class="prob__tag prob__tag--business">Business problem</span><h4>Shapes for a design tool</h4></div>
+      <p>A poster-design tool needs the total ink area of all shapes on a canvas. <code>Shape.area()</code> returns 0; <code>Rect</code>, <code>Circle</code> and <code>Triangle</code> override it. Print each area (2 decimals) and the total.</p>
+      <div class="prob__io"><div><small>Input</small><pre>Rect 40×25, Circle r=10, Triangle base 30 height 12</pre></div><div><small>Expected output</small><pre>Rect      1000.00 sq cm
+Circle     314.16 sq cm
+Triangle   180.00 sq cm
+Total     1494.16 sq cm</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="java" data-file="Main.java"><pre><code>class Shape {
+    double area() {
+        return 0;
+    }
+
+    String name() {
+        return getClass().getSimpleName();
+    }
+}
+
+class Rect extends Shape {
+    private final double w, h;
+    Rect(double w, double h) { this.w = w; this.h = h; }
+
+    @Override
+    double area() { return w * h; }
+}
+
+class Circle extends Shape {
+    private final double r;
+    Circle(double r) { this.r = r; }
+
+    @Override
+    double area() { return Math.PI * r * r; }
+}
+
+class Triangle extends Shape {
+    private final double base, height;
+    Triangle(double base, double height) { this.base = base; this.height = height; }
+
+    @Override
+    double area() { return 0.5 * base * height; }
+}
+
+public class Main {
+    public static void main(String[] args) {
+        Shape[] canvas = { new Rect(40, 25), new Circle(10), new Triangle(30, 12) };
+        double total = 0;
+        for (Shape s : canvas) {
+            System.out.printf(&quot;%-8s %8.2f sq cm%n&quot;, s.name(), s.area());
+            total += s.area();
+        }
+        System.out.printf(&quot;Total    %8.2f sq cm%n&quot;, total);
+    }
+}</code></pre><div class="output">Rect      1000.00 sq cm
+Circle     314.16 sq cm
+Triangle   180.00 sq cm
+Total     1494.16 sq cm</div></div>
+        <p><b>How it works:</b></p><ol><li>The canvas loop knows only <code>Shape</code>; each object supplies its own formula through overriding.</li><li><code>name()</code> is inherited unchanged; <code>getClass()</code> returns the object's real class, so it prints Rect, Circle, Triangle.</li><li>Adding a Hexagon means one new class; the total-area code stays the same. (In Lesson 7.6 Shape becomes abstract, since a plain Shape has no real area.)</li></ol>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P9</span><span class="prob__tag prob__tag--business">Business problem</span><h4>Diwali bonus by employee type</h4></div>
+      <p>Everyone gets a Diwali bonus of 8.33% of basic (one month's pay per year, roughly). Managers get the normal bonus plus Rs 10,000; interns get a flat Rs 3,000. Override <code>bonus()</code> and print a bonus sheet.</p>
+      <div class="prob__io"><div><small>Input</small><pre>Employee &quot;Anil&quot; 30000, Manager &quot;Kiran&quot; 70000, Intern &quot;Zoya&quot; 15000</pre></div><div><small>Expected output</small><pre>Anil (Employee): Rs 2499.0
+Kiran (Manager): Rs 15831.0
+Zoya (Intern): Rs 3000.0
+Total bonus payout: Rs 21330.0</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="java" data-file="Main.java"><pre><code>class Employee {
+    protected final String name;
+    protected final double basic;
+
+    Employee(String name, double basic) {
+        this.name = name;
+        this.basic = basic;
+    }
+
+    double bonus() {
+        return Math.round(basic * 0.0833);
+    }
+}
+
+class Manager extends Employee {
+    Manager(String name, double basic) { super(name, basic); }
+
+    @Override
+    double bonus() {
+        return super.bonus() + 10000;
+    }
+}
+
+class Intern extends Employee {
+    Intern(String name, double basic) { super(name, basic); }
+
+    @Override
+    double bonus() {
+        return 3000;
+    }
+}
+
+public class Main {
+    public static void main(String[] args) {
+        Employee[] staff = {
+            new Employee(&quot;Anil&quot;, 30000), new Manager(&quot;Kiran&quot;, 70000), new Intern(&quot;Zoya&quot;, 15000)
+        };
+        double total = 0;
+        for (Employee e : staff) {
+            System.out.println(e.name + &quot; (&quot; + e.getClass().getSimpleName() + &quot;): Rs &quot; + e.bonus());
+            total += e.bonus();
+        }
+        System.out.println(&quot;Total bonus payout: Rs &quot; + total);
+    }
+}</code></pre><div class="output">Anil (Employee): Rs 2499.0
+Kiran (Manager): Rs 15831.0
+Zoya (Intern): Rs 3000.0
+Total bonus payout: Rs 21330.0</div></div>
+        <p><b>How it works:</b></p><ol><li>Anil: 30000 × 0.0833 = 2499. Kiran: 70000 × 0.0833 = 5831 (rounded), + 10,000 = 15,831. Zoya: flat 3,000.</li><li>Manager <b>extends</b> the rule with <code>super.bonus()</code>; Intern <b>replaces</b> it.</li><li>The payroll loop has no if-else on job type.</li></ol>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P10</span><span class="prob__tag prob__tag--business">Business problem</span><h4>Delivery time estimate by vehicle</h4></div>
+      <p>A delivery app estimates minutes for a trip: <code>DeliveryVehicle.eta(km)</code> assumes 30 km/h plus 10 minutes of handling. A <code>Bike</code> is faster in traffic (40 km/h); a <code>Drone</code> flies at 60 km/h with only 2 minutes of handling but can't go beyond 10 km (return -1). Print ETAs for 6 km and 15 km.</p>
+      <div class="prob__io"><div><small>Input</small><pre>distances 6 km and 15 km</pre></div><div><small>Expected output</small><pre>6.0 km:  DeliveryVehicle=22 min  Bike=19 min  Drone=8 min
+15.0 km:  DeliveryVehicle=40 min  Bike=33 min  Drone=n/a</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="java" data-file="Main.java"><pre><code>class DeliveryVehicle {
+    int eta(double km) {
+        return (int) Math.ceil(km / 30 * 60) + 10;
+    }
+}
+
+class Bike extends DeliveryVehicle {
+    @Override
+    int eta(double km) {
+        return (int) Math.ceil(km / 40 * 60) + 10;
+    }
+}
+
+class Drone extends DeliveryVehicle {
+    @Override
+    int eta(double km) {
+        if (km &gt; 10) return -1;
+        return (int) Math.ceil(km / 60 * 60) + 2;
+    }
+}
+
+public class Main {
+    public static void main(String[] args) {
+        DeliveryVehicle[] fleet = { new DeliveryVehicle(), new Bike(), new Drone() };
+        double[] trips = {6, 15};
+        for (double km : trips) {
+            System.out.print(km + &quot; km:&quot;);
+            for (DeliveryVehicle v : fleet) {
+                int m = v.eta(km);
+                System.out.print(&quot;  &quot; + v.getClass().getSimpleName() + &quot;=&quot; + (m &lt; 0 ? &quot;n/a&quot; : m + &quot; min&quot;));
+            }
+            System.out.println();
+        }
+    }
+}</code></pre><div class="output">6.0 km:  DeliveryVehicle=22 min  Bike=19 min  Drone=8 min
+15.0 km:  DeliveryVehicle=40 min  Bike=33 min  Drone=n/a</div></div>
+        <p><b>How it works:</b></p><ol><li>Default vehicle: 6 km at 30 km/h = 12 min + 10 = 22. Bike: 9 + 10 = 19. Drone: 6 + 2 = 8.</li><li>For 15 km the drone's override returns −1, which the caller shows as n/a.</li><li>The dispatcher code that picks the fastest vehicle would only call <code>eta()</code>; each vehicle class owns its own speed rules.</li></ol>
+      </details>
+    </article>
+  </div>
+
+
+  <h3 id="scenarios">Real-world scenario questions (asked in company interviews)</h3>
+  <p class="scn-intro">Overriding bugs often compile and run, then quietly do the wrong thing. Decide your answer first, then open the model answer.</p>
+  <div class="scenarios">
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">E-commerce · cart</span><span class="scn__tag scn__tag--level">1–3 years</span></div>
+      <h4>Duplicate products in a HashSet</h4>
+      <p class="scn__situation">A <code>Product</code> class has <code>public boolean equals(Product p)</code> comparing SKUs, and also a correct <code>hashCode()</code>. A <code>HashSet&lt;Product&gt;</code> still keeps two products with the same SKU. The equals method passes its unit test. Explain.</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> do you know overloading vs overriding and why @Override matters?</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li><code>equals(Product)</code> <b>overloads</b> <code>Object.equals(Object)</code>. HashSet calls <code>equals(Object)</code>, which is still Object's identity comparison.</li>
+          <li>The unit test called <code>a.equals(b)</code> with both declared as Product, so javac picked the overload; the test proved nothing about collections.</li>
+          <li>Fix: <code>@Override public boolean equals(Object o)</code>, check the type, cast, compare SKUs. With <code>@Override</code>, the original mistake wouldn't have compiled.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> adding more tests with Product-typed variables only. Test through the collection.</p>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Payments · new provider</span><span class="scn__tag scn__tag--level">Fresher</span></div>
+      <h4>Adding a payment method without touching checkout</h4>
+      <p class="scn__situation">Checkout currently has a <code>switch</code> on payment type to compute fees and refund rules. The business wants to add "Buy Now Pay Later". How would you restructure the code so adding the next method is easy?</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> can you replace type checks with overriding?</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>Create a parent <code>Payment</code> with <code>fee()</code> and <code>refundDays()</code> (default rules), and one subclass per method that overrides what differs.</li>
+          <li>Checkout calls <code>payment.fee()</code> without knowing the type; dynamic dispatch picks the right version.</li>
+          <li>BNPL becomes one new class with its own overrides; existing classes and checkout don't change (the open/closed principle).</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> adding one more <code>case</code> to every switch. That's how Riya's net banking bug happened.</p>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Banking · library upgrade</span><span class="scn__tag scn__tag--level">1–3 years</span></div>
+      <h4>The override that stopped being called</h4>
+      <p class="scn__situation">Your <code>PremiumAccount</code> overrides <code>calculateInterest(double rate)</code> from a vendor library's <code>Account</code>. After upgrading the library, premium customers get normal interest. The vendor changed the parent method to <code>calculateInterest(BigDecimal rate)</code>. Your code had no <code>@Override</code>. What happened, and what would have caught it?</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> do you understand how signature changes silently break overriding?</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>Your method's signature no longer matches the parent's, so it became an unrelated method. The library calls its own <code>calculateInterest(BigDecimal)</code>, which you don't override.</li>
+          <li>With <code>@Override</code>, the upgrade would have failed to compile with "method does not override or implement a method from a supertype", pointing straight at the problem.</li>
+          <li>Fix: update the override's signature, add <code>@Override</code> everywhere, and add a test that checks premium interest through the library's entry point.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> treating @Override as optional decoration. It's a safety check.</p>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">SaaS · utilities</span><span class="scn__tag scn__tag--level">3+ years</span></div>
+      <h4>"I overrode the static formatter but nothing changed"</h4>
+      <p class="scn__situation">A shared <code>DateUtil</code> class has <code>static String format(LocalDate d)</code>. A team writes <code>IndiaDateUtil extends DateUtil</code> with its own static <code>format</code> (dd-MM-yyyy) and passes an <code>IndiaDateUtil</code> object wherever a <code>DateUtil</code> is expected. Reports still show the old format. Why, and what design would work?</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> do you know that static methods don't take part in dynamic dispatch?</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>Static methods are hidden, not overridden. Calls compiled against <code>DateUtil</code> always run <code>DateUtil.format</code>; the object passed in is ignored.</li>
+          <li>For swappable behaviour, use instance methods: an interface <code>DateFormatter</code> with implementations, injected where needed (Lesson 7.7).</li>
+          <li>Static utility methods are fine for fixed behaviour; once you need variations, make it an object.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> calling static methods through instance variables. It compiles but suggests polymorphism that doesn't exist.</p>
+      </div></details>
+    </article>
+  </div>
+</section>
+
+<nav class="lesson-nav" id="lesson-nav" aria-label="Lesson navigation"></nav>
+<div class="ad-slot" data-slot="bottom"></div>
+</article>
+
+<aside class="lesson-side">
+  <nav class="toc" aria-label="In this lesson">
+    <h4>In this lesson</h4>
+    <ol>
+      <li><a href="#story">The story</a></li>
+      <li><a href="#definition">Definition</a></li>
+      <li><a href="#types">Types and ways to use it</a></li>
+      <li><a href="#steps">Step by step</a></li>
+      <li><a href="#animation">See it happen</a></li>
+      <li><a href="#real-world">Real-world use</a></li>
+      <li><a href="#run">Run the code</a></li>
+      <li><a href="#tracer">Line by line</a></li>
+      <li><a href="#worked">Worked examples</a></li>
+      <li><a href="#quiz">Quiz and revision</a></li>
+      <li><a href="#practice">Practice problems</a></li>
+      <li><a href="#scenarios">Industry scenarios</a></li>
+    </ol>
+  </nav>
+  <div class="ad-slot" data-slot="side"></div>
+  <div class="outline" id="outline"></div>
+</aside>
+</div>
+</main>
+
+<footer class="site-footer">
+  <div class="wrap">
+    <div><h4>MyPhatshala</h4><p>Free programming and IT lessons that show what happens behind the screen.</p></div>
+    <div><h4>Learn</h4><a href="../../../../#tracks">All courses</a><a href="../../">Core Java syllabus</a></div>
+    <div><h4>Site</h4><a href="../../../../about.html">About</a><a href="../../../../contact.html">Contact</a><a href="../../../../privacy.html">Privacy policy</a><a href="../../../../disclaimer.html">Disclaimer</a></div>
+    <div class="copyright">© MyPhatshala. All lesson content, diagrams and animations are original. Please do not copy without permission.</div>
+  </div>
+</footer>
+
+<script src="../../../../data/courses/core-java.js"></script>
+<script src="../../../../assets/js/lesson.js"></script>
+<script src="../../../../assets/js/ads.js"></script>
+<script src="../../../../assets/js/site.js"></script>
+</body>
+</html>

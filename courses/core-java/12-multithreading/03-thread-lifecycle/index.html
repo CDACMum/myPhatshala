@@ -1,0 +1,995 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Thread lifecycle | MyPhatshala</title>
+<meta name="description" content="The Java thread lifecycle: the six Thread.State values NEW, RUNNABLE, BLOCKED, WAITING, TIMED_WAITING and TERMINATED, with sleep(), join(), join(timeout), interrupt(), isAlive() and getState(). With animations, a JVM tracer, 9 practice problems, quiz and interview scenarios.">
+<meta name="mp:minutes" content="22">
+<link rel="canonical" href="https://myphatshala.com/courses/core-java/12-multithreading/03-thread-lifecycle/">
+<meta property="og:title" content="Thread lifecycle in Java: the six states · MyPhatshala">
+<meta property="og:description" content="Watch a thread move from NEW to TERMINATED, cancel a sleeping thread with interrupt(), and solve 9 problems.">
+<link rel="icon" href="../../../../assets/img/logo.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Fraunces:ital,opsz,wght@0,9..144,600;0,9..144,700;1,9..144,600&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../../../../assets/css/style.css">
+<link rel="stylesheet" href="../../../../assets/css/lesson.css">
+<script src="../../../../assets/js/config.js"></script>
+<script>try { const t = localStorage.getItem("mp-theme"); if (t) document.documentElement.dataset.theme = t; } catch (e) {}</script>
+<script type="application/ld+json">{"@context": "https://schema.org", "@type": "LearningResource", "name": "Thread lifecycle", "learningResourceType": "Lesson", "educationalLevel": "Intermediate", "isAccessibleForFree": true, "inLanguage": "en", "isPartOf": {"@type": "Course", "name": "Core Java", "provider": {"@type": "Organization", "name": "MyPhatshala"}}}</script>
+</head>
+<body style="--track:#E8772E" data-lesson="12-multithreading/03-thread-lifecycle" data-course-root="../../">
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="site-header">
+  <div class="wrap">
+    <a class="brand" href="../../../../" aria-label="MyPhatshala home"><img src="../../../../assets/img/logo.svg" width="34" height="34" alt=""><span>My<b>Phatshala</b></span></a>
+    <nav class="nav" aria-label="Main">
+      <a href="../../../../#tracks">All courses</a>
+      <a href="../../">Core Java syllabus</a>
+      <button class="theme-btn" id="theme-btn" aria-label="Toggle dark mode"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg></button>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+<section class="lesson-hero">
+  <div class="wrap">
+    <nav class="crumbs" aria-label="Breadcrumb"><a href="../../../../">Home</a><span>›</span><a href="../../../../#track-programming">Programming Languages</a><span>›</span><a href="../../">Core Java</a><span>›</span><b>Lesson 12.3</b></nav>
+    <h1>Thread lifecycle</h1>
+    <p class="lead">A thread isn't simply “running” or “not running”. It is born, waits for the CPU, sleeps, waits for locks and for other threads, and finally ends. Java names these moments with six states. You'll see each one happen in real code, learn the methods that move a thread between them, and learn how to cancel a thread politely with <code>interrupt()</code>.</p>
+    <div class="lesson-meta"><span>Module 12 · Multithreading</span><span>⏱ 22 min</span><span>Intermediate</span><span>9 practice problems</span></div>
+  </div>
+</section>
+
+<div class="wrap lesson-layout">
+<article class="lesson-main">
+<!-- ======================= PART 1: THE STORY ======================= -->
+<section class="part" id="story">
+  <span class="part-label"><b>1</b> The story</span>
+  <h2>“Is my thread stuck or just sleeping?”</h2>
+  <div class="story">
+    <p class="narration">Riya's canteen app has a background thread that checks the payment status every few seconds. A customer complains the app is “stuck”. Riya stares at her code: is the thread dead, sleeping, or waiting for something?</p>
+    <div class="scene">
+      <svg viewBox="0 0 640 170" role="img" aria-label="A thread's life drawn as a path: born, ready, sleeping, waiting, finished">
+        <g font-size="10.5">
+          <rect x="14" y="60" width="80" height="34" rx="8" class="s-card" style="stroke:var(--line)"/><text x="54" y="82" text-anchor="middle" class="s-ink" font-weight="700">NEW</text>
+          <path d="M96 77h40" style="stroke:var(--ink-3);stroke-width:1.5"/><path d="M130 72l7 5-7 5" style="fill:none;stroke:var(--ink-3);stroke-width:1.5"/>
+          <rect x="140" y="60" width="110" height="34" rx="8" class="s-soft-green" style="stroke:var(--green)"/><text x="195" y="82" text-anchor="middle" class="s-green" font-weight="700">RUNNABLE</text>
+          <path d="M195 58V34h100" style="fill:none;stroke:var(--track);stroke-width:1.4;stroke-dasharray:4 3"/>
+          <rect x="298" y="18" width="130" height="30" rx="8" class="s-soft-acc" style="stroke:var(--track)"/><text x="363" y="38" text-anchor="middle" class="s-acc" font-weight="700">sleeping</text>
+          <path d="M195 96v24h100" style="fill:none;stroke:var(--blue);stroke-width:1.4;stroke-dasharray:4 3"/>
+          <rect x="298" y="106" width="130" height="30" rx="8" class="s-soft-blue" style="stroke:var(--blue)"/><text x="363" y="126" text-anchor="middle" class="s-blue" font-weight="700">waiting for others</text>
+          <path d="M252 77h250" style="stroke:var(--ink-3);stroke-width:1.5"/><path d="M496 72l7 5-7 5" style="fill:none;stroke:var(--ink-3);stroke-width:1.5"/>
+          <rect x="506" y="60" width="118" height="34" rx="8" class="s-card2" style="stroke:var(--line)"/><text x="565" y="82" text-anchor="middle" class="s-ink2" font-weight="700">TERMINATED</text>
+          <text x="14" y="156" class="s-ink2">t.getState() tells you where a thread is right now</text>
+        </g>
+        <text x="632" y="166" text-anchor="end" class="s-wm">myphatshala.com</text>
+      </svg>
+    </div>
+    <div class="panel">
+      <div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#FCE6D6"/><path d="M14 64c2-12 9-18 18-18s16 6 18 18z" fill="#2E5AAC"/><circle cx="32" cy="29" r="12" fill="#C68B5E"/><path d="M19 29c0-10 6-15 13-15s13 5 13 15c-3-5-7-8-13-8s-10 3-13 8z" fill="#2A1B14"/><path d="M43 27c3 6 3 14 0 20" stroke="#2A1B14" stroke-width="4" fill="none" stroke-linecap="round"/><circle cx="27.5" cy="30" r="1.5" fill="#2A1B14"/><circle cx="36.5" cy="30" r="1.5" fill="#2A1B14"/><path d="M28 35q4 3 8 0" stroke="#2A1B14" stroke-width="1.6" fill="none" stroke-linecap="round"/><circle cx="32" cy="24" r="1.2" fill="#D64545"/></svg></div>
+      <div class="bubble"><b class="who">Riya</b><p>Sir, how do I know what my thread is doing right now?</p></div>
+    </div>
+    <div class="panel panel--right">
+      <div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#DDEFE6"/><path d="M12 64c2-12 10-18 20-18s18 6 20 18z" fill="#F4F1EA"/><path d="M28 46l4 8 4-8" fill="#2F7D5B"/><circle cx="32" cy="28" r="12" fill="#B57A50"/><path d="M20 26c0-8 5-13 12-13s12 5 12 13c-2-3-6-5-12-5s-10 2-12 5z" fill="#5A5A5A"/><path d="M22 32c1 8 5 11 10 11s9-3 10-11c-2 3-6 4-10 4s-8-1-10-4z" fill="#5A5A5A"/><circle cx="27" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><circle cx="37" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><path d="M30.4 29h3.2" stroke="#1B2433" stroke-width="1.4"/><circle cx="27" cy="29" r="1.1" fill="#1B2433"/><circle cx="37" cy="29" r="1.1" fill="#1B2433"/></svg></div>
+      <div class="bubble"><b class="who">Arjun Sir</b><p>Ask it. <code>t.getState()</code> returns one of six states. A sleeping thread says TIMED_WAITING, a stuck one is often BLOCKED or WAITING, and a dead one says TERMINATED.</p></div>
+    </div>
+    <div class="panel">
+      <div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#FCE6D6"/><path d="M14 64c2-12 9-18 18-18s16 6 18 18z" fill="#2E5AAC"/><circle cx="32" cy="29" r="12" fill="#C68B5E"/><path d="M19 29c0-10 6-15 13-15s13 5 13 15c-3-5-7-8-13-8s-10 3-13 8z" fill="#2A1B14"/><path d="M43 27c3 6 3 14 0 20" stroke="#2A1B14" stroke-width="4" fill="none" stroke-linecap="round"/><circle cx="27.5" cy="30" r="1.5" fill="#2A1B14"/><circle cx="36.5" cy="30" r="1.5" fill="#2A1B14"/><path d="M28 35q4 3 8 0" stroke="#2A1B14" stroke-width="1.6" fill="none" stroke-linecap="round"/><circle cx="32" cy="24" r="1.2" fill="#D64545"/></svg></div>
+      <div class="bubble"><b class="who">Riya</b><p>And if it's sleeping but the user wants to cancel?</p></div>
+    </div>
+    <div class="panel panel--right">
+      <div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#DDEFE6"/><path d="M12 64c2-12 10-18 20-18s18 6 20 18z" fill="#F4F1EA"/><path d="M28 46l4 8 4-8" fill="#2F7D5B"/><circle cx="32" cy="28" r="12" fill="#B57A50"/><path d="M20 26c0-8 5-13 12-13s12 5 12 13c-2-3-6-5-12-5s-10 2-12 5z" fill="#5A5A5A"/><path d="M22 32c1 8 5 11 10 11s9-3 10-11c-2 3-6 4-10 4s-8-1-10-4z" fill="#5A5A5A"/><circle cx="27" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><circle cx="37" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><path d="M30.4 29h3.2" stroke="#1B2433" stroke-width="1.4"/><circle cx="27" cy="29" r="1.1" fill="#1B2433"/><circle cx="37" cy="29" r="1.1" fill="#1B2433"/></svg></div>
+      <div class="bubble"><b class="who">Arjun Sir</b><p>Then you <code>interrupt()</code> it. It wakes up early and can stop cleanly. Let's go through the whole life of a thread.</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- ======================= PART 2: DEFINITION ======================= -->
+<section class="part" id="definition">
+  <span class="part-label"><b>2</b> Definition</span>
+  <h2>What is the thread lifecycle?</h2>
+  <div class="def">
+    <div class="def__formal"><small>Formal definition (write this in exams)</small>
+      <p>The <b>thread lifecycle</b> is the sequence of states a thread passes through from creation to termination. In Java these are the constants of the enum <code>Thread.State</code>: <b>NEW</b> (created, not started), <b>RUNNABLE</b> (executing or ready to execute), <b>BLOCKED</b> (waiting to acquire a monitor lock), <b>WAITING</b> (waiting indefinitely for another thread, e.g. <code>join()</code>, <code>wait()</code>), <b>TIMED_WAITING</b> (waiting for a specified time, e.g. <code>sleep(ms)</code>, <code>join(ms)</code>) and <b>TERMINATED</b> (completed). A thread's current state is returned by <code>getState()</code>.</p></div>
+    <div class="def__simple"><small>In simple words</small>
+      <p>Like a delivery rider's day: hired (NEW), on the road or waiting at a signal (RUNNABLE), on a timed break (TIMED_WAITING), waiting for the restaurant to hand over food (WAITING), queued at the one-person counter (BLOCKED), and shift over (TERMINATED).</p></div>
+  </div>
+  <h3>Words you'll meet in this lesson</h3>
+  <div class="terms">
+    <div class="term"><b>Thread.State</b><span>The enum with the six states.</span></div>
+    <div class="term"><b>sleep(ms)</b><span>Pauses the current thread for a time. Uses no CPU.</span></div>
+    <div class="term"><b>join() / join(ms)</b><span>Wait for another thread to finish (optionally with a limit).</span></div>
+    <div class="term"><b>interrupt()</b><span>Sets a thread's interrupted flag: a polite “please stop”.</span></div>
+    <div class="term"><b>InterruptedException</b><span>Thrown by sleep/join/wait when the thread is interrupted.</span></div>
+    <div class="term"><b>isAlive()</b><span>True between <code>start()</code> and termination.</span></div>
+  </div>
+  <h3>The six states at a glance</h3>
+  <div class="table-wrap">
+  <table class="compare" style="min-width:580px">
+    <thead><tr><th>State</th><th>How it gets there</th><th>How it leaves</th></tr></thead>
+    <tbody>
+      <tr><td><code>NEW</code></td><td><code>new Thread(…)</code></td><td><code>start()</code></td></tr>
+      <tr><td><code>RUNNABLE</code></td><td><code>start()</code>, or a wait ends</td><td>a wait, a lock, or <code>run()</code> ends</td></tr>
+      <tr><td><code>TIMED_WAITING</code></td><td><code>sleep(ms)</code>, <code>join(ms)</code>, <code>wait(ms)</code></td><td>time up, or interrupted</td></tr>
+      <tr><td><code>WAITING</code></td><td><code>join()</code>, <code>wait()</code></td><td>other thread ends / notifies, or interrupted</td></tr>
+      <tr><td><code>BLOCKED</code></td><td>entering a <code>synchronized</code> block that's taken</td><td>the lock is released</td></tr>
+      <tr><td><code>TERMINATED</code></td><td><code>run()</code> returns or throws</td><td>never</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <div class="callout callout--exam"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19V5a2 2 0 0 1 2-2h12v18H6a2 2 0 0 1-2-2zm0 0a2 2 0 0 1 2-2h12"/></svg><p><b>Exam tip:</b> Java has <b>no RUNNING state</b>; running and ready are both RUNNABLE. Many textbooks draw a “Running” box anyway, so in exams you may write “Runnable (ready) ⇄ Running” and mention that <code>getState()</code> reports both as RUNNABLE.</p></div>
+</section>
+
+<div class="ad-slot" data-slot="mid"></div>
+
+<!-- ======================= PART 3: TYPES AND WAYS TO USE IT ======================= -->
+<section class="part" id="types">
+  <span class="part-label"><b>3</b> Types and ways to use it</span>
+  <h2>The waiting states, side by side</h2>
+  <div class="cards">
+    <div class="card"><svg class="ic" viewBox="0 0 40 40" fill="none" stroke="var(--track)" stroke-width="2"><circle cx="20" cy="20" r="12"/><path d="M20 12v8l5 4"/></svg><h4>TIMED_WAITING</h4><p><code>sleep(ms)</code>, <code>join(ms)</code>, <code>wait(ms)</code>. Comes back by itself when the time is up.</p><span class="tag">has a timer</span></div>
+    <div class="card"><svg class="ic" viewBox="0 0 40 40" fill="none" stroke="var(--blue)" stroke-width="2"><path d="M12 12h16v16H12z"/><path d="M17 17h6v6h-6z"/></svg><h4>WAITING</h4><p><code>join()</code>, <code>wait()</code>. Needs another thread to finish or call <code>notify</code>.</p><span class="tag">no timer</span></div>
+    <div class="card"><svg class="ic" viewBox="0 0 40 40" fill="none" stroke="var(--red)" stroke-width="2"><rect x="12" y="18" width="16" height="12" rx="2"/><path d="M15 18v-4a5 5 0 0110 0v4"/></svg><h4>BLOCKED</h4><p>Waiting to get a lock another thread holds. Only <code>synchronized</code> causes it.</p><span class="tag">lock queue</span></div>
+    <div class="card"><svg class="ic" viewBox="0 0 40 40" fill="none" stroke="var(--green)" stroke-width="2"><path d="M10 20h20M24 14l6 6-6 6"/></svg><h4>RUNNABLE</h4><p>Running, or ready and waiting for a CPU core. Busy loops stay here and burn CPU.</p><span class="tag">in the scheduler</span></div>
+  </div>
+
+  <h3>All six states in one program</h3>
+  <div class="code" data-lang="java" data-file="Main.java"><pre><code>public class Main {
+    public static void main(String[] args) throws InterruptedException {
+        Object lock = new Object();
+        Thread sleeper = new Thread(() -&gt; {
+            try { Thread.sleep(60_000); } catch (InterruptedException e) { }
+        }, "sleeper");
+        Thread waiter = new Thread(() -&gt; {
+            try { sleeper.join(); } catch (InterruptedException e) { }
+        }, "waiter");
+        Thread blocked = new Thread(() -&gt; {
+            synchronized (lock) { }
+        }, "blocked");
+
+        System.out.println("sleeper: " + sleeper.getState());
+        sleeper.start();
+        waiter.start();
+        synchronized (lock) {                 // main holds the lock...
+            blocked.start();                  // ...so this thread can't get in
+            while (blocked.getState() != Thread.State.BLOCKED
+                    || sleeper.getState() != Thread.State.TIMED_WAITING
+                    || waiter.getState() != Thread.State.WAITING) {
+                Thread.onSpinWait();          // wait until all three have settled
+            }
+            System.out.println("sleeper: " + sleeper.getState());
+            System.out.println("waiter:  " + waiter.getState());
+            System.out.println("blocked: " + blocked.getState());
+        }
+        sleeper.interrupt();
+        sleeper.join();
+        waiter.join();
+        blocked.join();
+        System.out.println("sleeper: " + sleeper.getState());
+    }
+}</code></pre><div class="output">sleeper: NEW
+sleeper: TIMED_WAITING
+waiter:  WAITING
+blocked: BLOCKED
+sleeper: TERMINATED</div></div>
+  <p>The loop with <code>Thread.onSpinWait()</code> keeps main checking until all three helpers have reached their waiting states, so the output is the same every run. In real code you'd rarely wait like this; here it lets us take a clean snapshot.</p>
+
+  <h3>The methods that move a thread</h3>
+  <div class="code" data-lang="java" data-file="Main.java"><pre><code>Thread.sleep(500);            // pause the CURRENT thread 500 ms  -&gt; TIMED_WAITING
+t.join();                     // wait until t ends                 -&gt; WAITING
+t.join(200);                  // ...but at most 200 ms             -&gt; TIMED_WAITING
+t.interrupt();                // politely ask t to stop
+Thread.currentThread().isInterrupted();   // check the flag
+t.getState();  t.isAlive();   // inspect
+Thread.yield();               // hint: let another thread run (rarely needed)</code></pre></div>
+  <div class="callout callout--warn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3 2 21h20L12 3z"/><path d="M12 10v5M12 18v.5"/></svg><p><b><code>t.sleep(100)</code> does not put <code>t</code> to sleep.</b> <code>sleep</code> is static, so it always pauses the thread that runs the line. The compiler only warns. Always write <code>Thread.sleep(…)</code>.</p></div>
+</section>
+
+<!-- ======================= PART 4: STEP BY STEP ======================= -->
+<section class="part" id="steps">
+  <span class="part-label"><b>4</b> Step by step</span>
+  <h2>How interrupt() cancels a sleeping thread</h2>
+  <ol class="stepper">
+    <li><h4>The worker sleeps</h4>
+      <div class="code" data-lang="java" data-file="Main.java"><pre><code>try {
+    Thread.sleep(60_000);
+} catch (InterruptedException e) {
+    return;               // stop cleanly
+}</code></pre></div>
+      <span class="behind">The worker is TIMED_WAITING. The OS won't schedule it until the minute is up.</span></li>
+    <li><h4>Another thread calls interrupt()</h4>
+      <span class="behind"><code>worker.interrupt()</code> sets a boolean <b>interrupted flag</b> inside the worker's Thread object and wakes it if it's sleeping, waiting or joining.</span></li>
+    <li><h4>sleep throws</h4>
+      <span class="behind">The worker becomes RUNNABLE, and <code>sleep</code> throws <code>InterruptedException</code> (message "sleep interrupted"). Throwing also <b>clears</b> the flag.</span></li>
+    <li><h4>The catch block decides</h4>
+      <span class="behind">Clean up and <code>return</code>, so <code>run()</code> ends and the thread becomes TERMINATED. If you can't stop here, call <code>Thread.currentThread().interrupt()</code> to restore the flag for code further up.</span></li>
+    <li><h4>Busy threads must check</h4>
+      <span class="behind">A thread that never sleeps or waits won't throw. Long loops should test <code>Thread.currentThread().isInterrupted()</code> and stop when it's true.</span></li>
+  </ol>
+</section>
+
+<!-- ======================= PART 5: SEE IT HAPPEN ======================= -->
+<section class="part" id="animation">
+  <span class="part-label"><b>5</b> See it happen</span>
+  <h2>Six states: both views</h2>
+  <p>Left: the line a thread is on and the state <code>getState()</code> would report. Right: the state diagram with the transition taken.</p>
+  <div class="anim" data-frames="6">
+    <div class="anim__title">The life of a thread <span>6 steps</span></div>
+    <div class="anim__views">
+      <div class="view view--see">
+        <span class="view__tag">What you see</span>
+        <svg viewBox="0 0 360 250" role="img" aria-label="The code a thread runs and the state it is in at each moment">
+          <rect x="8" y="8" width="344" height="136" rx="8" class="s-board" style="stroke:board;stroke-width:1.5"/>
+          <text x="18" y="30" font-size="9.4" class="s-chalk mono">Thread t = new Thread(task);</text>
+          <g data-on="1"><rect x="12" y="16" width="336" height="20" rx="4" class="" style="stroke:var(--track);stroke-width:1.5;fill:none"/></g>
+          <text x="18" y="51" font-size="9.4" class="s-chalk mono">t.start();</text>
+          <g data-on="2"><rect x="12" y="37" width="336" height="20" rx="4" class="" style="stroke:var(--track);stroke-width:1.5;fill:none"/></g>
+          <text x="18" y="72" font-size="9.4" class="s-chalk mono">Thread.sleep(500);      // in task</text>
+          <g data-on="3"><rect x="12" y="58" width="336" height="20" rx="4" class="" style="stroke:var(--track);stroke-width:1.5;fill:none"/></g>
+          <text x="18" y="93" font-size="9.4" class="s-chalk mono">synchronized (lock) {…}  // lock busy</text>
+          <g data-on="4"><rect x="12" y="79" width="336" height="20" rx="4" class="" style="stroke:var(--track);stroke-width:1.5;fill:none"/></g>
+          <text x="18" y="114" font-size="9.4" class="s-chalk mono">other.join();           // in task</text>
+          <g data-on="5"><rect x="12" y="100" width="336" height="20" rx="4" class="" style="stroke:var(--track);stroke-width:1.5;fill:none"/></g>
+          <text x="18" y="135" font-size="9.4" class="s-chalk mono">// run() returns</text>
+          <g data-on="6"><rect x="12" y="121" width="336" height="20" rx="4" class="" style="stroke:var(--track);stroke-width:1.5;fill:none"/></g>
+          <text x="10" y="172" font-size="10.5" font-weight="700" class="s-ink2">state of t:</text>
+          <text data-on="1" x="96" y="173" font-size="13" font-weight="700" class="s-ink2 mono">NEW</text>
+          <text data-on="2" x="96" y="173" font-size="13" font-weight="700" class="s-green mono">RUNNABLE</text>
+          <text data-on="3" x="96" y="173" font-size="13" font-weight="700" class="s-acc mono">TIMED_WAITING</text>
+          <text data-on="4" x="96" y="173" font-size="13" font-weight="700" class="s-red mono">BLOCKED</text>
+          <text data-on="5" x="96" y="173" font-size="13" font-weight="700" class="s-blue mono">WAITING</text>
+          <text data-on="6" x="96" y="173" font-size="13" font-weight="700" class="s-ink3 mono">TERMINATED</text>
+          <text x="10" y="200" font-size="9.5" class="s-ink3">t.getState() returns this value</text>
+          <text data-on="1" x="180" y="234" font-size="10.5" text-anchor="middle" class="s-ink2">Created, not started.</text>
+          <text data-on="2" x="180" y="234" font-size="10.5" text-anchor="middle" class="s-ink2">Running or ready to run.</text>
+          <text data-on="3" x="180" y="234" font-size="10.5" text-anchor="middle" class="s-ink2">Sleeping for a set time.</text>
+          <text data-on="4" x="180" y="234" font-size="10.5" text-anchor="middle" class="s-ink2">Waiting to enter a lock.</text>
+          <text data-on="5" x="180" y="234" font-size="10.5" text-anchor="middle" class="s-ink2">Waiting with no time limit.</text>
+          <text data-on="6" x="180" y="234" font-size="10.5" text-anchor="middle" class="s-ink2">Finished for good.</text>
+          <text x="354" y="245" text-anchor="end" class="s-wm">myphatshala.com</text>
+        </svg>
+        <ol class="caps" hidden>
+          <li><code>new Thread(task)</code> gives a thread in state <b>NEW</b>: an object, not yet running.</li>
+          <li>After <code>start()</code> it is <b>RUNNABLE</b>: either running on a core, or ready and waiting for the scheduler to give it one. Java uses one state for both.</li>
+          <li><code>Thread.sleep(500)</code> puts it in <b>TIMED_WAITING</b>: it uses no CPU and wakes up by itself after the time is up (or when interrupted).</li>
+          <li>If it reaches a <code>synchronized</code> block whose lock another thread holds, it is <b>BLOCKED</b> until the lock is free (Lesson 12.4).</li>
+          <li><code>join()</code> or <code>wait()</code> without a time limit puts it in <b>WAITING</b>: it needs another thread to finish or to notify it (Lesson 12.5).</li>
+          <li>When <code>run()</code> returns or throws, the thread is <b>TERMINATED</b>. It can never run again.</li>
+        </ol>
+      </div>
+      <div class="view view--behind">
+        <span class="view__tag">Behind the screen</span>
+        <svg viewBox="0 0 360 250" role="img" aria-label="The six states of java.lang.Thread.State and the transitions between them">
+          <rect x="8" y="40" width="70" height="32" rx="8" class="s-card" style="stroke:var(--line);stroke-width:1.5"/><text x="43" y="59.168" font-size="8.8" text-anchor="middle" font-weight="700" class="s-ink mono">NEW</text>
+          <rect x="122" y="40" width="112" height="32" rx="8" class="s-card" style="stroke:var(--line);stroke-width:1.5"/><text x="178" y="59.168" font-size="8.8" text-anchor="middle" font-weight="700" class="s-ink mono">RUNNABLE</text>
+          <rect x="270" y="40" width="84" height="32" rx="8" class="s-card" style="stroke:var(--line);stroke-width:1.5"/><text x="312" y="59.168" font-size="8.8" text-anchor="middle" font-weight="700" class="s-ink mono">TERMINATED</text>
+          <rect x="8" y="150" width="112" height="32" rx="8" class="s-card" style="stroke:var(--line);stroke-width:1.5"/><text x="64" y="169.168" font-size="8.8" text-anchor="middle" font-weight="700" class="s-ink mono">TIMED_WAITING</text>
+          <rect x="128" y="150" width="96" height="32" rx="8" class="s-card" style="stroke:var(--line);stroke-width:1.5"/><text x="176" y="169.168" font-size="8.8" text-anchor="middle" font-weight="700" class="s-ink mono">BLOCKED</text>
+          <rect x="232" y="150" width="90" height="32" rx="8" class="s-card" style="stroke:var(--line);stroke-width:1.5"/><text x="277" y="169.168" font-size="8.8" text-anchor="middle" font-weight="700" class="s-ink mono">WAITING</text>
+          <g data-on="1"><rect x="8" y="40" width="70" height="32" rx="8" class="s-soft-green" style="stroke:var(--green);stroke-width:2.2"/><text x="43" y="59.168" font-size="8.8" text-anchor="middle" font-weight="700" class="s-ink mono">NEW</text></g>
+          <g data-on="2"><rect x="122" y="40" width="112" height="32" rx="8" class="s-soft-green" style="stroke:var(--green);stroke-width:2.2"/><text x="178" y="59.168" font-size="8.8" text-anchor="middle" font-weight="700" class="s-ink mono">RUNNABLE</text></g>
+          <g data-on="3"><rect x="8" y="150" width="112" height="32" rx="8" class="s-soft-green" style="stroke:var(--green);stroke-width:2.2"/><text x="64" y="169.168" font-size="8.8" text-anchor="middle" font-weight="700" class="s-ink mono">TIMED_WAITING</text></g>
+          <g data-on="4"><rect x="128" y="150" width="96" height="32" rx="8" class="s-soft-green" style="stroke:var(--green);stroke-width:2.2"/><text x="176" y="169.168" font-size="8.8" text-anchor="middle" font-weight="700" class="s-ink mono">BLOCKED</text></g>
+          <g data-on="5"><rect x="232" y="150" width="90" height="32" rx="8" class="s-soft-green" style="stroke:var(--green);stroke-width:2.2"/><text x="277" y="169.168" font-size="8.8" text-anchor="middle" font-weight="700" class="s-ink mono">WAITING</text></g>
+          <g data-on="6"><rect x="270" y="40" width="84" height="32" rx="8" class="s-soft-green" style="stroke:var(--green);stroke-width:2.2"/><text x="312" y="59.168" font-size="8.8" text-anchor="middle" font-weight="700" class="s-ink mono">TERMINATED</text></g>
+          <g data-on="2-"><path d="M80 56 L120 56" style="stroke:var(--ink-3);stroke-width:2;fill:none"/><path d="M112.0 51.5 L120 56 L112.0 60.5" style="stroke:var(--ink-3);stroke-width:2;fill:none;stroke-linecap:round;stroke-linejoin:round"/></g>
+          <text data-on="2-" x="84" y="48" font-size="8" class="s-ink3">start()</text>
+          <g data-on="6"><path d="M236 56 L268 56" style="stroke:var(--ink-3);stroke-width:2;fill:none"/><path d="M260.0 51.5 L268 56 L260.0 60.5" style="stroke:var(--ink-3);stroke-width:2;fill:none;stroke-linecap:round;stroke-linejoin:round"/></g>
+          <g data-on="3"><path d="M150 74 L70 148" style="stroke:acc;stroke-width:1.6;fill:none"/><path d="M78.9 145.9 L70 148 L72.8 139.3" style="stroke:acc;stroke-width:1.6;fill:none;stroke-linecap:round;stroke-linejoin:round"/></g>
+          <g data-on="4"><path d="M178 74 L178 148" style="stroke:#D64545;stroke-width:1.6;fill:none"/><path d="M182.5 140.0 L178 148 L173.5 140.0" style="stroke:#D64545;stroke-width:1.6;fill:none;stroke-linecap:round;stroke-linejoin:round"/></g>
+          <g data-on="5"><path d="M206 74 L270 148" style="stroke:var(--blue);stroke-width:1.6;fill:none"/><path d="M268.2 139.0 L270 148 L261.4 144.9" style="stroke:var(--blue);stroke-width:1.6;fill:none;stroke-linecap:round;stroke-linejoin:round"/></g>
+          <text data-on="3" x="12" y="112" font-size="8.5" class="s-acc">sleep(ms), join(ms)</text>
+          <text data-on="4" x="186" y="112" font-size="8.5" class="s-red">lock busy</text>
+          <text data-on="5" x="232" y="112" font-size="8.5" class="s-blue">join(), wait()</text>
+          <text data-on="3" x="8" y="212" font-size="9" class="s-ink2">time up / interrupt → back to RUNNABLE</text>
+          <text data-on="4" x="8" y="212" font-size="9" class="s-ink2">lock released → back to RUNNABLE</text>
+          <text data-on="5" x="8" y="212" font-size="9" class="s-ink2">other thread ends / notify → RUNNABLE</text>
+          <text data-on="6" x="8" y="212" font-size="9" class="s-ink2">no way back from TERMINATED</text>
+          <text x="8" y="20" font-size="10" font-weight="700" class="s-ink2">enum Thread.State</text>
+          <text data-on="1" x="180" y="236" font-size="10.5" text-anchor="middle" class="s-ink2">Only an object.</text>
+          <text data-on="2" x="180" y="236" font-size="10.5" text-anchor="middle" class="s-ink2">In the scheduler's hands.</text>
+          <text data-on="3" x="180" y="236" font-size="10.5" text-anchor="middle" class="s-ink2">Parked with a timer.</text>
+          <text data-on="4" x="180" y="236" font-size="10.5" text-anchor="middle" class="s-ink2">Queued for a lock.</text>
+          <text data-on="5" x="180" y="236" font-size="10.5" text-anchor="middle" class="s-ink2">Parked until someone acts.</text>
+          <text data-on="6" x="180" y="236" font-size="10.5" text-anchor="middle" class="s-ink2">Done.</text>
+          <text x="354" y="245" text-anchor="end" class="s-wm">myphatshala.com</text>
+        </svg>
+        <ol class="caps" hidden>
+          <li>The six values of the enum <code>Thread.State</code>. A brand-new Thread is <b>NEW</b>.</li>
+          <li><code>start()</code> is the only way out of NEW. RUNNABLE means the OS may run it whenever a core is free.</li>
+          <li>Timed waits (<code>sleep</code>, <code>join(ms)</code>, <code>wait(ms)</code>) go to TIMED_WAITING and come back on their own.</li>
+          <li>Trying to enter a <code>synchronized</code> block held by another thread: BLOCKED. It returns when the lock is released.</li>
+          <li>Untimed waits (<code>join()</code>, <code>wait()</code>) go to WAITING and need another thread to act.</li>
+          <li>From RUNNABLE, a finished <code>run()</code> leads to TERMINATED. There is no arrow back: calling <code>start()</code> again throws <code>IllegalThreadStateException</code>.</li>
+        </ol>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ======================= PART 6: REAL-WORLD USE ======================= -->
+<section class="part" id="real-world">
+  <span class="part-label"><b>6</b> Real-world use</span>
+  <h2>Lifecycle in real systems</h2>
+  <p>Knowing the states is how engineers read <b>thread dumps</b>: a snapshot of every thread and its state, taken when a server is slow or stuck.</p>
+  <!--ANIM2-->
+  <h3 id="animated-example">Watch it with an example: a payment-status poller the user can cancel</h3>
+  <p class="anim-intro">After a UPI payment, the app checks the bank every 2 seconds until the status is final. If the user taps Cancel, main interrupts the poller.</p>
+  <div class="anim anim--one" data-frames="6" data-delay="4600">
+    <div class="anim__title">Payment poller: sleep, wake, interrupt <span>6 steps</span></div>
+    <div class="anim__views">
+      <div class="view view--story">
+        <span class="view__tag">Animated example</span>
+        <svg viewBox="0 0 360 230" role="img" aria-label="A poller thread alternates between RUNNABLE and TIMED_WAITING and ends when interrupted">
+          <rect x="10" y="14" width="150" height="66" rx="8" class="s-soft-blue" style="stroke:var(--blue);stroke-width:1.5"/>
+          <text x="20" y="32" font-size="9.5" font-weight="700" class="s-ink mono">Thread "poller"</text>
+          <text data-on="1" x="20" y="54" font-size="11" font-weight="700" class="s-ink2 mono">NEW</text>
+          <text data-on="2" x="20" y="54" font-size="11" font-weight="700" class="s-green mono">RUNNABLE</text>
+          <text data-on="3" x="20" y="54" font-size="11" font-weight="700" class="s-acc mono">TIMED_WAITING</text>
+          <text data-on="4" x="20" y="54" font-size="11" font-weight="700" class="s-green mono">RUNNABLE</text>
+          <text data-on="5" x="20" y="54" font-size="11" font-weight="700" class="s-acc mono">TIMED_WAITING</text>
+          <text data-on="6" x="20" y="54" font-size="11" font-weight="700" class="s-ink3 mono">TERMINATED</text>
+          <text data-on="6" x="20" y="72" font-size="9" class="s-red">woken by interrupt</text>
+          <rect x="170" y="14" width="184" height="120" rx="8" class="s-board" style="stroke:board;stroke-width:1.5"/>
+          <text x="178" y="32" font-size="8.4" class="s-chalk mono">while (true) {</text>
+          <text x="178" y="50" font-size="8.4" class="s-chalk mono">  check(bank);</text>
+          <text x="178" y="68" font-size="8.4" class="s-chalk mono">  Thread.sleep(2000);</text>
+          <text x="178" y="86" font-size="8.4" class="s-chalk mono">}</text>
+          <text x="178" y="104" font-size="8.4" class="s-chalk mono">catch (InterruptedException e)</text>
+          <text x="178" y="122" font-size="8.4" class="s-chalk mono">  stop polling</text>
+          <g data-on="2"><rect x="173" y="36" width="178" height="18" rx="3" class="" style="stroke:var(--track);stroke-width:1.5;fill:none"/></g>
+          <g data-on="3"><rect x="173" y="54" width="178" height="18" rx="3" class="" style="stroke:var(--track);stroke-width:1.5;fill:none"/></g>
+          <g data-on="4"><rect x="173" y="36" width="178" height="18" rx="3" class="" style="stroke:var(--track);stroke-width:1.5;fill:none"/></g>
+          <g data-on="5"><rect x="173" y="54" width="178" height="18" rx="3" class="" style="stroke:var(--track);stroke-width:1.5;fill:none"/></g>
+          <g data-on="6"><rect x="173" y="108" width="178" height="18" rx="3" class="" style="stroke:var(--track);stroke-width:1.5;fill:none"/></g>
+          <text data-on="2-" x="10" y="108" font-size="9.5" class="s-ink2">bank says:</text>
+          <text data-on="2-5" x="80" y="108" font-size="10" font-weight="700" class="s-acc mono">PENDING</text>
+          <text data-on="5-" x="10" y="128" font-size="9.5" font-weight="700" class="s-red">user taps Cancel →</text>
+          <text data-on="5-" x="10" y="146" font-size="9.5" class="s-red mono">main: poller.interrupt()</text>
+          <text data-on="6" x="10" y="164" font-size="9.5" class="s-green">poller woke up early and stopped</text>
+          <text data-on="1" x="180" y="204" font-size="10.5" text-anchor="middle" class="s-ink2">Poller created.</text>
+          <text data-on="2" x="180" y="204" font-size="10.5" text-anchor="middle" class="s-ink2">Asks the bank: pending.</text>
+          <text data-on="3" x="180" y="204" font-size="10.5" text-anchor="middle" class="s-ink2">Sleeps 2 s, no CPU used.</text>
+          <text data-on="4" x="180" y="204" font-size="10.5" text-anchor="middle" class="s-ink2">Wakes, asks again.</text>
+          <text data-on="5" x="180" y="204" font-size="10.5" text-anchor="middle" class="s-ink2">User cancels: interrupt.</text>
+          <text data-on="6" x="180" y="204" font-size="10.5" text-anchor="middle" class="s-ink2">sleep throws; thread ends.</text>
+          <text x="354" y="225" text-anchor="end" class="s-wm">myphatshala.com</text>
+        </svg>
+        <ol class="caps" hidden>
+          <li>main creates the poller thread: <b>NEW</b>.</li>
+          <li>After <code>start()</code> it is RUNNABLE and calls the bank: still PENDING.</li>
+          <li><code>Thread.sleep(2000)</code>: <b>TIMED_WAITING</b>. The thread uses no CPU while sleeping.</li>
+          <li>Time's up: back to RUNNABLE, and it asks again.</li>
+          <li>The user taps Cancel. main calls <code>poller.interrupt()</code>, which sets the poller's interrupted flag.</li>
+          <li>A sleeping thread that is interrupted wakes at once with <code>InterruptedException</code>. The catch block stops the loop, <code>run()</code> returns, and the poller is TERMINATED. Interrupt is a polite request, not a kill switch.</li>
+        </ol>
+      </div>
+    </div>
+  </div>
+  <!--/ANIM2-->
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><circle cx="60" cy="45" r="26" class="s-card" style="stroke:var(--line)"/><path d="M60 45V27M60 45l13 8" style="stroke:var(--track);stroke-width:2.5"/></svg></div>
+    <div><h4>1. Polling and retries</h4><p>Payment-status checks, retrying a failed SMS after 5 seconds, refreshing a cache every minute: all use timed waits.</p>
+      <div class="uc-flow"><span>check</span><i>→</i><span class="java">sleep(2000)</span><i>→</i><span>check again</span></div></div>
+  </div>
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="30" y="30" width="60" height="34" rx="6" class="s-soft-acc" style="stroke:var(--track)"/><path d="M40 47h40" style="stroke:var(--red);stroke-width:3"/></svg></div>
+    <div><h4>2. Cancel buttons</h4><p>Cancel upload, stop export, abort search: the UI thread interrupts the worker, which stops at its next sleep, wait or flag check.</p>
+      <div class="uc-flow"><span>tap Cancel</span><i>→</i><span class="java">worker.interrupt()</span><i>→</i><span>clean stop</span></div></div>
+  </div>
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="20" y="16" width="80" height="58" rx="6" class="s-board"/><path d="M30 30h44M30 42h56M30 54h36" style="stroke:var(--chalk);stroke-width:2"/></svg></div>
+    <div><h4>3. Thread dumps in production</h4><p><code>jstack</code> or monitoring tools list every thread with its state. Hundreds of BLOCKED threads on one lock point to a bottleneck; WAITING forever points to a missed notify or a deadlock.</p>
+      <div class="uc-flow"><span>server slow</span><i>→</i><span class="java">thread dump</span><i>→</i><span>find BLOCKED threads</span></div></div>
+  </div>
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="18" y="30" width="36" height="30" rx="5" class="s-soft-green" style="stroke:var(--green)"/><rect x="66" y="30" width="36" height="30" rx="5" class="s-soft-blue" style="stroke:var(--blue)"/><path d="M54 45h12" style="stroke:var(--ink-3);stroke-width:2"/></svg></div>
+    <div><h4>4. Timeouts</h4><p>Never wait forever for an outside system. <code>join(ms)</code> (and later <code>Future.get(timeout)</code>) lets the app give up and show a fallback.</p>
+      <div class="uc-flow"><span>bank API hangs</span><i>→</i><span class="java">join(100)</span><i>→</i><span>cached balance</span></div></div>
+  </div>
+  <p class="muted">Examples are simplified. Production code usually cancels tasks through executors and futures (Lesson 12.6), which use interrupts underneath.</p>
+</section>
+
+<div class="ad-slot" data-slot="mid"></div>
+
+<!-- ======================= PART 7: RUN THE CODE ======================= -->
+<section class="part" id="run">
+  <span class="part-label"><b>7</b> Run the code</span>
+  <h2>A download that sleeps between updates</h2>
+  <div class="code" data-lang="java" data-file="Main.java"><pre><code>public class Main {
+    public static void main(String[] args) throws InterruptedException {
+        Thread download = new Thread(() -&gt; {
+            for (int pct = 25; pct &lt;= 100; pct += 25) {
+                System.out.println("download " + pct + "%");
+                try {
+                    Thread.sleep(40);
+                } catch (InterruptedException e) {
+                    System.out.println("download cancelled");
+                    return;
+                }
+            }
+        }, "download");
+
+        System.out.println("1. " + download.getState());
+        download.start();
+        download.join();
+        System.out.println("2. " + download.getState() + ", alive " + download.isAlive());
+    }
+}</code></pre><div class="output">1. NEW
+download 25%
+download 50%
+download 75%
+download 100%
+2. TERMINATED, alive false</div></div>
+  <ul class="anno">
+    <li><code>download.getState()</code> before <code>start()</code><span>Always NEW.</span></li>
+    <li><code>Thread.sleep(40)</code><span>Pauses the download thread (not main) between updates: TIMED_WAITING.</span></li>
+    <li><code>catch (InterruptedException e)</code><span>Required: sleep's checked exception can't escape <code>run()</code>. The catch is where cancelling happens.</span></li>
+    <li><code>download.join()</code><span>main is WAITING until the download ends.</span></li>
+  </ul>
+  <div class="runner">
+    <script type="application/json">{
+ "lang": "java",
+ "file": "Main.java",
+ "tasks": [
+  {
+   "label": "1 · Progress with sleep",
+   "hint": "Press <b>Run</b>. Then add <code>download.interrupt();</code> right after <code>start()</code> and run again: what changes?",
+   "code": "public class Main {\n    public static void main(String[] args) throws InterruptedException {\n        Thread download = new Thread(() -> {\n            for (int pct = 25; pct <= 100; pct += 25) {\n                System.out.println(\"download \" + pct + \"%\");\n                try {\n                    Thread.sleep(40);\n                } catch (InterruptedException e) {\n                    System.out.println(\"download cancelled\");\n                    return;\n                }\n            }\n        }, \"download\");\n\n        System.out.println(\"1. \" + download.getState());\n        download.start();\n        download.join();\n        System.out.println(\"2. \" + download.getState() + \", alive \" + download.isAlive());\n    }\n}\n"
+  },
+  {
+   "label": "2 · Predict: state right after start",
+   "hint": "<b>Predict first:</b> which state is printed? Run it several times. Why can't you be sure? (The thread may still be RUNNABLE or already asleep.)",
+   "code": "public class Main {\n    public static void main(String[] args) throws InterruptedException {\n        Thread t = new Thread(() -> {\n            try { Thread.sleep(200); } catch (InterruptedException e) { }\n        });\n        t.start();\n        System.out.println(\"right after start: \" + t.getState());\n        Thread.sleep(50);\n        System.out.println(\"50 ms later: \" + t.getState());\n        t.join();\n    }\n}\n"
+  },
+  {
+   "label": "3 · Predict: interrupt yourself",
+   "hint": "<b>Predict first:</b> does the sleep last 2 seconds? Then delete the first line and compare.",
+   "code": "public class Main {\n    public static void main(String[] args) {\n        Thread.currentThread().interrupt();\n        long start = System.currentTimeMillis();\n        try {\n            Thread.sleep(2000);\n        } catch (InterruptedException e) {\n            System.out.println(\"sleep ended early: \" + e.getMessage());\n        }\n        System.out.println(\"slept about \" + (System.currentTimeMillis() - start) / 1000 + \" s\");\n    }\n}\n"
+  },
+  {
+   "label": "4 · Crash: negative timeout",
+   "hint": "A timeout can't be negative. Read the exception, then use <code>join(500)</code>.",
+   "code": "public class Main {\n    public static void main(String[] args) throws InterruptedException {\n        Thread sync = new Thread(() -> System.out.println(\"syncing contacts\"));\n        sync.start();\n        long waitMs = 500 - 1000;\n        sync.join(waitMs);\n        System.out.println(\"done\");\n    }\n}\n",
+   "_expect": "exception"
+  },
+  {
+   "label": "5 · Spot the error",
+   "hint": "<code>getState()</code> returns an enum <code>Thread.State</code>, not a String. Compare with <code>Thread.State.NEW</code>.",
+   "code": "public class Main {\n    public static void main(String[] args) {\n        Thread t = new Thread(() -> {});\n        if (t.getState() == \"NEW\") {\n            System.out.println(\"not started yet\");\n        }\n    }\n}\n",
+   "_expect": "compile-error"
+  }
+ ]
+}</script>
+  </div>
+</section>
+
+<!-- ======================= PART 8: LINE BY LINE ======================= -->
+<section class="part" id="tracer">
+  <span class="part-label"><b>8</b> Line by line</span>
+  <h2>NEW, interrupted, TERMINATED</h2>
+  <p>Recorded from the real JVM, following <b>main</b>. Watch the poller's state on the heap, and see how an interrupt turns a one-minute sleep into an instant stop.</p>
+  <div class="tracer">
+    <script type="application/json">{"lang": "java", "code": ["public class Main {", "    public static void main(String[] args) throws InterruptedException {", "        Thread poller = new Thread(() -> {", "            try {", "                Thread.sleep(60_000);", "            } catch (InterruptedException e) {", "                System.out.println(\"poller: woke early, stopping\");", "            }", "        }, \"poller\");", "        Thread.State before = poller.getState();", "        poller.start();", "        poller.interrupt();", "        poller.join();", "        System.out.println(before + \" -> \" + poller.getState() + \", alive \" + poller.isAlive());", "    }", "}"], "steps": [{"line": 3, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["poller", "→ #1 Thread"]]}], "heap": ["<b>#1</b> Thread &quot;poller&quot; (NEW)", "<b>#2</b> String[0] (args, empty)"], "newVar": "poller", "phase": "Create", "note": "A Thread object named \"poller\" is created. Its task would sleep for a whole minute."}, {"line": 10, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["poller", "→ #1 Thread"], ["before", "→ #3 Thread.State"]]}], "heap": ["<b>#1</b> Thread &quot;poller&quot; (NEW)", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Thread.State"], "newVar": "before", "phase": "NEW", "note": "<code>getState()</code> returns the enum value NEW: the thread exists only as an object."}, {"line": 11, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["poller", "→ #1 Thread"], ["before", "→ #3 Thread.State"]]}], "heap": ["<b>#1</b> Thread &quot;poller&quot; (TIMED_WAITING (sleeping))", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Thread.State"], "phase": "Start", "note": "The poller thread starts. Its state becomes RUNNABLE, then TIMED_WAITING once it reaches <code>sleep</code>."}, {"line": 12, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["poller", "→ #1 Thread"], ["before", "→ #3 Thread.State"]]}], "heap": ["<b>#1</b> Thread &quot;poller&quot; (TIMED_WAITING (sleeping))", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Thread.State"], "phase": "Interrupt", "note": "<code>interrupt()</code> sets the poller's interrupted flag. If it is already asleep it wakes up at once; if it hasn't reached <code>sleep</code> yet, <code>sleep</code> will throw immediately. Either way it doesn't sleep a minute."}, {"line": 13, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["poller", "→ #1 Thread"], ["before", "→ #3 Thread.State"]]}], "heap": ["<b>#1</b> Thread &quot;poller&quot; (TERMINATED)", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Thread.State"], "out": "poller: woke early, stopping\n", "phase": "Join", "note": "main waits (state WAITING) until the poller has printed its message and ended. Now it is TERMINATED."}, {"line": 14, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["poller", "→ #1 Thread"], ["before", "→ #3 Thread.State"]]}], "heap": ["<b>#1</b> Thread &quot;poller&quot; (TERMINATED)", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Thread.State"], "out": "NEW -> TERMINATED, alive false\n", "phase": "Print", "note": "Before start it was NEW; now it is TERMINATED and <code>isAlive()</code> is false. Prints <code>NEW -&gt; TERMINATED, alive false</code>."}, {"line": 15, "phase": "Program ends", "note": "<code>main</code> returns, its frame is popped and the program ends.", "stack": [], "heap": []}]}</script>
+  </div>
+
+<h3 id="worked">Worked examples: real problems, solved and traced in memory</h3>
+  <p class="wx-intro">Three lifecycle tools you'll use constantly: <code>sleep</code> for pauses, <code>interrupt</code> for cancelling, and <code>join(ms)</code> for waiting with a time limit. The traces follow main and show the worker's state on the heap.</p>
+  <article class="wx">
+    <div class="wx__head"><span class="wx__num">Example 1</span><span class="wx__tag">Food delivery · tracking</span></div>
+    <h4>Order status ticks with sleep()</h4>
+    <div class="wx__problem"><p class="wx__label">Problem statement</p><p>A delivery tracker moves an order through three statuses, pausing between updates. Run the updates on a <code>tracker</code> thread with <code>Thread.sleep(50)</code> between them. Main waits and then confirms the tracker has ended.</p></div>
+    <div class="prob__io"><div><small>Input</small><pre>statuses: PLACED, COOKING, OUT FOR DELIVERY</pre></div><div><small>Expected output</small><pre>Order #88: PLACED
+Order #88: COOKING
+Order #88: OUT FOR DELIVERY
+tracker TERMINATED, alive false</pre></div></div>
+    <div class="wx__approach"><p class="wx__label">Approach</p><ol><li>The tracker loops over the statuses, printing each and sleeping in between.</li><li><code>sleep</code> throws a checked exception, so catch it inside the lambda.</li><li>main joins, then checks <code>getState()</code> and <code>isAlive()</code>.</li></ol></div>
+    <p class="wx__label">Solution: run it live</p>
+    <div class="runner">
+    <script type="application/json">{"lang": "java", "file": "Main.java", "tasks": [{"label": "Run · Order status ticks with sleep()", "hint": "Press <b>Run</b>. Then change the sleep to 500 ms and watch the updates appear slowly, one by one.", "code": "public class Main {\n    public static void main(String[] args) throws InterruptedException {\n        String[] steps = {\"PLACED\", \"COOKING\", \"OUT FOR DELIVERY\"};\n        Thread tracker = new Thread(() -> {\n            for (String s : steps) {\n                System.out.println(\"Order #88: \" + s);\n                try {\n                    Thread.sleep(50);\n                } catch (InterruptedException e) {\n                    return;\n                }\n            }\n        }, \"tracker\");\n        tracker.start();\n        tracker.join();\n        System.out.println(\"tracker \" + tracker.getState() + \", alive \" + tracker.isAlive());\n    }\n}\n"}]}</script>
+    </div>
+    <p class="wx__label">What happens in memory, step by step</p>
+    <p class="wx__how">Recorded from the real JVM: press <b>Next</b> to execute one line at a time. Watch method calls push and pop frames on the stack, and objects (numbered #1, #2 …) appear on the heap.</p>
+    <div class="tracer">
+    <script type="application/json">{"lang": "java", "code": ["public class Main {", "    public static void main(String[] args) throws InterruptedException {", "        String[] steps = {\"PLACED\", \"COOKING\", \"OUT FOR DELIVERY\"};", "        Thread tracker = new Thread(() -> {", "            for (String s : steps) {", "                System.out.println(\"Order #88: \" + s);", "                try {", "                    Thread.sleep(50);", "                } catch (InterruptedException e) {", "                    return;", "                }", "            }", "        }, \"tracker\");", "        tracker.start();", "        tracker.join();", "        System.out.println(\"tracker \" + tracker.getState() + \", alive \" + tracker.isAlive());", "    }", "}"], "steps": [{"line": 3, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["steps", "→ #1 String[3]"]]}], "heap": ["<b>#1</b> String[3] {&quot;PLACED&quot;, &quot;COOKING&quot;, &quot;OUT FOR DELIVERY&quot;}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> String &quot;PLACED&quot;", "<b>#4</b> String &quot;COOKING&quot;", "<b>#5</b> String &quot;OUT FOR DELIVERY&quot;"], "newVar": "steps", "phase": "Statuses", "note": "The array the tracker will walk through. Now <code>steps</code> = → #1 String[3]. New object <b>#1</b> on the heap: String[3] {&quot;PLACED&quot;, &quot;COOKING&quot;, &quot;OUT FOR DELIVERY&quot;}. New object <b>#3</b> on the heap: String &quot;PLACED&quot;. New object <b>#4</b> on the heap: String &quot;COOKING&quot;."}, {"line": 4, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["steps", "→ #1 String[3]"], ["tracker", "→ #6 Thread"]]}], "heap": ["<b>#1</b> String[3] {&quot;PLACED&quot;, &quot;COOKING&quot;, &quot;OUT FOR DELIVERY&quot;}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> String &quot;PLACED&quot;", "<b>#4</b> String &quot;COOKING&quot;", "<b>#5</b> String &quot;OUT FOR DELIVERY&quot;", "<b>#6</b> Thread &quot;tracker&quot; (NEW)"], "newVar": "tracker", "phase": "Create", "note": "The tracker Thread object, state NEW. Now <code>tracker</code> = → #6 Thread. New object <b>#6</b> on the heap: Thread &quot;tracker&quot; (NEW)."}, {"line": 14, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["steps", "→ #1 String[3]"], ["tracker", "→ #6 Thread"]]}], "heap": ["<b>#1</b> String[3] {&quot;PLACED&quot;, &quot;COOKING&quot;, &quot;OUT FOR DELIVERY&quot;}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> String &quot;PLACED&quot;", "<b>#4</b> String &quot;COOKING&quot;", "<b>#5</b> String &quot;OUT FOR DELIVERY&quot;", "<b>#6</b> Thread &quot;tracker&quot; (RUNNABLE)"], "phase": "Start", "note": "The tracker starts. For the next 150 ms it alternates between RUNNABLE (printing) and TIMED_WAITING (sleeping)."}, {"line": 15, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["steps", "→ #1 String[3]"], ["tracker", "→ #6 Thread"]]}], "heap": ["<b>#1</b> String[3] {&quot;PLACED&quot;, &quot;COOKING&quot;, &quot;OUT FOR DELIVERY&quot;}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> String &quot;PLACED&quot;", "<b>#4</b> String &quot;COOKING&quot;", "<b>#5</b> String &quot;OUT FOR DELIVERY&quot;", "<b>#6</b> Thread &quot;tracker&quot; (TERMINATED)"], "out": "Order #88: PLACED\nOrder #88: COOKING\nOrder #88: OUT FOR DELIVERY\n", "phase": "Join", "note": "main is WAITING until the tracker's <code>run()</code> returns."}, {"line": 16, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["steps", "→ #1 String[3]"], ["tracker", "→ #6 Thread"]]}], "heap": ["<b>#1</b> String[3] {&quot;PLACED&quot;, &quot;COOKING&quot;, &quot;OUT FOR DELIVERY&quot;}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> String &quot;PLACED&quot;", "<b>#4</b> String &quot;COOKING&quot;", "<b>#5</b> String &quot;OUT FOR DELIVERY&quot;", "<b>#6</b> Thread &quot;tracker&quot; (TERMINATED)"], "out": "tracker TERMINATED, alive false\n", "phase": "Check", "note": "The tracker is TERMINATED and no longer alive. Prints <code>tracker TERMINATED, alive false</code>."}, {"line": 17, "phase": "Program ends", "note": "<code>main</code> returns, its frame is popped and the program ends.", "stack": [], "heap": []}]}</script>
+  </div>
+  </article>
+  <article class="wx">
+    <div class="wx__head"><span class="wx__num">Example 2</span><span class="wx__tag">Analytics · reports</span></div>
+    <h4>Cancel a slow report with interrupt()</h4>
+    <div class="wx__problem"><p class="wx__label">Problem statement</p><p>A report job processes rows, pausing after each one (simulating slow disk reads). The user cancels right away. The job must notice the interrupt, stop cleanly, and say how many rows it finished.</p></div>
+    <div class="prob__io"><div><small>Input</small><pre>rows 1..5, cancel immediately</pre></div><div><small>Expected output</small><pre>cancelled after 1 row(s)
+report state: TERMINATED</pre></div></div>
+    <div class="wx__approach"><p class="wx__label">Approach</p><ol><li>The worker processes a row, then sleeps 1 second.</li><li>main calls <code>interrupt()</code> straight after <code>start()</code>.</li><li>The sleep throws <code>InterruptedException</code>; the catch reports progress and returns.</li></ol></div>
+    <p class="wx__label">Solution: run it live</p>
+    <div class="runner">
+    <script type="application/json">{"lang": "java", "file": "Main.java", "tasks": [{"label": "Run · Cancel a slow report with interrupt()", "hint": "Press <b>Run</b>. Then remove the <code>report.interrupt()</code> line: the job takes about five seconds and prints “report finished”.", "code": "public class Main {\n    static int done = 0;\n\n    public static void main(String[] args) throws InterruptedException {\n        Thread report = new Thread(() -> {\n            for (int row = 1; row <= 5; row++) {\n                done++;\n                try {\n                    Thread.sleep(1000);\n                } catch (InterruptedException e) {\n                    System.out.println(\"cancelled after \" + done + \" row(s)\");\n                    return;\n                }\n            }\n            System.out.println(\"report finished\");\n        }, \"report\");\n        report.start();\n        report.interrupt();\n        report.join();\n        System.out.println(\"report state: \" + report.getState());\n    }\n}\n"}]}</script>
+    </div>
+    <p class="wx__label">What happens in memory, step by step</p>
+    <p class="wx__how">Recorded from the real JVM: press <b>Next</b> to execute one line at a time. Watch method calls push and pop frames on the stack, and objects (numbered #1, #2 …) appear on the heap.</p>
+    <div class="tracer">
+    <script type="application/json">{"lang": "java", "code": ["public class Main {", "    static int done = 0;", "", "    public static void main(String[] args) throws InterruptedException {", "        Thread report = new Thread(() -> {", "            for (int row = 1; row <= 5; row++) {", "                done++;", "                try {", "                    Thread.sleep(1000);", "                } catch (InterruptedException e) {", "                    System.out.println(\"cancelled after \" + done + \" row(s)\");", "                    return;", "                }", "            }", "            System.out.println(\"report finished\");", "        }, \"report\");", "        report.start();", "        report.interrupt();", "        report.join();", "        System.out.println(\"report state: \" + report.getState());", "    }", "}"], "steps": [{"line": 5, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["report", "→ #1 Thread"]]}], "heap": ["<b>static</b> Main.done = 0", "<b>#1</b> Thread &quot;report&quot; (NEW)", "<b>#2</b> String[0] (args, empty)"], "newVar": "report", "phase": "Create", "note": "The report thread, NEW. Now <code>report</code> = → #1 Thread. New object <b>#1</b> on the heap: Thread &quot;report&quot; (NEW)."}, {"line": 17, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["report", "→ #1 Thread"]]}], "heap": ["<b>static</b> Main.done = 0", "<b>#1</b> Thread &quot;report&quot; (RUNNABLE)", "<b>#2</b> String[0] (args, empty)"], "phase": "Start", "note": "The report thread starts and processes row 1."}, {"line": 18, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["report", "→ #1 Thread"]]}], "heap": ["<b>static</b> Main.done = 1", "<b>#1</b> Thread &quot;report&quot; (RUNNABLE)", "<b>#2</b> String[0] (args, empty)"], "phase": "Interrupt", "note": "main sets the report thread's interrupted flag. The first <code>sleep</code> sees it and throws at once, whether it was already sleeping or not."}, {"line": 19, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["report", "→ #1 Thread"]]}], "heap": ["<b>static</b> Main.done = 1", "<b>#1</b> Thread &quot;report&quot; (TERMINATED)", "<b>#2</b> String[0] (args, empty)"], "out": "cancelled after 1 row(s)\n", "phase": "Join", "note": "main waits. The worker printed the cancel message and returned."}, {"line": 20, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["report", "→ #1 Thread"]]}], "heap": ["<b>static</b> Main.done = 1", "<b>#1</b> Thread &quot;report&quot; (TERMINATED)", "<b>#2</b> String[0] (args, empty)"], "out": "report state: TERMINATED\n", "phase": "Done", "note": "The report thread is TERMINATED, after one row instead of five seconds of work. Prints <code>report state: TERMINATED</code>."}, {"line": 21, "phase": "Program ends", "note": "<code>main</code> returns, its frame is popped and the program ends.", "stack": [], "heap": []}]}</script>
+  </div>
+  </article>
+  <article class="wx">
+    <div class="wx__head"><span class="wx__num">Example 3</span><span class="wx__tag">Banking · timeouts</span></div>
+    <h4>Wait at most 100 ms for a slow bank API</h4>
+    <div class="wx__problem"><p class="wx__label">Problem statement</p><p>A balance check calls a bank API that sometimes hangs. main waits for it with <code>join(100)</code>. If it hasn't finished by then, main reports a timeout, cancels the call with <code>interrupt()</code>, and shows a cached balance.</p></div>
+    <div class="prob__io"><div><small>Input</small><pre>cached balance Rs 12,400; the API hangs</pre></div><div><small>Expected output</small><pre>timeout: bank-api is TIMED_WAITING
+api call cancelled
+showing cached balance Rs 12,400</pre></div></div>
+    <div class="wx__approach"><p class="wx__label">Approach</p><ol><li>The API thread sleeps 60 s to simulate a hung call.</li><li><code>join(100)</code> returns after at most 100 ms, finished or not.</li><li>Check <code>isAlive()</code>: if still alive, interrupt it and use the cached value.</li></ol></div>
+    <p class="wx__label">Solution: run it live</p>
+    <div class="runner">
+    <script type="application/json">{"lang": "java", "file": "Main.java", "tasks": [{"label": "Run · Wait at most 100 ms for a slow bank API", "hint": "Press <b>Run</b>. Then make the API sleep only 20 ms: <code>join(100)</code> returns early, <code>isAlive()</code> is false, and nothing is printed by main.", "code": "public class Main {\n    public static void main(String[] args) throws InterruptedException {\n        Thread api = new Thread(() -> {\n            try {\n                Thread.sleep(60_000);\n            } catch (InterruptedException e) {\n                System.out.println(\"api call cancelled\");\n            }\n        }, \"bank-api\");\n        api.start();\n        api.join(100);\n        if (api.isAlive()) {\n            System.out.println(\"timeout: bank-api is \" + api.getState());\n            api.interrupt();\n            api.join();\n            System.out.println(\"showing cached balance Rs 12,400\");\n        }\n    }\n}\n"}]}</script>
+    </div>
+    <p class="wx__label">What happens in memory, step by step</p>
+    <p class="wx__how">Recorded from the real JVM: press <b>Next</b> to execute one line at a time. Watch method calls push and pop frames on the stack, and objects (numbered #1, #2 …) appear on the heap.</p>
+    <div class="tracer">
+    <script type="application/json">{"lang": "java", "code": ["public class Main {", "    public static void main(String[] args) throws InterruptedException {", "        Thread api = new Thread(() -> {", "            try {", "                Thread.sleep(60_000);", "            } catch (InterruptedException e) {", "                System.out.println(\"api call cancelled\");", "            }", "        }, \"bank-api\");", "        api.start();", "        api.join(100);", "        if (api.isAlive()) {", "            System.out.println(\"timeout: bank-api is \" + api.getState());", "            api.interrupt();", "            api.join();", "            System.out.println(\"showing cached balance Rs 12,400\");", "        }", "    }", "}"], "steps": [{"line": 3, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["api", "→ #1 Thread"]]}], "heap": ["<b>#1</b> Thread &quot;bank-api&quot; (NEW)", "<b>#2</b> String[0] (args, empty)"], "newVar": "api", "phase": "Create", "note": "A thread that simulates a call that hangs for a minute. Now <code>api</code> = → #1 Thread. New object <b>#1</b> on the heap: Thread &quot;bank-api&quot; (NEW)."}, {"line": 10, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["api", "→ #1 Thread"]]}], "heap": ["<b>#1</b> Thread &quot;bank-api&quot; (RUNNABLE)", "<b>#2</b> String[0] (args, empty)"], "phase": "Start", "note": "The API thread starts and soon sleeps (TIMED_WAITING)."}, {"line": 11, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["api", "→ #1 Thread"]]}], "heap": ["<b>#1</b> Thread &quot;bank-api&quot; (TIMED_WAITING (sleeping))", "<b>#2</b> String[0] (args, empty)"], "phase": "Timed join", "note": "main waits at most 100 ms. The API thread is still sleeping, so <code>join</code> simply returns."}, {"line": 12, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["api", "→ #1 Thread"]]}], "heap": ["<b>#1</b> Thread &quot;bank-api&quot; (TIMED_WAITING (sleeping))", "<b>#2</b> String[0] (args, empty)"], "phase": "Still alive?", "note": "<code>isAlive()</code> is true: the call hasn't finished. The condition <code>api.isAlive()</code> is checked: <b>true</b>, so the block runs."}, {"line": 13, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["api", "→ #1 Thread"]]}], "heap": ["<b>#1</b> Thread &quot;bank-api&quot; (TIMED_WAITING (sleeping))", "<b>#2</b> String[0] (args, empty)"], "out": "timeout: bank-api is TIMED_WAITING\n", "phase": "Report", "note": "The API thread is TIMED_WAITING (inside its long sleep). Prints <code>timeout: bank-api is TIMED_WAITING</code>."}, {"line": 14, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["api", "→ #1 Thread"]]}], "heap": ["<b>#1</b> Thread &quot;bank-api&quot; (TIMED_WAITING (sleeping))", "<b>#2</b> String[0] (args, empty)"], "phase": "Cancel", "note": "main interrupts it; the sleep throws and the thread prints its message."}, {"line": 15, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["api", "→ #1 Thread"]]}], "heap": ["<b>#1</b> Thread &quot;bank-api&quot; (TERMINATED)", "<b>#2</b> String[0] (args, empty)"], "out": "api call cancelled\n", "phase": "Wait to end", "note": "A plain <code>join()</code> waits for the cancelled thread to finish cleanly."}, {"line": 16, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["api", "→ #1 Thread"]]}], "heap": ["<b>#1</b> Thread &quot;bank-api&quot; (TERMINATED)", "<b>#2</b> String[0] (args, empty)"], "out": "showing cached balance Rs 12,400\n", "phase": "Fallback", "note": "The app shows the cached balance instead of hanging. Prints <code>showing cached balance Rs 12,400</code>."}, {"line": 18, "phase": "Program ends", "note": "<code>main</code> returns, its frame is popped and the program ends.", "stack": [], "heap": []}]}</script>
+  </div>
+  </article>
+
+</section>
+
+<!-- ======================= PART 9: QUIZ AND REVISION ======================= -->
+<section class="part" id="quiz">
+  <span class="part-label"><b>9</b> Quiz and revision</span>
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <script type="application/json">[
+ {
+  "q": "How many values does Thread.State have?",
+  "options": [
+   "4",
+   "5",
+   "6",
+   "7"
+  ],
+  "answer": 2,
+  "why": "NEW, RUNNABLE, BLOCKED, WAITING, TIMED_WAITING, TERMINATED."
+ },
+ {
+  "q": "A thread is inside Thread.sleep(1000). Its state is…",
+  "options": [
+   "WAITING",
+   "BLOCKED",
+   "TIMED_WAITING",
+   "RUNNABLE"
+  ],
+  "answer": 2,
+  "why": "Waits with a time limit are TIMED_WAITING."
+ },
+ {
+  "q": "A thread tries to enter a synchronized block whose lock another thread holds. Its state is…",
+  "options": [
+   "WAITING",
+   "BLOCKED",
+   "TIMED_WAITING",
+   "NEW"
+  ],
+  "answer": 1,
+  "why": "BLOCKED means waiting to acquire a monitor lock."
+ },
+ {
+  "q": "Java has no separate 'RUNNING' state because…",
+  "options": [
+   "threads never run",
+   "RUNNABLE covers both running and ready-to-run",
+   "it's called ACTIVE",
+   "it's TIMED_WAITING"
+  ],
+  "answer": 1,
+  "why": "Whether a RUNNABLE thread is on a core right now is up to the OS scheduler."
+ },
+ {
+  "q": "What does t.interrupt() do?",
+  "options": [
+   "Kills t immediately",
+   "Sets t's interrupted flag; blocking calls like sleep then throw InterruptedException",
+   "Pauses t",
+   "Restarts t"
+  ],
+  "answer": 1,
+  "why": "Interruption is cooperative: the thread must notice and stop itself."
+ },
+ {
+  "q": "Which statement pauses the thread that executes it?",
+  "options": [
+   "t.sleep(100) always pauses t",
+   "Thread.sleep(100)",
+   "t.join()",
+   "t.yield()"
+  ],
+  "answer": 1,
+  "why": "sleep is static and always pauses the current thread, whatever reference you call it through."
+ },
+ {
+  "q": "After join() returns normally, the joined thread is…",
+  "options": [
+   "NEW",
+   "RUNNABLE",
+   "TERMINATED",
+   "WAITING"
+  ],
+  "answer": 2,
+  "why": "join() waits until the thread has terminated."
+ },
+ {
+  "q": "Which call can bring a TERMINATED thread back to life?",
+  "options": [
+   "start()",
+   "run()",
+   "interrupt()",
+   "None: create a new Thread"
+  ],
+  "answer": 3,
+  "why": "TERMINATED is final. start() on it throws IllegalThreadStateException."
+ }
+]</script>
+  </div>
+  <h3>Quick revision</h3>
+  <div class="revision">
+    <h3>Lesson 12.3 in one screen</h3>
+    <ul>
+      <li>Six states: NEW, RUNNABLE, BLOCKED, WAITING, TIMED_WAITING, TERMINATED (<code>Thread.State</code>).</li>
+      <li>RUNNABLE = running or ready; Java has no separate RUNNING state.</li>
+      <li><code>sleep(ms)</code>, <code>join(ms)</code> → TIMED_WAITING; <code>join()</code>, <code>wait()</code> → WAITING; busy lock → BLOCKED.</li>
+      <li><code>Thread.sleep</code> always pauses the <b>current</b> thread.</li>
+      <li><code>interrupt()</code> sets a flag; sleep/join/wait then throw <code>InterruptedException</code> and clear the flag.</li>
+      <li>Use <code>join(ms)</code> + <code>isAlive()</code> for timeouts.</li>
+      <li>TERMINATED is final; a thread can't be restarted.</li>
+    </ul>
+  </div>
+  <h3>Interview and viva questions</h3>
+  <div class="faq">
+    <details><summary>Explain the lifecycle of a thread in Java.</summary><p>A thread is NEW after construction. <code>start()</code> makes it RUNNABLE (running or ready). It may move to TIMED_WAITING (sleep, timed join/wait), WAITING (join, wait) or BLOCKED (waiting for a monitor lock), and returns to RUNNABLE when the condition ends. When <code>run()</code> completes or throws, it is TERMINATED.</p></details>
+    <details><summary>What is the difference between WAITING and BLOCKED?</summary><p>BLOCKED means the thread wants to enter a <code>synchronized</code> block/method and another thread holds the lock. WAITING means the thread chose to wait (join, wait) until another thread does something. A thread in <code>wait()</code> also releases the lock; a BLOCKED thread holds nothing.</p></details>
+    <details><summary>What is the difference between sleep() and wait()?</summary><p><code>sleep</code> is a static Thread method that pauses the current thread for a time and keeps any locks it holds. <code>wait</code> is an Object method that must be called while holding that object's lock; it releases the lock and waits for <code>notify</code> or a timeout (Lesson 12.5).</p></details>
+    <details><summary>How do you stop a thread in Java?</summary><p>Cooperatively: call <code>interrupt()</code>, and write the thread so it stops when <code>sleep</code>/<code>wait</code> throws <code>InterruptedException</code> or when <code>isInterrupted()</code> is true. <code>Thread.stop()</code> was deprecated because killing a thread mid-operation can leave shared data corrupted.</p></details>
+    <details><summary>What happens to the interrupted flag when InterruptedException is thrown?</summary><p>It is cleared. If your code catches the exception but can't stop right there, it should call <code>Thread.currentThread().interrupt()</code> to restore the flag so code higher up can see the request.</p></details>
+  </div>
+
+  <h3 id="practice">Practice problems</h3>
+  <p class="prob-intro">Observe states, pause with <code>sleep</code>, wait with <code>join</code>, and cancel with <code>interrupt</code>. Every output is fixed. The last three are business tasks.</p>
+  <div class="probs">
+    <article class="prob"><div class="prob__head"><span class="prob__num">P1</span><span class="prob__tag prob__tag--easy">Easy</span><h4>State before and after</h4></div>
+      <p>Print a thread's state before <code>start()</code> and after <code>join()</code>.</p>
+      <div class="prob__io"><div><small>Input</small><pre>(none)</pre></div><div><small>Expected output</small><pre>before: NEW
+after: TERMINATED</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="java" data-file="Main.java"><pre><code>public class Main {
+    public static void main(String[] args) throws InterruptedException {
+        Thread t = new Thread(() -&gt; {});
+        System.out.println(&quot;before: &quot; + t.getState());
+        t.start();
+        t.join();
+        System.out.println(&quot;after: &quot; + t.getState());
+    }
+}</code></pre><div class="output">before: NEW
+after: TERMINATED</div></div>
+        <p><b>How it works:</b> NEW until <code>start()</code>; after <code>join()</code> returns the thread is certainly TERMINATED. Any state in between depends on timing.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P2</span><span class="prob__tag prob__tag--easy">Easy</span><h4>isAlive()</h4></div>
+      <p>Print <code>isAlive()</code> before starting a thread and after it has finished.</p>
+      <div class="prob__io"><div><small>Input</small><pre>(none)</pre></div><div><small>Expected output</small><pre>alive before start: false
+working
+alive after join: false</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="java" data-file="Main.java"><pre><code>public class Main {
+    public static void main(String[] args) throws InterruptedException {
+        Thread t = new Thread(() -&gt; System.out.println(&quot;working&quot;));
+        System.out.println(&quot;alive before start: &quot; + t.isAlive());
+        t.start();
+        t.join();
+        System.out.println(&quot;alive after join: &quot; + t.isAlive());
+    }
+}</code></pre><div class="output">alive before start: false
+working
+alive after join: false</div></div>
+        <p><b>How it works:</b> a thread is alive from <code>start()</code> until it terminates. NEW and TERMINATED threads are not alive.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P3</span><span class="prob__tag prob__tag--easy">Easy</span><h4>Countdown with sleep</h4></div>
+      <p>Print 3, 2, 1, Go! with a 100 ms pause between numbers, on the main thread.</p>
+      <div class="prob__io"><div><small>Input</small><pre>(none)</pre></div><div><small>Expected output</small><pre>3
+2
+1
+Go!</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="java" data-file="Main.java"><pre><code>public class Main {
+    public static void main(String[] args) throws InterruptedException {
+        for (int i = 3; i &gt;= 1; i--) {
+            System.out.println(i);
+            Thread.sleep(100);
+        }
+        System.out.println(&quot;Go!&quot;);
+    }
+}</code></pre><div class="output">3
+2
+1
+Go!</div></div>
+        <p><b>How it works:</b> <code>Thread.sleep</code> is static: it always pauses the <i>current</i> thread (here, main). main declares <code>throws InterruptedException</code>.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P4</span><span class="prob__tag prob__tag--medium">Medium</span><h4>Interrupt a sleeping thread</h4></div>
+      <p>Start a thread that sleeps 10 seconds. Interrupt it at once and print the exception message it catches.</p>
+      <div class="prob__io"><div><small>Input</small><pre>(none)</pre></div><div><small>Expected output</small><pre>caught: sleep interrupted</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="java" data-file="Main.java"><pre><code>public class Main {
+    public static void main(String[] args) throws InterruptedException {
+        Thread t = new Thread(() -&gt; {
+            try {
+                Thread.sleep(10_000);
+            } catch (InterruptedException e) {
+                System.out.println(&quot;caught: &quot; + e.getMessage());
+            }
+        });
+        t.start();
+        t.interrupt();
+        t.join();
+    }
+}</code></pre><div class="output">caught: sleep interrupted</div></div>
+        <p><b>How it works:</b> <code>interrupt()</code> makes <code>sleep</code> throw <code>InterruptedException</code> (message "sleep interrupted"), so the program ends in milliseconds, not 10 seconds.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P5</span><span class="prob__tag prob__tag--medium">Medium</span><h4>The flag is cleared</h4></div>
+      <p>Interrupt the current thread, then call <code>sleep</code>. Print the interrupted flag after catching the exception.</p>
+      <div class="prob__io"><div><small>Input</small><pre>(none)</pre></div><div><small>Expected output</small><pre>flag set: true
+sleep threw at once
+flag now: false</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="java" data-file="Main.java"><pre><code>public class Main {
+    public static void main(String[] args) {
+        Thread.currentThread().interrupt();
+        System.out.println(&quot;flag set: &quot; + Thread.currentThread().isInterrupted());
+        try {
+            Thread.sleep(1000);
+        } catch (InterruptedException e) {
+            System.out.println(&quot;sleep threw at once&quot;);
+        }
+        System.out.println(&quot;flag now: &quot; + Thread.currentThread().isInterrupted());
+    }
+}</code></pre><div class="output">flag set: true
+sleep threw at once
+flag now: false</div></div>
+        <p><b>How it works:</b> when <code>sleep</code> throws <code>InterruptedException</code> it also <b>clears</b> the flag. If you can't handle the interrupt, restore it with <code>Thread.currentThread().interrupt()</code> so callers still see it.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P6</span><span class="prob__tag prob__tag--medium">Medium</span><h4>Join in a chain</h4></div>
+      <p>Thread B must print only after thread A has finished. Make B call <code>a.join()</code> before printing. main joins B.</p>
+      <div class="prob__io"><div><small>Input</small><pre>(none)</pre></div><div><small>Expected output</small><pre>A: data downloaded
+B: data processed
+main: all done</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="java" data-file="Main.java"><pre><code>public class Main {
+    public static void main(String[] args) throws InterruptedException {
+        Thread a = new Thread(() -&gt; System.out.println(&quot;A: data downloaded&quot;));
+        Thread b = new Thread(() -&gt; {
+            try {
+                a.join();
+            } catch (InterruptedException e) {
+                return;
+            }
+            System.out.println(&quot;B: data processed&quot;);
+        });
+        a.start();
+        b.start();
+        b.join();
+        System.out.println(&quot;main: all done&quot;);
+    }
+}</code></pre><div class="output">A: data downloaded
+B: data processed
+main: all done</div></div>
+        <p><b>How it works:</b> any thread can join any other. B is WAITING inside <code>a.join()</code> until A terminates, so B's line always comes second, whichever thread the scheduler runs first. (Careful: if B called <code>a.join()</code> before A was started, join would return at once, because a NEW thread isn't alive.)</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P7</span><span class="prob__tag prob__tag--business">Business problem</span><h4>OTP expiry timer</h4></div>
+      <p>An OTP is valid for 3 ticks. A timer thread prints the remaining ticks with 50 ms sleeps and then marks the OTP expired. main waits and prints the final status.</p>
+      <div class="prob__io"><div><small>Input</small><pre>OTP 482913, 3 ticks</pre></div><div><small>Expected output</small><pre>OTP 482913 valid for 3 more tick(s)
+OTP 482913 valid for 2 more tick(s)
+OTP 482913 valid for 1 more tick(s)
+OTP status: EXPIRED</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="java" data-file="Main.java"><pre><code>public class Main {
+    static String status = &quot;VALID&quot;;
+
+    public static void main(String[] args) throws InterruptedException {
+        Thread timer = new Thread(() -&gt; {
+            try {
+                for (int left = 3; left &gt; 0; left--) {
+                    System.out.println(&quot;OTP 482913 valid for &quot; + left + &quot; more tick(s)&quot;);
+                    Thread.sleep(50);
+                }
+                status = &quot;EXPIRED&quot;;
+            } catch (InterruptedException e) {
+                status = &quot;CANCELLED&quot;;
+            }
+        }, &quot;otp-timer&quot;);
+        timer.start();
+        timer.join();
+        System.out.println(&quot;OTP status: &quot; + status);
+    }
+}</code></pre><div class="output">OTP 482913 valid for 3 more tick(s)
+OTP 482913 valid for 2 more tick(s)
+OTP 482913 valid for 1 more tick(s)
+OTP status: EXPIRED</div></div>
+        <p><b>How it works:</b> the timer is mostly TIMED_WAITING. If the user verified the OTP early, main could <code>interrupt()</code> the timer and the status would become CANCELLED.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P8</span><span class="prob__tag prob__tag--business">Business problem</span><h4>Cancel a bulk SMS run</h4></div>
+      <p>A marketing job sends 1,000 SMS, one per 500 ms. Operations cancels it right after start. The job must check for the interrupt, stop, and report how many were sent.</p>
+      <div class="prob__io"><div><small>Input</small><pre>1,000 messages, cancelled immediately</pre></div><div><small>Expected output</small><pre>campaign stopped by operator
+messages sent: 1 of 1000</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="java" data-file="Main.java"><pre><code>public class Main {
+    public static void main(String[] args) throws InterruptedException {
+        int[] sent = {0};
+        Thread job = new Thread(() -&gt; {
+            for (int i = 1; i &lt;= 1000; i++) {
+                sent[0]++;
+                try {
+                    Thread.sleep(500);
+                } catch (InterruptedException e) {
+                    System.out.println(&quot;campaign stopped by operator&quot;);
+                    return;
+                }
+            }
+        }, &quot;sms-campaign&quot;);
+        job.start();
+        job.interrupt();
+        job.join();
+        System.out.println(&quot;messages sent: &quot; + sent[0] + &quot; of 1000&quot;);
+    }
+}</code></pre><div class="output">campaign stopped by operator
+messages sent: 1 of 1000</div></div>
+        <p><b>How it works:</b> the job checks for cancellation at every sleep. A thread that never sleeps or checks <code>isInterrupted()</code> can't be cancelled politely; that's why long loops should check the flag.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P9</span><span class="prob__tag prob__tag--business">Business problem</span><h4>Pipeline with join timeouts</h4></div>
+      <p>A nightly pipeline has a fast step (sleeps 10 ms) and a stuck step (sleeps 60 s). Give each <code>join(200)</code>. Print which steps completed and cancel the stuck one.</p>
+      <div class="prob__io"><div><small>Input</small><pre>steps: export (fast), upload (stuck)</pre></div><div><small>Expected output</small><pre>export: OK
+upload: TIMEOUT
+upload cancelled</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="java" data-file="Main.java"><pre><code>public class Main {
+    static Thread step(String name, long ms) {
+        return new Thread(() -&gt; {
+            try {
+                Thread.sleep(ms);
+            } catch (InterruptedException e) {
+                System.out.println(name + &quot; cancelled&quot;);
+            }
+        }, name);
+    }
+
+    public static void main(String[] args) throws InterruptedException {
+        Thread[] steps = {step(&quot;export&quot;, 10), step(&quot;upload&quot;, 60_000)};
+        for (Thread s : steps) s.start();
+        for (Thread s : steps) {
+            s.join(200);
+            if (s.isAlive()) {
+                System.out.println(s.getName() + &quot;: TIMEOUT&quot;);
+                s.interrupt();
+                s.join();
+            } else {
+                System.out.println(s.getName() + &quot;: OK&quot;);
+            }
+        }
+    }
+}</code></pre><div class="output">export: OK
+upload: TIMEOUT
+upload cancelled</div></div>
+        <p><b>How it works:</b> <code>join(ms)</code> never blocks longer than the limit. Combining it with <code>isAlive()</code> and <code>interrupt()</code> is the classic timeout pattern for raw threads (executors give you <code>Future.get(timeout)</code>, Lesson 12.6).</p>
+      </details>
+    </article>
+  </div>
+
+
+
+  <h3 id="scenarios">Real-world scenario questions (asked in company interviews)</h3>
+  <p class="scn-intro">These test whether you can reason about states in a running system, not just recite them.</p>
+  <div class="scenarios">
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Production · thread dump</span><span class="scn__tag scn__tag--level">Junior</span></div>
+      <h4>150 threads BLOCKED on one line</h4>
+      <p class="scn__situation">During a sale, the order service becomes slow. A thread dump shows 150 request threads BLOCKED waiting for the same lock in <code>InventoryService.reserve()</code>, and one thread RUNNABLE inside it, calling a slow pricing API. What's going on?</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> reading states to find a bottleneck.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>The method is <code>synchronized</code>, and the thread holding the lock is doing slow I/O inside it, so every other request queues up as BLOCKED.</li>
+          <li>Move the pricing call outside the locked section, and lock only the few lines that update shared stock, or use finer-grained locks.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> adding more threads; they would just join the BLOCKED queue.</p>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Code review · interrupts</span><span class="scn__tag scn__tag--level">Junior</span></div>
+      <h4>The Cancel button that doesn't cancel</h4>
+      <p class="scn__situation">An export thread's code is <code>try { Thread.sleep(100); } catch (InterruptedException e) { }</code> inside a loop of 10,000 rows. Pressing Cancel calls <code>interrupt()</code>, but the export keeps going. Why?</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> swallowed interrupts.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>The empty catch swallows the interrupt, and throwing cleared the flag, so the loop just continues.</li>
+          <li>In the catch, stop the loop (<code>return</code> or <code>break</code>), or restore the flag with <code>Thread.currentThread().interrupt()</code> and check it in the loop condition.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> “use Thread.stop()”. It's deprecated and unsafe.</p>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Integration · timeouts</span><span class="scn__tag scn__tag--level">Junior</span></div>
+      <h4>A partner API that sometimes never answers</h4>
+      <p class="scn__situation">A travel site's search calls three airline APIs on three threads and then calls <code>join()</code> on each. Once a week one airline's API hangs and the search page never loads. Fix it.</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> timed waits and fallbacks.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>Plain <code>join()</code> waits forever. Use a deadline: <code>join(remainingMs)</code> per thread (or <code>Future.get(timeout)</code>).</li>
+          <li>After the deadline, interrupt the slow thread, show results from the airlines that answered, and log the timeout.</li>
+          <li>Also set network timeouts in the HTTP client itself.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> waiting forever for anything outside your system.</p>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Performance · CPU</span><span class="scn__tag scn__tag--level">Mid</span></div>
+      <h4>A “waiting” thread using 100% CPU</h4>
+      <p class="scn__situation">A worker waits for a flag with <code>while (!ready) { }</code>. The server shows one core at 100%, and the thread dump says the worker is RUNNABLE. Explain and fix.</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> busy-waiting vs blocking states.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>A busy loop never leaves RUNNABLE, so it burns a whole core doing nothing useful. It may also never see the change if <code>ready</code> isn't <code>volatile</code> (Lesson 12.4).</li>
+          <li>Use a blocking mechanism: <code>wait/notify</code> (Lesson 12.5), a <code>CountDownLatch</code>, a <code>BlockingQueue</code>, or <code>join()</code>, so the thread is WAITING and uses no CPU.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> adding <code>Thread.sleep(1)</code> in the loop as the final fix; it still wakes up constantly and adds delay.</p>
+      </div></details>
+    </article>
+  </div>
+</section>
+
+<nav class="lesson-nav" id="lesson-nav" aria-label="Lesson navigation"></nav>
+<div class="ad-slot" data-slot="bottom"></div>
+</article>
+
+<aside class="lesson-side">
+  <nav class="toc" aria-label="In this lesson">
+    <h4>In this lesson</h4>
+    <ol>
+      <li><a href="#story">The story</a></li>
+      <li><a href="#definition">Definition</a></li>
+      <li><a href="#types">Types and ways to use it</a></li>
+      <li><a href="#steps">Step by step</a></li>
+      <li><a href="#animation">See it happen</a></li>
+      <li><a href="#real-world">Real-world use</a></li>
+      <li><a href="#run">Run the code</a></li>
+      <li><a href="#tracer">Line by line</a></li>
+      <li><a href="#worked">Worked examples</a></li>
+      <li><a href="#quiz">Quiz and revision</a></li>
+      <li><a href="#practice">Practice problems</a></li>
+      <li><a href="#scenarios">Industry scenarios</a></li>
+    </ol>
+  </nav>
+  <div class="ad-slot" data-slot="side"></div>
+  <div class="outline" id="outline"></div>
+</aside>
+</div>
+</main>
+
+<footer class="site-footer">
+  <div class="wrap">
+    <div><h4>MyPhatshala</h4><p>Free programming and IT lessons that show what happens behind the screen.</p></div>
+    <div><h4>Learn</h4><a href="../../../../#tracks">All courses</a><a href="../../">Core Java syllabus</a></div>
+    <div><h4>Site</h4><a href="../../../../about.html">About</a><a href="../../../../contact.html">Contact</a><a href="../../../../privacy.html">Privacy policy</a><a href="../../../../disclaimer.html">Disclaimer</a></div>
+    <div class="copyright">© MyPhatshala. All lesson content, diagrams and animations are original. Please do not copy without permission.</div>
+  </div>
+</footer>
+
+<script src="../../../../data/courses/core-java.js"></script>
+<script src="../../../../assets/js/lesson.js"></script>
+<script src="../../../../assets/js/ads.js"></script>
+<script src="../../../../assets/js/site.js"></script>
+</body>
+</html>

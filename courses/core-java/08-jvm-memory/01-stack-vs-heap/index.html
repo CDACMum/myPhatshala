@@ -1,0 +1,954 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Stack vs heap memory | MyPhatshala</title>
+<meta name="description" content="Java stack vs heap explained: per-thread stacks of frames (locals, operand stack, return info), the shared heap for objects and arrays, references pointing from stack to heap, metaspace for class data, -Xss and -Xmx, and real StackOverflowError and OutOfMemoryError messages. With animations, a JVM tracer, 9 practice problems, quiz and industry scenarios.">
+<meta name="mp:minutes" content="24">
+<link rel="canonical" href="https://myphatshala.com/courses/core-java/08-jvm-memory/01-stack-vs-heap/">
+<meta property="og:title" content="Java stack vs heap: where your variables and objects really live · MyPhatshala">
+<meta property="og:description" content="Watch frames push and pop, objects land on the heap, and both memory errors happen for real. Then solve 9 problems including business tasks.">
+<link rel="icon" href="../../../../assets/img/logo.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Fraunces:ital,opsz,wght@0,9..144,600;0,9..144,700;1,9..144,600&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../../../../assets/css/style.css">
+<link rel="stylesheet" href="../../../../assets/css/lesson.css">
+<script src="../../../../assets/js/config.js"></script>
+<script>try { const t = localStorage.getItem("mp-theme"); if (t) document.documentElement.dataset.theme = t; } catch (e) {}</script>
+<script type="application/ld+json">{"@context": "https://schema.org", "@type": "LearningResource", "name": "Stack vs heap memory", "learningResourceType": "Lesson", "educationalLevel": "Beginner", "isAccessibleForFree": true, "inLanguage": "en", "isPartOf": {"@type": "Course", "name": "Core Java", "provider": {"@type": "Organization", "name": "MyPhatshala"}}}</script>
+</head>
+<body style="--track:#E8772E" data-lesson="08-jvm-memory/01-stack-vs-heap" data-course-root="../../">
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="site-header">
+  <div class="wrap">
+    <a class="brand" href="../../../../" aria-label="MyPhatshala home"><img src="../../../../assets/img/logo.svg" width="34" height="34" alt=""><span>My<b>Phatshala</b></span></a>
+    <nav class="nav" aria-label="Main">
+      <a href="../../../../#tracks">All courses</a>
+      <a href="../../">Core Java syllabus</a>
+      <button class="theme-btn" id="theme-btn" aria-label="Toggle dark mode"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg></button>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+<section class="lesson-hero">
+  <div class="wrap">
+    <nav class="crumbs" aria-label="Breadcrumb"><a href="../../../../">Home</a><span>›</span><a href="../../../../#track-programming">Programming Languages</a><span>›</span><a href="../../">Core Java</a><span>›</span><b>Lesson 8.1</b></nav>
+    <h1>Stack vs heap memory</h1>
+    <p class="lead">Your laptop has gigabytes of RAM, yet a Java program can crash because it ran out of memory. That happens because the JVM splits memory into areas with different jobs: a small stack per thread for method calls, one big shared heap for objects, and metaspace for class data. You'll see exactly what goes where, how the two famous memory errors happen, which flags control the sizes, and then practise with 9 problems.</p>
+    <div class="lesson-meta"><span>Module 8 · JVM Memory</span><span>⏱ 24 min</span><span>Intermediate</span><span>9 practice problems</span></div>
+  </div>
+</section>
+
+<div class="wrap lesson-layout">
+<article class="lesson-main">
+<!-- ======================= PART 1: THE STORY ======================= -->
+<section class="part" id="story">
+  <span class="part-label"><b>1</b> The story</span>
+  <h2>The crash on an 8 GB laptop</h2>
+  <div class="story">
+    <p class="narration">Riya builds a referral tracker for the college fest: each student was referred by another, and her method follows the chain back to the first student by calling itself. One chain loops back on itself by mistake. The program dies in a second with <code>java.lang.StackOverflowError</code>, while Task Manager shows 6 GB of RAM still free.</p>
+    <div class="scene">
+      <svg viewBox="0 0 640 170" role="img" aria-label="Left: a tall pile of method frames named findRoot overflowing a small stack box. Right: a large heap area holding student objects, with arrows from the stack to them.">
+        <g font-size="10">
+          <text x="110" y="18" text-anchor="middle" font-weight="700" class="s-red">Stack: small, one per thread</text>
+          <rect x="40" y="28" width="140" height="122" rx="6" style="fill:none;stroke:var(--line);stroke-width:1.5;stroke-dasharray:5 4"/>
+          <g class="s-soft-acc" style="stroke:var(--track);stroke-width:1.2">
+            <rect x="48" y="126" width="124" height="18" rx="3"/><rect x="48" y="104" width="124" height="18" rx="3"/><rect x="48" y="82" width="124" height="18" rx="3"/><rect x="48" y="60" width="124" height="18" rx="3"/><rect x="48" y="38" width="124" height="18" rx="3"/>
+          </g>
+          <g class="mono s-ink" font-size="9.4"><text x="56" y="139">main()</text><text x="56" y="117">findRoot(17)</text><text x="56" y="95">findRoot(42)</text><text x="56" y="73">findRoot(17)</text><text x="56" y="51">findRoot(42)</text></g>
+          <text x="110" y="166" text-anchor="middle" class="mono s-red" font-weight="700">StackOverflowError</text>
+          <path d="M196 90 H246" style="stroke:var(--blue);stroke-width:2"/><path d="M240 84l8 6-8 6" style="stroke:var(--blue);stroke-width:2;fill:none"/>
+          <text x="221" y="80" text-anchor="middle" font-size="9" class="s-blue">references</text>
+          <text x="440" y="18" text-anchor="middle" font-weight="700" class="s-green">Heap: big, shared by all threads</text>
+          <rect x="262" y="28" width="356" height="122" rx="10" class="s-soft-green" style="stroke:var(--green);stroke-width:1.5"/>
+          <g class="s-card" style="stroke:var(--line)">
+            <rect x="280" y="44" width="96" height="40" rx="6"/><rect x="392" y="44" width="96" height="40" rx="6"/><rect x="504" y="44" width="96" height="40" rx="6"/>
+            <rect x="336" y="96" width="120" height="40" rx="6"/>
+          </g>
+          <g class="mono s-ink" font-size="9.4"><text x="290" y="60">Student #1</text><text x="290" y="75" class="s-ink2">roll 17</text><text x="402" y="60">Student #2</text><text x="402" y="75" class="s-ink2">roll 42</text><text x="514" y="60">Student #3</text><text x="514" y="75" class="s-ink2">roll 58</text><text x="346" y="112">ArrayList #4</text><text x="346" y="127" class="s-ink2">3 students</text></g>
+          <text x="540" y="124" text-anchor="middle" class="s-ink2">plenty of room left</text>
+        </g>
+        <text x="632" y="166" text-anchor="end" class="s-wm">myphatshala.com</text>
+      </svg>
+    </div>
+    <div class="panel">
+      <div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#FCE6D6"/><path d="M14 64c2-12 9-18 18-18s16 6 18 18z" fill="#2E5AAC"/><circle cx="32" cy="29" r="12" fill="#C68B5E"/><path d="M19 29c0-10 6-15 13-15s13 5 13 15c-3-5-7-8-13-8s-10 3-13 8z" fill="#2A1B14"/><path d="M43 27c3 6 3 14 0 20" stroke="#2A1B14" stroke-width="4" fill="none" stroke-linecap="round"/><circle cx="27.5" cy="30" r="1.5" fill="#2A1B14"/><circle cx="36.5" cy="30" r="1.5" fill="#2A1B14"/><path d="M28 35q4 3 8 0" stroke="#2A1B14" stroke-width="1.6" fill="none" stroke-linecap="round"/><circle cx="32" cy="24" r="1.2" fill="#D64545"/></svg></div>
+      <div class="bubble"><b class="who">Riya</b><p>Sir, it says I ran out of stack. But my laptop has 8 GB and most of it is free!</p></div>
+    </div>
+    <div class="panel panel--right">
+      <div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#DDEFE6"/><path d="M12 64c2-12 10-18 20-18s18 6 20 18z" fill="#F4F1EA"/><path d="M28 46l4 8 4-8" fill="#2F7D5B"/><circle cx="32" cy="28" r="12" fill="#B57A50"/><path d="M20 26c0-8 5-13 12-13s12 5 12 13c-2-3-6-5-12-5s-10 2-12 5z" fill="#5A5A5A"/><path d="M22 32c1 8 5 11 10 11s9-3 10-11c-2 3-6 4-10 4s-8-1-10-4z" fill="#5A5A5A"/><circle cx="27" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><circle cx="37" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><path d="M30.4 29h3.2" stroke="#1B2433" stroke-width="1.4"/><circle cx="27" cy="29" r="1.1" fill="#1B2433"/><circle cx="37" cy="29" r="1.1" fill="#1B2433"/></svg></div>
+      <div class="bubble"><b class="who">Arjun Sir</b><p>The JVM doesn't hand your program one big bag of memory. Every thread gets its own <b>stack</b>, about 1 MB by default, just for method calls. Your loop in the referral chain made calls that never returned, so that small stack filled up. The RAM was never the problem.</p></div>
+    </div>
+    <div class="panel">
+      <div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#FCE6D6"/><path d="M14 64c2-12 9-18 18-18s16 6 18 18z" fill="#2E5AAC"/><circle cx="32" cy="29" r="12" fill="#C68B5E"/><path d="M19 29c0-10 6-15 13-15s13 5 13 15c-3-5-7-8-13-8s-10 3-13 8z" fill="#2A1B14"/><path d="M43 27c3 6 3 14 0 20" stroke="#2A1B14" stroke-width="4" fill="none" stroke-linecap="round"/><circle cx="27.5" cy="30" r="1.5" fill="#2A1B14"/><circle cx="36.5" cy="30" r="1.5" fill="#2A1B14"/><path d="M28 35q4 3 8 0" stroke="#2A1B14" stroke-width="1.6" fill="none" stroke-linecap="round"/><circle cx="32" cy="24" r="1.2" fill="#D64545"/></svg></div>
+      <div class="bubble"><b class="who">Riya</b><p>Then where do my 3,000 Student objects go? Not into that 1 MB?</p></div>
+    </div>
+    <div class="panel panel--right">
+      <div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#DDEFE6"/><path d="M12 64c2-12 10-18 20-18s18 6 20 18z" fill="#F4F1EA"/><path d="M28 46l4 8 4-8" fill="#2F7D5B"/><circle cx="32" cy="28" r="12" fill="#B57A50"/><path d="M20 26c0-8 5-13 12-13s12 5 12 13c-2-3-6-5-12-5s-10 2-12 5z" fill="#5A5A5A"/><path d="M22 32c1 8 5 11 10 11s9-3 10-11c-2 3-6 4-10 4s-8-1-10-4z" fill="#5A5A5A"/><circle cx="27" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><circle cx="37" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><path d="M30.4 29h3.2" stroke="#1B2433" stroke-width="1.4"/><circle cx="27" cy="29" r="1.1" fill="#1B2433"/><circle cx="37" cy="29" r="1.1" fill="#1B2433"/></svg></div>
+      <div class="bubble"><b class="who">Arjun Sir</b><p>No, objects go to the <b>heap</b>, a much bigger area shared by all threads. Your local variables on the stack only hold <b>references</b>, like addresses, to those objects. Learn which is which and you'll read every memory error like a sentence.</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- ======================= PART 2: DEFINITION ======================= -->
+<section class="part" id="definition">
+  <span class="part-label"><b>2</b> Definition</span>
+  <h2>What are the stack and the heap?</h2>
+  <div class="def">
+    <div class="def__formal"><small>Formal definition (write this in exams)</small>
+      <p>At run time the JVM divides memory into <b>run-time data areas</b>. Each thread has its own <b>JVM stack</b>, made of <b>frames</b>: a frame is pushed for every method call and holds that call's <b>local variables</b>, its <b>operand stack</b> and the data needed to return to the caller; it is popped when the method returns. The <b>heap</b> is one area shared by all threads in which every object and array is allocated; it is managed by the garbage collector. Class metadata (bytecode, field and method descriptions) is kept in the <b>method area</b>, which HotSpot implements as <b>Metaspace</b> in native memory since Java 8.</p></div>
+    <div class="def__simple"><small>In simple words</small>
+      <p>The stack is each worker's notepad: one page per job in progress, torn off when the job is done. The heap is the shared warehouse where all the actual goods (objects) are kept. A notepad page only says where in the warehouse a thing is.</p></div>
+  </div>
+  <h3>Words you'll meet in this lesson</h3>
+  <div class="terms">
+    <div class="term"><b>Frame</b><span>One method call's private space on the stack. Pushed on call, popped on return.</span></div>
+    <div class="term"><b>Local variable</b><span>A parameter or variable declared inside a method. Lives in that call's frame.</span></div>
+    <div class="term"><b>Operand stack</b><span>A small scratch area in each frame where bytecode does its arithmetic.</span></div>
+    <div class="term"><b>Reference</b><span>A value that points to an object on the heap. Copying it does not copy the object.</span></div>
+    <div class="term"><b>Heap</b><span>Shared memory for all objects and arrays. Cleaned up by the garbage collector.</span></div>
+    <div class="term"><b>Metaspace</b><span>Native memory for class data (Java 8+). Replaced the old PermGen area.</span></div>
+  </div>
+  <h3>Memory areas at a glance</h3>
+  <table class="facts">
+    <tr><th>Stack</th><td>One per thread. Frames for method calls. Size set by <code>-Xss</code> (1 MB by default on 64-bit Linux). Full → <code>StackOverflowError</code></td></tr>
+    <tr><th>Heap</th><td>One per JVM, shared. All objects and arrays (and the String pool since Java 7). <code>-Xms</code> start size, <code>-Xmx</code> maximum (default about ¼ of RAM). Full → <code>OutOfMemoryError: Java heap space</code></td></tr>
+    <tr><th>Metaspace</th><td>Class metadata in native memory (Java 8+). Unlimited by default; cap with <code>-XX:MaxMetaspaceSize</code>. Full → <code>OutOfMemoryError: Metaspace</code></td></tr>
+    <tr><th>Local primitive</th><td><code>int count = 2;</code> → the value 2 sits in the frame</td></tr>
+    <tr><th>Local object variable</th><td><code>Order o = new Order();</code> → the reference sits in the frame, the object on the heap</td></tr>
+    <tr><th>Field of an object</th><td>Inside the object, so on the heap, even if it is an <code>int</code></td></tr>
+  </table>
+  <div class="callout callout--exam"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19V5a2 2 0 0 1 2-2h12v18H6a2 2 0 0 1-2-2zm0 0a2 2 0 0 1 2-2h12"/></svg><p><b>Exam tip:</b> “primitives on the stack, objects on the heap” is only half true. It holds for <b>local variables</b>. A primitive <b>field</b> such as <code>int balance</code> is part of its object, so it lives on the heap. Examiners love this trap.</p></div>
+</section>
+
+<div class="ad-slot" data-slot="mid"></div>
+
+<!-- ======================= PART 3: TYPES AND WAYS TO USE IT ======================= -->
+<section class="part" id="types">
+  <span class="part-label"><b>3</b> Types and ways to use it</span>
+  <h2>Three areas, three jobs</h2>
+  <div class="cards">
+    <div class="card"><svg class="ic" viewBox="0 0 40 40" fill="none" stroke="var(--track)" stroke-width="2"><rect x="8" y="26" width="24" height="8" rx="2"/><rect x="8" y="16" width="24" height="8" rx="2"/><rect x="8" y="6" width="24" height="8" rx="2"/></svg><h4>Stack (per thread)</h4><p>Frames for calls in progress: parameters, locals, partial results. Last in, first out. Tiny and fast; cleaned up automatically on return.</p><span class="tag">-Xss</span></div>
+    <div class="card"><svg class="ic" viewBox="0 0 40 40" fill="none" stroke="var(--green)" stroke-width="2"><rect x="4" y="8" width="32" height="26" rx="4"/><circle cx="13" cy="17" r="3"/><circle cx="26" cy="15" r="3"/><circle cx="20" cy="26" r="3"/></svg><h4>Heap (shared)</h4><p>Every object and array, from all threads. Objects stay as long as something references them; then the garbage collector reclaims them.</p><span class="tag">-Xms / -Xmx</span></div>
+    <div class="card"><svg class="ic" viewBox="0 0 40 40" fill="none" stroke="var(--blue)" stroke-width="2"><path d="M8 6h18l6 6v22H8z"/><path d="M13 18h14M13 24h14M13 30h9"/></svg><h4>Metaspace (class data)</h4><p>For each loaded class: its bytecode, method and field descriptions, constant pool. Lives outside the heap, in native memory.</p><span class="tag">-XX:MaxMetaspaceSize</span></div>
+  </div>
+  <h3>Copying a value vs copying a reference</h3>
+  <div class="code" data-lang="java" data-file="Main.java"><pre><code>public class Main {
+    static class Product {
+        String name;
+        int stock;          // a field: lives inside the object, on the heap
+    }
+
+    public static void main(String[] args) {
+        int a = 10;                   // local primitive: the value is in main's frame
+        int b = a;                    // copies the value
+        b = 99;
+
+        Product p = new Product();    // object on the heap; p holds a reference
+        Product q = p;                // copies the reference, not the object
+        q.stock = 99;
+
+        System.out.println("a = " + a + ", b = " + b);
+        System.out.println("p.stock = " + p.stock + ", same object? " + (p == q));
+        System.out.println("default name = " + p.name);
+    }
+}</code></pre><div class="output">a = 10, b = 99
+p.stock = 99, same object? true
+default name = null</div></div>
+  <h3>Stack vs heap, side by side</h3>
+  <div class="table-wrap">
+  <table class="compare" style="min-width:560px">
+    <thead><tr><th></th><th>Stack</th><th>Heap</th></tr></thead>
+    <tbody>
+      <tr><td>Belongs to</td><td>One thread</td><td>The whole JVM, all threads</td></tr>
+      <tr><td>Holds</td><td>Frames: locals (primitive values and references), operand stack, return info</td><td>Objects and arrays, including their fields</td></tr>
+      <tr><td>Freed when</td><td>The method returns (frame popped)</td><td>No references remain and the GC runs</td></tr>
+      <tr><td>Allocation cost</td><td>Very cheap: move the stack pointer</td><td>Also cheap (a pointer bump in a per-thread buffer), but objects must be collected later</td></tr>
+      <tr><td>Typical size</td><td>About 1 MB per thread (<code>-Xss</code>)</td><td>Hundreds of MB to many GB (<code>-Xmx</code>)</td></tr>
+      <tr><td>Error when full</td><td><code>StackOverflowError</code></td><td><code>OutOfMemoryError: Java heap space</code></td></tr>
+      <tr><td>Thread safety</td><td>Private to its thread: nothing to share</td><td>Shared: objects used by many threads need care (Module 12)</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <div class="callout callout--warn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3 2 21h20L12 3z"/><path d="M12 10v5M12 18v.5"/></svg><p><b>Not a fix:</b> catching <code>StackOverflowError</code> or <code>OutOfMemoryError</code> and carrying on hides the real bug. Both extend <code>VirtualMachineError</code>, which signals the JVM itself is in trouble. Find the runaway recursion or the objects that should not be kept, or size the memory properly.</p></div>
+</section>
+
+<!-- ======================= PART 4: STEP BY STEP ======================= -->
+<section class="part" id="steps">
+  <span class="part-label"><b>4</b> Step by step</span>
+  <h2>From <code>java Main</code> to the first object</h2>
+  <ol class="stepper">
+    <li><h4>The JVM reserves its areas</h4>
+      <div class="code" data-lang="bash" data-file="Terminal"><pre><code>java -Xms256m -Xmx1g -Xss1m Main</code></pre></div>
+      <span class="behind">Before any of your code runs, the JVM sets up the heap (start 256 MB, may grow to 1 GB) and creates the main thread with its own stack (1 MB here). Without flags it picks defaults from the machine's memory.</span></li>
+    <li><h4>The class is loaded</h4>
+      <div class="code" data-lang="java" data-file="Main.java"><pre><code>public class Main { … }</code></pre></div>
+      <span class="behind">The class loader reads <code>Main.class</code>. Its bytecode, constant pool and method descriptions go into metaspace. Static field values are kept with the class's <code>Class</code> object on the heap (Lesson 8.4 covers loading in detail).</span></li>
+    <li><h4>main is called: the first frame is pushed</h4>
+      <div class="code" data-lang="java" data-file="Main.java"><pre><code>static int addGst(int price) {
+    int tax = price * 18 / 100;
+    return price + tax;
+}</code></pre></div>
+      <span class="behind">The frame size is decided at compile time. <code>javap -v</code> on this method prints <code>stack=2, locals=2</code>: two slots for locals (<code>price</code>, <code>tax</code>) and room for two values on the operand stack, where <code>imul</code> and <code>idiv</code> do the maths.</span></li>
+    <li><h4>new creates an object on the heap</h4>
+      <div class="code" data-lang="java" data-file="Main.java"><pre><code>Order o = new Order(101, 500.0);</code></pre></div>
+      <span class="behind">The bytecode is <code>new</code> (allocate and zero-fill), <code>dup</code>, then <code>invokespecial Order.&lt;init&gt;</code> (run the constructor in its own frame), then <code>astore_1</code>: the reference is stored in local slot 1 of main's frame.</span></li>
+    <li><h4>The method returns: the frame is popped</h4>
+      <p>Locals vanish instantly. Objects stay on the heap as long as some reference to them remains.</p>
+      <span class="behind">Returning just moves the stack pointer back and jumps to the saved return point in the caller. No cleanup work is needed, which is why the stack is so fast. The heap needs the garbage collector instead (Lesson 8.3).</span></li>
+  </ol>
+</section>
+
+<!-- ======================= PART 5: SEE IT HAPPEN ======================= -->
+<section class="part" id="animation">
+  <span class="part-label"><b>5</b> See it happen</span>
+  <h2>Frames, objects and two crashes: both views</h2>
+  <p>Left: the line being run and what the console shows. Right: main thread's stack, the heap, and metaspace.</p>
+  <div class="anim" data-frames="6">
+    <div class="anim__title">Where everything lives <span>6 steps</span></div>
+    <div class="anim__views">
+      <div class="view view--see">
+        <span class="view__tag">What you see</span>
+        <svg viewBox="0 0 360 250" role="img" aria-label="Each line of code and its console output">
+          <rect x="10" y="12" width="340" height="40" rx="8" class="s-board"/>
+          <g font-size="11" class="mono s-chalk">
+            <text x="22" y="37" data-on="1">int count = 2;</text>
+            <text x="22" y="37" data-on="2">Order first = new Order(101, 500.0);</text>
+            <text x="22" y="37" data-on="3">double g = withGst(first);</text>
+            <text x="22" y="37" data-on="4">System.out.println("g = " + g);</text>
+            <text x="22" y="37" data-on="5">return n * factorial(n - 1);</text>
+            <text x="22" y="37" data-on="6">chunks.add(new byte[1024 * 1024]);</text>
+          </g>
+          <rect x="10" y="62" width="340" height="130" rx="8" style="fill:#0F1512"/>
+          <g font-size="11" class="mono" style="fill:#B9F5D0">
+            <text x="24" y="90" data-on="1">// main's frame: count = 2</text>
+            <text x="24" y="112" data-on="1">// the heap has no Order yet</text>
+            <text x="24" y="90" data-on="2">first → Order {id 101,</text>
+            <text x="24" y="112" data-on="2">               amount 500.0}</text>
+            <text x="24" y="90" data-on="3">// withGst is running</text>
+            <text x="24" y="112" data-on="3">// tax = 90.0 in its frame</text>
+            <text x="24" y="90" data-on="4">g = 590.0</text>
+          </g>
+          <g font-size="10.4" class="mono" style="fill:#FF9B8A">
+            <text x="24" y="88" data-on="5-6">Exception in thread "main"</text>
+            <text x="24" y="106" data-on="5">java.lang.StackOverflowError</text>
+            <text x="24" y="124" data-on="5">  at Main.factorial(Main.java:3)</text>
+            <text x="24" y="142" data-on="5">  at Main.factorial(Main.java:3)</text>
+            <text x="24" y="160" data-on="5">  … (many more)</text>
+            <text x="24" y="106" data-on="6">java.lang.OutOfMemoryError:</text>
+            <text x="24" y="124" data-on="6">Java heap space</text>
+            <text x="24" y="142" data-on="6">  at Main.main(Main.java:7)</text>
+          </g>
+          <g font-size="10.2" class="s-ink2" text-anchor="middle">
+            <text x="180" y="222" data-on="1">A primitive local is just a value.</text>
+            <text x="180" y="222" data-on="2">new puts the object on the heap.</text>
+            <text x="180" y="222" data-on="3">A method call gets its own frame.</text>
+            <text x="180" y="222" data-on="4">The call is over; the object is still there.</text>
+            <text x="180" y="222" data-on="5">No base case: the calls never end.</text>
+            <text x="180" y="222" data-on="6">Every chunk is kept: the heap fills up.</text>
+          </g>
+          <text x="354" y="246" text-anchor="end" class="s-wm">myphatshala.com</text>
+        </svg>
+        <ol class="caps" hidden>
+          <li><b>Primitive local:</b> <code>count</code> holds the value 2 directly.</li>
+          <li><b>new:</b> an <code>Order</code> object is created; <code>first</code> refers to it.</li>
+          <li><b>Call:</b> <code>withGst(first)</code> starts running with its own variables.</li>
+          <li><b>Return:</b> the method hands back 590.0 and is finished.</li>
+          <li><b>StackOverflowError:</b> a recursive method with no base case calls itself until the JVM gives up.</li>
+          <li><b>OutOfMemoryError:</b> a loop keeps adding 1 MB arrays to a list until no heap is left.</li>
+        </ol>
+      </div>
+      <div class="view view--behind">
+        <span class="view__tag">Behind the screen</span>
+        <svg viewBox="0 0 360 250" role="img" aria-label="The main thread's stack with frames on the left, the heap with objects on the right, metaspace below the heap">
+          <text x="82" y="24" text-anchor="middle" font-size="10" font-weight="700" class="s-ink2">Stack (main thread)</text>
+          <text x="257" y="24" text-anchor="middle" font-size="10" font-weight="700" class="s-ink2">Heap (shared)</text>
+          <rect x="12" y="32" width="142" height="158" rx="6" style="fill:none;stroke:var(--line);stroke-width:1.2;stroke-dasharray:4 3"/>
+          <rect x="165" y="32" width="185" height="118" rx="8" class="s-soft-green" style="stroke:var(--green);stroke-width:1.2"/>
+          <rect x="18" y="140" width="130" height="46" rx="5" class="s-soft-acc" style="stroke:var(--track);stroke-width:1.5"/>
+          <text x="26" y="154" font-size="9.6" class="mono s-acc" font-weight="700">main()</text>
+          <g font-size="9.6" class="mono s-ink">
+            <text x="26" y="168" data-on="1-3">count = 2</text>
+            <text x="26" y="168" data-on="4">count = 2  g = 590.0</text>
+            <text x="26" y="181" data-on="2-4">first → #1</text>
+          </g>
+          <text x="257" y="94" text-anchor="middle" font-size="9.6" class="s-ink2" data-on="1">(no objects yet)</text>
+          <g data-on="2-4">
+            <rect x="186" y="60" width="150" height="44" rx="6" class="s-card" style="stroke:var(--blue);stroke-width:1.5"/>
+            <text x="194" y="76" font-size="9.6" class="mono s-blue" font-weight="700">#1 Order</text>
+            <text x="194" y="94" font-size="9.6" class="mono s-ink">id=101 amount=500.0</text>
+          </g>
+          <g data-on="2-4">
+            <path d="M92 178 C150 178, 160 96, 182 92" style="stroke:var(--blue);stroke-width:1.8;fill:none"/><path d="M176 87l7 5-7 4" style="stroke:var(--blue);stroke-width:1.8;fill:none"/>
+          </g>
+          <g data-on="3">
+            <rect x="18" y="86" width="130" height="48" rx="5" class="s-soft-blue" style="stroke:var(--blue);stroke-width:1.5"/>
+            <text x="26" y="100" font-size="9.6" class="mono s-blue" font-weight="700">withGst()</text>
+            <text x="26" y="114" font-size="9.6" class="mono s-ink">order → #1</text>
+            <text x="26" y="127" font-size="9.6" class="mono s-ink">tax = 90.0</text>
+            <path d="M96 111 C140 111, 150 76, 182 74" style="stroke:var(--blue);stroke-width:1.8;fill:none;stroke-dasharray:4 3"/>
+          </g>
+          <g data-on="5">
+            <g class="s-soft-acc" style="stroke:var(--track);stroke-width:1.2">
+              <rect x="18" y="118" width="130" height="18" rx="3"/><rect x="18" y="97" width="130" height="18" rx="3"/><rect x="18" y="76" width="130" height="18" rx="3"/><rect x="18" y="55" width="130" height="18" rx="3"/>
+            </g>
+            <g font-size="9" class="mono s-ink"><text x="26" y="131">factorial(5)</text><text x="26" y="110">factorial(4)</text><text x="26" y="89">factorial(3)</text><text x="26" y="68">factorial(2) …</text></g>
+            <rect x="18" y="35" width="130" height="17" rx="3" style="fill:none;stroke:var(--red);stroke-width:2;stroke-dasharray:4 3"/>
+            <text x="83" y="47" text-anchor="middle" font-size="9" class="s-red" font-weight="700">no room for a frame</text>
+          </g>
+          <g data-on="6">
+            <g class="s-card2" style="stroke:var(--red);stroke-width:1">
+              <rect x="174" y="40" width="40" height="22" rx="3"/><rect x="218" y="40" width="40" height="22" rx="3"/><rect x="262" y="40" width="40" height="22" rx="3"/><rect x="306" y="40" width="38" height="22" rx="3"/>
+              <rect x="174" y="66" width="40" height="22" rx="3"/><rect x="218" y="66" width="40" height="22" rx="3"/><rect x="262" y="66" width="40" height="22" rx="3"/><rect x="306" y="66" width="38" height="22" rx="3"/>
+              <rect x="174" y="92" width="40" height="22" rx="3"/><rect x="218" y="92" width="40" height="22" rx="3"/><rect x="262" y="92" width="40" height="22" rx="3"/><rect x="306" y="92" width="38" height="22" rx="3"/>
+            </g>
+            <g font-size="8" class="mono s-ink" text-anchor="middle"><text x="194" y="55">byte[]</text><text x="238" y="55">byte[]</text><text x="282" y="55">byte[]</text><text x="325" y="55">byte[]</text><text x="194" y="81">byte[]</text><text x="238" y="81">byte[]</text><text x="282" y="81">byte[]</text><text x="325" y="81">byte[]</text><text x="194" y="107">byte[]</text><text x="238" y="107">byte[]</text><text x="282" y="107">byte[]</text><text x="325" y="107">byte[]</text></g>
+            <text x="257" y="136" text-anchor="middle" font-size="9.4" class="s-red" font-weight="700">full: all still referenced</text>
+          </g>
+          <rect x="165" y="158" width="185" height="32" rx="6" class="s-soft-blue" style="stroke:var(--blue);stroke-width:1.2"/>
+          <text x="173" y="172" font-size="9.4" class="s-blue" font-weight="700">Metaspace</text>
+          <text x="173" y="185" font-size="9" class="mono s-ink" data-on="1">class Main</text>
+          <text x="173" y="185" font-size="9" class="mono s-ink" data-on="2-6">class Main, class Order</text>
+          <g font-size="9.6" class="s-ink2" text-anchor="middle">
+            <text x="180" y="210" data-on="1">main's frame holds the value 2 itself.</text>
+            <text x="180" y="210" data-on="2">The frame holds an arrow; the object is on the heap.</text>
+            <text x="180" y="210" data-on="3">New frame on top; both frames point to #1.</text>
+            <text x="180" y="210" data-on="4">withGst's frame is popped; #1 stays.</text>
+            <text x="180" y="210" data-on="5">Frames pile up until the 1 MB stack is full.</text>
+            <text x="180" y="210" data-on="6">The heap reaches -Xmx; the GC can't free anything.</text>
+          </g>
+          <text x="354" y="246" text-anchor="end" class="s-wm">myphatshala.com</text>
+        </svg>
+        <ol class="caps" hidden>
+          <li>main's frame is at the bottom of the stack. <code>count</code> occupies one slot and holds 2. Metaspace already has class <code>Main</code>.</li>
+          <li>The <code>Order</code> class is loaded into metaspace, object #1 is allocated on the heap, and main's slot <code>first</code> stores its address.</li>
+          <li>Calling <code>withGst</code> pushes a new frame. Its parameter <code>order</code> is a copy of the reference, so two frames point at one object.</li>
+          <li>On return, the top frame is popped and its locals disappear. #1 is still referenced by <code>first</code>, so it stays.</li>
+          <li>Each recursive call pushes another frame and none returns. When the thread's stack (1 MB by default) has no space for the next frame, the JVM throws <code>StackOverflowError</code>.</li>
+          <li>The list keeps every 1 MB array reachable, so the garbage collector can't free any of them. When the heap reaches its maximum (<code>-Xmx</code>), allocation fails with <code>OutOfMemoryError</code>.</li>
+        </ol>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ======================= PART 6: REAL-WORLD USE ======================= -->
+<section class="part" id="real-world">
+  <span class="part-label"><b>6</b> Real-world use</span>
+  <h2>Stack and heap in real systems</h2>
+  <p>Backend developers set memory flags, read memory errors and size containers every week. These are the situations where this lesson matters most.</p>
+  <!--ANIM2-->
+  <h3 id="animated-example">Watch it with an example: two customers, two threads, one heap</h3>
+  <p class="anim-intro">A shopping server handles Asha and Ravi at the same time. Each request runs on its own thread with its <b>own stack</b>, but both share the <b>one heap</b>.</p>
+  <div class="anim anim--one" data-frames="5" data-delay="4600">
+    <div class="anim__title">Separate stacks, shared heap <span>5 steps</span></div>
+    <div class="anim__views">
+      <div class="view view--story">
+        <span class="view__tag">Animated example</span>
+        <svg viewBox="0 0 360 252" role="img" aria-label="two thread stacks sharing a heap">
+          <text x="90" y="20" font-size="9.5" text-anchor="middle" font-weight="700" class="s-ink">Thread 1: Asha (stack)</text>
+          <rect x="6" y="26" width="168" height="96" rx="8" class="s-card" style="stroke:var(--blue);stroke-width:1.5"/>
+          <g data-on="1-4"><rect x="14" y="84" width="152" height="30" rx="8" class="s-soft-blue" style="stroke:var(--blue);stroke-width:1.5"/><text x="90" y="102.42" font-size="9.5" text-anchor="middle" class="s-ink mono">handle()</text></g>
+          <g data-on="2-4"><rect x="14" y="46" width="152" height="32" rx="8" class="s-soft-blue" style="stroke:var(--blue);stroke-width:1.5"/></g>
+          <text data-on="2-4" x="22" y="60" font-size="9.5" font-weight="700" class="s-ink mono">addToCart()</text>
+          <text data-on="2-4" x="22" y="73" font-size="9" class="s-ink mono">qty = 2   cart → </text>
+          <text data-on="5" x="90" y="78" font-size="9.5" text-anchor="middle" class="s-ink3">(empty)</text>
+          <text x="270" y="20" font-size="9.5" text-anchor="middle" font-weight="700" class="s-ink">Thread 2: Ravi (stack)</text>
+          <rect x="186" y="26" width="168" height="96" rx="8" class="s-card" style="stroke:var(--track);stroke-width:1.5"/>
+          <g data-on="1-4"><rect x="194" y="84" width="152" height="30" rx="8" class="s-soft-acc" style="stroke:var(--track);stroke-width:1.5"/><text x="270" y="102.42" font-size="9.5" text-anchor="middle" class="s-ink mono">handle()</text></g>
+          <g data-on="2-4"><rect x="194" y="46" width="152" height="32" rx="8" class="s-soft-acc" style="stroke:var(--track);stroke-width:1.5"/></g>
+          <text data-on="2-4" x="202" y="60" font-size="9.5" font-weight="700" class="s-ink mono">addToCart()</text>
+          <text data-on="2-4" x="202" y="73" font-size="9" class="s-ink mono">qty = 1   cart → </text>
+          <text data-on="5" x="270" y="78" font-size="9.5" text-anchor="middle" class="s-ink3">(empty)</text>
+          <text x="180" y="138" font-size="9.5" text-anchor="middle" font-weight="700" class="s-green">HEAP (shared by all threads)</text>
+          <rect x="6" y="144" width="348" height="62" rx="8" class="s-soft-green" style="stroke:var(--green);stroke-width:1.5"/>
+          <g data-on="3-"><rect x="16" y="154" width="96" height="42" rx="8" class="s-card2" style="stroke:var(--blue);stroke-width:1.5"/><text x="64" y="172.4" font-size="10" text-anchor="middle" font-weight="700" class="s-ink">Cart</text><text x="64" y="185.4" font-size="8.5" text-anchor="middle" class="s-ink2">Asha</text></g>
+          <rect x="132" y="154" width="96" height="42" rx="8" class="s-card2" style="stroke:var(--green);stroke-width:1.5"/><text x="180" y="172.4" font-size="10" text-anchor="middle" font-weight="700" class="s-ink">Catalog</text><text x="180" y="185.4" font-size="8.5" text-anchor="middle" class="s-ink2">1 object</text>
+          <g data-on="3-"><rect x="248" y="154" width="96" height="42" rx="8" class="s-card2" style="stroke:var(--track);stroke-width:1.5"/><text x="296" y="172.4" font-size="10" text-anchor="middle" font-weight="700" class="s-ink">Cart</text><text x="296" y="185.4" font-size="8.5" text-anchor="middle" class="s-ink2">Ravi</text></g>
+          <g data-on="3-4"><path d="M124 78 L70 152" style="stroke:var(--blue);stroke-width:2;fill:none"/><path d="M78.4 148.2 L70 152 L71.1 142.9" style="stroke:var(--blue);stroke-width:2;fill:none;stroke-linecap:round;stroke-linejoin:round"/></g>
+          <g data-on="3-4"><path d="M304 78 L296 152" style="stroke:var(--track);stroke-width:2;fill:none"/><path d="M301.3 144.5 L296 152 L292.4 143.6" style="stroke:var(--track);stroke-width:2;fill:none;stroke-linecap:round;stroke-linejoin:round"/></g>
+          <g data-on="4"><path d="M150 90 L166 152" style="stroke:var(--blue);stroke-width:2;fill:none"/><path d="M168.4 143.1 L166 152 L159.6 145.4" style="stroke:var(--blue);stroke-width:2;fill:none;stroke-linecap:round;stroke-linejoin:round"/></g>
+          <g data-on="4"><path d="M210 90 L194 152" style="stroke:var(--track);stroke-width:2;fill:none"/><path d="M200.4 145.4 L194 152 L191.6 143.1" style="stroke:var(--track);stroke-width:2;fill:none;stroke-linecap:round;stroke-linejoin:round"/></g>
+          <text data-on="1" x="180" y="226" font-size="10.5" text-anchor="middle" font-weight="700" class="s-ink">each thread gets its own stack</text>
+          <text data-on="2" x="180" y="226" font-size="10.5" text-anchor="middle" font-weight="700" class="s-ink">local variables live in each frame</text>
+          <text data-on="3" x="180" y="226" font-size="10.5" text-anchor="middle" font-weight="700" class="s-ink">objects live on the heap</text>
+          <text data-on="4" x="180" y="226" font-size="10.5" text-anchor="middle" font-weight="700" class="s-ink">both threads read the same Catalog</text>
+          <text data-on="5" x="180" y="226" font-size="10.5" text-anchor="middle" font-weight="700" class="s-ink">frames gone; carts stay while referenced</text>
+          <text data-on="5" x="180" y="242" font-size="9.2" text-anchor="middle" class="s-ink2">stack: small, private, auto-cleaned · heap: big, shared, GC</text>
+          <text x="354" y="247" text-anchor="end" class="s-wm">myphatshala.com</text>
+        </svg>
+        <ol class="caps" hidden>
+          <li><b>Two requests at once:</b> the server runs each on a separate thread. Every thread has its own stack, starting with a frame for <code>handle()</code>.</li>
+          <li><b>Method calls:</b> <code>addToCart()</code> pushes a frame on each thread's stack. Asha's <code>qty = 2</code> and Ravi's <code>qty = 1</code> can't interfere: they are in different stacks.</li>
+          <li><b>Objects:</b> each request creates a Cart object. Objects never live on a stack; they are on the heap, and the frames only hold references to them.</li>
+          <li><b>Shared data:</b> both threads use the same Catalog object on the heap. Sharing saves memory, but shared objects that change need care (Module 12: synchronization).</li>
+          <li><b>Finish:</b> when the methods return, their frames vanish instantly. The carts stay on the heap as long as something (say, the user's session) refers to them; the garbage collector frees them later.</li>
+        </ol>
+      </div>
+    </div>
+  </div>
+  <!--/ANIM2-->
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="14" y="12" width="92" height="66" rx="6" class="s-card2"/><rect x="22" y="22" width="60" height="46" rx="4" class="s-soft-green"/><text x="52" y="49" text-anchor="middle" font-size="9" class="mono s-ink">heap</text><text x="94" y="49" text-anchor="middle" font-size="8" class="mono s-ink2">other</text></svg></div>
+    <div><h4>1. Sizing a service in a container</h4><p>A service gets a 2 GB container. The heap (<code>-Xmx</code>) must leave room for metaspace, thread stacks and other native memory, or the container is killed from outside. Teams often use <code>-XX:MaxRAMPercentage</code> so the heap follows the container limit.</p>
+      <div class="uc-flow"><span>Container limit</span><i>→</i><span class="java">-XX:MaxRAMPercentage=75</span><i>→</i><span>Heap + headroom</span></div></div>
+  </div>
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><g class="s-soft-acc" style="stroke:var(--track)"><rect x="14" y="20" width="14" height="50"/><rect x="32" y="20" width="14" height="50"/><rect x="50" y="20" width="14" height="50"/><rect x="68" y="20" width="14" height="50"/><rect x="86" y="20" width="14" height="50"/></g><text x="60" y="84" text-anchor="middle" font-size="8" class="mono s-ink2">one stack each</text></svg></div>
+    <div><h4>2. Thread-heavy servers</h4><p>Every platform thread reserves its own stack. A server with 800 request threads reserves up to 800 × 1 MB of stack address space in addition to the heap. That is one reason servers use bounded thread pools (Module 12).</p>
+      <div class="uc-flow"><span>800 threads</span><i>→</i><span class="java">-Xss1m each</span><i>→</i><span>Plan the memory</span></div></div>
+  </div>
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><g font-size="9" class="mono s-ink"><text x="14" y="24">{"a":{"b":{"c":</text><text x="24" y="40">{"d":{"e":{</text><text x="34" y="56">… 50,000 levels</text></g><path d="M20 66h80" class="s-line"/><text x="60" y="80" text-anchor="middle" font-size="8" class="s-red">StackOverflowError</text></svg></div>
+    <div><h4>3. Deeply nested input</h4><p>Recursive parsers for JSON, XML or expression trees use one frame per nesting level. A maliciously deep document can overflow the stack, so production parsers limit nesting depth or use loops with an explicit stack.</p>
+      <div class="uc-flow"><span>Nested input</span><i>→</i><span class="java">depth limit / loop</span><i>→</i><span>No crash</span></div></div>
+  </div>
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="14" y="14" width="92" height="62" rx="6" class="s-board"/><g font-size="8" class="mono" style="fill:#9FD3B8"><text x="20" y="32">OutOfMemoryError</text><text x="20" y="46">Dumping heap to</text><text x="20" y="60">java_pid4321.hprof</text></g></svg></div>
+    <div><h4>4. Investigating an OutOfMemoryError</h4><p>With <code>-XX:+HeapDumpOnOutOfMemoryError</code>, the JVM writes a snapshot of the heap when it runs out. Tools like Eclipse MAT then show which objects filled it and which references kept them alive.</p>
+      <div class="uc-flow"><span>OOM in production</span><i>→</i><span class="java">heap dump</span><i>→</i><span>Find the culprit</span></div></div>
+  </div>
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="16" y="16" width="88" height="58" rx="6" class="s-soft-blue"/><g font-size="8.5" class="mono s-ink"><text x="24" y="34">class Proxy$1</text><text x="24" y="48">class Proxy$2</text><text x="24" y="62">class Proxy$3 …</text></g></svg></div>
+    <div><h4>5. Frameworks that generate classes</h4><p>Frameworks create classes at run time (proxies, generated serializers). A bug that keeps generating new classes, or an app server that redeploys without releasing old classes, slowly fills metaspace until <code>OutOfMemoryError: Metaspace</code>.</p>
+      <div class="uc-flow"><span>Generated classes</span><i>→</i><span class="java">metaspace grows</span><i>→</i><span>Cap and monitor it</span></div></div>
+  </div>
+  <p class="muted">Examples are simplified. Exact default sizes depend on the JVM version, operating system and container settings; check yours with <code>java -XX:+PrintFlagsFinal -version</code>.</p>
+</section>
+
+<div class="ad-slot" data-slot="mid"></div>
+
+<!-- ======================= PART 7: RUN THE CODE ======================= -->
+<section class="part" id="run">
+  <span class="part-label"><b>7</b> Run the code</span>
+  <h2>One object, two references, one method call</h2>
+  <div class="code" data-lang="java" data-file="Main.java"><pre><code>public class Main {
+    static class Order {
+        int id;
+        double amount;
+        Order(int id, double amount) {
+            this.id = id;
+            this.amount = amount;
+        }
+    }
+
+    static double withGst(Order order) {
+        double tax = order.amount * 0.18;
+        return order.amount + tax;
+    }
+
+    public static void main(String[] args) {
+        int count = 2;
+        Order first = new Order(101, 500.0);
+        Order same = first;
+        same.amount = 1000.0;
+        System.out.println("Orders: " + count);
+        System.out.println("first.amount = " + first.amount);
+        System.out.println("Same object? " + (first == same));
+        System.out.println("With GST: " + withGst(first));
+    }
+}</code></pre><div class="output">Orders: 2
+first.amount = 1000.0
+Same object? true
+With GST: 1180.0</div></div>
+  <ul class="anno">
+    <li><code>int count = 2;</code><span>A primitive local: the value lives in main's frame.</span></li>
+    <li><code>Order same = first;</code><span>Copies the reference. Still one Order object on the heap.</span></li>
+    <li><code>same.amount = 1000.0;</code><span>Writes into that one object, so <code>first.amount</code> changes too.</span></li>
+    <li><code>withGst(first)</code><span>Pushes a frame with <code>order</code> and <code>tax</code>; popped when it returns 1180.0.</span></li>
+  </ul>
+  <div class="runner">
+    <script type="application/json">{"lang": "java", "file": "Main.java", "tasks": [
+{"label": "1 · Stack and heap", "hint": "Press <b>Run</b>. Then replace <code>Order same = first;</code> with <code>Order same = new Order(101, 500.0);</code>. Which lines of output change, and why?", "code": "public class Main {\n    static class Order {\n        int id;\n        double amount;\n        Order(int id, double amount) {\n            this.id = id;\n            this.amount = amount;\n        }\n    }\n\n    static double withGst(Order order) {\n        double tax = order.amount * 0.18;\n        return order.amount + tax;\n    }\n\n    public static void main(String[] args) {\n        int count = 2;\n        Order first = new Order(101, 500.0);\n        Order same = first;\n        same.amount = 1000.0;\n        System.out.println(\"Orders: \" + count);\n        System.out.println(\"first.amount = \" + first.amount);\n        System.out.println(\"Same object? \" + (first == same));\n        System.out.println(\"With GST: \" + withGst(first));\n    }\n}\n"},
+{"label": "2 · Predict: who sees the change?", "hint": "<b>Predict first:</b> which of the three changes does <code>main</code> see after the calls? Remember: every argument is copied into the new frame.", "code": "public class Main {\n    static void addBonus(int marks) {\n        marks += 5;\n    }\n\n    static void addBonus(int[] marks) {\n        marks[0] += 5;\n    }\n\n    static void reset(int[] marks) {\n        marks = new int[]{0};\n    }\n\n    public static void main(String[] args) {\n        int single = 70;\n        int[] list = {70};\n        addBonus(single);\n        addBonus(list);\n        reset(list);\n        System.out.println(\"single = \" + single);\n        System.out.println(\"list[0] = \" + list[0]);\n    }\n}\n"},
+{"label": "3 · How deep can the stack go?", "hint": "Run it two or three times: the number changes from run to run and machine to machine (it depends on the stack size and on the JIT). Then add a few extra local variables to <code>dive</code>: bigger frames mean fewer fit.", "code": "public class Main {\n    static int depth = 0;\n\n    static void dive() {\n        depth++;\n        dive();\n    }\n\n    public static void main(String[] args) {\n        try {\n            dive();\n        } catch (StackOverflowError e) {\n            System.out.println(\"StackOverflowError after about \" + depth + \" calls\");\n        }\n    }\n}\n"},
+{"label": "4 · Your heap in numbers", "hint": "Your numbers will differ: the default maximum heap is about a quarter of the machine's (or container's) memory. Locally, try <code>java -Xmx256m Main</code> and watch the first line change.", "code": "public class Main {\n    public static void main(String[] args) {\n        Runtime rt = Runtime.getRuntime();\n        long mb = 1024 * 1024;\n        System.out.println(\"Max heap (-Xmx):   \" + rt.maxMemory() / mb + \" MB\");\n        System.out.println(\"Heap reserved now: \" + rt.totalMemory() / mb + \" MB\");\n        System.out.println(\"Free in that:      \" + rt.freeMemory() / mb + \" MB\");\n        int[] big = new int[10_000_000];   // about 40 MB on the heap\n        System.out.println(\"After a 40 MB array, free: \" + rt.freeMemory() / mb + \" MB\");\n        System.out.println(big.length);\n    }\n}\n"},
+{"label": "5 · Predict the crash", "hint": "<b>Predict first:</b> this method has no base case. Which error appears, and what does every line of the stack trace point to? Fix it by returning 1 when <code>n &lt;= 1</code>.", "code": "public class Main {\n    static long factorial(int n) {\n        return n * factorial(n - 1);\n    }\n\n    public static void main(String[] args) {\n        System.out.println(factorial(5));\n    }\n}\n", "_expect": "exception"},
+{"label": "6 · Spot the error", "hint": "Fields get default values, local variables don't. javac says <i>variable total might not have been initialized</i>. Write <code>int total = 0;</code>.", "code": "public class Main {\n    public static void main(String[] args) {\n        int[] bills = {250, 400, 120};\n        int total;\n        for (int b : bills) {\n            total += b;\n        }\n        System.out.println(\"Total: \" + total);\n    }\n}\n", "_expect": "compile-error"}]}</script>
+  </div>
+</section>
+
+<!-- ======================= PART 8: LINE BY LINE ======================= -->
+<section class="part" id="tracer">
+  <span class="part-label"><b>8</b> Line by line</span>
+  <h2>A wallet on the heap, a payment on the stack</h2>
+  <p>Recorded from the real JVM. Watch <code>pay</code>'s frame appear and disappear while the <code>Wallet</code> object (#2) stays on the heap and changes.</p>
+  <div class="tracer">
+    <script type="application/json">{"lang": "java", "code": ["public class Main {", "    static class Wallet {", "        int balance;", "    }", "", "    static void pay(Wallet w, int amount) {", "        int fee = 2;", "        w.balance -= amount + fee;", "    }", "", "    public static void main(String[] args) {", "        int price = 120;", "        Wallet upi = new Wallet();", "        upi.balance = 500;", "        pay(upi, price);", "        System.out.println(\"Left: Rs \" + upi.balance);", "    }", "}"], "steps": [
+{"line": 12, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["price", "120"]]}], "heap": ["<b>#1</b> String[0] (args, empty)"], "newVar": "price", "phase": "Primitive local", "note": "<code>price</code> is an <code>int</code> local, so the value 120 itself sits in main's frame on the stack. Nothing is created on the heap."},
+{"line": 13, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["price", "120"]]}, {"frame": "new Main.Wallet()", "vars": [["this", "→ #2 Main.Wallet"]]}], "heap": ["<b>#1</b> String[0] (args, empty)", "<b>#2</b> Main.Wallet {balance=0}"], "newVar": "this", "phase": "new Wallet()", "note": "The JVM allocates object #2 on the heap with <code>balance</code> set to its default 0, then pushes a frame for the (compiler-written) constructor. <code>this</code> points to #2."},
+{"line": 2, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["price", "120"]]}], "heap": ["<b>#1</b> String[0] (args, empty)"], "phase": "Constructor returns", "note": "The constructor frame is popped. For a moment the new object's address sits only on main's operand stack (the tracer can't show that), so #2 is briefly not listed."},
+{"line": 13, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["price", "120"], ["upi", "→ #2 Main.Wallet"]]}], "heap": ["<b>#1</b> String[0] (args, empty)", "<b>#2</b> Main.Wallet {balance=0}"], "newVar": "upi", "phase": "Store the reference", "note": "The address is stored in <code>upi</code>. The stack holds the arrow, the heap holds the object."},
+{"line": 14, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["price", "120"], ["upi", "→ #2 Main.Wallet"]]}], "heap": ["<b>#1</b> String[0] (args, empty)", "<b>#2</b> Main.Wallet {balance=500}"], "phase": "Change a field", "note": "<code>balance</code> is a field, so 500 is written <b>inside</b> object #2 on the heap, not on the stack."},
+{"line": 15, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["price", "120"], ["upi", "→ #2 Main.Wallet"]]}, {"frame": "pay(Main.Wallet w, int amount)", "vars": [["w", "→ #2 Main.Wallet"], ["amount", "120"]]}], "heap": ["<b>#1</b> String[0] (args, empty)", "<b>#2</b> Main.Wallet {balance=500}"], "newVar": "w", "phase": "Call pay", "note": "A new frame is pushed on top of main. <code>w</code> gets a copy of the reference (same #2) and <code>amount</code> gets a copy of the value 120."},
+{"line": 7, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["price", "120"], ["upi", "→ #2 Main.Wallet"]]}, {"frame": "pay(Main.Wallet w, int amount)", "vars": [["w", "→ #2 Main.Wallet"], ["amount", "120"], ["fee", "2"]]}], "heap": ["<b>#1</b> String[0] (args, empty)", "<b>#2</b> Main.Wallet {balance=500}"], "newVar": "fee", "phase": "Local in pay", "note": "<code>fee</code> lives only in pay's frame."},
+{"line": 8, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["price", "120"], ["upi", "→ #2 Main.Wallet"]]}, {"frame": "pay(Main.Wallet w, int amount)", "vars": [["w", "→ #2 Main.Wallet"], ["amount", "120"], ["fee", "2"]]}], "heap": ["<b>#1</b> String[0] (args, empty)", "<b>#2</b> Main.Wallet {balance=378}"], "phase": "Update through w", "note": "500 − (120 + 2) = 378 is written into #2. main will see it, because main's <code>upi</code> points to the same object."},
+{"line": 9, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["price", "120"], ["upi", "→ #2 Main.Wallet"]]}], "heap": ["<b>#1</b> String[0] (args, empty)", "<b>#2</b> Main.Wallet {balance=378}"], "phase": "pay returns", "note": "pay's frame is popped: <code>w</code>, <code>amount</code> and <code>fee</code> are gone. Object #2 stays, because <code>upi</code> still refers to it."},
+{"line": 16, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["price", "120"], ["upi", "→ #2 Main.Wallet"]]}], "heap": ["<b>#1</b> String[0] (args, empty)", "<b>#2</b> Main.Wallet {balance=378}"], "out": "Left: Rs 378\n", "phase": "Print", "note": "main reads <code>upi.balance</code> from the heap: 378."},
+{"line": 17, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["price", "120"], ["upi", "→ #2 Main.Wallet"]]}], "heap": ["<b>#1</b> String[0] (args, empty)", "<b>#2</b> Main.Wallet {balance=378}"], "phase": "main ends", "note": "main reaches its closing brace. Next, its frame is popped and #2 becomes unreachable."},
+{"line": 17, "phase": "Program ends", "note": "main's frame is popped. No reference to #2 is left, so the garbage collector may reclaim it (Lesson 8.3).", "stack": [], "heap": []}]}</script>
+  </div>
+
+<h3 id="worked">Worked examples: real problems, solved and traced in memory</h3>
+  <p class="wx-intro">Three business programs, traced on the real JVM. Watch each method call push a frame on the stack, watch it pop on return, and notice that objects and arrays always live on the heap while frames only hold values and references.</p>
+  <article class="wx">
+    <div class="wx__head"><span class="wx__num">Example 1</span><span class="wx__tag">E-commerce · checkout</span></div>
+    <h4>Frames pile up and unwind during a bill</h4>
+    <div class="wx__problem"><p class="wx__label">Problem statement</p><p>A checkout page computes a bill: for each cart line, <code>lineTotal</code> multiplies price by quantity and calls <code>addGst</code> to add 18% GST (in whole rupees). Print the bill and see how deep the stack gets.</p></div>
+    <div class="prob__io"><div><small>Input</small><pre>prices = {200, 50}
+qtys   = {2, 3}</pre></div><div><small>Expected output</small><pre>Bill: Rs 649</pre></div></div>
+    <div class="wx__approach"><p class="wx__label">Approach</p><ol><li>Keep prices and quantities in two arrays: they are objects, so they live on the heap.</li><li><code>main</code> calls <code>lineTotal</code>, which calls <code>addGst</code>: three frames at the deepest point.</li><li>Each frame has its own locals (<code>base</code>, <code>tax</code>). They vanish when the method returns; only the returned value travels back.</li></ol></div>
+    <p class="wx__label">Solution: run it live</p>
+    <div class="runner">
+    <script type="application/json">{"lang": "java", "file": "Main.java", "tasks": [{"label": "Run · Frames pile up and unwind during a bill", "hint": "Press <b>Run</b>. Then add a third item (price 999, qty 1) to both arrays and predict the new bill before running.", "code": "public class Main {\n    static int addGst(int amount) {\n        int tax = amount * 18 / 100;\n        return amount + tax;\n    }\n\n    static int lineTotal(int price, int qty) {\n        int base = price * qty;\n        return addGst(base);\n    }\n\n    public static void main(String[] args) {\n        int[] prices = {200, 50};\n        int[] qtys = {2, 3};\n        int bill = 0;\n        for (int i = 0; i < prices.length; i++) {\n            bill += lineTotal(prices[i], qtys[i]);\n        }\n        System.out.println(\"Bill: Rs \" + bill);\n    }\n}\n"}]}</script>
+    </div>
+    <p class="wx__label">What happens in memory, step by step</p>
+    <p class="wx__how">Recorded from the real JVM: press <b>Next</b> to execute one line at a time. Watch method calls push and pop frames on the stack, and objects (numbered #1, #2 …) appear on the heap.</p>
+    <div class="tracer">
+    <script type="application/json">{"lang": "java", "code": ["public class Main {", "    static int addGst(int amount) {", "        int tax = amount * 18 / 100;", "        return amount + tax;", "    }", "", "    static int lineTotal(int price, int qty) {", "        int base = price * qty;", "        return addGst(base);", "    }", "", "    public static void main(String[] args) {", "        int[] prices = {200, 50};", "        int[] qtys = {2, 3};", "        int bill = 0;", "        for (int i = 0; i < prices.length; i++) {", "            bill += lineTotal(prices[i], qtys[i]);", "        }", "        System.out.println(\"Bill: Rs \" + bill);", "    }", "}"], "steps": [{"line": 13, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["prices", "→ #1 int[2]"]]}], "heap": ["<b>#1</b> int[2] {200, 50}", "<b>#2</b> String[0] (args, empty)"], "newVar": "prices", "phase": "Prices array", "note": "<code>{200, 50}</code> creates int array #1 on the <b>heap</b>. main's frame only stores the reference <code>prices</code>."}, {"line": 14, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["prices", "→ #1 int[2]"], ["qtys", "→ #3 int[2]"]]}], "heap": ["<b>#1</b> int[2] {200, 50}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> int[2] {2, 3}"], "newVar": "qtys", "phase": "Quantities array", "note": "A second array, #3, also on the heap."}, {"line": 15, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["prices", "→ #1 int[2]"], ["qtys", "→ #3 int[2]"], ["bill", "0"]]}], "heap": ["<b>#1</b> int[2] {200, 50}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> int[2] {2, 3}"], "newVar": "bill", "phase": "bill", "note": "A primitive local: the value 0 is stored directly in main's frame."}, {"line": 16, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["prices", "→ #1 int[2]"], ["qtys", "→ #3 int[2]"], ["bill", "0"], ["i", "0"]]}], "heap": ["<b>#1</b> int[2] {200, 50}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> int[2] {2, 3}"], "newVar": "i", "phase": "Loop starts", "note": "<code>i = 0</code> is another local in main's frame."}, {"line": 17, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["prices", "→ #1 int[2]"], ["qtys", "→ #3 int[2]"], ["bill", "0"], ["i", "0"]]}, {"frame": "lineTotal(int price, int qty)", "vars": [["price", "200"], ["qty", "2"]]}], "heap": ["<b>#1</b> int[2] {200, 50}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> int[2] {2, 3}"], "newVar": "price", "phase": "Call lineTotal", "note": "A new frame is <b>pushed</b> on top of main. The values 200 and 2 are copied into its parameters <code>price</code> and <code>qty</code>."}, {"line": 8, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["prices", "→ #1 int[2]"], ["qtys", "→ #3 int[2]"], ["bill", "0"], ["i", "0"]]}, {"frame": "lineTotal(int price, int qty)", "vars": [["price", "200"], ["qty", "2"], ["base", "400"]]}], "heap": ["<b>#1</b> int[2] {200, 50}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> int[2] {2, 3}"], "newVar": "base", "phase": "Local base", "note": "200 × 2 = 400, stored in lineTotal's own frame."}, {"line": 9, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["prices", "→ #1 int[2]"], ["qtys", "→ #3 int[2]"], ["bill", "0"], ["i", "0"]]}, {"frame": "lineTotal(int price, int qty)", "vars": [["price", "200"], ["qty", "2"], ["base", "400"]]}, {"frame": "addGst(int amount)", "vars": [["amount", "400"]]}], "heap": ["<b>#1</b> int[2] {200, 50}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> int[2] {2, 3}"], "newVar": "amount", "phase": "Call addGst", "note": "A third frame is pushed. This is the deepest the stack gets: main → lineTotal → addGst. 400 is copied into <code>amount</code>."}, {"line": 3, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["prices", "→ #1 int[2]"], ["qtys", "→ #3 int[2]"], ["bill", "0"], ["i", "0"]]}, {"frame": "lineTotal(int price, int qty)", "vars": [["price", "200"], ["qty", "2"], ["base", "400"]]}, {"frame": "addGst(int amount)", "vars": [["amount", "400"], ["tax", "72"]]}], "heap": ["<b>#1</b> int[2] {200, 50}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> int[2] {2, 3}"], "newVar": "tax", "phase": "Compute tax", "note": "400 × 18 / 100 = 72 in int arithmetic. <code>tax</code> lives only in addGst's frame."}, {"line": 4, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["prices", "→ #1 int[2]"], ["qtys", "→ #3 int[2]"], ["bill", "0"], ["i", "0"]]}, {"frame": "lineTotal(int price, int qty)", "vars": [["price", "200"], ["qty", "2"], ["base", "400"]]}], "heap": ["<b>#1</b> int[2] {200, 50}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> int[2] {2, 3}"], "phase": "addGst returns", "note": "It returns 472 and its frame is <b>popped</b>: <code>amount</code> and <code>tax</code> no longer exist anywhere."}, {"line": 9, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["prices", "→ #1 int[2]"], ["qtys", "→ #3 int[2]"], ["bill", "0"], ["i", "0"]]}], "heap": ["<b>#1</b> int[2] {200, 50}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> int[2] {2, 3}"], "phase": "lineTotal returns", "note": "lineTotal passes 472 back to main and its frame is popped too. Only main is left."}, {"line": 17, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["prices", "→ #1 int[2]"], ["qtys", "→ #3 int[2]"], ["bill", "472"], ["i", "0"]]}], "heap": ["<b>#1</b> int[2] {200, 50}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> int[2] {2, 3}"], "newVar": "bill", "phase": "Add to bill", "note": "bill = 0 + 472. The returned value is the only thing that came back from the two frames."}, {"line": 16, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["prices", "→ #1 int[2]"], ["qtys", "→ #3 int[2]"], ["bill", "472"], ["i", "1"]]}], "heap": ["<b>#1</b> int[2] {200, 50}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> int[2] {2, 3}"], "newVar": "i", "phase": "Next item", "note": "i = 1."}, {"line": 17, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["prices", "→ #1 int[2]"], ["qtys", "→ #3 int[2]"], ["bill", "472"], ["i", "1"]]}, {"frame": "lineTotal(int price, int qty)", "vars": [["price", "50"], ["qty", "3"]]}], "heap": ["<b>#1</b> int[2] {200, 50}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> int[2] {2, 3}"], "newVar": "price", "phase": "Call lineTotal again", "note": "A <b>fresh</b> frame is pushed: price = 50, qty = 3. Nothing from the earlier call is left over."}, {"line": 8, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["prices", "→ #1 int[2]"], ["qtys", "→ #3 int[2]"], ["bill", "472"], ["i", "1"]]}, {"frame": "lineTotal(int price, int qty)", "vars": [["price", "50"], ["qty", "3"], ["base", "150"]]}], "heap": ["<b>#1</b> int[2] {200, 50}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> int[2] {2, 3}"], "newVar": "base", "phase": "Local base", "note": "50 × 3 = 150."}, {"line": 9, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["prices", "→ #1 int[2]"], ["qtys", "→ #3 int[2]"], ["bill", "472"], ["i", "1"]]}, {"frame": "lineTotal(int price, int qty)", "vars": [["price", "50"], ["qty", "3"], ["base", "150"]]}, {"frame": "addGst(int amount)", "vars": [["amount", "150"]]}], "heap": ["<b>#1</b> int[2] {200, 50}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> int[2] {2, 3}"], "newVar": "amount", "phase": "Call addGst", "note": "Three frames again."}, {"line": 3, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["prices", "→ #1 int[2]"], ["qtys", "→ #3 int[2]"], ["bill", "472"], ["i", "1"]]}, {"frame": "lineTotal(int price, int qty)", "vars": [["price", "50"], ["qty", "3"], ["base", "150"]]}, {"frame": "addGst(int amount)", "vars": [["amount", "150"], ["tax", "27"]]}], "heap": ["<b>#1</b> int[2] {200, 50}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> int[2] {2, 3}"], "newVar": "tax", "phase": "Compute tax", "note": "150 × 18 / 100 = 2700 / 100 = 27 (int division drops nothing here)."}, {"line": 4, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["prices", "→ #1 int[2]"], ["qtys", "→ #3 int[2]"], ["bill", "472"], ["i", "1"]]}, {"frame": "lineTotal(int price, int qty)", "vars": [["price", "50"], ["qty", "3"], ["base", "150"]]}], "heap": ["<b>#1</b> int[2] {200, 50}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> int[2] {2, 3}"], "phase": "addGst returns", "note": "Returns 177; frame popped."}, {"line": 9, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["prices", "→ #1 int[2]"], ["qtys", "→ #3 int[2]"], ["bill", "472"], ["i", "1"]]}], "heap": ["<b>#1</b> int[2] {200, 50}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> int[2] {2, 3}"], "phase": "lineTotal returns", "note": "Returns 177 to main; frame popped."}, {"line": 17, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["prices", "→ #1 int[2]"], ["qtys", "→ #3 int[2]"], ["bill", "649"], ["i", "1"]]}], "heap": ["<b>#1</b> int[2] {200, 50}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> int[2] {2, 3}"], "newVar": "bill", "phase": "Add to bill", "note": "bill = 472 + 177 = 649."}, {"line": 16, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["prices", "→ #1 int[2]"], ["qtys", "→ #3 int[2]"], ["bill", "649"]]}], "heap": ["<b>#1</b> int[2] {200, 50}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> int[2] {2, 3}"], "phase": "Loop ends", "note": "i becomes 2, which is not &lt; 2. The loop ends and <code>i</code> is removed from the frame."}, {"line": 19, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["prices", "→ #1 int[2]"], ["qtys", "→ #3 int[2]"], ["bill", "649"]]}], "heap": ["<b>#1</b> int[2] {200, 50}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> int[2] {2, 3}"], "out": "Bill: Rs 649\n", "phase": "Print", "note": "Prints the bill. The two arrays are still on the heap because main's frame still references them."}, {"line": 20, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["prices", "→ #1 int[2]"], ["qtys", "→ #3 int[2]"], ["bill", "649"]]}], "heap": ["<b>#1</b> int[2] {200, 50}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> int[2] {2, 3}"], "phase": "main finishes", "note": "main reaches its closing brace."}, {"line": 20, "phase": "Program ends", "note": "main returns, its frame is popped and the program ends.", "stack": [], "heap": []}]}</script>
+    </div>
+  </article>
+  <article class="wx">
+    <div class="wx__head"><span class="wx__num">Example 2</span><span class="wx__tag">Banking · deposits</span></div>
+    <h4>A method changes the account, not the caller's variable</h4>
+    <div class="wx__problem"><p class="wx__label">Problem statement</p><p>A bank's <code>deposit</code> method adds money to an <code>Account</code> object. A buggy helper <code>replace</code> tries to swap the caller's account for a new one. Predict what <code>main</code> prints, then check the memory trace.</p></div>
+    <div class="prob__io"><div><small>Input</small><pre>account: Riya, Rs 1000
+deposit: Rs 500</pre></div><div><small>Expected output</small><pre>Riya 1500.0, cash 500.0</pre></div></div>
+    <div class="wx__approach"><p class="wx__label">Approach</p><ol><li>The <code>Account</code> object lives on the heap; <code>riya</code> in main's frame holds a reference to it.</li><li>Java passes a <b>copy</b> of every argument. For an object, the copy is the reference, so <code>deposit</code> reaches the same object.</li><li>Assigning a new object to the parameter inside <code>replace</code> changes only the copy in replace's frame.</li></ol></div>
+    <p class="wx__label">Solution: run it live</p>
+    <div class="runner">
+    <script type="application/json">{"lang": "java", "file": "Main.java", "tasks": [{"label": "Run · A method changes the account, not the caller's variable", "hint": "Press <b>Run</b>. Then make <code>replace</code> return the new account and write <code>riya = replace(riya);</code> in main. What prints now?", "code": "public class Main {\n    static class Account {\n        String holder;\n        double balance;\n        Account(String holder, double balance) { this.holder = holder; this.balance = balance; }\n    }\n\n    static void deposit(Account acc, double amount) {\n        acc.balance += amount;\n        amount = 0;\n    }\n\n    static void replace(Account acc) {\n        acc = new Account(\"Temp\", 0);\n    }\n\n    public static void main(String[] args) {\n        Account riya = new Account(\"Riya\", 1000);\n        double cash = 500;\n        deposit(riya, cash);\n        replace(riya);\n        System.out.println(riya.holder + \" \" + riya.balance + \", cash \" + cash);\n    }\n}\n"}]}</script>
+    </div>
+    <p class="wx__label">What happens in memory, step by step</p>
+    <p class="wx__how">Recorded from the real JVM: press <b>Next</b> to execute one line at a time. Watch method calls push and pop frames on the stack, and objects (numbered #1, #2 …) appear on the heap.</p>
+    <div class="tracer">
+    <script type="application/json">{"lang": "java", "code": ["public class Main {", "    static class Account {", "        String holder;", "        double balance;", "        Account(String holder, double balance) { this.holder = holder; this.balance = balance; }", "    }", "", "    static void deposit(Account acc, double amount) {", "        acc.balance += amount;", "        amount = 0;", "    }", "", "    static void replace(Account acc) {", "        acc = new Account(\"Temp\", 0);", "    }", "", "    public static void main(String[] args) {", "        Account riya = new Account(\"Riya\", 1000);", "        double cash = 500;", "        deposit(riya, cash);", "        replace(riya);", "        System.out.println(riya.holder + \" \" + riya.balance + \", cash \" + cash);", "    }", "}"], "steps": [{"line": 18, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "new Main.Account(String holder, double balance)", "vars": [["this", "→ #1 Main.Account"], ["holder", "→ #2 \"Riya\""], ["balance", "1000.0"]]}], "heap": ["<b>#1</b> Main.Account {holder=null, balance=0.0}", "<b>#2</b> String &quot;Riya&quot;", "<b>#3</b> String[0] (args, empty)"], "newVar": "this", "phase": "new Account", "note": "Object #1 is allocated on the heap with defaults (holder = null, balance = 0.0), and a constructor frame is pushed with <code>this</code> → #1."}, {"line": 5, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}], "heap": ["<b>#3</b> String[0] (args, empty)"], "phase": "Constructor done", "note": "The constructor filled both fields and its frame was popped. The new reference is on main's operand stack for a moment, so the heap view is briefly empty."}, {"line": 18, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["riya", "→ #1 Main.Account"]]}], "heap": ["<b>#1</b> Main.Account {holder=&quot;Riya&quot;, balance=1000.0}", "<b>#2</b> String &quot;Riya&quot;", "<b>#3</b> String[0] (args, empty)"], "newVar": "riya", "phase": "Store reference", "note": "<code>riya</code> now points to #1: holder \"Riya\", balance 1000.0."}, {"line": 19, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["riya", "→ #1 Main.Account"], ["cash", "500.0"]]}], "heap": ["<b>#1</b> Main.Account {holder=&quot;Riya&quot;, balance=1000.0}", "<b>#2</b> String &quot;Riya&quot;", "<b>#3</b> String[0] (args, empty)"], "newVar": "cash", "phase": "cash", "note": "A primitive local: 500.0 sits in main's frame."}, {"line": 20, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["riya", "→ #1 Main.Account"], ["cash", "500.0"]]}, {"frame": "deposit(Main.Account acc, double amount)", "vars": [["acc", "→ #1 Main.Account"], ["amount", "500.0"]]}], "heap": ["<b>#1</b> Main.Account {holder=&quot;Riya&quot;, balance=1000.0}", "<b>#2</b> String &quot;Riya&quot;", "<b>#3</b> String[0] (args, empty)"], "newVar": "acc", "phase": "Call deposit", "note": "A frame is pushed. <code>acc</code> receives a copy of the <b>reference</b> (→ #1); <code>amount</code> receives a copy of the <b>value</b> 500.0."}, {"line": 9, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["riya", "→ #1 Main.Account"], ["cash", "500.0"]]}, {"frame": "deposit(Main.Account acc, double amount)", "vars": [["acc", "→ #1 Main.Account"], ["amount", "500.0"]]}], "heap": ["<b>#1</b> Main.Account {holder=&quot;Riya&quot;, balance=1500.0}", "<b>#2</b> String &quot;Riya&quot;", "<b>#3</b> String[0] (args, empty)"], "phase": "Change the object", "note": "<code>acc.balance += amount</code> writes into #1 on the heap: 1500.0. main shares this object."}, {"line": 10, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["riya", "→ #1 Main.Account"], ["cash", "500.0"]]}, {"frame": "deposit(Main.Account acc, double amount)", "vars": [["acc", "→ #1 Main.Account"], ["amount", "0.0"]]}], "heap": ["<b>#1</b> Main.Account {holder=&quot;Riya&quot;, balance=1500.0}", "<b>#2</b> String &quot;Riya&quot;", "<b>#3</b> String[0] (args, empty)"], "newVar": "amount", "phase": "Change the copy", "note": "<code>amount = 0</code> changes only deposit's own copy. main's <code>cash</code> is untouched."}, {"line": 11, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["riya", "→ #1 Main.Account"], ["cash", "500.0"]]}], "heap": ["<b>#1</b> Main.Account {holder=&quot;Riya&quot;, balance=1500.0}", "<b>#2</b> String &quot;Riya&quot;", "<b>#3</b> String[0] (args, empty)"], "phase": "deposit returns", "note": "Frame popped. #1 keeps balance 1500.0; cash is still 500.0."}, {"line": 21, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["riya", "→ #1 Main.Account"], ["cash", "500.0"]]}, {"frame": "replace(Main.Account acc)", "vars": [["acc", "→ #1 Main.Account"]]}], "heap": ["<b>#1</b> Main.Account {holder=&quot;Riya&quot;, balance=1500.0}", "<b>#2</b> String &quot;Riya&quot;", "<b>#3</b> String[0] (args, empty)"], "newVar": "acc", "phase": "Call replace", "note": "A frame is pushed; its <code>acc</code> is another copy of the reference to #1."}, {"line": 14, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["riya", "→ #1 Main.Account"], ["cash", "500.0"]]}, {"frame": "replace(Main.Account acc)", "vars": [["acc", "→ #1 Main.Account"]]}, {"frame": "new Main.Account(String holder, double balance)", "vars": [["this", "→ #4 Main.Account"], ["holder", "→ #5 \"Temp\""], ["balance", "0.0"]]}], "heap": ["<b>#1</b> Main.Account {holder=&quot;Riya&quot;, balance=1500.0}", "<b>#2</b> String &quot;Riya&quot;", "<b>#3</b> String[0] (args, empty)", "<b>#4</b> Main.Account {holder=null, balance=0.0}", "<b>#5</b> String &quot;Temp&quot;"], "newVar": "this", "phase": "new Account(\"Temp\")", "note": "Object #4 is allocated (fields still at defaults) and its constructor frame is pushed on top of replace."}, {"line": 5, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["riya", "→ #1 Main.Account"], ["cash", "500.0"]]}, {"frame": "replace(Main.Account acc)", "vars": [["acc", "→ #1 Main.Account"]]}], "heap": ["<b>#1</b> Main.Account {holder=&quot;Riya&quot;, balance=1500.0}", "<b>#2</b> String &quot;Riya&quot;", "<b>#3</b> String[0] (args, empty)"], "phase": "Constructor done", "note": "Constructor frame popped; the new reference waits on replace's operand stack."}, {"line": 14, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["riya", "→ #1 Main.Account"], ["cash", "500.0"]]}, {"frame": "replace(Main.Account acc)", "vars": [["acc", "→ #4 Main.Account"]]}], "heap": ["<b>#1</b> Main.Account {holder=&quot;Riya&quot;, balance=1500.0}", "<b>#2</b> String &quot;Riya&quot;", "<b>#3</b> String[0] (args, empty)", "<b>#4</b> Main.Account {holder=&quot;Temp&quot;, balance=0.0}", "<b>#5</b> String &quot;Temp&quot;"], "newVar": "acc", "phase": "Reassign the parameter", "note": "<code>acc</code> in <b>replace's frame</b> now points to #4. main's <code>riya</code> still points to #1."}, {"line": 15, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["riya", "→ #1 Main.Account"], ["cash", "500.0"]]}], "heap": ["<b>#1</b> Main.Account {holder=&quot;Riya&quot;, balance=1500.0}", "<b>#2</b> String &quot;Riya&quot;", "<b>#3</b> String[0] (args, empty)"], "phase": "replace returns", "note": "Its frame is popped. Nothing refers to #4 any more, so it disappears from the heap view: it is garbage."}, {"line": 22, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["riya", "→ #1 Main.Account"], ["cash", "500.0"]]}], "heap": ["<b>#1</b> Main.Account {holder=&quot;Riya&quot;, balance=1500.0}", "<b>#2</b> String &quot;Riya&quot;", "<b>#3</b> String[0] (args, empty)"], "out": "Riya 1500.0, cash 500.0\n", "phase": "Print", "note": "main still sees #1: Riya with 1500.0, and cash 500.0."}, {"line": 23, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["riya", "→ #1 Main.Account"], ["cash", "500.0"]]}], "heap": ["<b>#1</b> Main.Account {holder=&quot;Riya&quot;, balance=1500.0}", "<b>#2</b> String &quot;Riya&quot;", "<b>#3</b> String[0] (args, empty)"], "phase": "main finishes", "note": "main reaches its closing brace."}, {"line": 23, "phase": "Program ends", "note": "main returns, its frame is popped and the program ends.", "stack": [], "heap": []}]}</script>
+    </div>
+  </article>
+  <article class="wx">
+    <div class="wx__head"><span class="wx__num">Example 3</span><span class="wx__tag">Logistics · route planner</span></div>
+    <h4>Recursion: one frame per delivery leg</h4>
+    <div class="wx__problem"><p class="wx__label">Problem statement</p><p>A delivery route has legs of 12, 30 and 8 km. A recursive method <code>totalKm(legs, i)</code> returns the distance from leg <code>i</code> to the end. Trace it and count the frames.</p></div>
+    <div class="prob__io"><div><small>Input</small><pre>legs = {12, 30, 8}</pre></div><div><small>Expected output</small><pre>Route: 50 km</pre></div></div>
+    <div class="wx__approach"><p class="wx__label">Approach</p><ol><li>Base case: when <code>i</code> reaches <code>legs.length</code> there are no legs left, so return 0.</li><li>Otherwise ask the next call for the rest of the route, then add this leg.</li><li>Every call is a new frame with its own <code>i</code> and <code>rest</code>. With n legs there are n + 1 frames on top of main, which is why a very long route (or a missing base case) ends in <code>StackOverflowError</code>.</li></ol></div>
+    <p class="wx__label">Solution: run it live</p>
+    <div class="runner">
+    <script type="application/json">{"lang": "java", "file": "Main.java", "tasks": [{"label": "Run · Recursion: one frame per delivery leg", "hint": "Press <b>Run</b>. Then delete the base case (the whole <code>if</code> block) and run again. Read the first line of the error.", "code": "public class Main {\n    static int totalKm(int[] legs, int i) {\n        if (i == legs.length) {\n            return 0;\n        }\n        int rest = totalKm(legs, i + 1);\n        return legs[i] + rest;\n    }\n\n    public static void main(String[] args) {\n        int[] legs = {12, 30, 8};\n        int km = totalKm(legs, 0);\n        System.out.println(\"Route: \" + km + \" km\");\n    }\n}\n"}]}</script>
+    </div>
+    <p class="wx__label">What happens in memory, step by step</p>
+    <p class="wx__how">Recorded from the real JVM: press <b>Next</b> to execute one line at a time. Watch method calls push and pop frames on the stack, and objects (numbered #1, #2 …) appear on the heap.</p>
+    <div class="tracer">
+    <script type="application/json">{"lang": "java", "code": ["public class Main {", "    static int totalKm(int[] legs, int i) {", "        if (i == legs.length) {", "            return 0;", "        }", "        int rest = totalKm(legs, i + 1);", "        return legs[i] + rest;", "    }", "", "    public static void main(String[] args) {", "        int[] legs = {12, 30, 8};", "        int km = totalKm(legs, 0);", "        System.out.println(\"Route: \" + km + \" km\");", "    }", "}"], "steps": [{"line": 11, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["legs", "→ #1 int[3]"]]}], "heap": ["<b>#1</b> int[3] {12, 30, 8}", "<b>#2</b> String[0] (args, empty)"], "newVar": "legs", "phase": "Route legs", "note": "Array #1 on the heap; <code>legs</code> in main refers to it."}, {"line": 12, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["legs", "→ #1 int[3]"]]}, {"frame": "totalKm(int[] legs, int i)", "vars": [["legs", "→ #1 int[3]"], ["i", "0"]]}], "heap": ["<b>#1</b> int[3] {12, 30, 8}", "<b>#2</b> String[0] (args, empty)"], "newVar": "legs", "phase": "First call", "note": "totalKm(legs, 0) pushes frame 1. Its <code>legs</code> is a copy of the reference (same #1), and i = 0."}, {"line": 3, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["legs", "→ #1 int[3]"]]}, {"frame": "totalKm(int[] legs, int i)", "vars": [["legs", "→ #1 int[3]"], ["i", "0"]]}], "heap": ["<b>#1</b> int[3] {12, 30, 8}", "<b>#2</b> String[0] (args, empty)"], "phase": "Base case?", "note": "0 == 3 is false, so we keep going."}, {"line": 6, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["legs", "→ #1 int[3]"]]}, {"frame": "totalKm(int[] legs, int i)", "vars": [["legs", "→ #1 int[3]"], ["i", "0"]]}, {"frame": "totalKm(int[] legs, int i)", "vars": [["legs", "→ #1 int[3]"], ["i", "1"]]}], "heap": ["<b>#1</b> int[3] {12, 30, 8}", "<b>#2</b> String[0] (args, empty)"], "newVar": "i", "phase": "Second call", "note": "totalKm(legs, 1) pushes frame 2 on top. Frame 1 is paused halfway through line 6, waiting for the answer."}, {"line": 3, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["legs", "→ #1 int[3]"]]}, {"frame": "totalKm(int[] legs, int i)", "vars": [["legs", "→ #1 int[3]"], ["i", "0"]]}, {"frame": "totalKm(int[] legs, int i)", "vars": [["legs", "→ #1 int[3]"], ["i", "1"]]}], "heap": ["<b>#1</b> int[3] {12, 30, 8}", "<b>#2</b> String[0] (args, empty)"], "newVar": "i", "phase": "Base case?", "note": "1 == 3 is false."}, {"line": 6, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["legs", "→ #1 int[3]"]]}, {"frame": "totalKm(int[] legs, int i)", "vars": [["legs", "→ #1 int[3]"], ["i", "0"]]}, {"frame": "totalKm(int[] legs, int i)", "vars": [["legs", "→ #1 int[3]"], ["i", "1"]]}, {"frame": "totalKm(int[] legs, int i)", "vars": [["legs", "→ #1 int[3]"], ["i", "2"]]}], "heap": ["<b>#1</b> int[3] {12, 30, 8}", "<b>#2</b> String[0] (args, empty)"], "newVar": "i", "phase": "Third call", "note": "Frame 3 with i = 2. Each frame has its <b>own</b> i."}, {"line": 3, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["legs", "→ #1 int[3]"]]}, {"frame": "totalKm(int[] legs, int i)", "vars": [["legs", "→ #1 int[3]"], ["i", "0"]]}, {"frame": "totalKm(int[] legs, int i)", "vars": [["legs", "→ #1 int[3]"], ["i", "1"]]}, {"frame": "totalKm(int[] legs, int i)", "vars": [["legs", "→ #1 int[3]"], ["i", "2"]]}], "heap": ["<b>#1</b> int[3] {12, 30, 8}", "<b>#2</b> String[0] (args, empty)"], "newVar": "i", "phase": "Base case?", "note": "2 == 3 is false."}, {"line": 6, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["legs", "→ #1 int[3]"]]}, {"frame": "totalKm(int[] legs, int i)", "vars": [["legs", "→ #1 int[3]"], ["i", "0"]]}, {"frame": "totalKm(int[] legs, int i)", "vars": [["legs", "→ #1 int[3]"], ["i", "1"]]}, {"frame": "totalKm(int[] legs, int i)", "vars": [["legs", "→ #1 int[3]"], ["i", "2"]]}, {"frame": "totalKm(int[] legs, int i)", "vars": [["legs", "→ #1 int[3]"], ["i", "3"]]}], "heap": ["<b>#1</b> int[3] {12, 30, 8}", "<b>#2</b> String[0] (args, empty)"], "newVar": "i", "phase": "Fourth call", "note": "Frame 4 with i = 3. Now there are five frames: main plus four totalKm calls."}, {"line": 3, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["legs", "→ #1 int[3]"]]}, {"frame": "totalKm(int[] legs, int i)", "vars": [["legs", "→ #1 int[3]"], ["i", "0"]]}, {"frame": "totalKm(int[] legs, int i)", "vars": [["legs", "→ #1 int[3]"], ["i", "1"]]}, {"frame": "totalKm(int[] legs, int i)", "vars": [["legs", "→ #1 int[3]"], ["i", "2"]]}, {"frame": "totalKm(int[] legs, int i)", "vars": [["legs", "→ #1 int[3]"], ["i", "3"]]}], "heap": ["<b>#1</b> int[3] {12, 30, 8}", "<b>#2</b> String[0] (args, empty)"], "newVar": "i", "phase": "Base case!", "note": "3 == legs.length, so this call can answer without recursing."}, {"line": 4, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["legs", "→ #1 int[3]"]]}, {"frame": "totalKm(int[] legs, int i)", "vars": [["legs", "→ #1 int[3]"], ["i", "0"]]}, {"frame": "totalKm(int[] legs, int i)", "vars": [["legs", "→ #1 int[3]"], ["i", "1"]]}, {"frame": "totalKm(int[] legs, int i)", "vars": [["legs", "→ #1 int[3]"], ["i", "2"]]}], "heap": ["<b>#1</b> int[3] {12, 30, 8}", "<b>#2</b> String[0] (args, empty)"], "newVar": "i", "phase": "Return 0", "note": "Frame 4 is popped and 0 goes back to frame 3."}, {"line": 6, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["legs", "→ #1 int[3]"]]}, {"frame": "totalKm(int[] legs, int i)", "vars": [["legs", "→ #1 int[3]"], ["i", "0"]]}, {"frame": "totalKm(int[] legs, int i)", "vars": [["legs", "→ #1 int[3]"], ["i", "1"]]}, {"frame": "totalKm(int[] legs, int i)", "vars": [["legs", "→ #1 int[3]"], ["i", "2"], ["rest", "0"]]}], "heap": ["<b>#1</b> int[3] {12, 30, 8}", "<b>#2</b> String[0] (args, empty)"], "newVar": "i", "phase": "Resume frame 3", "note": "Frame 3 continues where it paused: rest = 0."}, {"line": 7, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["legs", "→ #1 int[3]"]]}, {"frame": "totalKm(int[] legs, int i)", "vars": [["legs", "→ #1 int[3]"], ["i", "0"]]}, {"frame": "totalKm(int[] legs, int i)", "vars": [["legs", "→ #1 int[3]"], ["i", "1"]]}], "heap": ["<b>#1</b> int[3] {12, 30, 8}", "<b>#2</b> String[0] (args, empty)"], "newVar": "i", "phase": "Return 8", "note": "legs[2] + 0 = 8. Frame 3 is popped."}, {"line": 6, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["legs", "→ #1 int[3]"]]}, {"frame": "totalKm(int[] legs, int i)", "vars": [["legs", "→ #1 int[3]"], ["i", "0"]]}, {"frame": "totalKm(int[] legs, int i)", "vars": [["legs", "→ #1 int[3]"], ["i", "1"], ["rest", "8"]]}], "heap": ["<b>#1</b> int[3] {12, 30, 8}", "<b>#2</b> String[0] (args, empty)"], "newVar": "i", "phase": "Resume frame 2", "note": "rest = 8."}, {"line": 7, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["legs", "→ #1 int[3]"]]}, {"frame": "totalKm(int[] legs, int i)", "vars": [["legs", "→ #1 int[3]"], ["i", "0"]]}], "heap": ["<b>#1</b> int[3] {12, 30, 8}", "<b>#2</b> String[0] (args, empty)"], "phase": "Return 38", "note": "legs[1] + 8 = 30 + 8 = 38. Frame 2 is popped."}, {"line": 6, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["legs", "→ #1 int[3]"]]}, {"frame": "totalKm(int[] legs, int i)", "vars": [["legs", "→ #1 int[3]"], ["i", "0"], ["rest", "38"]]}], "heap": ["<b>#1</b> int[3] {12, 30, 8}", "<b>#2</b> String[0] (args, empty)"], "newVar": "rest", "phase": "Resume frame 1", "note": "rest = 38."}, {"line": 7, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["legs", "→ #1 int[3]"]]}], "heap": ["<b>#1</b> int[3] {12, 30, 8}", "<b>#2</b> String[0] (args, empty)"], "phase": "Return 50", "note": "legs[0] + 38 = 12 + 38 = 50. Frame 1 is popped; only main is left."}, {"line": 12, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["legs", "→ #1 int[3]"], ["km", "50"]]}], "heap": ["<b>#1</b> int[3] {12, 30, 8}", "<b>#2</b> String[0] (args, empty)"], "newVar": "km", "phase": "Store km", "note": "main stores 50. The stack grew to 5 frames and shrank back to 1, while the array on the heap never moved."}, {"line": 13, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["legs", "→ #1 int[3]"], ["km", "50"]]}], "heap": ["<b>#1</b> int[3] {12, 30, 8}", "<b>#2</b> String[0] (args, empty)"], "out": "Route: 50 km\n", "phase": "Print", "note": "Prints the route length."}, {"line": 14, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["legs", "→ #1 int[3]"], ["km", "50"]]}], "heap": ["<b>#1</b> int[3] {12, 30, 8}", "<b>#2</b> String[0] (args, empty)"], "phase": "main finishes", "note": "main reaches its closing brace."}, {"line": 14, "phase": "Program ends", "note": "main returns, its frame is popped and the program ends.", "stack": [], "heap": []}]}</script>
+    </div>
+  </article>
+
+</section>
+
+<!-- ======================= PART 9: QUIZ AND REVISION ======================= -->
+<section class="part" id="quiz">
+  <span class="part-label"><b>9</b> Quiz and revision</span>
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <script type="application/json">[
+      { "q": "Where is the object created by new Order() stored?", "options": ["On the stack of the current thread", "On the heap", "In metaspace", "In the CPU registers"], "answer": 1, "why": "Every object and array is allocated on the heap. The local variable only holds a reference to it." },
+      { "q": "class Account { int balance; } Where does balance live for an Account object?", "options": ["On the stack, because it is a primitive", "On the heap, inside the object", "In metaspace", "Nowhere until it is assigned"], "answer": 1, "why": "Fields are part of their object. Only primitive local variables live in stack frames." },
+      { "q": "How many stacks does a JVM running 10 threads have?", "options": ["1, shared", "10, one per thread", "2: one for main, one for the rest", "It depends on -Xmx"], "answer": 1, "why": "Each thread gets its own JVM stack. The heap is the area that is shared." },
+      { "q": "Which error does infinite recursion produce?", "options": ["OutOfMemoryError: Java heap space", "StackOverflowError", "ArithmeticException", "NullPointerException"], "answer": 1, "why": "Each call pushes a frame; with no base case the thread's stack fills up and the JVM throws StackOverflowError." },
+      { "q": "Which flag sets the maximum heap size?", "options": ["-Xss", "-Xms", "-Xmx", "-XX:MaxMetaspaceSize"], "answer": 2, "why": "-Xmx is the maximum heap, -Xms the starting heap, -Xss the stack size per thread." },
+      { "q": "Since Java 8, where is class metadata such as method bytecode stored in HotSpot?", "options": ["PermGen inside the heap", "Metaspace in native memory", "On the main thread's stack", "In the String pool"], "answer": 1, "why": "Java 8 removed PermGen and introduced Metaspace, which lives outside the Java heap and is unlimited by default." },
+      { "q": "void f(int[] a) { a = new int[3]; } After f(arr), what does the caller's arr refer to?", "options": ["The new array of 3 zeros", "The same array as before", "null", "Compile error"], "answer": 1, "why": "f received a copy of the reference. Reassigning that copy changes only f's frame, which is popped on return." },
+      { "q": "int total; total += 5; does not compile, but an int field works without initialising. Why?", "options": ["Fields are final", "Objects on the heap are zero-filled; locals in frames are not", "Locals are always null", "int fields live on the stack"], "answer": 1, "why": "new zero-fills an object's memory, giving fields default values. javac requires local variables to be assigned before use." }
+    ]</script>
+  </div>
+  <h3>Quick revision</h3>
+  <div class="revision">
+    <h3>Lesson 8.1 in one screen</h3>
+    <ul>
+      <li>Stack: one per thread, made of frames; a frame per call holds locals, the operand stack and return info.</li>
+      <li>Heap: one per JVM, shared; all objects and arrays (with their fields) live here.</li>
+      <li>Local primitive → value in the frame. Local object variable → reference in the frame, object on the heap.</li>
+      <li>Metaspace (Java 8+, native memory) holds class metadata; it replaced PermGen.</li>
+      <li>Flags: <code>-Xss</code> stack per thread, <code>-Xms</code>/<code>-Xmx</code> heap start/max, <code>-XX:MaxMetaspaceSize</code>.</li>
+      <li>Stack full → <code>StackOverflowError</code>; heap full → <code>OutOfMemoryError: Java heap space</code>.</li>
+      <li>Java passes copies: of values for primitives, of references for objects.</li>
+    </ul>
+  </div>
+  <h3>Interview and viva questions</h3>
+  <div class="faq">
+    <details><summary>What is the difference between stack and heap memory in Java?</summary><p>The stack is per thread and stores frames for active method calls: local variables, partial results and return information. It is freed automatically when a method returns. The heap is shared by all threads and stores every object and array; objects are removed by the garbage collector once nothing references them. Stack overflow gives <code>StackOverflowError</code>; a full heap gives <code>OutOfMemoryError</code>.</p></details>
+    <details><summary>What exactly is inside a stack frame?</summary><p>A local variable array (parameters, including <code>this</code> for instance methods, and locals), an operand stack used by bytecode instructions for intermediate values, and frame data such as a link to the class's run-time constant pool and where to continue in the caller after returning. The sizes are fixed at compile time; <code>javap -v</code> shows them as <code>stack=</code> and <code>locals=</code>.</p></details>
+    <details><summary>What replaced PermGen and why does it matter?</summary><p>Java 8 replaced PermGen with Metaspace. Class metadata moved out of the Java heap into native memory, which is unlimited by default, so the old <code>OutOfMemoryError: PermGen space</code> disappeared. Metaspace can still fill up if classes keep being created or class loaders leak, giving <code>OutOfMemoryError: Metaspace</code>; it can be capped with <code>-XX:MaxMetaspaceSize</code>.</p></details>
+    <details><summary>Is Java pass-by-value or pass-by-reference?</summary><p>Always pass-by-value. For a primitive the value is the number itself; for an object the value is the reference. The called method can change the object through its copy of the reference, but reassigning the parameter never affects the caller's variable.</p></details>
+    <details><summary>How would you fix a StackOverflowError in production?</summary><p>Read the stack trace: the repeating lines show which method recurses. Usually there is a missing or wrong base case, or a cycle in the data (for example a category that is its own ancestor). Fix the logic, add cycle detection, or convert deep recursion to a loop. Increasing <code>-Xss</code> only helps for legitimately deep but bounded recursion.</p></details>
+  </div>
+
+  <h3 id="practice">Practice problems</h3>
+  <p class="prob-intro">These problems train you to see where every value lives: in a frame on the stack, or in an object on the heap. Predict the output on paper first, then check. The last three are business tasks.</p>
+  <div class="probs">
+    <article class="prob"><div class="prob__head"><span class="prob__num">P1</span><span class="prob__tag prob__tag--easy">Easy</span><h4>Copy a value, copy a reference</h4></div>
+      <p>Show the difference between copying a primitive and copying a reference. Change the copy in both cases and print the originals.</p>
+      <div class="prob__io"><div><small>Input</small><pre>int a = 10; int[] scores = {50, 60}</pre></div><div><small>Expected output</small><pre>a = 10, b = 20
+scores = [99, 60]</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="java" data-file="Main.java"><pre><code>import java.util.Arrays;
+
+public class Main {
+    public static void main(String[] args) {
+        int a = 10;
+        int b = a;          // copies the value 10
+        b = 20;
+
+        int[] scores = {50, 60};
+        int[] alias = scores;   // copies the reference
+        alias[0] = 99;
+
+        System.out.println(&quot;a = &quot; + a + &quot;, b = &quot; + b);
+        System.out.println(&quot;scores = &quot; + Arrays.toString(scores));
+    }
+}</code></pre><div class="output">a = 10, b = 20
+scores = [99, 60]</div></div>
+        <p><b>How it works:</b> <code>a</code> and <code>b</code> are two separate boxes in main's frame, so changing <code>b</code> can't touch <code>a</code>. <code>scores</code> and <code>alias</code> are two boxes holding the <b>same address</b>; there is only one array on the heap, so the change is visible through both names.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P2</span><span class="prob__tag prob__tag--easy">Easy</span><h4>Fields get defaults, locals don&#x27;t</h4></div>
+      <p>Create a <code>Student</code> object without setting its fields and print them. Explain why the same trick with a local variable would not compile.</p>
+      <div class="prob__io"><div><small>Input</small><pre>class Student { String name; int marks; boolean passed; double fee; }</pre></div><div><small>Expected output</small><pre>null 0 false 0.0</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="java" data-file="Main.java"><pre><code>public class Main {
+    static class Student {
+        String name;
+        int marks;
+        boolean passed;
+        double fee;
+    }
+
+    public static void main(String[] args) {
+        Student s = new Student();
+        System.out.println(s.name + &quot; &quot; + s.marks + &quot; &quot; + s.passed + &quot; &quot; + s.fee);
+        // int local; System.out.println(local);  -&gt; compile error
+    }
+}</code></pre><div class="output">null 0 false 0.0</div></div>
+        <p><b>How it works:</b> when <code>new</code> creates an object on the heap, the JVM zero-fills its memory first, so every field starts at <code>null</code>, <code>0</code>, <code>false</code> or <code>0.0</code>. Local variables live in a frame and are <b>not</b> zero-filled; javac refuses to let you read one before assigning it ("variable might not have been initialized").</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P3</span><span class="prob__tag prob__tag--easy">Easy</span><h4>Swap that doesn&#x27;t swap</h4></div>
+      <p>Write <code>swap(int x, int y)</code> and <code>swap(int[] pair)</code>. Show that only the array version changes the caller's data.</p>
+      <div class="prob__io"><div><small>Input</small><pre>p = 5, q = 9
+pair = {5, 9}</pre></div><div><small>Expected output</small><pre>p = 5, q = 9
+pair = [9, 5]</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="java" data-file="Main.java"><pre><code>import java.util.Arrays;
+
+public class Main {
+    static void swap(int x, int y) {
+        int t = x;
+        x = y;
+        y = t;
+    }
+
+    static void swap(int[] pair) {
+        int t = pair[0];
+        pair[0] = pair[1];
+        pair[1] = t;
+    }
+
+    public static void main(String[] args) {
+        int p = 5, q = 9;
+        swap(p, q);
+        System.out.println(&quot;p = &quot; + p + &quot;, q = &quot; + q);
+
+        int[] pair = {5, 9};
+        swap(pair);
+        System.out.println(&quot;pair = &quot; + Arrays.toString(pair));
+    }
+}</code></pre><div class="output">p = 5, q = 9
+pair = [9, 5]</div></div>
+        <p><b>How it works:</b> the first <code>swap</code> receives copies of 5 and 9 in its own frame and swaps the copies; the frame is popped and the swap is lost. The second receives a copy of the <b>reference</b>, so it swaps the elements of the one array on the heap. Java is always pass-by-value; for objects, the value passed is the reference.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P4</span><span class="prob__tag prob__tag--medium">Medium</span><h4>Count the frames in a recursion</h4></div>
+      <p>Compute 5! recursively and print how deep the stack went, using a static counter that rises on each call and falls on each return.</p>
+      <div class="prob__io"><div><small>Input</small><pre>n = 5</pre></div><div><small>Expected output</small><pre>5! = 120
+Deepest stack: 5 factorial frames (+ main)
+Depth after return: 0</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="java" data-file="Main.java"><pre><code>public class Main {
+    static int depth = 0;
+    static int maxDepth = 0;
+
+    static long factorial(int n) {
+        depth++;
+        if (depth &gt; maxDepth) maxDepth = depth;
+        long result = (n &lt;= 1) ? 1 : n * factorial(n - 1);
+        depth--;
+        return result;
+    }
+
+    public static void main(String[] args) {
+        System.out.println(&quot;5! = &quot; + factorial(5));
+        System.out.println(&quot;Deepest stack: &quot; + maxDepth + &quot; factorial frames (+ main)&quot;);
+        System.out.println(&quot;Depth after return: &quot; + depth);
+    }
+}</code></pre><div class="output">5! = 120
+Deepest stack: 5 factorial frames (+ main)
+Depth after return: 0</div></div>
+        <p><b>How it works:</b> each call pushes a frame and increments <code>depth</code>; each return pops a frame and decrements it. factorial(5) calls 4, 3, 2, 1, so 5 factorial frames are on the stack at the deepest point. The counters are <code>static</code>, so they are not in any frame: they belong to the class and survive all the pushes and pops.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P5</span><span class="prob__tag prob__tag--medium">Medium</span><h4>Recursion vs loop for a long series</h4></div>
+      <p>Sum the numbers 1 to 1,00,000. A recursive version needs one frame per number and risks <code>StackOverflowError</code>; write the loop version and show it uses a single frame.</p>
+      <div class="prob__io"><div><small>Input</small><pre>n = 100000</pre></div><div><small>Expected output</small><pre>Sum 1..100000 = 5000050000
+Formula check  = 5000050000</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="java" data-file="Main.java"><pre><code>public class Main {
+    // Recursive idea (do NOT use for large n):
+    // static long sum(int n) { return n == 0 ? 0 : n + sum(n - 1); }
+
+    static long sumLoop(int n) {
+        long total = 0;
+        for (int i = 1; i &lt;= n; i++) {
+            total += i;
+        }
+        return total;
+    }
+
+    public static void main(String[] args) {
+        int n = 100_000;
+        System.out.println(&quot;Sum 1..&quot; + n + &quot; = &quot; + sumLoop(n));
+        System.out.println(&quot;Formula check  = &quot; + (long) n * (n + 1) / 2);
+    }
+}</code></pre><div class="output">Sum 1..100000 = 5000050000
+Formula check  = 5000050000</div></div>
+        <p><b>How it works:</b> the recursive version would need 1,00,000 frames at once. With the default 1 MB stack that is usually too many, so it fails with <code>StackOverflowError</code> (the exact limit depends on the machine and JIT). The loop reuses the same two locals in one frame, whatever <code>n</code> is. The cast to <code>long</code> in the formula prevents int overflow.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P6</span><span class="prob__tag prob__tag--medium">Medium</span><h4>Catch a runaway recursion and report it</h4></div>
+      <p>A menu-category tree accidentally contains a loop: category A's parent is B and B's parent is A. Finding the root recursively never ends. Catch the <code>StackOverflowError</code> once, at the top, and print a clear message.</p>
+      <div class="prob__io"><div><small>Input</small><pre>parent[0] = 1, parent[1] = 0  (a cycle)</pre></div><div><small>Expected output</small><pre>Category tree has a cycle: StackOverflowError
+Program continues</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="java" data-file="Main.java"><pre><code>public class Main {
+    static int[] parent = {1, 0};   // 0 -&gt; 1 -&gt; 0 -&gt; 1 ... never reaches -1
+
+    static int findRoot(int c) {
+        if (parent[c] == -1) return c;
+        return findRoot(parent[c]);
+    }
+
+    public static void main(String[] args) {
+        try {
+            System.out.println(&quot;Root: &quot; + findRoot(0));
+        } catch (StackOverflowError e) {
+            System.out.println(&quot;Category tree has a cycle: &quot; + e.getClass().getSimpleName());
+        }
+        System.out.println(&quot;Program continues&quot;);
+    }
+}</code></pre><div class="output">Category tree has a cycle: StackOverflowError
+Program continues</div></div>
+        <p><b>How it works:</b> each <code>findRoot</code> call pushes a frame and none ever returns, so the thread's stack fills and the JVM throws <code>StackOverflowError</code>. When it propagates to <code>main</code>, all those frames have already been popped, so the program can continue. This only reports the bug; the real fix is to detect the cycle (for example with a visited array) or to walk the tree with a loop.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P7</span><span class="prob__tag prob__tag--business">Business problem</span><h4>Batch the orders, reuse one buffer</h4></div>
+      <p>A warehouse job processes 10 order amounts in batches of 4. Instead of creating a new array for each batch, reuse one buffer array. Print each batch total and the grand total.</p>
+      <div class="prob__io"><div><small>Input</small><pre>amounts = {1200, 450, 980, 300, 2200, 150, 640, 875, 410, 990}
+batch size = 4</pre></div><div><small>Expected output</small><pre>Batch 1 (4 orders): Rs 2930
+Batch 2 (4 orders): Rs 3865
+Batch 3 (2 orders): Rs 1400
+Grand total: Rs 8195</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="java" data-file="Main.java"><pre><code>public class Main {
+    public static void main(String[] args) {
+        int[] amounts = {1200, 450, 980, 300, 2200, 150, 640, 875, 410, 990};
+        int[] buffer = new int[4];          // one object on the heap, reused
+        int grand = 0, batchNo = 0;
+        for (int start = 0; start &lt; amounts.length; start += buffer.length) {
+            int count = Math.min(buffer.length, amounts.length - start);
+            System.arraycopy(amounts, start, buffer, 0, count);
+            int batchTotal = 0;
+            for (int i = 0; i &lt; count; i++) batchTotal += buffer[i];
+            batchNo++;
+            grand += batchTotal;
+            System.out.println(&quot;Batch &quot; + batchNo + &quot; (&quot; + count + &quot; orders): Rs &quot; + batchTotal);
+        }
+        System.out.println(&quot;Grand total: Rs &quot; + grand);
+    }
+}</code></pre><div class="output">Batch 1 (4 orders): Rs 2930
+Batch 2 (4 orders): Rs 3865
+Batch 3 (2 orders): Rs 1400
+Grand total: Rs 8195</div></div>
+        <p><b>How it works:</b></p><ol><li>Only two arrays ever exist on the heap: the input and the 4-slot buffer. Batch processing keeps memory use flat however many orders arrive, which is how real import jobs avoid <code>OutOfMemoryError</code>.</li><li><code>count</code> handles the last, shorter batch (2 orders).</li><li>The primitives <code>start</code>, <code>count</code> and <code>batchTotal</code> are just slots in main's frame, reused every round.</li></ol>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P8</span><span class="prob__tag prob__tag--business">Business problem</span><h4>Month-end interest without a deep stack</h4></div>
+      <p>A savings account of Rs 1,00,000 earns 0.5% interest per month, credited monthly for 12 months. A teammate wrote it recursively. Rewrite it with a loop (one frame for any number of months) and print the balance after 12 months, rounded to paise.</p>
+      <div class="prob__io"><div><small>Input</small><pre>principal = 100000, monthly rate = 0.5%, months = 12</pre></div><div><small>Expected output</small><pre>Balance after 12 months: Rs 106167.78
+Interest earned: Rs 6167.78</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="java" data-file="Main.java"><pre><code>public class Main {
+    static double balanceAfter(double principal, double monthlyRate, int months) {
+        double balance = principal;
+        for (int m = 1; m &lt;= months; m++) {
+            balance += balance * monthlyRate / 100;
+        }
+        return balance;
+    }
+
+    public static void main(String[] args) {
+        double b = balanceAfter(100000, 0.5, 12);
+        System.out.printf(&quot;Balance after 12 months: Rs %.2f%n&quot;, b);
+        System.out.printf(&quot;Interest earned: Rs %.2f%n&quot;, b - 100000);
+    }
+}</code></pre><div class="output">Balance after 12 months: Rs 106167.78
+Interest earned: Rs 6167.78</div></div>
+        <p><b>How it works:</b></p><ol><li>The recursive version (<code>balanceAfter(p * 1.005, rate, months - 1)</code>) works for 12 months, but a 30-year loan schedule with daily steps would need about 11,000 frames. The loop always uses one frame.</li><li>Each month's interest is calculated on the updated balance: that is compounding.</li><li>Real banking code uses <code>BigDecimal</code> for money; <code>double</code> is fine for this exercise because we only round for display.</li></ol>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P9</span><span class="prob__tag prob__tag--business">Business problem</span><h4>Shared cart object between two screens</h4></div>
+      <p>In a shopping app, the cart screen and the checkout screen both hold a reference to the same <code>Cart</code> object. Adding an item on one screen must show on the other. Model it and print what each screen sees.</p>
+      <div class="prob__io"><div><small>Input</small><pre>cart screen adds Rs 499 shoes, checkout adds Rs 99 delivery</pre></div><div><small>Expected output</small><pre>Cart screen sees: 2 items, Rs 598
+Checkout sees:    2 items, Rs 598
+Objects on the heap for carts: 1</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="java" data-file="Main.java"><pre><code>public class Main {
+    static class Cart {
+        int items;
+        int total;
+        void add(int price) {
+            items++;
+            total += price;
+        }
+    }
+
+    public static void main(String[] args) {
+        Cart cart = new Cart();
+        Cart cartScreen = cart;       // both screens get the same reference
+        Cart checkoutScreen = cart;
+
+        cartScreen.add(499);
+        checkoutScreen.add(99);
+
+        System.out.println(&quot;Cart screen sees: &quot; + cartScreen.items + &quot; items, Rs &quot; + cartScreen.total);
+        System.out.println(&quot;Checkout sees:    &quot; + checkoutScreen.items + &quot; items, Rs &quot; + checkoutScreen.total);
+        System.out.println(&quot;Objects on the heap for carts: &quot; + (cartScreen == checkoutScreen ? 1 : 2));
+    }
+}</code></pre><div class="output">Cart screen sees: 2 items, Rs 598
+Checkout sees:    2 items, Rs 598
+Objects on the heap for carts: 1</div></div>
+        <p><b>How it works:</b> there is one <code>Cart</code> object on the heap and three references to it on main's stack frame. Every <code>add</code> call pushes a frame whose <code>this</code> points to that same object, so both screens always agree. If each screen had called <code>new Cart()</code>, they would hold two independent carts and the totals would drift apart.</p>
+      </details>
+    </article>
+  </div>
+
+
+  <h3 id="scenarios">Real-world scenario questions (asked in company interviews)</h3>
+  <p class="scn-intro">Memory questions are favourites in backend interviews because every production team has fought these errors. Decide your answer first, then open the model answer.</p>
+  <div class="scenarios">
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Fintech · referral rewards</span><span class="scn__tag scn__tag--level">Fresher</span></div>
+      <h4>The reward job that dies on one customer</h4>
+      <p class="scn__situation">A nightly job credits referral rewards by following each customer's “referred by” link recursively up to the first customer. It runs fine for months, then crashes every night with <code>StackOverflowError</code>. The logs show the same two customer IDs alternating in the stack trace. What happened and how do you fix it?</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> can you read a stack trace and connect StackOverflowError to recursion and bad data?</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>The alternating IDs mean a <b>cycle</b>: A was referred by B and B by A (bad data from a migration or a bug). The recursion never reaches a customer with no referrer, so frames pile up until the thread's stack is full.</li>
+          <li>Fix the data, and make the code safe: keep a <code>Set</code> of visited IDs and stop on a repeat, or walk the chain with a loop and a maximum depth.</li>
+          <li>Add a database constraint or validation so a customer can't become their own ancestor.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> “Increase -Xss.” A cycle is infinite; no stack size is enough.</p>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">E-commerce · containers</span><span class="scn__tag scn__tag--level">3+ years</span></div>
+      <h4>Killed without an OutOfMemoryError</h4>
+      <p class="scn__situation">An order service runs in a container with a 1 GB memory limit and is started with <code>-Xmx1g</code>. Under festival-sale load, the container is restarted by the platform with “OOMKilled”, but the application logs show no <code>OutOfMemoryError</code>. Explain and fix.</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> do you know the JVM uses more than the heap?</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <p>The heap alone was allowed to use the whole 1 GB. The JVM process also needs metaspace, a stack for every thread, JIT-compiled code, GC structures and native buffers. Total process memory crossed the container limit, so the operating system killed it before the heap was full; the JVM never got a chance to throw.</p>
+        <ul>
+          <li>Leave headroom: for example <code>-Xmx700m</code>, or <code>-XX:MaxRAMPercentage=70</code> so it adapts to the limit.</li>
+          <li>Bound thread pools (each thread has its own stack) and consider capping metaspace.</li>
+          <li>Monitor process memory (RSS), not only heap usage.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> making -Xmx equal to the container limit.</p>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Logistics · tracking API</span><span class="scn__tag scn__tag--level">1–3 years</span></div>
+      <h4>OutOfMemoryError after a bulk export</h4>
+      <p class="scn__situation">A tracking API has an endpoint that exports all shipments for a date range. It loads every shipment into one <code>List</code>, builds a big report String and returns it. When a client asks for a full year (about 40 lakh shipments), the server logs <code>java.lang.OutOfMemoryError: Java heap space</code> and other requests start failing too. What would you change?</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> do you understand that the heap is shared and that live objects can't be collected?</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>All 40 lakh objects plus the report are <b>reachable</b> at once, so the GC can free nothing. The heap is shared, so every other request on the server fails too.</li>
+          <li>Stream the export: read in pages (say 5,000 rows), write each page to the response or a file, and drop it before reading the next. Memory use stays flat.</li>
+          <li>Limit the date range or make big exports an asynchronous job that emails a download link.</li>
+          <li>Enable <code>-XX:+HeapDumpOnOutOfMemoryError</code> so the next incident can be analysed.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> only raising -Xmx. The next client will ask for two years.</p>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Campus interview · fundamentals</span><span class="scn__tag scn__tag--level">Fresher</span></div>
+      <h4>“Where is each of these stored?”</h4>
+      <p class="scn__situation">The interviewer writes: <code>class Bill { static int count; double amount; }</code> and in <code>main</code>: <code>int qty = 3; Bill b = new Bill();</code>. They ask where <code>qty</code>, <code>b</code>, the Bill object, <code>amount</code>, <code>count</code> and the code of class Bill are stored.</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> can you go beyond “primitives on stack, objects on heap”?</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li><code>qty</code>: a local primitive, so the value 3 is in main's frame on the stack.</li>
+          <li><code>b</code>: a local reference, in main's frame; the <b>Bill object</b> it points to is on the heap.</li>
+          <li><code>amount</code>: an instance field, so inside the Bill object on the heap.</li>
+          <li>The <b>class metadata and bytecode</b> of Bill: metaspace (Java 8+). The <code>static count</code> value belongs to the class, not to any object; in HotSpot it is kept with the class's <code>Class</code> object on the heap.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> saying <code>amount</code> is on the stack because it is a double.</p>
+      </div></details>
+    </article>
+  </div>
+</section>
+
+<nav class="lesson-nav" id="lesson-nav" aria-label="Lesson navigation"></nav>
+<div class="ad-slot" data-slot="bottom"></div>
+</article>
+
+<aside class="lesson-side">
+  <nav class="toc" aria-label="In this lesson">
+    <h4>In this lesson</h4>
+    <ol>
+      <li><a href="#story">The story</a></li>
+      <li><a href="#definition">Definition</a></li>
+      <li><a href="#types">Types and ways to use it</a></li>
+      <li><a href="#steps">Step by step</a></li>
+      <li><a href="#animation">See it happen</a></li>
+      <li><a href="#real-world">Real-world use</a></li>
+      <li><a href="#run">Run the code</a></li>
+      <li><a href="#tracer">Line by line</a></li>
+      <li><a href="#worked">Worked examples</a></li>
+      <li><a href="#quiz">Quiz and revision</a></li>
+      <li><a href="#practice">Practice problems</a></li>
+      <li><a href="#scenarios">Industry scenarios</a></li>
+    </ol>
+  </nav>
+  <div class="ad-slot" data-slot="side"></div>
+  <div class="outline" id="outline"></div>
+</aside>
+</div>
+</main>
+
+<footer class="site-footer">
+  <div class="wrap">
+    <div><h4>MyPhatshala</h4><p>Free programming and IT lessons that show what happens behind the screen.</p></div>
+    <div><h4>Learn</h4><a href="../../../../#tracks">All courses</a><a href="../../">Core Java syllabus</a></div>
+    <div><h4>Site</h4><a href="../../../../about.html">About</a><a href="../../../../contact.html">Contact</a><a href="../../../../privacy.html">Privacy policy</a><a href="../../../../disclaimer.html">Disclaimer</a></div>
+    <div class="copyright">© MyPhatshala. All lesson content, diagrams and animations are original. Please do not copy without permission.</div>
+  </div>
+</footer>
+
+<script src="../../../../data/courses/core-java.js"></script>
+<script src="../../../../assets/js/lesson.js"></script>
+<script src="../../../../assets/js/ads.js"></script>
+<script src="../../../../assets/js/site.js"></script>
+</body>
+</html>

@@ -1,0 +1,251 @@
+<!--META {
+"course": "core-java", "module": "12-multithreading", "lesson": "05-wait-notify",
+"title": "Inter-thread communication: wait() and notify()", "courseTitle": "Core Java", "number": "12.5",
+"track": "#E8772E", "trackId": "programming", "trackTitle": "Programming Languages", "level": "Intermediate",
+"minutes": 25,
+"description": "Inter-thread communication in Java: wait(), notify() and notifyAll(), the monitor's wait set, why wait must be in a while loop, IllegalMonitorStateException, the producer-consumer pattern, BlockingQueue and CountDownLatch. With animations, a JVM tracer, {{NPROB}} practice problems, quiz and interview scenarios.",
+"ogTitle": "wait() and notify() in Java: producer and consumer",
+"ogDescription": "Watch a chef and a waiter coordinate through one counter, see the monitor's wait set, and solve {{NPROB}} problems.",
+"lead": "Locks stop threads from clashing. But often one thread must <b>wait for another</b>: the waiter waits for the chef, the order waits for payment, the dispatcher waits for messages. Checking a flag in a loop wastes a whole CPU core. Java's answer is <code>wait()</code> and <code>notify()</code>. You'll see exactly how they release and re-acquire a lock, write the classic producer–consumer, and then meet <code>BlockingQueue</code>, which does it all for you.",
+"chips": ["Module 12 · Multithreading", "⏱ 25 min", "Intermediate", "{{NPROB}} practice problems"]
+} META-->
+<part n="1" id="story" label="The story">
+  <h2>The waiter who kept asking</h2>
+  <div class="story">
+    <p class="narration">In Riya's canteen simulation, the waiter thread checks the counter in a loop: “Is the dosa ready? Is it ready now? Now?” Millions of times a second. Her laptop fan starts screaming, and the chef thread runs slower because the waiter hogs the CPU.</p>
+    <div class="scene">
+      <svg viewBox="0 0 640 170" role="img" aria-label="Left: a waiter asking again and again at an empty counter. Right: the waiter resting until the chef rings a bell">
+        <g font-size="10.5">
+          <text x="14" y="24" font-weight="700" class="s-red">Busy waiting</text>
+          <rect x="14" y="40" width="90" height="50" rx="8" class="s-card2" style="stroke:var(--line)"/><text x="59" y="70" text-anchor="middle" class="s-ink" font-weight="700">waiter</text>
+          <rect x="170" y="40" width="110" height="50" rx="8" class="s-soft-blue" style="stroke:var(--blue)"/><text x="225" y="70" text-anchor="middle" class="s-ink2">counter: empty</text>
+          <text x="110" y="52" class="s-red">ready?</text><text x="114" y="68" class="s-red">ready?</text><text x="118" y="84" class="s-red">ready?</text>
+          <text x="14" y="120" class="s-red">CPU 100%, doing nothing useful</text>
+          <path d="M318 20v130" style="stroke:var(--line);stroke-width:1;stroke-dasharray:4 4"/>
+          <text x="340" y="24" font-weight="700" class="s-green">wait() and notify()</text>
+          <rect x="340" y="40" width="90" height="50" rx="8" class="s-card2" style="stroke:var(--line)"/><text x="385" y="64" text-anchor="middle" class="s-ink" font-weight="700">waiter</text><text x="385" y="80" text-anchor="middle" class="s-blue">resting</text>
+          <rect x="520" y="40" width="100" height="50" rx="8" class="s-soft-acc" style="stroke:var(--track)"/><text x="570" y="64" text-anchor="middle" class="s-ink" font-weight="700">chef</text><text x="570" y="80" text-anchor="middle" class="s-acc">dosa ready!</text>
+          <path d="M518 65h-84" style="stroke:var(--green);stroke-width:1.6"/><path d="M440 59l-8 6 8 6" style="fill:none;stroke:var(--green);stroke-width:1.6"/>
+          <text x="475" y="56" text-anchor="middle" class="s-green">notify()</text>
+          <text x="340" y="120" class="s-green">CPU idle until there's real work</text>
+        </g>
+        <text x="632" y="166" text-anchor="end" class="s-wm">myphatshala.com</text>
+      </svg>
+    </div>
+    <riya>Sir, how can the waiter wait without checking all the time?</riya>
+    <arjun>He goes to sleep on the counter's lock with <code>wait()</code>. When the chef puts a dish, the chef rings the bell: <code>notify()</code>. The waiter wakes only when something changed.</arjun>
+    <riya>But the counter is locked with <code>synchronized</code>. If the waiter sleeps inside, how does the chef get in?</riya>
+    <arjun>That's the clever part: <code>wait()</code> <b>gives up the lock</b> while it sleeps, and takes it back before it returns. Let's watch it inside the monitor.</arjun>
+  </div>
+</part>
+
+<part n="2" id="definition" label="Definition">
+  <h2>What is inter-thread communication?</h2>
+  <div class="def">
+    <div class="def__formal"><small>Formal definition (write this in exams)</small>
+      <p><b>Inter-thread communication</b> is the coordination of threads so that one thread waits until a condition becomes true and another thread signals when it changes. In Java it is done with the <code>Object</code> methods <code>wait()</code>, <code>notify()</code> and <code>notifyAll()</code>, which must be called while holding the object's monitor. <code>wait()</code> releases the monitor and suspends the thread in the object's <b>wait set</b> until it is notified, interrupted or times out; it then re-acquires the monitor before returning. <code>notify()</code> wakes one thread from the wait set, <code>notifyAll()</code> wakes all of them.</p></div>
+    <div class="def__simple"><small>In simple words</small>
+      <p><code>wait()</code> = “wake me when something changes” (and let others use the room meanwhile). <code>notifyAll()</code> = “something changed, everyone check again”.</p></div>
+  </div>
+  <h3>Words you'll meet in this lesson</h3>
+  <div class="terms">
+    <div class="term"><b>Condition</b><span>What a thread is waiting for: “counter not empty”, “payment confirmed”.</span></div>
+    <div class="term"><b>Wait set</b><span>Threads that called <code>wait()</code> on this object (state WAITING).</span></div>
+    <div class="term"><b>Entry set</b><span>Threads trying to get this object's lock (state BLOCKED).</span></div>
+    <div class="term"><b>Producer–consumer</b><span>One thread makes items, another uses them, through a shared buffer.</span></div>
+    <div class="term"><b>Spurious wakeup</b><span>Waking up without a notify. Rare, but allowed, hence the loop.</span></div>
+    <div class="term"><b>BlockingQueue</b><span>A thread-safe queue whose <code>put</code>/<code>take</code> wait for space/items.</span></div>
+  </div>
+  <h3>wait() vs sleep()</h3>
+  <div class="table-wrap">
+  <table class="compare" style="min-width:560px">
+    <thead><tr><th></th><th><code>obj.wait()</code></th><th><code>Thread.sleep(ms)</code></th></tr></thead>
+    <tbody>
+      <tr><td>Defined in</td><td><code>Object</code></td><td><code>Thread</code> (static)</td></tr>
+      <tr><td>Must hold the lock?</td><td>Yes, of <code>obj</code></td><td>No</td></tr>
+      <tr><td>Releases the lock?</td><td><b>Yes</b></td><td>No: keeps any locks held</td></tr>
+      <tr><td>Wakes up when</td><td>notified, interrupted, or timeout</td><td>time is up, or interrupted</td></tr>
+      <tr><td>Purpose</td><td>Wait for a condition</td><td>Pause for a time</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <exam><b>Exam tip:</b> three rules to write in every answer: (1) call wait/notify <b>inside synchronized</b> on the same object, else <code>IllegalMonitorStateException</code>; (2) <b>wait releases the lock</b>, sleep doesn't; (3) always call wait <b>in a while loop</b> that re-checks the condition.</exam>
+</part>
+
+{{AD}}
+
+<part n="3" id="types" label="Types and ways to use it">
+  <h2>The pattern, and the tools built on it</h2>
+  <h3>The one pattern to memorise</h3>
+  {{CODE_PATTERN}}
+  <h3>Forget the lock and Java stops you</h3>
+  {{CODE_IMSE}}
+
+  <h3>Ways to make threads wait for each other</h3>
+  <div class="cards">
+    <div class="card"><svg class="ic" viewBox="0 0 40 40" fill="none" stroke="var(--blue)" stroke-width="2"><rect x="11" y="18" width="18" height="13" rx="2"/><path d="M15 18v-4a5 5 0 0110 0v4"/></svg><h4>wait / notifyAll</h4><p>The low-level tool every Java object supports. Know it for exams and interviews.</p><span class="tag">built in</span></div>
+    <div class="card"><svg class="ic" viewBox="0 0 40 40" fill="none" stroke="var(--green)" stroke-width="2"><rect x="8" y="14" width="24" height="12" rx="3"/><path d="M16 14v12M24 14v12"/></svg><h4>BlockingQueue</h4><p><code>ArrayBlockingQueue</code>, <code>LinkedBlockingQueue</code>: producer–consumer ready-made.</p><span class="tag">use in real code</span></div>
+    <div class="card"><svg class="ic" viewBox="0 0 40 40" fill="none" stroke="var(--track)" stroke-width="2"><path d="M12 28V12M20 28V16M28 28V20"/></svg><h4>CountDownLatch</h4><p>Wait until N events have happened (“all 3 services started”).</p><span class="tag">one-time gate</span></div>
+    <div class="card"><svg class="ic" viewBox="0 0 40 40" fill="none" stroke="var(--ink-3)" stroke-width="2"><circle cx="20" cy="20" r="11"/><path d="M20 13v7h6"/></svg><h4>join()</h4><p>Wait until a thread has finished: the simplest coordination of all (Lesson 12.3).</p><span class="tag">wait for the end</span></div>
+  </div>
+  <warn><b>Notify without a condition is a lost signal.</b> If <code>notify()</code> runs before the other thread calls <code>wait()</code>, nobody hears it and the waiter may sleep forever. Always pair the signal with a shared variable (a flag, a count, a buffer) that the waiter checks first.</warn>
+</part>
+
+<part n="4" id="steps" label="Step by step">
+  <h2>One wait() and one notify(), in order</h2>
+  <ol class="stepper">
+    <li><h4>The consumer takes the lock and checks</h4>
+      <span class="behind">Inside <code>synchronized take()</code> the waiter sees <code>dish == null</code>. It can't proceed.</span></li>
+    <li><h4>wait(): release and sleep</h4>
+      <span class="behind">The JVM releases the monitor and moves the thread to the object's wait set (WAITING). The lock is now free for others.</span></li>
+    <li><h4>The producer changes the state</h4>
+      <span class="behind">The chef enters <code>synchronized put()</code>, sets <code>dish</code> and calls <code>notifyAll()</code>. The waiter moves from the wait set to the entry set (BLOCKED): it still needs the lock.</span></li>
+    <li><h4>The producer leaves</h4>
+      <span class="behind">When <code>put()</code> returns, the monitor is released. The waiter acquires it and <code>wait()</code> finally returns.</span></li>
+    <li><h4>Re-check, then act</h4>
+      <span class="behind">The <code>while</code> loop checks again (another consumer might have taken the dish first). The condition is true, so the waiter takes the dish and notifies in turn.</span></li>
+  </ol>
+</part>
+
+<part n="5" id="animation" label="See it happen">
+  <h2>Chef, waiter and the monitor: both views</h2>
+  <p>Left: the kitchen as you'd describe it. Right: inside the counter object's monitor, with its owner, entry set and wait set.</p>
+  {{ANIM}}
+</part>
+
+<part n="6" id="real-world" label="Real-world use">
+  <h2>Producers and consumers everywhere</h2>
+  <p>Most back-end systems are chains of producers and consumers connected by queues.</p>
+  {{ANIM2}}
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="14" y="34" width="26" height="22" rx="4" class="s-soft-acc" style="stroke:var(--track)"/><rect x="47" y="34" width="26" height="22" rx="4" class="s-soft-blue" style="stroke:var(--blue)"/><rect x="80" y="34" width="26" height="22" rx="4" class="s-soft-green" style="stroke:var(--green)"/></svg></div>
+    <div><h4>1. Order and notification pipelines</h4><p>Checkout produces events; email, SMS and invoice workers consume them from queues at their own pace.</p>
+      <div class="uc-flow"><span>order placed</span><i>→</i><span class="java">BlockingQueue</span><i>→</i><span>SMS worker</span></div></div>
+  </div>
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="22" y="20" width="76" height="50" rx="6" class="s-board"/><path d="M32 34h56M32 46h40M32 58h48" style="stroke:var(--chalk);stroke-width:2"/></svg></div>
+    <div><h4>2. Logging</h4><p>Request threads put log lines into an in-memory queue; one background writer thread takes them and writes to disk, so requests never wait for the disk.</p>
+      <div class="uc-flow"><span>200 request threads</span><i>→</i><span class="java">log queue</span><i>→</i><span>1 writer</span></div></div>
+  </div>
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><circle cx="60" cy="45" r="24" class="s-soft-green" style="stroke:var(--green)"/><path d="M50 45l7 7 14-14" style="fill:none;stroke:var(--green);stroke-width:3"/></svg></div>
+    <div><h4>3. Startup and readiness</h4><p>A server waits until its database pool, caches and configs are ready (a latch) before accepting traffic.</p>
+      <div class="uc-flow"><span>3 services</span><i>→</i><span class="java">CountDownLatch(3)</span><i>→</i><span>open for traffic</span></div></div>
+  </div>
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="30" y="18" width="60" height="54" rx="6" class="s-card" style="stroke:var(--line)"/><path d="M50 28h20l-10 17 10 17H50l10-17z" style="fill:none;stroke:var(--track);stroke-width:2.5"/></svg></div>
+    <div><h4>4. Waiting for confirmations</h4><p>Payment flows, OTP verification and seat holds wait for an external event, always with a timeout so nothing waits forever.</p>
+      <div class="uc-flow"><span>payment sent</span><i>→</i><span class="java">wait(timeout) in a loop</span><i>→</i><span>ship or release</span></div></div>
+  </div>
+  <p class="muted">Simplified. Large systems connect services with message brokers (such as Kafka or RabbitMQ), which apply the same producer–consumer idea between machines.</p>
+</part>
+
+{{AD}}
+
+<part n="7" id="run" label="Run the code">
+  <h2>Chef and waiter, four dishes</h2>
+  {{CODE_RUN}}
+  <ul class="anno">
+    <li><code>while (dish != null) wait();</code><span>The chef waits while the counter is full, releasing the lock.</span></li>
+    <li><code>while (dish == null) wait();</code><span>The waiter waits while it's empty.</span></li>
+    <li><code>notifyAll()</code><span>After every change, wake the other side so it re-checks.</span></li>
+    <li>printing inside the methods<span>Prints happen while holding the lock, in the true order of puts and takes, so the output is the same every run.</span></li>
+  </ul>
+  {{RUNNER}}
+</part>
+
+<part n="8" id="tracer" label="Line by line">
+  <h2>main waits for the chef's dish</h2>
+  <p>Recorded from the real JVM, following <b>main</b>, which plays the waiter. Watch it enter <code>take()</code>, find nothing, and wait; when <code>wait()</code> returns, the dish set by the chef thread is in the shared object.</p>
+  {{TRACER}}
+
+{{WORKED}}
+</part>
+
+<part n="9" id="quiz" label="Quiz and revision">
+  <h2>Check yourself</h2>
+  {{QUIZ}}
+  <h3>Quick revision</h3>
+  <div class="revision">
+    <h3>Lesson 12.5 in one screen</h3>
+    <ul>
+      <li><code>wait</code>/<code>notify</code>/<code>notifyAll</code> are <code>Object</code> methods; call them while holding that object's lock.</li>
+      <li>Otherwise: <code>IllegalMonitorStateException: current thread is not owner</code>.</li>
+      <li><code>wait()</code> releases the lock, waits in the wait set, and re-acquires the lock before returning.</li>
+      <li>Always <code>while (!condition) wait();</code>: never <code>if</code>.</li>
+      <li>Signal with a shared condition variable, then <code>notifyAll()</code>; a bare notify can be lost.</li>
+      <li><code>wait()</code> → WAITING; <code>wait(ms)</code> → TIMED_WAITING; both throw <code>InterruptedException</code>.</li>
+      <li>In real code prefer <code>BlockingQueue</code>, <code>CountDownLatch</code> and friends.</li>
+    </ul>
+  </div>
+  <h3>Interview and viva questions</h3>
+  <div class="faq">
+    <details><summary>Why are wait() and notify() in Object and not in Thread?</summary><p>Because threads wait on a condition associated with a <b>lock</b>, and every object can be a lock (monitor). The method is called on the object whose monitor you hold, not on a thread.</p></details>
+    <details><summary>Why must wait() be called from a synchronized context?</summary><p>The check of the condition and the decision to wait must be atomic with respect to the thread that changes it; otherwise a notify could slip in between and be lost. Requiring the lock enforces this, and the JVM throws <code>IllegalMonitorStateException</code> if you don't hold it.</p></details>
+    <details><summary>Why use while instead of if around wait()?</summary><p>After waking, the condition may no longer be true: another thread may have consumed the item, notifyAll may have woken threads waiting for different conditions, or a spurious wakeup may occur. The loop re-checks before acting.</p></details>
+    <details><summary>Difference between notify() and notifyAll()?</summary><p><code>notify()</code> wakes one arbitrary thread from the wait set; <code>notifyAll()</code> wakes them all, and each competes for the lock and re-checks. notify is a small optimisation that is only safe when all waiters wait for the same condition and any one of them can handle it.</p></details>
+    <details><summary>How would you implement producer–consumer?</summary><p>With a bounded buffer whose <code>put</code> waits while full and <code>take</code> waits while empty, both synchronized, each calling <code>notifyAll()</code> after changing the buffer. In production, use <code>ArrayBlockingQueue</code> or <code>LinkedBlockingQueue</code>, which provide exactly this.</p></details>
+  </div>
+
+{{PRACTICE}}
+
+  <h3 id="scenarios">Real-world scenario questions (asked in company interviews)</h3>
+  <p class="scn-intro">Coordination bugs freeze systems silently, so interviewers like to see you reason about who waits for whom.</p>
+  <div class="scenarios">
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Code review · CPU</span><span class="scn__tag scn__tag--level">Fresher</span></div>
+      <h4>The worker that eats a CPU core</h4>
+      <p class="scn__situation">A report worker waits for jobs with <code>while (jobs.isEmpty()) { }</code>. The server shows one core at 100% even when there are no jobs. How would you rewrite it?</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> busy waiting vs blocking.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>The empty loop spins constantly. Replace the list with a <code>BlockingQueue</code> and call <code>take()</code>, which waits without using CPU.</li>
+          <li>If a plain list must stay, guard it with a lock and use <code>while (jobs.isEmpty()) lock.wait();</code> with <code>notifyAll()</code> when adding.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> <code>Thread.sleep(10)</code> in the loop as the solution: it still wastes wakeups and adds latency.</p>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Production · hang</span><span class="scn__tag scn__tag--level">Junior</span></div>
+      <h4>Occasionally, the consumer never wakes up</h4>
+      <p class="scn__situation">Once in a few thousand runs, a consumer thread stays WAITING forever although an item was added. The producer does <code>buffer.add(x); synchronized (lock) { lock.notify(); }</code>, and the consumer does <code>synchronized (lock) { lock.wait(); } item = buffer.poll();</code>. What's wrong?</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> lost notifications and the guarded-wait pattern.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>The consumer waits without checking a condition. If the notify happens before the consumer reaches <code>wait()</code>, it is lost.</li>
+          <li>Fix: update the buffer and check it under the same lock: <code>synchronized (lock) { while (buffer.isEmpty()) lock.wait(); item = buffer.poll(); }</code>, and the producer adds and notifies inside the lock.</li>
+          <li>Or replace it all with a BlockingQueue.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> adding a sleep before wait to “make the timing work”.</p>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Backend · memory</span><span class="scn__tag scn__tag--level">Junior</span></div>
+      <h4>OutOfMemoryError during a sale</h4>
+      <p class="scn__situation">Order events go into an unbounded <code>LinkedBlockingQueue</code> consumed by an email worker. During a sale, producers add 5,000 events/s, the worker sends 300 emails/s, and after an hour the JVM runs out of memory. Fix the design.</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> back-pressure and bounded queues.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>The queue grows without limit because consumers are slower than producers.</li>
+          <li>Use a bounded queue (<code>new ArrayBlockingQueue&lt;&gt;(10_000)</code>) so producers slow down, or use <code>offer</code> with a timeout and handle rejection (store for later, drop low-priority events).</li>
+          <li>Add more consumer threads if the email provider allows it, and monitor queue length.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> just increasing the heap; it only delays the crash.</p>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Design · shutdown</span><span class="scn__tag scn__tag--level">Mid</span></div>
+      <h4>Stopping consumers cleanly</h4>
+      <p class="scn__situation">Four consumer threads loop on <code>queue.take()</code>. At shutdown the app must finish processing everything already queued, then stop all four. How?</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> poison pills and interruption.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>After the last real item, put one “poison pill” per consumer (4 STOP messages). Each consumer exits when it takes one, so all real items are processed first.</li>
+          <li>Alternatively stop producers, wait until the queue is empty, then interrupt the consumers; <code>take()</code> throws <code>InterruptedException</code> and they exit.</li>
+          <li>With an <code>ExecutorService</code>, use <code>shutdown()</code> + <code>awaitTermination()</code> (Lesson 12.6).</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> daemon consumers that are killed with work still in the queue.</p>
+      </div></details>
+    </article>
+  </div>
+</part>

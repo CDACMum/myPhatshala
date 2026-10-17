@@ -1,0 +1,1147 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>try-with-resources | MyPhatshala</title>
+<meta name="description" content="Java try-with-resources explained: the AutoCloseable interface, resources closed automatically in reverse order, closing before catch and finally, suppressed exceptions and getSuppressed(), why it beats a manual finally, and Java 9 effectively-final resource variables. With animations, a tracer, 11 practice problems, quiz and industry scenarios.">
+<meta name="mp:minutes" content="22">
+<link rel="canonical" href="https://myphatshala.com/courses/core-java/09-exception-handling/06-try-with-resources/">
+<meta property="og:title" content="try-with-resources: Java closes it for you, in the right order · MyPhatshala">
+<meta property="og:description" content="Watch resources close in reverse order, see suppressed exceptions saved instead of lost, and solve 11 problems including bank-statement imports.">
+<link rel="icon" href="../../../../assets/img/logo.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Fraunces:ital,opsz,wght@0,9..144,600;0,9..144,700;1,9..144,600&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../../../../assets/css/style.css">
+<link rel="stylesheet" href="../../../../assets/css/lesson.css">
+<script src="../../../../assets/js/config.js"></script>
+<script>try { const t = localStorage.getItem("mp-theme"); if (t) document.documentElement.dataset.theme = t; } catch (e) {}</script>
+<script type="application/ld+json">{"@context": "https://schema.org", "@type": "LearningResource", "name": "try-with-resources", "learningResourceType": "Lesson", "educationalLevel": "Beginner", "isAccessibleForFree": true, "inLanguage": "en", "isPartOf": {"@type": "Course", "name": "Core Java", "provider": {"@type": "Organization", "name": "MyPhatshala"}}}</script>
+</head>
+<body style="--track:#E8772E" data-lesson="09-exception-handling/06-try-with-resources" data-course-root="../../">
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="site-header">
+  <div class="wrap">
+    <a class="brand" href="../../../../" aria-label="MyPhatshala home"><img src="../../../../assets/img/logo.svg" width="34" height="34" alt=""><span>My<b>Phatshala</b></span></a>
+    <nav class="nav" aria-label="Main">
+      <a href="../../../../#tracks">All courses</a>
+      <a href="../../">Core Java syllabus</a>
+      <button class="theme-btn" id="theme-btn" aria-label="Toggle dark mode"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg></button>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+<section class="lesson-hero">
+  <div class="wrap">
+    <nav class="crumbs" aria-label="Breadcrumb"><a href="../../../../">Home</a><span>›</span><a href="../../../../#track-programming">Programming Languages</a><span>›</span><a href="../../">Core Java</a><span>›</span><b>Lesson 9.6</b></nav>
+    <h1>try-with-resources</h1>
+    <p class="lead">Files, database connections, network sessions and printers must be closed, even when something fails halfway. Writing that in finally blocks is long and easy to get wrong. try-with-resources closes everything for you, in reverse order, before your catch runs, and never loses the original exception. You'll see exactly how it works, write your own AutoCloseable classes, read suppressed exceptions, and then practise with 11 problems.</p>
+    <div class="lesson-meta"><span>Module 9 · Exception Handling</span><span>⏱ 22 min</span><span>Intermediate</span><span>11 practice problems</span></div>
+  </div>
+</section>
+
+<div class="wrap lesson-layout">
+<article class="lesson-main">
+<!-- ======================= PART 1: THE STORY ======================= -->
+<section class="part" id="story">
+  <span class="part-label"><b>1</b> The story</span>
+  <h2>The server that ran out of connections</h2>
+  <div class="story">
+    <p class="narration">Riya's internship project, a fee-payment portal, works perfectly in testing. On the last day of fee submission, after a few hundred failed payments, the whole portal hangs with “Cannot get a connection from the pool”. Every failed payment had opened a database connection, thrown an exception, and skipped the line that closed it.</p>
+    <div class="scene">
+      <svg viewBox="0 0 640 170" role="img" aria-label="Left: a pool of ten connections; failed requests leave connections open until none are free. Right: try-with-resources returns every connection, whether the request succeeds or fails.">
+        <g font-size="10">
+          <text x="150" y="18" text-anchor="middle" font-weight="700" class="s-red">Manual close: leaks on failure</text>
+          <g style="stroke:#D64545;stroke-width:1.5" class="s-soft-acc">
+            <rect x="30" y="34" width="40" height="26" rx="4"/><rect x="76" y="34" width="40" height="26" rx="4"/><rect x="122" y="34" width="40" height="26" rx="4"/><rect x="168" y="34" width="40" height="26" rx="4"/><rect x="214" y="34" width="40" height="26" rx="4"/>
+            <rect x="30" y="66" width="40" height="26" rx="4"/><rect x="76" y="66" width="40" height="26" rx="4"/><rect x="122" y="66" width="40" height="26" rx="4"/><rect x="168" y="66" width="40" height="26" rx="4"/><rect x="214" y="66" width="40" height="26" rx="4"/>
+          </g>
+          <text x="142" y="114" text-anchor="middle" class="s-ink2">10 of 10 connections stuck open</text>
+          <text x="142" y="132" text-anchor="middle" class="mono s-red">Cannot get a connection</text>
+          <path d="M310 20 V160" class="s-line" style="stroke-dasharray:4 4"/>
+          <text x="480" y="18" text-anchor="middle" font-weight="700" class="s-green">try-with-resources: always returned</text>
+          <rect x="344" y="34" width="270" height="40" rx="8" class="s-board"/>
+          <text x="356" y="58" class="mono" style="fill:#F5C77E">try (Connection c = pool.get()) {</text>
+          <g style="stroke:var(--green);stroke-width:1.5" class="s-soft-green">
+            <rect x="370" y="88" width="40" height="26" rx="4"/><rect x="416" y="88" width="40" height="26" rx="4"/><rect x="462" y="88" width="40" height="26" rx="4"/><rect x="508" y="88" width="40" height="26" rx="4"/><rect x="554" y="88" width="40" height="26" rx="4"/>
+          </g>
+          <text x="480" y="134" text-anchor="middle" class="s-ink2">success or exception: close() is called</text>
+          <text x="480" y="150" text-anchor="middle" class="s-green" font-weight="700">the pool never runs dry</text>
+        </g>
+        <text x="632" y="166" text-anchor="end" class="s-wm">myphatshala.com</text>
+      </svg>
+    </div>
+    <div class="panel">
+      <div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#FCE6D6"/><path d="M14 64c2-12 9-18 18-18s16 6 18 18z" fill="#2E5AAC"/><circle cx="32" cy="29" r="12" fill="#C68B5E"/><path d="M19 29c0-10 6-15 13-15s13 5 13 15c-3-5-7-8-13-8s-10 3-13 8z" fill="#2A1B14"/><path d="M43 27c3 6 3 14 0 20" stroke="#2A1B14" stroke-width="4" fill="none" stroke-linecap="round"/><circle cx="27.5" cy="30" r="1.5" fill="#2A1B14"/><circle cx="36.5" cy="30" r="1.5" fill="#2A1B14"/><path d="M28 35q4 3 8 0" stroke="#2A1B14" stroke-width="1.6" fill="none" stroke-linecap="round"/><circle cx="32" cy="24" r="1.2" fill="#D64545"/></svg></div>
+      <div class="bubble"><b class="who">Riya</b><p>Sir, I did close the connection. It's the last line of the method!</p></div>
+    </div>
+    <div class="panel panel--right">
+      <div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#DDEFE6"/><path d="M12 64c2-12 10-18 20-18s18 6 20 18z" fill="#F4F1EA"/><path d="M28 46l4 8 4-8" fill="#2F7D5B"/><circle cx="32" cy="28" r="12" fill="#B57A50"/><path d="M20 26c0-8 5-13 12-13s12 5 12 13c-2-3-6-5-12-5s-10 2-12 5z" fill="#5A5A5A"/><path d="M22 32c1 8 5 11 10 11s9-3 10-11c-2 3-6 4-10 4s-8-1-10-4z" fill="#5A5A5A"/><circle cx="27" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><circle cx="37" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><path d="M30.4 29h3.2" stroke="#1B2433" stroke-width="1.4"/><circle cx="27" cy="29" r="1.1" fill="#1B2433"/><circle cx="37" cy="29" r="1.1" fill="#1B2433"/></svg></div>
+      <div class="bubble"><b class="who">Arjun Sir</b><p>And when the payment threw an exception, the last line never ran. You could move it into <code>finally</code>, but then you need null checks, a nested try for <code>close()</code> itself, and you might still lose the real error.</p></div>
+    </div>
+    <div class="panel">
+      <div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#FCE6D6"/><path d="M14 64c2-12 9-18 18-18s16 6 18 18z" fill="#2E5AAC"/><circle cx="32" cy="29" r="12" fill="#C68B5E"/><path d="M19 29c0-10 6-15 13-15s13 5 13 15c-3-5-7-8-13-8s-10 3-13 8z" fill="#2A1B14"/><path d="M43 27c3 6 3 14 0 20" stroke="#2A1B14" stroke-width="4" fill="none" stroke-linecap="round"/><circle cx="27.5" cy="30" r="1.5" fill="#2A1B14"/><circle cx="36.5" cy="30" r="1.5" fill="#2A1B14"/><path d="M28 35q4 3 8 0" stroke="#2A1B14" stroke-width="1.6" fill="none" stroke-linecap="round"/><circle cx="32" cy="24" r="1.2" fill="#D64545"/></svg></div>
+      <div class="bubble"><b class="who">Riya</b><p>That sounds like a lot of code for one close.</p></div>
+    </div>
+    <div class="panel panel--right">
+      <div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#DDEFE6"/><path d="M12 64c2-12 10-18 20-18s18 6 20 18z" fill="#F4F1EA"/><path d="M28 46l4 8 4-8" fill="#2F7D5B"/><circle cx="32" cy="28" r="12" fill="#B57A50"/><path d="M20 26c0-8 5-13 12-13s12 5 12 13c-2-3-6-5-12-5s-10 2-12 5z" fill="#5A5A5A"/><path d="M22 32c1 8 5 11 10 11s9-3 10-11c-2 3-6 4-10 4s-8-1-10-4z" fill="#5A5A5A"/><circle cx="27" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><circle cx="37" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><path d="M30.4 29h3.2" stroke="#1B2433" stroke-width="1.4"/><circle cx="27" cy="29" r="1.1" fill="#1B2433"/><circle cx="37" cy="29" r="1.1" fill="#1B2433"/></svg></div>
+      <div class="bubble"><b class="who">Arjun Sir</b><p>That's why Java 7 added <b>try-with-resources</b>. Declare the connection in brackets after <code>try</code>, and Java closes it for you on every path, in the right order, without hiding the original exception.</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- ======================= PART 2: DEFINITION ======================= -->
+<section class="part" id="definition">
+  <span class="part-label"><b>2</b> Definition</span>
+  <h2>What is try-with-resources?</h2>
+  <div class="def">
+    <div class="def__formal"><small>Formal definition (write this in exams)</small>
+      <p>The <b>try-with-resources</b> statement (Java 7+) declares one or more <b>resources</b> in parentheses after <code>try</code>. A resource is an object whose class implements <code>java.lang.AutoCloseable</code>. When the try block completes, normally or abruptly, the <code>close()</code> method of each resource is called automatically, in the <b>reverse order</b> of declaration, before any catch or finally block of the same statement runs. If the try block throws and <code>close()</code> also throws, the exception from <code>close()</code> is added to the original as a <b>suppressed exception</b>. Since Java 9, an existing final or effectively final variable may be used as a resource.</p></div>
+    <div class="def__simple"><small>In simple words</small>
+      <p>“Here are the things I'm borrowing. Whatever happens in this block, give them all back when it ends: last borrowed, first returned. And if returning one also goes wrong, remember that too, but tell me about the first problem first.”</p></div>
+  </div>
+  <h3>Words you'll meet in this lesson</h3>
+  <div class="terms">
+    <div class="term"><b>Resource</b><span>Something that must be released: file, connection, socket, lock, session.</span></div>
+    <div class="term"><b>AutoCloseable</b><span>Interface with one method, <code>close()</code>. Required for resources.</span></div>
+    <div class="term"><b>Closeable</b><span>Older I/O interface (<code>close() throws IOException</code>); extends AutoCloseable.</span></div>
+    <div class="term"><b>Resource leak</b><span>A resource that is never closed and slowly uses up a limit.</span></div>
+    <div class="term"><b>Suppressed exception</b><span>A secondary exception (usually from close) attached to the main one.</span></div>
+    <div class="term"><b>Effectively final</b><span>A variable that is never reassigned after it gets its value.</span></div>
+  </div>
+  <h3>The rules at a glance</h3>
+  <table class="facts">
+    <tr><th>Syntax</th><td><code>try (A a = new A(); B b = new B()) { … }</code>; catch and finally are optional</td></tr>
+    <tr><th>Requirement</th><td>The type must implement <code>AutoCloseable</code>, or javac says <i>try-with-resources not applicable to variable type</i></td></tr>
+    <tr><th>Close order</th><td>Reverse of declaration: <code>b</code> closes before <code>a</code></td></tr>
+    <tr><th>When</th><td>Right after the try block ends, <b>before</b> catch and finally run</td></tr>
+    <tr><th>Exceptions</th><td>Body's exception wins; close's exception is attached and read with <code>getSuppressed()</code></td></tr>
+    <tr><th>Resource variables</th><td>Implicitly final (can't be reassigned). Java 9+: <code>try (existingVar)</code> if effectively final. A <code>null</code> resource is simply not closed.</td></tr>
+  </table>
+  <div class="callout callout--exam"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19V5a2 2 0 0 1 2-2h12v18H6a2 2 0 0 1-2-2zm0 0a2 2 0 0 1 2-2h12"/></svg><p><b>Exam tip:</b> “In try-with-resources, does close() run before or after catch?” <b>Before.</b> By the time your catch block runs, every resource of that statement is already closed. Also: if <code>close()</code> declares a checked exception (like <code>IOException</code>), you must catch or declare it even if the body throws nothing.</p></div>
+</section>
+
+<div class="ad-slot" data-slot="mid"></div>
+
+<!-- ======================= PART 3: TYPES AND WAYS TO USE IT ======================= -->
+<section class="part" id="types">
+  <span class="part-label"><b>3</b> Types and ways to use it</span>
+  <h2>What it does for you, three ways</h2>
+  <div class="cards">
+    <div class="card"><svg class="ic" viewBox="0 0 40 40" fill="none" stroke="var(--blue)" stroke-width="2"><rect x="8" y="22" width="24" height="10" rx="2"/><rect x="11" y="12" width="18" height="10" rx="2"/><path d="M20 4v6M17 7l3 3 3-3"/></svg><h4>Reverse-order closing</h4><p>Several resources in one statement are closed last-opened-first, so dependent resources (a statement on a connection) close before what they depend on.</p><span class="tag">LIFO</span></div>
+    <div class="card"><svg class="ic" viewBox="0 0 40 40" fill="none" stroke="var(--green)" stroke-width="2"><path d="M8 20h24M24 12l8 8-8 8"/><rect x="4" y="8" width="8" height="24" rx="2"/></svg><h4>Closing on every path</h4><p>Normal end, return, break or exception: close always happens, and before the catch block, so handlers never see a half-open resource.</p><span class="tag">no leaks</span></div>
+    <div class="card"><svg class="ic" viewBox="0 0 40 40" fill="none" stroke="var(--track)" stroke-width="2"><rect x="6" y="8" width="20" height="16" rx="3"/><rect x="16" y="18" width="18" height="14" rx="3"/></svg><h4>Suppressed, not lost</h4><p>If the body fails and close fails too, you get the body's exception, with the close failure attached. A manual finally would have thrown the real error away.</p><span class="tag">getSuppressed()</span></div>
+  </div>
+  <div class="code" data-lang="java" data-file="Main.java"><pre><code>class Res implements AutoCloseable {
+    private final String name;
+    private final boolean failOnClose;
+
+    Res(String name, boolean failOnClose) {
+        this.name = name;
+        this.failOnClose = failOnClose;
+        System.out.println("  open " + name);
+    }
+
+    @Override
+    public void close() {
+        System.out.println("  close " + name);
+        if (failOnClose) throw new IllegalStateException("close failed: " + name);
+    }
+}
+
+public class Main {
+    public static void main(String[] args) {
+        System.out.println("1) Normal end:");
+        try (Res a = new Res("A", false); Res b = new Res("B", false)) {
+            System.out.println("  body");
+        }
+
+        System.out.println("2) Body throws:");
+        try (Res a = new Res("A", false)) {
+            throw new IllegalStateException("body failed");
+        } catch (IllegalStateException e) {
+            System.out.println("  catch: " + e.getMessage());
+        }
+
+        System.out.println("3) Body and close both throw:");
+        try (Res a = new Res("A", true)) {
+            throw new IllegalStateException("body failed");
+        } catch (IllegalStateException e) {
+            System.out.println("  catch: " + e.getMessage());
+            System.out.println("  suppressed: " + e.getSuppressed()[0].getMessage());
+        }
+    }
+}</code></pre><div class="output">1) Normal end:
+  open A
+  open B
+  body
+  close B
+  close A
+2) Body throws:
+  open A
+  close A
+  catch: body failed
+3) Body and close both throw:
+  open A
+  close A
+  catch: body failed
+  suppressed: close failed: A</div></div>
+  <h3>Manual finally vs try-with-resources</h3>
+  <div class="table-wrap">
+  <table class="compare" style="min-width:560px">
+    <thead><tr><th></th><th>Manual <code>try { … } finally { r.close(); }</code></th><th><code>try (R r = …) { … }</code></th></tr></thead>
+    <tbody>
+      <tr><td>Lines of code</td><td>Many: declare outside, null check, nested try for close</td><td>One line in the header</td></tr>
+      <tr><td>Several resources</td><td>Nested try/finally blocks, easy to get the order wrong</td><td>Separated by <code>;</code>, closed in reverse automatically</td></tr>
+      <tr><td>Body and close both throw</td><td>Close's exception <b>replaces</b> the body's; the real cause is lost</td><td>Body's exception kept; close's attached as suppressed</td></tr>
+      <tr><td>Forgetting to close</td><td>Possible (and common)</td><td>Impossible for declared resources</td></tr>
+      <tr><td>Available since</td><td>Java 1.0</td><td>Java 7 (existing variables: Java 9)</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <div class="callout callout--warn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3 2 21h20L12 3z"/><path d="M12 10v5M12 18v.5"/></svg><p><b>Only what's in the brackets is closed.</b> In <code>try (BufferedReader br = new BufferedReader(new FileReader(f)))</code>, closing <code>br</code> also closes the FileReader inside it. But if the <code>BufferedReader</code> constructor itself threw, the FileReader would never be closed. For full safety, declare each resource separately: <code>try (FileReader fr = new FileReader(f); BufferedReader br = new BufferedReader(fr))</code>.</p></div>
+</section>
+
+<!-- ======================= PART 4: STEP BY STEP ======================= -->
+<section class="part" id="steps">
+  <span class="part-label"><b>4</b> Step by step</span>
+  <h2>Using try-with-resources, start to finish</h2>
+  <ol class="stepper">
+    <li><h4>Make sure the type is AutoCloseable</h4>
+      <div class="code" data-lang="java" data-file="Main.java"><pre><code>class PrinterSession implements AutoCloseable {
+    public void close() { … }
+}</code></pre></div>
+      <span class="behind">JDK resources already implement it: <code>FileReader</code>, <code>BufferedReader</code>, <code>Scanner</code>, JDBC <code>Connection</code>, <code>Statement</code>, <code>ResultSet</code>, sockets, streams. A <code>String</code> doesn't, so <code>try (String s = "x")</code> is a compile error.</span></li>
+    <li><h4>Declare the resources in the brackets</h4>
+      <div class="code" data-lang="java" data-file="Main.java"><pre><code>try (Conn c = new Conn(); Query q = new Query()) {</code></pre></div>
+      <span class="behind">They are created left to right. If the second constructor throws, the first resource (already open) is closed, and the second, which never existed, is not.</span></li>
+    <li><h4>Use them in the block</h4>
+      <div class="code" data-lang="java" data-file="Main.java"><pre><code>    System.out.println(q.balanceOf("SB-1042"));
+}</code></pre></div>
+      <span class="behind">The resource variables are implicitly final: <code>q = new Query();</code> inside the block gives <i>auto-closeable resource q may not be assigned</i>.</span></li>
+    <li><h4>Java closes them in reverse</h4>
+      <p>At the end of the block: <code>q.close()</code>, then <code>c.close()</code>. Then catch (if an exception is pending and matches), then finally.</p>
+      <span class="behind">javac generates the code you would otherwise write by hand: calls to <code>close()</code> on every exit path, handlers of type <code>Throwable</code>, and calls to <code>Throwable.addSuppressed</code>. You can see them with <code>javap -c</code>.</span></li>
+    <li><h4>Read suppressed exceptions when you need them</h4>
+      <div class="code" data-lang="bash" data-file="Console"><pre><code>Exception in thread "main" java.lang.IllegalStateException: upload failed at 60%
+	at Upload.send(Main.java:3)
+	at Main.main(Main.java:15)
+	Suppressed: java.lang.IllegalStateException: connection reset while closing
+		at Upload.close(Main.java:8)
+		at Main.main(Main.java:14)</code></pre></div>
+      <span class="behind">Stack traces print suppressed exceptions indented under “Suppressed:”. In code, <code>e.getSuppressed()</code> returns them as an array (empty if there are none).</span></li>
+  </ol>
+</section>
+
+<!-- ======================= PART 5: SEE IT HAPPEN ======================= -->
+<section class="part" id="animation">
+  <span class="part-label"><b>5</b> See it happen</span>
+  <h2>Two resources, a failure, and a suppressed exception: both views</h2>
+  <p>Left: the line and the console. Right: the open resources (last opened on top) and the exception objects.</p>
+  <div class="anim" data-frames="6">
+    <div class="anim__title">A fee-payment query that times out <span>6 steps</span></div>
+    <div class="anim__views">
+      <div class="view view--see">
+        <span class="view__tag">What you see</span>
+        <svg viewBox="0 0 360 250" role="img" aria-label="The current line and console output">
+          <rect x="10" y="12" width="340" height="40" rx="8" class="s-board"/>
+          <g font-size="11" class="mono s-chalk">
+            <text x="22" y="37" data-on="1">try (Conn c = pool.get();</text>
+            <text x="22" y="37" data-on="2">     Stmt s = c.prepare(sql)) {</text>
+            <text x="22" y="37" data-on="3">  s.execute();   // times out</text>
+            <text x="22" y="37" data-on="4">// auto: s.close()</text>
+            <text x="22" y="37" data-on="5">// auto: c.close()  → fails too</text>
+            <text x="22" y="37" data-on="6">} catch (IllegalStateException e)</text>
+          </g>
+          <rect x="10" y="62" width="340" height="130" rx="8" style="fill:#0F1512"/>
+          <g font-size="10.4" class="mono" style="fill:#B9F5D0">
+            <text x="22" y="84">open connection</text>
+            <text x="22" y="102" data-on="2-">open statement</text>
+            <text x="22" y="120" data-on="4-">close statement</text>
+            <text x="22" y="138" data-on="5-">close connection</text>
+            <text x="22" y="158" data-on="6">catch: query timeout</text>
+            <text x="22" y="176" data-on="6">suppressed: pool unreachable</text>
+          </g>
+          <g font-size="10.2" class="s-ink2" text-anchor="middle">
+            <text x="180" y="222" data-on="1">First resource opened.</text>
+            <text x="180" y="222" data-on="2">Second resource opened on top of it.</text>
+            <text x="180" y="222" data-on="3">The body throws; nothing printed yet.</text>
+            <text x="180" y="222" data-on="4">Last opened, first closed.</text>
+            <text x="180" y="222" data-on="5">Closing fails, but it isn't lost.</text>
+            <text x="180" y="222" data-on="6">Catch gets the real problem + the extra.</text>
+          </g>
+          <text x="354" y="246" text-anchor="end" class="s-wm">myphatshala.com</text>
+        </svg>
+        <ol class="caps" hidden>
+          <li><b>Open:</b> the first resource, a database connection, is created.</li>
+          <li><b>Open again:</b> a statement is created using the connection. Both are now open.</li>
+          <li><b>Failure:</b> running the query throws an exception (a timeout). The rest of the block is skipped.</li>
+          <li><b>Auto-close 1:</b> before anything else, Java closes the statement, the last one opened.</li>
+          <li><b>Auto-close 2:</b> then the connection. Its <code>close()</code> fails as well.</li>
+          <li><b>catch:</b> the handler receives the timeout, the real problem, and can read the closing failure with <code>getSuppressed()</code>.</li>
+        </ol>
+      </div>
+      <div class="view view--behind">
+        <span class="view__tag">Behind the screen</span>
+        <svg viewBox="0 0 360 250" role="img" aria-label="A stack of open resources and two exception objects, the second attached to the first as suppressed">
+          <text x="80" y="22" text-anchor="middle" font-size="10" font-weight="700" class="s-ink2">Open resources</text>
+          <text x="262" y="22" text-anchor="middle" font-size="10" font-weight="700" class="s-ink2">Exceptions (heap)</text>
+          <g font-size="10" class="mono">
+            <g data-on="2-3">
+              <rect x="12" y="70" width="136" height="34" rx="6" class="s-soft-blue" style="stroke:var(--blue)"/>
+              <text x="22" y="91" class="s-ink">#2 Stmt (top)</text>
+            </g>
+            <rect x="12" y="70" width="136" height="34" rx="6" data-on="4" style="fill:none;stroke:var(--green);stroke-width:2.5;stroke-dasharray:5 4"/>
+            <text x="80" y="91" text-anchor="middle" font-size="9.6" class="s-green" data-on="4-">#2 closed</text>
+            <g data-on="1-4">
+              <rect x="12" y="112" width="136" height="34" rx="6" class="s-soft-blue" style="stroke:var(--blue)"/>
+              <text x="22" y="133" class="s-ink">#1 Conn</text>
+            </g>
+            <rect x="12" y="112" width="136" height="34" rx="6" data-on="5" style="fill:none;stroke:#D64545;stroke-width:2.5;stroke-dasharray:5 4"/>
+            <text x="80" y="133" text-anchor="middle" font-size="9.6" class="s-red" data-on="5-">#1 closed (with error)</text>
+          </g>
+          <g data-on="3-">
+            <rect x="166" y="34" width="186" height="60" rx="6" class="s-soft-acc" style="stroke:#D64545;stroke-width:1.5"/>
+            <text x="174" y="51" font-size="9" class="mono s-red" font-weight="700">#3 IllegalStateException</text>
+            <text x="174" y="66" font-size="9" class="mono s-ink">"query timeout"</text>
+            <text x="174" y="84" font-size="9" class="mono s-ink" data-on="3-4">suppressed: [ ]</text>
+            <text x="174" y="84" font-size="9" class="mono s-acc" font-weight="700" data-on="5-">suppressed: [ #4 ]</text>
+          </g>
+          <g data-on="5-">
+            <rect x="166" y="120" width="186" height="44" rx="6" class="s-card2" style="stroke:var(--track);stroke-width:1.5"/>
+            <text x="174" y="137" font-size="9" class="mono s-acc" font-weight="700">#4 IllegalStateException</text>
+            <text x="174" y="153" font-size="9" class="mono s-ink">"pool unreachable"</text>
+            <path d="M259 118 V98" style="stroke:var(--track);stroke-width:2;fill:none"/><path d="M254 104l5-7 5 7" style="stroke:var(--track);stroke-width:2;fill:none"/>
+          </g>
+          <rect x="166" y="34" width="186" height="60" rx="6" data-on="6" style="fill:none;stroke:var(--green);stroke-width:3"/>
+          <g font-size="9.6" class="s-ink2" text-anchor="middle">
+            <text x="180" y="196" data-on="1">#1 opened: Java will close it later.</text>
+            <text x="180" y="196" data-on="2">#2 opened on top: it will close first.</text>
+            <text x="180" y="196" data-on="3">#3 thrown; it is held while Java closes.</text>
+            <text x="180" y="196" data-on="4">#2.close() runs and succeeds.</text>
+            <text x="180" y="196" data-on="5">#1.close() throws #4: #3.addSuppressed(#4).</text>
+            <text x="180" y="196" data-on="6">Only now does the catch receive #3.</text>
+          </g>
+          <text x="354" y="246" text-anchor="end" class="s-wm">myphatshala.com</text>
+        </svg>
+        <ol class="caps" hidden>
+          <li>The connection object #1 is created. Java remembers it as a resource of this statement.</li>
+          <li>The statement #2 is created. Resources form a stack: the newest is on top.</li>
+          <li>The body throws #3. Instead of leaving at once, the generated code catches it internally (as a <code>Throwable</code>) and holds on to it.</li>
+          <li><code>close()</code> is called on the top of the stack, #2. It succeeds.</li>
+          <li><code>close()</code> on #1 throws #4. Because #3 is already pending, the generated code calls <code>#3.addSuppressed(#4)</code> instead of letting #4 replace it.</li>
+          <li>All resources are closed. #3 is rethrown and the catch block receives it, with #4 available from <code>getSuppressed()</code>.</li>
+        </ol>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ======================= PART 6: REAL-WORLD USE ======================= -->
+<section class="part" id="real-world">
+  <span class="part-label"><b>6</b> Real-world use</span>
+  <h2>try-with-resources in real systems</h2>
+  <p>Anything that holds an operating-system handle, a network connection or a lock should be opened in try-with-resources.</p>
+  <!--ANIM2-->
+  <h3 id="animated-example">Watch it with an example: a billing counter that always locks the cash drawer</h3>
+  <p class="anim-intro">A supermarket counter opens the cash drawer and the receipt printer as resources. The printer runs out of paper mid-bill. Watch Java close both, printer first, before the cashier's catch block shows a message.</p>
+  <div class="anim anim--one" data-frames="6" data-delay="4600">
+    <div class="anim__title">Paper runs out, the drawer still locks <span>6 steps</span></div>
+    <div class="anim__views">
+      <div class="view view--story">
+        <span class="view__tag">Animated example</span>
+        <svg viewBox="0 0 360 226" role="img" aria-label="two resources closed in reverse order after an exception, before the catch block">
+          <rect x="6" y="14" width="348" height="30" rx="8" class="s-board" style="stroke:board;stroke-width:1.5"/>
+          <text data-on="1" x="14" y="34" font-size="10" class="s-chalk mono">try (CashDrawer d = till.open();</text>
+          <text data-on="2" x="14" y="34" font-size="10" class="s-chalk mono">     ReceiptPrinter p = new …()) {</text>
+          <text data-on="3" x="14" y="34" font-size="10" class="s-chalk mono">  p.print(bill7712);  // out of paper!</text>
+          <text data-on="4" x="14" y="34" font-size="10" class="s-chalk mono">// auto: p.close()</text>
+          <text data-on="5" x="14" y="34" font-size="10" class="s-chalk mono">// auto: d.close()</text>
+          <text data-on="6" x="14" y="34" font-size="10" class="s-chalk mono">} catch (PrinterException e) { … }</text>
+          <g data-on="1-4"><rect x="14" y="62" width="150" height="54" rx="8" class="s-soft-green" style="stroke:var(--green);stroke-width:1.5"/></g>
+          <text data-on="1-4" x="89" y="84" font-size="10.5" text-anchor="middle" font-weight="700" class="s-ink">Cash drawer</text>
+          <text data-on="1-4" x="89" y="102" font-size="10" text-anchor="middle" font-weight="700" class="s-green mono">OPEN</text>
+          <g data-on="5-"><rect x="14" y="62" width="150" height="54" rx="8" class="s-card2" style="stroke:var(--line);stroke-width:1.5"/></g>
+          <text data-on="5-" x="89" y="84" font-size="10.5" text-anchor="middle" font-weight="700" class="s-ink">Cash drawer</text>
+          <text data-on="5-" x="89" y="102" font-size="10" text-anchor="middle" font-weight="700" class="s-blue mono">LOCKED</text>
+          <g data-on="5"><rect x="14" y="62" width="150" height="54" rx="8" class="" style="stroke:var(--blue);stroke-width:3;fill:none"/></g>
+          <g data-on="2"><rect x="196" y="62" width="150" height="54" rx="8" class="s-soft-green" style="stroke:var(--green);stroke-width:1.5"/></g>
+          <g data-on="3"><rect x="196" y="62" width="150" height="54" rx="8" class="s-soft-acc" style="stroke:#D64545;stroke-width:1.5"/></g>
+          <g data-on="4-"><rect x="196" y="62" width="150" height="54" rx="8" class="s-card2" style="stroke:var(--line);stroke-width:1.5"/></g>
+          <g data-on="4"><rect x="196" y="62" width="150" height="54" rx="8" class="" style="stroke:var(--blue);stroke-width:3;fill:none"/></g>
+          <text data-on="2-" x="271" y="84" font-size="10.5" text-anchor="middle" font-weight="700" class="s-ink">Receipt printer</text>
+          <text data-on="2" x="271" y="102" font-size="10" text-anchor="middle" font-weight="700" class="s-green mono">ON</text>
+          <text data-on="3" x="271" y="102" font-size="10" text-anchor="middle" font-weight="700" class="s-red mono">OUT OF PAPER</text>
+          <text data-on="4-" x="271" y="102" font-size="10" text-anchor="middle" font-weight="700" class="s-blue mono">OFF</text>
+          <text data-on="2-" x="89" y="134" font-size="9.4" text-anchor="middle" class="s-ink2">opened 1st, closed 2nd</text>
+          <text data-on="2-" x="271" y="134" font-size="9.4" text-anchor="middle" class="s-ink2">opened 2nd, closed 1st</text>
+          <g data-on="3-5" data-pos='{"3":"0,0","4":"0,0","5":"0,0"}'><rect x="110" y="146" width="140" height="24" rx="13" class="s-soft-acc" style="stroke:#D64545;stroke-width:2"/><text x="180" y="161.384" font-size="9.4" text-anchor="middle" font-weight="700" class="s-ink mono">PrinterException</text></g>
+          <text data-on="4-5" x="180" y="184" font-size="9.4" text-anchor="middle" class="s-ink2">(held while Java closes)</text>
+          <g data-on="6"><rect x="40" y="140" width="280" height="34" rx="8" class="s-soft-blue" style="stroke:var(--blue);stroke-width:1.5"/><text x="180" y="160.6" font-size="10" text-anchor="middle" font-weight="700" class="s-ink">Bill 7712 saved. Reprint after refill.</text></g>
+          <text data-on="1" x="180" y="200" font-size="10" text-anchor="middle" class="s-ink2">Resource 1: the drawer opens.</text>
+          <text data-on="2" x="180" y="200" font-size="10" text-anchor="middle" class="s-ink2">Resource 2: the printer starts.</text>
+          <text data-on="3" x="180" y="200" font-size="10" text-anchor="middle" class="s-ink2">Printing fails: an exception is thrown.</text>
+          <text data-on="4" x="180" y="200" font-size="10" text-anchor="middle" class="s-ink2">Java closes the printer first (last opened).</text>
+          <text data-on="5" x="180" y="200" font-size="10" text-anchor="middle" class="s-ink2">Then it locks the drawer.</text>
+          <text data-on="6" x="180" y="200" font-size="10" text-anchor="middle" class="s-ink2">Only now does the catch run.</text>
+          <text x="354" y="221" text-anchor="end" class="s-wm">myphatshala.com</text>
+        </svg>
+        <ol class="caps" hidden>
+          <li><b>First resource:</b> the cash drawer opens. Java notes it must be closed at the end of the block.</li>
+          <li><b>Second resource:</b> the receipt printer is switched on. Both are listed in the try brackets, so neither needs a close call in our code.</li>
+          <li><b>Failure:</b> the printer runs out of paper in the middle of bill 7712 and throws a <code>PrinterException</code>. The rest of the block is skipped.</li>
+          <li><b>Reverse order:</b> before the exception goes anywhere, Java calls <code>p.close()</code>: the last resource opened is closed first.</li>
+          <li><b>Drawer locked:</b> then <code>d.close()</code> locks the drawer. Even with a failed bill, no cash drawer is left open at the counter.</li>
+          <li><b>Catch:</b> only after both are closed does the catch block run and show the cashier a helpful message. Had a close also failed, it would be attached as a suppressed exception.</li>
+        </ol>
+      </div>
+    </div>
+  </div>
+  <!--/ANIM2-->
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><ellipse cx="60" cy="22" rx="34" ry="9" class="s-soft-blue" style="stroke:var(--blue)"/><path d="M26 22v44c0 5 15 9 34 9s34-4 34-9V22" class="s-soft-blue" style="stroke:var(--blue)"/></svg></div>
+    <div><h4>1. JDBC: connection, statement, result set</h4><p>Plain JDBC code opens all three in one try-with-resources, so they are closed in the right order (result set, statement, connection) and returned to the pool even when a query fails.</p>
+      <div class="uc-flow"><span>pool.getConnection()</span><i>→</i><span class="java">try (Connection c; PreparedStatement ps; ResultSet rs)</span><i>→</i><span>Back to the pool</span></div></div>
+  </div>
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><path d="M30 12h40l16 16v50H30z" class="s-card2" style="stroke:var(--line)"/><path d="M70 12v16h16" class="s-line"/><path d="M40 44h36M40 56h28" class="s-line" style="stroke-width:2"/></svg></div>
+    <div><h4>2. Reading uploads and reports</h4><p>CSV imports, bank statements and log processing read files with <code>BufferedReader</code> or <code>Files.lines</code> inside try-with-resources. On a busy server, each leaked file handle counts against an operating-system limit.</p>
+      <div class="uc-flow"><span>Uploaded CSV</span><i>→</i><span class="java">try (BufferedReader br = …)</span><i>→</i><span>Rows imported, file closed</span></div></div>
+  </div>
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><circle cx="30" cy="45" r="16" class="s-soft-green" style="stroke:var(--green)"/><circle cx="90" cy="45" r="16" class="s-soft-green" style="stroke:var(--green)"/><path d="M46 45h28" class="s-line" style="stroke-width:3"/></svg></div>
+    <div><h4>3. HTTP clients and sockets</h4><p>Calls to payment gateways or SMS providers open network connections and response streams. Closing them promptly lets the client reuse connections; leaking them eventually blocks new calls.</p>
+      <div class="uc-flow"><span>Gateway call</span><i>→</i><span class="java">try (response body)</span><i>→</i><span>Connection reused</span></div></div>
+  </div>
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="30" y="34" width="60" height="44" rx="6" class="s-card2"/><path d="M42 34v-10a18 18 0 0 1 36 0v10" class="s-line" style="stroke-width:3;fill:none"/></svg></div>
+    <div><h4>4. Your own AutoCloseable wrappers</h4><p>Teams wrap locks, temporary files, tracing spans or “maintenance mode” switches in small AutoCloseable classes, so <code>try (var lock = locks.acquire(orderId))</code> guarantees release.</p>
+      <div class="uc-flow"><span>acquire()</span><i>→</i><span class="java">try (…) { work }</span><i>→</i><span>Always released</span></div></div>
+  </div>
+  <p class="muted">Examples are simplified. Frameworks often manage connections for you, but underneath they rely on the same close-on-every-path guarantee.</p>
+</section>
+
+<div class="ad-slot" data-slot="mid"></div>
+
+<!-- ======================= PART 7: RUN THE CODE ======================= -->
+<section class="part" id="run">
+  <span class="part-label"><b>7</b> Run the code</span>
+  <h2>Riya's fee file, read safely</h2>
+  <div class="code" data-lang="java" data-file="Main.java"><pre><code>import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.StringReader;
+
+public class Main {
+    public static void main(String[] args) {
+        String feeFile = "Riya,45000\nKabir,45000\nSana,22500\n";
+        long total = 0;
+        int students = 0;
+        try (BufferedReader br = new BufferedReader(new StringReader(feeFile))) {
+            String line;
+            while ((line = br.readLine()) != null) {
+                String[] parts = line.split(",");
+                total += Long.parseLong(parts[1]);
+                students++;
+            }
+        } catch (IOException e) {
+            System.out.println("Could not read fees: " + e.getMessage());
+        }
+        System.out.println(students + " students, total fees Rs " + total);
+    }
+}</code></pre><div class="output">3 students, total fees Rs 112500</div></div>
+  <ul class="anno">
+    <li><code>try (BufferedReader br = …)</code><span>The reader is the resource. It is closed when the block ends, whatever happens inside.</span></li>
+    <li><code>new StringReader(feeFile)</code><span>Reads from a String so the program runs anywhere. For a real file use <code>new FileReader("fees.csv")</code>.</span></li>
+    <li><code>catch (IOException e)</code><span>Needed because <code>readLine()</code> and <code>close()</code> declare the checked IOException.</span></li>
+    <li>No <code>finally</code><span>Nothing to clean up by hand: that's the point.</span></li>
+  </ul>
+  <div class="runner">
+    <script type="application/json">{
+      "lang": "java", "file": "Main.java",
+      "tasks": [
+        { "label": "1 · Fee file", "hint": "Press <b>Run</b>. Then add a line <code>Arjun,abc</code> to the text and run again: the NumberFormatException isn't caught here, but the reader is still closed before the program stops.",
+          "code": "import java.io.BufferedReader;\nimport java.io.IOException;\nimport java.io.StringReader;\n\npublic class Main {\n    public static void main(String[] args) {\n        String feeFile = \"Riya,45000\\nKabir,45000\\nSana,22500\\n\";\n        long total = 0;\n        int students = 0;\n        try (BufferedReader br = new BufferedReader(new StringReader(feeFile))) {\n            String line;\n            while ((line = br.readLine()) != null) {\n                String[] parts = line.split(\",\");\n                total += Long.parseLong(parts[1]);\n                students++;\n            }\n        } catch (IOException e) {\n            System.out.println(\"Could not read fees: \" + e.getMessage());\n        }\n        System.out.println(students + \" students, total fees Rs \" + total);\n    }\n}\n" },
+        { "label": "2 · Predict: the order", "hint": "<b>Predict first:</b> number the messages in the order they appear. Is the printer off before the catch runs?",
+          "code": "class Printer implements AutoCloseable {\n    Printer() { System.out.println(\"printer on\"); }\n\n    void print() {\n        System.out.println(\"printing\");\n        throw new IllegalStateException(\"paper jam\");\n    }\n\n    @Override\n    public void close() { System.out.println(\"printer off\"); }\n}\n\npublic class Main {\n    public static void main(String[] args) {\n        try (Printer p = new Printer()) {\n            p.print();\n            System.out.println(\"never printed\");\n        } catch (IllegalStateException e) {\n            System.out.println(\"catch: \" + e.getMessage());\n        } finally {\n            System.out.println(\"finally\");\n        }\n    }\n}\n" },
+        { "label": "3 · Reverse order", "hint": "Add a third resource <code>Res c = new Res(\"C\", false)</code> to the brackets and predict the new close order.",
+          "code": "class Res implements AutoCloseable {\n    private final String name;\n\n    Res(String name, boolean unused) {\n        this.name = name;\n        System.out.println(\"open \" + name);\n    }\n\n    @Override\n    public void close() {\n        System.out.println(\"close \" + name);\n    }\n}\n\npublic class Main {\n    public static void main(String[] args) {\n        try (Res a = new Res(\"A\", false); Res b = new Res(\"B\", false)) {\n            System.out.println(\"body\");\n        }\n    }\n}\n" },
+        { "label": "4 · Predict the crash", "hint": "<b>Predict first:</b> nothing catches the exception. Which exception is on the first line of the trace, and where does the close failure appear? Look for <b>Suppressed:</b>.",
+          "code": "class Upload implements AutoCloseable {\n    void send() {\n        throw new IllegalStateException(\"upload failed at 60%\");\n    }\n\n    @Override\n    public void close() {\n        throw new IllegalStateException(\"connection reset while closing\");\n    }\n}\n\npublic class Main {\n    public static void main(String[] args) {\n        try (Upload u = new Upload()) {\n            u.send();\n        }\n    }\n}\n", "_expect": "exception" },
+        { "label": "5 · Spot the error", "hint": "Since Java 9 an existing variable can be a resource, but only if it is effectively final. <code>ledger</code> is reassigned, so javac refuses. Remove the second assignment.",
+          "code": "class Ledger implements AutoCloseable {\n    public void close() {\n        System.out.println(\"ledger closed\");\n    }\n}\n\npublic class Main {\n    public static void main(String[] args) {\n        Ledger ledger = new Ledger();\n        ledger = new Ledger();\n        try (ledger) {\n            System.out.println(\"posting entries\");\n        }\n    }\n}\n", "_expect": "compile-error" }
+      ]
+    }</script>
+  </div>
+</section>
+
+<!-- ======================= PART 8: LINE BY LINE ======================= -->
+<section class="part" id="tracer">
+  <span class="part-label"><b>8</b> Line by line</span>
+  <h2>Two doors opened, closed in reverse</h2>
+  <p>A bank locker visit: the gate opens, then the locker. When the block ends, Java calls <code>close()</code> on the locker first, then the gate, with no close call written anywhere.</p>
+  <div class="tracer">
+    <script type="application/json">{
+      "lang": "java",
+      "code": [
+        "class Door implements AutoCloseable {",
+        "    private final String name;",
+        "",
+        "    Door(String name) {",
+        "        this.name = name;",
+        "        System.out.println(\"open \" + name);",
+        "    }",
+        "",
+        "    public void close() {",
+        "        System.out.println(\"close \" + name);",
+        "    }",
+        "}",
+        "",
+        "public class Main {",
+        "    public static void main(String[] args) {",
+        "        try (Door gate = new Door(\"gate\"); Door locker = new Door(\"locker\")) {",
+        "            System.out.println(\"take documents\");",
+        "        }",
+        "        System.out.println(\"done\");",
+        "    }",
+        "}"
+      ],
+      "steps": [
+        { "line": 16, "phase": "Resource 1", "note": "<code>new Door(\"gate\")</code> creates #1 and pushes its constructor frame.", "stack": [{ "frame": "main(String[] args)", "vars": [["args", "→ String[0]"]] }, { "frame": "Door(String name)", "vars": [["this", "→ #1"], ["name", "→ \"gate\""]] }], "heap": ["String[0] (empty array)", "<b>#1</b> Door {name=null}"], "newVar": "this" },
+        { "line": 6, "phase": "Open", "note": "The name is stored and \"open gate\" is printed. The constructor returns.", "stack": [{ "frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["gate", "→ #1"]] }], "heap": ["String[0] (empty array)", "<b>#1</b> Door {name=\"gate\"}"], "out": "open gate\n", "newVar": "gate" },
+        { "line": 16, "phase": "Resource 2", "note": "<code>new Door(\"locker\")</code> creates #2.", "stack": [{ "frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["gate", "→ #1"]] }, { "frame": "Door(String name)", "vars": [["this", "→ #2"], ["name", "→ \"locker\""]] }], "heap": ["String[0] (empty array)", "<b>#1</b> Door {name=\"gate\"}", "<b>#2</b> Door {name=null}"], "newVar": "this" },
+        { "line": 6, "phase": "Open", "note": "\"open locker\". Both resources are now open; the locker is on top.", "stack": [{ "frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["gate", "→ #1"], ["locker", "→ #2"]] }], "heap": ["String[0] (empty array)", "<b>#1</b> Door {name=\"gate\"}", "<b>#2</b> Door {name=\"locker\"}"], "out": "open locker\n", "newVar": "locker" },
+        { "line": 17, "phase": "Body", "note": "The try block runs.", "stack": [{ "frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["gate", "→ #1"], ["locker", "→ #2"]] }], "heap": ["String[0] (empty array)", "<b>#1</b> Door {name=\"gate\"}", "<b>#2</b> Door {name=\"locker\"}"], "out": "take documents\n" },
+        { "line": 18, "phase": "Auto-close 1", "note": "At the closing brace Java calls <code>locker.close()</code>: the <b>last</b> resource opened is closed first.", "stack": [{ "frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["gate", "→ #1"], ["locker", "→ #2"]] }, { "frame": "Door.close()", "vars": [["this", "→ #2"]] }], "heap": ["String[0] (empty array)", "<b>#1</b> Door {name=\"gate\"}", "<b>#2</b> Door {name=\"locker\"}"] },
+        { "line": 10, "phase": "Close", "note": "\"close locker\" is printed; the close frame is popped.", "stack": [{ "frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["gate", "→ #1"], ["locker", "→ #2"]] }], "heap": ["String[0] (empty array)", "<b>#1</b> Door {name=\"gate\"}", "<b>#2</b> Door {name=\"locker\"}"], "out": "close locker\n" },
+        { "line": 18, "phase": "Auto-close 2", "note": "Then <code>gate.close()</code>.", "stack": [{ "frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["gate", "→ #1"], ["locker", "→ #2"]] }, { "frame": "Door.close()", "vars": [["this", "→ #1"]] }], "heap": ["String[0] (empty array)", "<b>#1</b> Door {name=\"gate\"}", "<b>#2</b> Door {name=\"locker\"}"] },
+        { "line": 10, "phase": "Close", "note": "\"close gate\". The resource variables go out of scope; #1 and #2 become garbage.", "stack": [{ "frame": "main(String[] args)", "vars": [["args", "→ String[0]"]] }], "heap": ["String[0] (empty array)"], "out": "close gate\n" },
+        { "line": 19, "phase": "After", "note": "Normal flow continues after the try statement.", "stack": [{ "frame": "main(String[] args)", "vars": [["args", "→ String[0]"]] }], "heap": ["String[0] (empty array)"], "out": "done\n" },
+        { "line": 20, "phase": "Program ends", "note": "main returns.", "stack": [], "heap": [] }
+      ]
+    }</script>
+  </div>
+
+<h3 id="worked">Worked examples: real problems, solved and traced in memory</h3>
+  <p class="wx-intro">Three jobs where something must always be closed. The resources are small classes of our own that print when they open and close, so you can see every step. Watch the <code>close()</code> frames being pushed automatically, in reverse order, before any catch block runs.</p>
+  <article class="wx">
+    <div class="wx__head"><span class="wx__num">Example 1</span><span class="wx__tag">Banking · database access</span></div>
+    <h4>Connection and statement closed in reverse order</h4>
+    <div class="wx__problem"><p class="wx__label">Problem statement</p><p>A balance query needs a database connection and, on top of it, a statement. Both must be closed after the query, the statement first. Model them with two small <code>AutoCloseable</code> classes.</p></div>
+    <div class="prob__io"><div><small>Input</small><pre>account = SB-1042</pre></div><div><small>Expected output</small><pre>connection open
+SB-1042: Rs 15250
+query closed
+connection closed
+done</pre></div></div>
+    <div class="wx__approach"><p class="wx__label">Approach</p><ol><li>Open both in one try-with-resources: <code>try (Conn c = new Conn(); Query q = new Query())</code>.</li><li>Run the query inside the block.</li><li>When the block ends, Java calls <code>q.close()</code> and then <code>c.close()</code>: reverse order, no code needed.</li></ol></div>
+    <p class="wx__label">Solution: run it live</p>
+    <div class="runner">
+    <script type="application/json">{"lang": "java", "file": "Main.java", "tasks": [{"label": "Run · Connection and statement closed in reverse order", "hint": "Press <b>Run</b>. Then swap the order of the two resources in the parentheses and predict the new close order.", "code": "class Conn implements AutoCloseable {\n    Conn() {\n        System.out.println(\"connection open\");\n    }\n\n    public void close() {\n        System.out.println(\"connection closed\");\n    }\n}\n\nclass Query implements AutoCloseable {\n    int balanceOf(String account) {\n        return 15250;\n    }\n\n    public void close() {\n        System.out.println(\"query closed\");\n    }\n}\n\npublic class Main {\n    public static void main(String[] args) {\n        try (Conn c = new Conn(); Query q = new Query()) {\n            System.out.println(\"SB-1042: Rs \" + q.balanceOf(\"SB-1042\"));\n        }\n        System.out.println(\"done\");\n    }\n}\n"}]}</script>
+    </div>
+    <p class="wx__label">What happens in memory, step by step</p>
+    <p class="wx__how">Recorded from the real JVM: press <b>Next</b> to execute one line at a time. Watch method calls push and pop frames on the stack, and objects (numbered #1, #2 …) appear on the heap.</p>
+    <div class="tracer">
+    <script type="application/json">{"lang": "java", "code": ["class Conn implements AutoCloseable {", "    Conn() {", "        System.out.println(\"connection open\");", "    }", "", "    public void close() {", "        System.out.println(\"connection closed\");", "    }", "}", "", "class Query implements AutoCloseable {", "    int balanceOf(String account) {", "        return 15250;", "    }", "", "    public void close() {", "        System.out.println(\"query closed\");", "    }", "}", "", "public class Main {", "    public static void main(String[] args) {", "        try (Conn c = new Conn(); Query q = new Query()) {", "            System.out.println(\"SB-1042: Rs \" + q.balanceOf(\"SB-1042\"));", "        }", "        System.out.println(\"done\");", "    }", "}"], "steps": [{"line": 23, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "new Conn()", "vars": [["this", "→ #1 Conn"]]}], "heap": ["<b>#1</b> Conn {}", "<b>#2</b> String[0] (args, empty)"], "newVar": "this", "phase": "First resource", "note": "The try statement starts with <code>new Conn()</code>: object #1 is allocated and its constructor frame is pushed."}, {"line": 2, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "new Conn()", "vars": [["this", "→ #1 Conn"]]}], "heap": ["<b>#1</b> Conn {}", "<b>#2</b> String[0] (args, empty)"], "phase": "Constructor", "note": "Conn's constructor body begins."}, {"line": 3, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "new Conn()", "vars": [["this", "→ #1 Conn"]]}], "heap": ["<b>#1</b> Conn {}", "<b>#2</b> String[0] (args, empty)"], "out": "connection open\n", "phase": "Open", "note": "It prints \"connection open\"."}, {"line": 4, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}], "heap": ["<b>#2</b> String[0] (args, empty)"], "phase": "Constructor done", "note": "The frame is popped. (The variable <code>c</code> isn't shown yet: the tracer shows it once the resource list is complete.)"}, {"line": 23, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["c", "→ #1 Conn"]]}, {"frame": "new Query()", "vars": [["this", "→ #3 Query"]]}], "heap": ["<b>#1</b> Conn {}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Query {}"], "newVar": "this", "phase": "Second resource", "note": "<code>new Query()</code> creates #3; its constructor frame is pushed."}, {"line": 11, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["c", "→ #1 Conn"]]}], "heap": ["<b>#1</b> Conn {}", "<b>#2</b> String[0] (args, empty)"], "phase": "Default constructor", "note": "Query has no constructor of its own, so the compiler-generated default one runs (shown at the class line) and returns."}, {"line": 23, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["c", "→ #1 Conn"], ["q", "→ #3 Query"]]}], "heap": ["<b>#1</b> Conn {}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Query {}"], "newVar": "q", "phase": "Both open", "note": "<code>c</code> → #1 and <code>q</code> → #3. The try block can start."}, {"line": 24, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["c", "→ #1 Conn"], ["q", "→ #3 Query"]]}, {"frame": "Query.balanceOf(String account)", "vars": [["this", "→ #3 Query"], ["account", "→ #4 \"SB-1042\""]]}], "heap": ["<b>#1</b> Conn {}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Query {}", "<b>#4</b> String &quot;SB-1042&quot;"], "newVar": "this", "phase": "Use", "note": "<code>q.balanceOf(\"SB-1042\")</code> pushes a frame for the method."}, {"line": 13, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["c", "→ #1 Conn"], ["q", "→ #3 Query"]]}], "heap": ["<b>#1</b> Conn {}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Query {}"], "phase": "Return", "note": "It returns 15250 and its frame is popped."}, {"line": 24, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["c", "→ #1 Conn"], ["q", "→ #3 Query"]]}], "heap": ["<b>#1</b> Conn {}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Query {}"], "out": "SB-1042: Rs 15250\n", "phase": "Print", "note": "The balance is printed. The block is now finished."}, {"line": 25, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["c", "→ #1 Conn"], ["q", "→ #3 Query"]]}, {"frame": "Query.close()", "vars": [["this", "→ #3 Query"]]}], "heap": ["<b>#1</b> Conn {}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Query {}"], "newVar": "this", "phase": "Auto-close 1", "note": "At the closing brace, Java calls <code>q.close()</code> by itself: a frame is pushed for #3. The <b>last</b> resource opened is closed <b>first</b>."}, {"line": 17, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["c", "→ #1 Conn"], ["q", "→ #3 Query"]]}, {"frame": "Query.close()", "vars": [["this", "→ #3 Query"]]}], "heap": ["<b>#1</b> Conn {}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Query {}"], "out": "query closed\n", "phase": "Close query", "note": "\"query closed\"."}, {"line": 18, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["c", "→ #1 Conn"], ["q", "→ #3 Query"]]}], "heap": ["<b>#1</b> Conn {}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Query {}"], "phase": "Done", "note": "The close frame is popped."}, {"line": 25, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["c", "→ #1 Conn"]]}, {"frame": "Conn.close()", "vars": [["this", "→ #1 Conn"]]}], "heap": ["<b>#1</b> Conn {}", "<b>#2</b> String[0] (args, empty)"], "newVar": "this", "phase": "Auto-close 2", "note": "Now <code>c.close()</code> runs for #1."}, {"line": 7, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["c", "→ #1 Conn"]]}, {"frame": "Conn.close()", "vars": [["this", "→ #1 Conn"]]}], "heap": ["<b>#1</b> Conn {}", "<b>#2</b> String[0] (args, empty)"], "out": "connection closed\n", "phase": "Close connection", "note": "\"connection closed\": the connection outlives the query, as it must."}, {"line": 8, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["c", "→ #1 Conn"]]}], "heap": ["<b>#1</b> Conn {}", "<b>#2</b> String[0] (args, empty)"], "phase": "Done", "note": "The frame is popped."}, {"line": 25, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}], "heap": ["<b>#2</b> String[0] (args, empty)"], "phase": "Out of the try", "note": "<code>c</code> and <code>q</code> go out of scope; both objects become garbage."}, {"line": 26, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}], "heap": ["<b>#2</b> String[0] (args, empty)"], "out": "done\n", "phase": "Continue", "note": "Normal flow continues after the statement."}, {"line": 27, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}], "heap": ["<b>#2</b> String[0] (args, empty)"], "phase": "main finishes", "note": "main reaches its closing brace."}, {"line": 27, "phase": "Program ends", "note": "main returns, its frame is popped and the program ends.", "stack": [], "heap": []}]}</script>
+    </div>
+  </article>
+  <article class="wx">
+    <div class="wx__head"><span class="wx__num">Example 2</span><span class="wx__tag">Logistics · shipment import</span></div>
+    <h4>The import fails, the file is still closed</h4>
+    <div class="wx__problem"><p class="wx__label">Problem statement</p><p>A courier company imports shipment weights from a partner's file. One row is broken. The file must be closed anyway, and the error reported by the caller. A small <code>ShipmentFile</code> class stands in for the real file.</p></div>
+    <div class="prob__io"><div><small>Input</small><pre>rows = {&quot;2.5&quot;, &quot;1,2&quot;, &quot;4.0&quot;}</pre></div><div><small>Expected output</small><pre>file closed after 2 rows
+Import failed: For input string: &quot;1,2&quot;</pre></div></div>
+    <div class="wx__approach"><p class="wx__label">Approach</p><ol><li><code>importAll</code> opens the file in try-with-resources and adds up the weights.</li><li>Row 2 makes <code>Double.parseDouble</code> throw a <code>NumberFormatException</code>; <code>importAll</code> has no catch.</li><li>Before the exception leaves <code>importAll</code>, Java closes the file. Then <code>main</code>'s catch runs.</li></ol></div>
+    <p class="wx__label">Solution: run it live</p>
+    <div class="runner">
+    <script type="application/json">{"lang": "java", "file": "Main.java", "tasks": [{"label": "Run · The import fails, the file is still closed", "hint": "Press <b>Run</b>. Then fix the bad row to <code>\"1.2\"</code> and run again: the close happens at the normal end of the block.", "code": "class ShipmentFile implements AutoCloseable {\n    private final String[] rows;\n    private int next = 0;\n\n    ShipmentFile(String[] rows) {\n        this.rows = rows;\n    }\n\n    String readRow() {\n        return next < rows.length ? rows[next++] : null;\n    }\n\n    public void close() {\n        System.out.println(\"file closed after \" + next + \" rows\");\n    }\n}\n\npublic class Main {\n    static double importAll(String[] rows) {\n        double total = 0;\n        try (ShipmentFile f = new ShipmentFile(rows)) {\n            String row;\n            while ((row = f.readRow()) != null) {\n                total += Double.parseDouble(row);\n            }\n        }\n        return total;\n    }\n\n    public static void main(String[] args) {\n        try {\n            System.out.println(\"Total kg: \" + importAll(new String[]{\"2.5\", \"1,2\", \"4.0\"}));\n        } catch (NumberFormatException e) {\n            System.out.println(\"Import failed: \" + e.getMessage());\n        }\n    }\n}\n"}]}</script>
+    </div>
+    <p class="wx__label">What happens in memory, step by step</p>
+    <p class="wx__how">Recorded from the real JVM: press <b>Next</b> to execute one line at a time. Watch method calls push and pop frames on the stack, and objects (numbered #1, #2 …) appear on the heap.</p>
+    <div class="tracer">
+    <script type="application/json">{"lang": "java", "code": ["class ShipmentFile implements AutoCloseable {", "    private final String[] rows;", "    private int next = 0;", "", "    ShipmentFile(String[] rows) {", "        this.rows = rows;", "    }", "", "    String readRow() {", "        return next < rows.length ? rows[next++] : null;", "    }", "", "    public void close() {", "        System.out.println(\"file closed after \" + next + \" rows\");", "    }", "}", "", "public class Main {", "    static double importAll(String[] rows) {", "        double total = 0;", "        try (ShipmentFile f = new ShipmentFile(rows)) {", "            String row;", "            while ((row = f.readRow()) != null) {", "                total += Double.parseDouble(row);", "            }", "        }", "        return total;", "    }", "", "    public static void main(String[] args) {", "        try {", "            System.out.println(\"Total kg: \" + importAll(new String[]{\"2.5\", \"1,2\", \"4.0\"}));", "        } catch (NumberFormatException e) {", "            System.out.println(\"Import failed: \" + e.getMessage());", "        }", "    }", "}"], "steps": [{"line": 32, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "importAll(String[] rows)", "vars": [["rows", "→ #1 String[3]"]]}], "heap": ["<b>#1</b> String[3] {&quot;2.5&quot;, &quot;1,2&quot;, &quot;4.0&quot;}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> String &quot;2.5&quot;", "<b>#4</b> String &quot;1,2&quot;", "<b>#5</b> String &quot;4.0&quot;"], "newVar": "rows", "phase": "Call", "note": "main calls <code>importAll</code> with array #1 (three rows). The call sits inside main's try."}, {"line": 20, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "importAll(String[] rows)", "vars": [["rows", "→ #1 String[3]"], ["total", "0.0"]]}], "heap": ["<b>#1</b> String[3] {&quot;2.5&quot;, &quot;1,2&quot;, &quot;4.0&quot;}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> String &quot;2.5&quot;", "<b>#4</b> String &quot;1,2&quot;", "<b>#5</b> String &quot;4.0&quot;"], "newVar": "total", "phase": "Total", "note": "total = 0.0."}, {"line": 21, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "importAll(String[] rows)", "vars": [["rows", "→ #1 String[3]"], ["total", "0.0"]]}, {"frame": "new ShipmentFile(String[] rows)", "vars": [["this", "→ #6 ShipmentFile"], ["rows", "→ #1 String[3]"]]}], "heap": ["<b>#1</b> String[3] {&quot;2.5&quot;, &quot;1,2&quot;, &quot;4.0&quot;}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> String &quot;2.5&quot;", "<b>#4</b> String &quot;1,2&quot;", "<b>#5</b> String &quot;4.0&quot;", "<b>#6</b> ShipmentFile {rows=null, next=0}"], "newVar": "this", "phase": "Open the file", "note": "<code>new ShipmentFile(rows)</code> creates #6 and pushes its constructor frame."}, {"line": 5, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "importAll(String[] rows)", "vars": [["rows", "→ #1 String[3]"], ["total", "0.0"]]}, {"frame": "new ShipmentFile(String[] rows)", "vars": [["this", "→ #6 ShipmentFile"], ["rows", "→ #1 String[3]"]]}], "heap": ["<b>#1</b> String[3] {&quot;2.5&quot;, &quot;1,2&quot;, &quot;4.0&quot;}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> String &quot;2.5&quot;", "<b>#4</b> String &quot;1,2&quot;", "<b>#5</b> String &quot;4.0&quot;", "<b>#6</b> ShipmentFile {rows=null, next=0}"], "phase": "Constructor", "note": "The constructor body begins."}, {"line": 3, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "importAll(String[] rows)", "vars": [["rows", "→ #1 String[3]"], ["total", "0.0"]]}, {"frame": "new ShipmentFile(String[] rows)", "vars": [["this", "→ #6 ShipmentFile"], ["rows", "→ #1 String[3]"]]}], "heap": ["<b>#1</b> String[3] {&quot;2.5&quot;, &quot;1,2&quot;, &quot;4.0&quot;}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> String &quot;2.5&quot;", "<b>#4</b> String &quot;1,2&quot;", "<b>#5</b> String &quot;4.0&quot;", "<b>#6</b> ShipmentFile {rows=null, next=0}"], "phase": "Field initialiser", "note": "<code>next = 0</code> runs as part of construction."}, {"line": 6, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "importAll(String[] rows)", "vars": [["rows", "→ #1 String[3]"], ["total", "0.0"]]}, {"frame": "new ShipmentFile(String[] rows)", "vars": [["this", "→ #6 ShipmentFile"], ["rows", "→ #1 String[3]"]]}], "heap": ["<b>#1</b> String[3] {&quot;2.5&quot;, &quot;1,2&quot;, &quot;4.0&quot;}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> String &quot;2.5&quot;", "<b>#4</b> String &quot;1,2&quot;", "<b>#5</b> String &quot;4.0&quot;", "<b>#6</b> ShipmentFile {rows=→#1, next=0}"], "phase": "Store rows", "note": "<code>this.rows = rows</code>: #6 now refers to array #1."}, {"line": 7, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "importAll(String[] rows)", "vars": [["rows", "→ #1 String[3]"], ["total", "0.0"]]}], "heap": ["<b>#1</b> String[3] {&quot;2.5&quot;, &quot;1,2&quot;, &quot;4.0&quot;}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> String &quot;2.5&quot;", "<b>#4</b> String &quot;1,2&quot;", "<b>#5</b> String &quot;4.0&quot;"], "phase": "Constructor done", "note": "Frame popped."}, {"line": 21, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "importAll(String[] rows)", "vars": [["rows", "→ #1 String[3]"], ["total", "0.0"], ["f", "→ #6 ShipmentFile"]]}], "heap": ["<b>#1</b> String[3] {&quot;2.5&quot;, &quot;1,2&quot;, &quot;4.0&quot;}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> String &quot;2.5&quot;", "<b>#4</b> String &quot;1,2&quot;", "<b>#5</b> String &quot;4.0&quot;", "<b>#6</b> ShipmentFile {rows=→#1, next=0}"], "newVar": "f", "phase": "Resource ready", "note": "<code>f</code> → #6. The try block starts."}, {"line": 23, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "importAll(String[] rows)", "vars": [["rows", "→ #1 String[3]"], ["total", "0.0"], ["f", "→ #6 ShipmentFile"]]}, {"frame": "ShipmentFile.readRow()", "vars": [["this", "→ #6 ShipmentFile"]]}], "heap": ["<b>#1</b> String[3] {&quot;2.5&quot;, &quot;1,2&quot;, &quot;4.0&quot;}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> String &quot;2.5&quot;", "<b>#4</b> String &quot;1,2&quot;", "<b>#5</b> String &quot;4.0&quot;", "<b>#6</b> ShipmentFile {rows=→#1, next=0}"], "newVar": "this", "phase": "Read", "note": "<code>f.readRow()</code> pushes a frame."}, {"line": 10, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "importAll(String[] rows)", "vars": [["rows", "→ #1 String[3]"], ["total", "0.0"], ["f", "→ #6 ShipmentFile"]]}], "heap": ["<b>#1</b> String[3] {&quot;2.5&quot;, &quot;1,2&quot;, &quot;4.0&quot;}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> String &quot;2.5&quot;", "<b>#4</b> String &quot;1,2&quot;", "<b>#5</b> String &quot;4.0&quot;", "<b>#6</b> ShipmentFile {rows=→#1, next=1}"], "phase": "Row 1", "note": "It returns rows[0] and advances next to 1."}, {"line": 23, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "importAll(String[] rows)", "vars": [["rows", "→ #1 String[3]"], ["total", "0.0"], ["f", "→ #6 ShipmentFile"], ["row", "→ #3 \"2.5\""]]}], "heap": ["<b>#1</b> String[3] {&quot;2.5&quot;, &quot;1,2&quot;, &quot;4.0&quot;}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> String &quot;2.5&quot;", "<b>#4</b> String &quot;1,2&quot;", "<b>#5</b> String &quot;4.0&quot;", "<b>#6</b> ShipmentFile {rows=→#1, next=1}"], "newVar": "row", "phase": "Row", "note": "row → \"2.5\", not null, so the loop body runs."}, {"line": 24, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "importAll(String[] rows)", "vars": [["rows", "→ #1 String[3]"], ["total", "2.5"], ["f", "→ #6 ShipmentFile"]]}], "heap": ["<b>#1</b> String[3] {&quot;2.5&quot;, &quot;1,2&quot;, &quot;4.0&quot;}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> String &quot;2.5&quot;", "<b>#4</b> String &quot;1,2&quot;", "<b>#5</b> String &quot;4.0&quot;", "<b>#6</b> ShipmentFile {rows=→#1, next=1}"], "newVar": "total", "phase": "Add", "note": "total = 2.5."}, {"line": 23, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "importAll(String[] rows)", "vars": [["rows", "→ #1 String[3]"], ["total", "2.5"], ["f", "→ #6 ShipmentFile"]]}, {"frame": "ShipmentFile.readRow()", "vars": [["this", "→ #6 ShipmentFile"]]}], "heap": ["<b>#1</b> String[3] {&quot;2.5&quot;, &quot;1,2&quot;, &quot;4.0&quot;}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> String &quot;2.5&quot;", "<b>#4</b> String &quot;1,2&quot;", "<b>#5</b> String &quot;4.0&quot;", "<b>#6</b> ShipmentFile {rows=→#1, next=1}"], "newVar": "this", "phase": "Read", "note": "readRow() again."}, {"line": 10, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "importAll(String[] rows)", "vars": [["rows", "→ #1 String[3]"], ["total", "2.5"], ["f", "→ #6 ShipmentFile"]]}], "heap": ["<b>#1</b> String[3] {&quot;2.5&quot;, &quot;1,2&quot;, &quot;4.0&quot;}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> String &quot;2.5&quot;", "<b>#4</b> String &quot;1,2&quot;", "<b>#5</b> String &quot;4.0&quot;", "<b>#6</b> ShipmentFile {rows=→#1, next=2}"], "phase": "Row 2", "note": "It returns \"1,2\"; next becomes 2."}, {"line": 23, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "importAll(String[] rows)", "vars": [["rows", "→ #1 String[3]"], ["total", "2.5"], ["f", "→ #6 ShipmentFile"], ["row", "→ #4 \"1,2\""]]}], "heap": ["<b>#1</b> String[3] {&quot;2.5&quot;, &quot;1,2&quot;, &quot;4.0&quot;}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> String &quot;2.5&quot;", "<b>#4</b> String &quot;1,2&quot;", "<b>#5</b> String &quot;4.0&quot;", "<b>#6</b> ShipmentFile {rows=→#1, next=2}"], "newVar": "row", "phase": "Row", "note": "row → \"1,2\"."}, {"line": 24, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "importAll(String[] rows)", "vars": [["rows", "→ #1 String[3]"], ["total", "2.5"], ["f", "→ #6 ShipmentFile"]]}], "heap": ["<b>#1</b> String[3] {&quot;2.5&quot;, &quot;1,2&quot;, &quot;4.0&quot;}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> String &quot;2.5&quot;", "<b>#4</b> String &quot;1,2&quot;", "<b>#5</b> String &quot;4.0&quot;", "<b>#6</b> ShipmentFile {rows=→#1, next=2}"], "phase": "Exception", "note": "<code>Double.parseDouble(\"1,2\")</code> throws a NumberFormatException: a comma is not a decimal point in Java. importAll has no catch, but its try-with-resources still has work to do first."}, {"line": 21, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "importAll(String[] rows)", "vars": [["rows", "→ #1 String[3]"], ["total", "2.5"], ["f", "→ #6 ShipmentFile"]]}, {"frame": "ShipmentFile.close()", "vars": [["this", "→ #6 ShipmentFile"]]}], "heap": ["<b>#1</b> String[3] {&quot;2.5&quot;, &quot;1,2&quot;, &quot;4.0&quot;}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> String &quot;2.5&quot;", "<b>#4</b> String &quot;1,2&quot;", "<b>#5</b> String &quot;4.0&quot;", "<b>#6</b> ShipmentFile {rows=→#1, next=2}"], "newVar": "this", "phase": "Auto-close", "note": "Before the exception leaves the block, Java calls <code>f.close()</code>: a frame is pushed for #6."}, {"line": 14, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "importAll(String[] rows)", "vars": [["rows", "→ #1 String[3]"], ["total", "2.5"], ["f", "→ #6 ShipmentFile"]]}, {"frame": "ShipmentFile.close()", "vars": [["this", "→ #6 ShipmentFile"]]}], "heap": ["<b>#1</b> String[3] {&quot;2.5&quot;, &quot;1,2&quot;, &quot;4.0&quot;}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> String &quot;2.5&quot;", "<b>#4</b> String &quot;1,2&quot;", "<b>#5</b> String &quot;4.0&quot;", "<b>#6</b> ShipmentFile {rows=→#1, next=2}"], "out": "file closed after 2 rows\n", "phase": "Closed", "note": "\"file closed after 2 rows\": the third row was never read, but the file is closed."}, {"line": 15, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "importAll(String[] rows)", "vars": [["rows", "→ #1 String[3]"], ["total", "2.5"], ["f", "→ #6 ShipmentFile"]]}], "heap": ["<b>#1</b> String[3] {&quot;2.5&quot;, &quot;1,2&quot;, &quot;4.0&quot;}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> String &quot;2.5&quot;", "<b>#4</b> String &quot;1,2&quot;", "<b>#5</b> String &quot;4.0&quot;", "<b>#6</b> ShipmentFile {rows=→#1, next=2}"], "phase": "Done", "note": "The close frame is popped."}, {"line": 21, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}], "heap": ["<b>#2</b> String[0] (args, empty)"], "phase": "Leave importAll", "note": "Now the exception continues: importAll's frame is popped and <code>return total</code> never happens."}, {"line": 33, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["e", "→ #7 NumberFormatException"]]}], "heap": ["<b>#2</b> String[0] (args, empty)", "<b>#7</b> NumberFormatException: For input string: &quot;1,2&quot;"], "newVar": "e", "phase": "Caught", "note": "main's catch matches; <code>e</code> → #7. By now the file was already closed."}, {"line": 34, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}], "heap": ["<b>#2</b> String[0] (args, empty)"], "out": "Import failed: For input string: \"1,2\"\n", "phase": "Report", "note": "The message names the bad value."}, {"line": 36, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}], "heap": ["<b>#2</b> String[0] (args, empty)"], "phase": "main finishes", "note": "main reaches its closing brace."}, {"line": 36, "phase": "Program ends", "note": "main returns, its frame is popped and the program ends.", "stack": [], "heap": []}]}</script>
+    </div>
+  </article>
+  <article class="wx">
+    <div class="wx__head"><span class="wx__num">Example 3</span><span class="wx__tag">Retail · billing counter</span></div>
+    <h4>A printer jam plus a failed close: the suppressed exception</h4>
+    <div class="wx__problem"><p class="wx__label">Problem statement</p><p>At a billing counter, printing the receipt fails (paper jam). While closing the printer session, the device also reports an error. The cashier screen should show the real problem, and the support log should still see the closing error.</p></div>
+    <div class="prob__io"><div><small>Input</small><pre>bill no. 5531; printer jams; closing fails too</pre></div><div><small>Expected output</small><pre>Cashier sees: Paper jam on bill 5531
+Support log: Printer offline during close</pre></div></div>
+    <div class="wx__approach"><p class="wx__label">Approach</p><ol><li><code>PrinterSession.print</code> throws for the jam; <code>close()</code> throws as well.</li><li>try-with-resources keeps the jam as the main exception and attaches the close error with <code>addSuppressed</code>.</li><li><code>main</code> prints the main message and loops over <code>getSuppressed()</code>.</li></ol></div>
+    <p class="wx__label">Solution: run it live</p>
+    <div class="runner">
+    <script type="application/json">{"lang": "java", "file": "Main.java", "tasks": [{"label": "Run · A printer jam plus a failed close: the suppressed exception", "hint": "Press <b>Run</b>. Then rewrite it with a manual <code>try { … } finally { s.close(); }</code> and see which message the catch gets now.", "code": "class PrinterSession implements AutoCloseable {\n    void print(int billNo) {\n        throw new IllegalStateException(\"Paper jam on bill \" + billNo);\n    }\n\n    public void close() {\n        throw new IllegalStateException(\"Printer offline during close\");\n    }\n}\n\npublic class Main {\n    public static void main(String[] args) {\n        try (PrinterSession s = new PrinterSession()) {\n            s.print(5531);\n        } catch (IllegalStateException e) {\n            System.out.println(\"Cashier sees: \" + e.getMessage());\n            for (Throwable extra : e.getSuppressed()) {\n                System.out.println(\"Support log: \" + extra.getMessage());\n            }\n        }\n    }\n}\n"}]}</script>
+    </div>
+    <p class="wx__label">What happens in memory, step by step</p>
+    <p class="wx__how">Recorded from the real JVM: press <b>Next</b> to execute one line at a time. Watch method calls push and pop frames on the stack, and objects (numbered #1, #2 …) appear on the heap.</p>
+    <div class="tracer">
+    <script type="application/json">{"lang": "java", "code": ["class PrinterSession implements AutoCloseable {", "    void print(int billNo) {", "        throw new IllegalStateException(\"Paper jam on bill \" + billNo);", "    }", "", "    public void close() {", "        throw new IllegalStateException(\"Printer offline during close\");", "    }", "}", "", "public class Main {", "    public static void main(String[] args) {", "        try (PrinterSession s = new PrinterSession()) {", "            s.print(5531);", "        } catch (IllegalStateException e) {", "            System.out.println(\"Cashier sees: \" + e.getMessage());", "            for (Throwable extra : e.getSuppressed()) {", "                System.out.println(\"Support log: \" + extra.getMessage());", "            }", "        }", "    }", "}"], "steps": [{"line": 13, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "new PrinterSession()", "vars": [["this", "→ #1 PrinterSession"]]}], "heap": ["<b>#1</b> PrinterSession {}", "<b>#2</b> String[0] (args, empty)"], "newVar": "this", "phase": "Open", "note": "<code>new PrinterSession()</code> creates #1; the (default) constructor frame is pushed."}, {"line": 1, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}], "heap": ["<b>#2</b> String[0] (args, empty)"], "phase": "Constructor", "note": "The compiler-generated constructor runs and returns."}, {"line": 13, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["s", "→ #1 PrinterSession"]]}], "heap": ["<b>#1</b> PrinterSession {}", "<b>#2</b> String[0] (args, empty)"], "newVar": "s", "phase": "Ready", "note": "<code>s</code> → #1. The try block starts."}, {"line": 14, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["s", "→ #1 PrinterSession"]]}, {"frame": "PrinterSession.print(int billNo)", "vars": [["this", "→ #1 PrinterSession"], ["billNo", "5531"]]}], "heap": ["<b>#1</b> PrinterSession {}", "<b>#2</b> String[0] (args, empty)"], "newVar": "this", "phase": "Print", "note": "<code>s.print(5531)</code> pushes a frame."}, {"line": 3, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["s", "→ #1 PrinterSession"]]}], "heap": ["<b>#1</b> PrinterSession {}", "<b>#2</b> String[0] (args, empty)"], "phase": "Main exception", "note": "print throws <b>#3</b> \"Paper jam…\" and its frame is popped. This is the primary exception."}, {"line": 13, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["s", "→ #1 PrinterSession"]]}, {"frame": "PrinterSession.close()", "vars": [["this", "→ #1 PrinterSession"]]}], "heap": ["<b>#1</b> PrinterSession {}", "<b>#2</b> String[0] (args, empty)"], "newVar": "this", "phase": "Auto-close", "note": "Before leaving the block, Java calls <code>s.close()</code>; a frame is pushed."}, {"line": 7, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["s", "→ #1 PrinterSession"]]}], "heap": ["<b>#1</b> PrinterSession {}", "<b>#2</b> String[0] (args, empty)"], "phase": "Second exception", "note": "close throws <b>#4</b> \"Printer offline…\". Java does <b>not</b> let it replace #3; it calls <code>#3.addSuppressed(#4)</code> instead."}, {"line": 13, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}], "heap": ["<b>#2</b> String[0] (args, empty)"], "phase": "Leave the block", "note": "The resource is done. #3, carrying #4 inside it, continues to the catch."}, {"line": 15, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["e", "→ #3 IllegalStateException"]]}], "heap": ["<b>#2</b> String[0] (args, empty)", "<b>#3</b> IllegalStateException: Paper jam on bill 5531"], "newVar": "e", "phase": "Caught", "note": "The catch receives #3, the real problem."}, {"line": 16, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["e", "→ #3 IllegalStateException"]]}], "heap": ["<b>#2</b> String[0] (args, empty)", "<b>#3</b> IllegalStateException: Paper jam on bill 5531"], "out": "Cashier sees: Paper jam on bill 5531\n", "phase": "Cashier", "note": "The cashier sees the jam message."}, {"line": 17, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["e", "→ #3 IllegalStateException"], ["extra", "→ #4 IllegalStateException"]]}], "heap": ["<b>#2</b> String[0] (args, empty)", "<b>#3</b> IllegalStateException: Paper jam on bill 5531", "<b>#4</b> IllegalStateException: Printer offline during close"], "newVar": "extra", "phase": "Suppressed", "note": "<code>getSuppressed()</code> returns an array holding #4; the loop variable <code>extra</code> → #4."}, {"line": 18, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["e", "→ #3 IllegalStateException"]]}], "heap": ["<b>#2</b> String[0] (args, empty)", "<b>#3</b> IllegalStateException: Paper jam on bill 5531"], "out": "Support log: Printer offline during close\n", "phase": "Support log", "note": "The closing error is logged, not lost."}, {"line": 17, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}], "heap": ["<b>#2</b> String[0] (args, empty)"], "phase": "Loop ends", "note": "There was only one suppressed exception."}, {"line": 21, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}], "heap": ["<b>#2</b> String[0] (args, empty)"], "phase": "main finishes", "note": "main reaches its closing brace."}, {"line": 21, "phase": "Program ends", "note": "main returns, its frame is popped and the program ends.", "stack": [], "heap": []}]}</script>
+    </div>
+  </article>
+
+</section>
+
+<!-- ======================= PART 9: QUIZ AND REVISION ======================= -->
+<section class="part" id="quiz">
+  <span class="part-label"><b>9</b> Quiz and revision</span>
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <script type="application/json">[
+      { "q": "Which interface must a class implement to be used in try-with-resources?", "options": ["Serializable", "AutoCloseable", "Runnable", "Iterable"], "answer": 1, "why": "java.lang.AutoCloseable (or its sub-interface java.io.Closeable). Otherwise javac reports 'try-with-resources not applicable to variable type'." },
+      { "q": "try (A a = new A(); B b = new B()) { } — in which order are they closed?", "options": ["a then b", "b then a", "At the same time", "Only b"], "answer": 1, "why": "Resources are closed in the reverse order of declaration." },
+      { "q": "The try block throws and there is a matching catch. When does close() run?", "options": ["After the catch", "Before the catch", "Only if no exception", "After finally"], "answer": 1, "why": "Resources are closed as soon as the try block ends, before catch and finally of the same statement." },
+      { "q": "Both the body and close() throw. Which exception does the catch receive?", "options": ["The one from close()", "The one from the body, with close's exception as suppressed", "Both, as a list", "Neither"], "answer": 1, "why": "The body's exception is the primary one; the close failure is attached with addSuppressed and read with getSuppressed()." },
+      { "q": "Which method returns the suppressed exceptions?", "options": ["getCause()", "getSuppressed()", "getStackTrace()", "getAll()"], "answer": 1, "why": "Throwable.getSuppressed() returns an array (Java 7+). getCause() is for chaining, which is different." },
+      { "q": "Since which Java version can you write try (existingVariable) { … }?", "options": ["Java 5", "Java 7", "Java 9", "Java 17"], "answer": 2, "why": "Java 7 introduced try-with-resources; Java 9 allowed final or effectively final variables declared earlier." },
+      { "q": "try (R r = new R()) { r = new R(); } does what?", "options": ["Closes both", "Compile error: auto-closeable resource r may not be assigned", "Closes only the second", "Runs fine"], "answer": 1, "why": "Resource variables are implicitly final." },
+      { "q": "What is the main danger of closing a resource in a manual finally block?", "options": ["It is slower", "If close() throws, its exception replaces the body's, so the real error is lost", "finally doesn't run on exceptions", "It closes too early"], "answer": 1, "why": "An exception thrown in finally discards the pending one. try-with-resources keeps the original and suppresses the close failure." }
+    ]</script>
+  </div>
+  <h3>Quick revision</h3>
+  <div class="revision">
+    <h3>Lesson 9.6 in one screen</h3>
+    <ul>
+      <li><code>try (Res r = …) { }</code> closes <code>r</code> automatically on every path (Java 7+).</li>
+      <li>Resources must implement <code>AutoCloseable</code> (Closeable extends it).</li>
+      <li>Several resources: separate with <code>;</code>; closed in reverse order.</li>
+      <li>Close happens before catch and finally of the same statement.</li>
+      <li>Body's exception wins; close failures become suppressed: <code>e.getSuppressed()</code>.</li>
+      <li>Resource variables are implicitly final; Java 9+ allows <code>try (existingEffectivelyFinalVar)</code>.</li>
+      <li>If <code>close()</code> declares a checked exception, catch or declare it.</li>
+    </ul>
+  </div>
+  <h3>Interview and viva questions</h3>
+  <div class="faq">
+    <details><summary>What is try-with-resources and why was it introduced?</summary><p>A form of try (Java 7) that declares resources in parentheses and closes them automatically when the block ends. It replaced long, error-prone finally blocks that needed null checks and nested try/catch for close(), and that could lose the original exception if close() also failed.</p></details>
+    <details><summary>What is a suppressed exception?</summary><p>When an exception is already being thrown and another one occurs while cleaning up (typically in close()), the second is attached to the first with <code>addSuppressed</code> instead of replacing it. You read them with <code>getSuppressed()</code>, and stack traces show them under “Suppressed:”.</p></details>
+    <details><summary>What is the difference between AutoCloseable and Closeable?</summary><p><code>AutoCloseable</code> (java.lang, Java 7) has <code>void close() throws Exception</code>. <code>Closeable</code> (java.io, older) extends it with <code>close() throws IOException</code> and its close is expected to be idempotent: calling it twice has no extra effect. Implementations may narrow the throws clause or remove it entirely.</p></details>
+    <details><summary>Can we use catch and finally with try-with-resources?</summary><p>Yes, both are optional. They run after all resources have been closed, so in the catch block the resources are no longer usable, and the catch also receives exceptions thrown by the resource constructors or by close().</p></details>
+    <details><summary>What happens if a resource is null?</summary><p>Nothing special: Java checks for null before calling close, so a null resource is simply not closed and no NullPointerException is thrown by the statement itself. Using the null variable inside the block would still throw, of course.</p></details>
+  </div>
+
+  <h3 id="practice">Practice problems</h3>
+  <p class="prob-intro">Practise opening resources in try-with-resources, predicting the order in which things open, run, close and get caught, and reading suppressed exceptions. Readers over in-memory text stand in for files so every program runs anywhere. The last three are real business tasks.</p>
+  <div class="probs">
+    <article class="prob"><div class="prob__head"><span class="prob__num">P1</span><span class="prob__tag prob__tag--easy">Easy</span><h4>Your own AutoCloseable</h4></div>
+      <p>Write a class <code>Session</code> that implements <code>AutoCloseable</code> and prints when it opens and closes. Use it in a try-with-resources block.</p>
+      <div class="prob__io"><div><small>Input</small><pre>session name &quot;billing&quot;</pre></div><div><small>Expected output</small><pre>open billing
+working in billing
+close billing
+after try</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="java" data-file="Main.java"><pre><code>class Session implements AutoCloseable {
+    private final String name;
+
+    Session(String name) {
+        this.name = name;
+        System.out.println(&quot;open &quot; + name);
+    }
+
+    void work() {
+        System.out.println(&quot;working in &quot; + name);
+    }
+
+    @Override
+    public void close() {
+        System.out.println(&quot;close &quot; + name);
+    }
+}
+
+public class Main {
+    public static void main(String[] args) {
+        try (Session s = new Session(&quot;billing&quot;)) {
+            s.work();
+        }
+        System.out.println(&quot;after try&quot;);
+    }
+}</code></pre><div class="output">open billing
+working in billing
+close billing
+after try</div></div>
+        <p><b>How it works:</b> any class that implements <code>AutoCloseable</code> (one method: <code>close()</code>) can be used in the parentheses after <code>try</code>. Java calls <code>close()</code> automatically when the block ends. Our <code>close</code> doesn't throw checked exceptions, so no catch is needed.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P2</span><span class="prob__tag prob__tag--easy">Easy</span><h4>Two resources, reverse order</h4></div>
+      <p>Open two resources in one try-with-resources statement and predict the order of the open and close messages.</p>
+      <div class="prob__io"><div><small>Input</small><pre>resources &quot;connection&quot; then &quot;statement&quot;</pre></div><div><small>Expected output</small><pre>open connection
+open statement
+run query
+close statement
+close connection</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="java" data-file="Main.java"><pre><code>class Res implements AutoCloseable {
+    private final String name;
+
+    Res(String name) {
+        this.name = name;
+        System.out.println(&quot;open &quot; + name);
+    }
+
+    @Override
+    public void close() {
+        System.out.println(&quot;close &quot; + name);
+    }
+}
+
+public class Main {
+    public static void main(String[] args) {
+        try (Res con = new Res(&quot;connection&quot;);
+             Res st = new Res(&quot;statement&quot;)) {
+            System.out.println(&quot;run query&quot;);
+        }
+    }
+}</code></pre><div class="output">open connection
+open statement
+run query
+close statement
+close connection</div></div>
+        <p><b>How it works:</b> resources open from left to right and close in the <b>reverse</b> order, like plates on a stack. That's what you want: the statement depends on the connection, so it must be closed first, while the connection is still open.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P3</span><span class="prob__tag prob__tag--easy">Easy</span><h4>Count lines with a BufferedReader</h4></div>
+      <p>Read text line by line with a <code>BufferedReader</code> (here over a <code>StringReader</code>, standing in for a file) and count non-empty lines.</p>
+      <div class="prob__io"><div><small>Input</small><pre>text = &quot;Asha\nRavi\n\nMeena\n&quot;</pre></div><div><small>Expected output</small><pre>Names: 3</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="java" data-file="Main.java"><pre><code>import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.StringReader;
+
+public class Main {
+    public static void main(String[] args) {
+        String text = &quot;Asha\nRavi\n\nMeena\n&quot;;
+        int count = 0;
+        try (BufferedReader br = new BufferedReader(new StringReader(text))) {
+            String line;
+            while ((line = br.readLine()) != null) {
+                if (!line.isEmpty()) count++;
+            }
+        } catch (IOException e) {
+            System.out.println(&quot;Read failed: &quot; + e.getMessage());
+        }
+        System.out.println(&quot;Names: &quot; + count);
+    }
+}</code></pre><div class="output">Names: 3</div></div>
+        <p><b>How it works:</b> <code>BufferedReader</code> implements <code>Closeable</code>, which extends <code>AutoCloseable</code>. Its <code>readLine()</code> and <code>close()</code> declare the checked <code>IOException</code>, so a catch (or throws) is required. With a real file you would write <code>new BufferedReader(new FileReader("names.txt"))</code>; everything else stays the same.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P4</span><span class="prob__tag prob__tag--medium">Medium</span><h4>Close happens before catch</h4></div>
+      <p>The body of the try throws. Predict the order of “use”, “close”, “catch” and “finally” messages.</p>
+      <div class="prob__io"><div><small>Input</small><pre>resource &quot;printer&quot;; printing fails</pre></div><div><small>Expected output</small><pre>1. printer on
+2. printing
+3. printer off
+4. catch: paper jam
+5. finally</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="java" data-file="Main.java"><pre><code>class Printer implements AutoCloseable {
+    Printer() { System.out.println(&quot;1. printer on&quot;); }
+
+    void print() {
+        System.out.println(&quot;2. printing&quot;);
+        throw new IllegalStateException(&quot;paper jam&quot;);
+    }
+
+    @Override
+    public void close() { System.out.println(&quot;3. printer off&quot;); }
+}
+
+public class Main {
+    public static void main(String[] args) {
+        try (Printer p = new Printer()) {
+            p.print();
+            System.out.println(&quot;never printed&quot;);
+        } catch (IllegalStateException e) {
+            System.out.println(&quot;4. catch: &quot; + e.getMessage());
+        } finally {
+            System.out.println(&quot;5. finally&quot;);
+        }
+    }
+}</code></pre><div class="output">1. printer on
+2. printing
+3. printer off
+4. catch: paper jam
+5. finally</div></div>
+        <p><b>How it works:</b> resources are closed as soon as the try block ends, normally or by an exception, and <b>before</b> any catch or finally of the same statement runs. So in the catch block the printer is already off. This is a common viva question.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P5</span><span class="prob__tag prob__tag--medium">Medium</span><h4>Read the suppressed exception</h4></div>
+      <p>The body throws, and then <code>close()</code> throws too. Print the main exception and every suppressed one.</p>
+      <div class="prob__io"><div><small>Input</small><pre>upload fails; closing the connection also fails</pre></div><div><small>Expected output</small><pre>Main problem: upload failed at 60%
+  suppressed: connection reset while closing</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="java" data-file="Main.java"><pre><code>class Upload implements AutoCloseable {
+    void send() {
+        throw new IllegalStateException(&quot;upload failed at 60%&quot;);
+    }
+
+    @Override
+    public void close() {
+        throw new IllegalStateException(&quot;connection reset while closing&quot;);
+    }
+}
+
+public class Main {
+    public static void main(String[] args) {
+        try (Upload u = new Upload()) {
+            u.send();
+        } catch (IllegalStateException e) {
+            System.out.println(&quot;Main problem: &quot; + e.getMessage());
+            for (Throwable s : e.getSuppressed()) {
+                System.out.println(&quot;  suppressed: &quot; + s.getMessage());
+            }
+        }
+    }
+}</code></pre><div class="output">Main problem: upload failed at 60%
+  suppressed: connection reset while closing</div></div>
+        <p><b>How it works:</b> the body's exception is the important one, so Java keeps it as the main exception. The exception from <code>close()</code> is not lost; it is attached with <code>addSuppressed</code>, and <code>getSuppressed()</code> returns all such extras (Java 7+). Stack traces print them under “Suppressed:”.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P6</span><span class="prob__tag prob__tag--medium">Medium</span><h4>Manual finally can lose the real error</h4></div>
+      <p>Compare a hand-written try/finally with try-with-resources when both the body and <code>close()</code> fail. Which exception reaches the catch in each case?</p>
+      <div class="prob__io"><div><small>Input</small><pre>body throws &quot;save failed&quot;; close throws &quot;close failed&quot;</pre></div><div><small>Expected output</small><pre>Manual finally: close failed, suppressed 0
+try-with-resources: save failed, suppressed 1</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="java" data-file="Main.java"><pre><code>class Store implements AutoCloseable {
+    void save() {
+        throw new IllegalStateException(&quot;save failed&quot;);
+    }
+
+    @Override
+    public void close() {
+        throw new IllegalStateException(&quot;close failed&quot;);
+    }
+}
+
+public class Main {
+    public static void main(String[] args) {
+        try {
+            Store s = new Store();
+            try {
+                s.save();
+            } finally {
+                s.close();
+            }
+        } catch (IllegalStateException e) {
+            System.out.println(&quot;Manual finally: &quot; + e.getMessage()
+                + &quot;, suppressed &quot; + e.getSuppressed().length);
+        }
+
+        try (Store s = new Store()) {
+            s.save();
+        } catch (IllegalStateException e) {
+            System.out.println(&quot;try-with-resources: &quot; + e.getMessage()
+                + &quot;, suppressed &quot; + e.getSuppressed().length);
+        }
+    }
+}</code></pre><div class="output">Manual finally: close failed, suppressed 0
+try-with-resources: save failed, suppressed 1</div></div>
+        <p><b>How it works:</b> in the manual version, the exception thrown inside finally replaces the one from the body, so the real cause, “save failed”, disappears completely. try-with-resources keeps “save failed” as the main exception and attaches “close failed” as suppressed. This is one of the main reasons the feature exists.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P7</span><span class="prob__tag prob__tag--medium">Medium</span><h4>Java 9: an existing variable as the resource</h4></div>
+      <p>Create the resource before the try statement and list just the variable in the parentheses. This works only if the variable is final or effectively final (Java 9+).</p>
+      <div class="prob__io"><div><small>Input</small><pre>a ledger created before the try</pre></div><div><small>Expected output</small><pre>ledger opened
+added Rs 500
+added Rs 250
+ledger closed
+done</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="java" data-file="Main.java"><pre><code>class Ledger implements AutoCloseable {
+    Ledger() { System.out.println(&quot;ledger opened&quot;); }
+
+    void add(int amount) { System.out.println(&quot;added Rs &quot; + amount); }
+
+    @Override
+    public void close() { System.out.println(&quot;ledger closed&quot;); }
+}
+
+public class Main {
+    public static void main(String[] args) {
+        Ledger ledger = new Ledger();
+        try (ledger) {
+            ledger.add(500);
+            ledger.add(250);
+        }
+        System.out.println(&quot;done&quot;);
+    }
+}</code></pre><div class="output">ledger opened
+added Rs 500
+added Rs 250
+ledger closed
+done</div></div>
+        <p><b>How it works:</b> before Java 9 you had to declare a new variable inside the parentheses. Now an existing variable is allowed as long as it is never reassigned (effectively final). Assigning <code>ledger = new Ledger();</code> anywhere would make javac reject it: <i>variable ledger used as a try-with-resources resource neither final nor effectively final</i>.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P8</span><span class="prob__tag prob__tag--medium">Medium</span><h4>Scanner is a resource too</h4></div>
+      <p>Add up the numbers in a line of text with a <code>Scanner</code> opened in try-with-resources.</p>
+      <div class="prob__io"><div><small>Input</small><pre>text = &quot;120 80 45 255&quot;</pre></div><div><small>Expected output</small><pre>Total: 500</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="java" data-file="Main.java"><pre><code>import java.util.Scanner;
+
+public class Main {
+    public static void main(String[] args) {
+        int total = 0;
+        try (Scanner sc = new Scanner(&quot;120 80 45 255&quot;)) {
+            while (sc.hasNextInt()) {
+                total += sc.nextInt();
+            }
+        }
+        System.out.println(&quot;Total: &quot; + total);
+    }
+}</code></pre><div class="output">Total: 500</div></div>
+        <p><b>How it works:</b> <code>Scanner</code> implements <code>Closeable</code>, and its <code>close()</code> doesn't throw checked exceptions, so no catch is needed. Be careful with <code>new Scanner(System.in)</code>: closing it also closes <code>System.in</code>, which you usually don't want in a program that reads input again later.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P9</span><span class="prob__tag prob__tag--business">Business problem</span><h4>Import a bank statement</h4></div>
+      <p>A bank statement arrives as CSV text (date, description, amount). Read it with a <code>BufferedReader</code> in try-with-resources, skip the header, add up valid amounts and list bad rows. (A <code>StringReader</code> stands in for the uploaded file.)</p>
+      <div class="prob__io"><div><small>Input</small><pre>date,desc,amount
+01-07,Salary,52000
+03-07,Rent,-18000
+05-07,Groceries,-2,450
+09-07,UPI refund,350</pre></div><div><small>Expected output</small><pre>Bad row &quot;05-07,Groceries,-2,450&quot;: expected 3 fields, got 4
+Net change: Rs 34350 (1 bad rows)</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="java" data-file="Main.java"><pre><code>import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.StringReader;
+
+public class Main {
+    public static void main(String[] args) {
+        String csv = &quot;date,desc,amount\n01-07,Salary,52000\n03-07,Rent,-18000\n&quot;
+                   + &quot;05-07,Groceries,-2,450\n09-07,UPI refund,350\n&quot;;
+        long net = 0;
+        int bad = 0;
+        try (BufferedReader br = new BufferedReader(new StringReader(csv))) {
+            br.readLine();                      // skip header
+            String line;
+            while ((line = br.readLine()) != null) {
+                String[] f = line.split(&quot;,&quot;);
+                try {
+                    if (f.length != 3) throw new IllegalArgumentException(&quot;expected 3 fields, got &quot; + f.length);
+                    net += Long.parseLong(f[2]);
+                } catch (IllegalArgumentException e) {
+                    bad++;
+                    System.out.println(&quot;Bad row \&quot;&quot; + line + &quot;\&quot;: &quot; + e.getMessage());
+                }
+            }
+        } catch (IOException e) {
+            System.out.println(&quot;Could not read statement: &quot; + e.getMessage());
+        }
+        System.out.println(&quot;Net change: Rs &quot; + net + &quot; (&quot; + bad + &quot; bad rows)&quot;);
+    }
+}</code></pre><div class="output">Bad row &quot;05-07,Groceries,-2,450&quot;: expected 3 fields, got 4
+Net change: Rs 34350 (1 bad rows)</div></div>
+        <p><b>How it works:</b></p><ol><li>The reader is closed automatically however the loop ends, so a long-running import service never leaks file handles.</li><li>The inner try handles one row; the outer try-with-resources handles reading. “-2,450” contains a comma, so the row splits into 4 fields and is rejected.</li><li><code>NumberFormatException</code> is a subclass of <code>IllegalArgumentException</code>, so the same catch would also handle a non-numeric amount.</li></ol>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P10</span><span class="prob__tag prob__tag--business">Business problem</span><h4>Payment retries, one session per attempt</h4></div>
+      <p>Each payment attempt opens a <code>GatewaySession</code> that must be closed whether the attempt works or not. The gateway fails twice, then succeeds. Retry up to 3 times.</p>
+      <div class="prob__io"><div><small>Input</small><pre>amount Rs 799; failures on attempts 1 and 2</pre></div><div><small>Expected output</small><pre>Attempt 1
+  session 1 opened
+  session 1 closed
+  failed: timeout
+Attempt 2
+  session 2 opened
+  session 2 closed
+  failed: timeout
+Attempt 3
+  session 3 opened
+  charged Rs 799
+  session 3 closed
+Payment done</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="java" data-file="Main.java"><pre><code>class GatewaySession implements AutoCloseable {
+    private final int id;
+
+    GatewaySession(int id) {
+        this.id = id;
+        System.out.println(&quot;  session &quot; + id + &quot; opened&quot;);
+    }
+
+    void charge(int amount, boolean fail) {
+        if (fail) throw new IllegalStateException(&quot;timeout&quot;);
+        System.out.println(&quot;  charged Rs &quot; + amount);
+    }
+
+    @Override
+    public void close() {
+        System.out.println(&quot;  session &quot; + id + &quot; closed&quot;);
+    }
+}
+
+public class Main {
+    public static void main(String[] args) {
+        boolean paid = false;
+        for (int attempt = 1; attempt &lt;= 3 &amp;&amp; !paid; attempt++) {
+            System.out.println(&quot;Attempt &quot; + attempt);
+            try (GatewaySession s = new GatewaySession(attempt)) {
+                s.charge(799, attempt &lt; 3);
+                paid = true;
+            } catch (IllegalStateException e) {
+                System.out.println(&quot;  failed: &quot; + e.getMessage());
+            }
+        }
+        System.out.println(paid ? &quot;Payment done&quot; : &quot;Payment failed&quot;);
+    }
+}</code></pre><div class="output">Attempt 1
+  session 1 opened
+  session 1 closed
+  failed: timeout
+Attempt 2
+  session 2 opened
+  session 2 closed
+  failed: timeout
+Attempt 3
+  session 3 opened
+  charged Rs 799
+  session 3 closed
+Payment done</div></div>
+        <p><b>How it works:</b></p><ol><li>Every attempt gets its own session, and every session is closed, even the failed ones: notice “closed” is printed before “failed”.</li><li>Without automatic closing, each failed attempt could leave a connection open on the gateway, and under load the pool would run out.</li><li><code>paid = true</code> sits after the charge, so it is only reached when the charge succeeds.</li></ol>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P11</span><span class="prob__tag prob__tag--business">Business problem</span><h4>Load app settings with Properties</h4></div>
+      <p>Load <code>key=value</code> settings with <code>java.util.Properties</code> from a reader in try-with-resources. Use defaults for missing keys and report a broken number clearly.</p>
+      <div class="prob__io"><div><small>Input</small><pre>settings text:
+maxCart=25
+currency=INR
+timeoutSec=3O</pre></div><div><small>Expected output</small><pre>timeoutSec is not a number, using 30
+maxCart=25, region=IN-West, timeout=30</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="java" data-file="Main.java"><pre><code>import java.io.IOException;
+import java.io.StringReader;
+import java.util.Properties;
+
+public class Main {
+    public static void main(String[] args) {
+        String text = &quot;maxCart=25\ncurrency=INR\ntimeoutSec=3O\n&quot;;
+        Properties p = new Properties();
+        try (StringReader in = new StringReader(text)) {
+            p.load(in);
+        } catch (IOException e) {
+            System.out.println(&quot;Cannot read settings: &quot; + e.getMessage());
+        }
+        int maxCart = Integer.parseInt(p.getProperty(&quot;maxCart&quot;, &quot;10&quot;));
+        String region = p.getProperty(&quot;region&quot;, &quot;IN-West&quot;);
+        int timeout;
+        try {
+            timeout = Integer.parseInt(p.getProperty(&quot;timeoutSec&quot;, &quot;30&quot;));
+        } catch (NumberFormatException e) {
+            System.out.println(&quot;timeoutSec is not a number, using 30&quot;);
+            timeout = 30;
+        }
+        System.out.println(&quot;maxCart=&quot; + maxCart + &quot;, region=&quot; + region + &quot;, timeout=&quot; + timeout);
+    }
+}</code></pre><div class="output">timeoutSec is not a number, using 30
+maxCart=25, region=IN-West, timeout=30</div></div>
+        <p><b>How it works:</b></p><ol><li><code>Properties.load</code> reads every <code>key=value</code> line; the reader is closed automatically right after.</li><li><code>getProperty(key, default)</code> handles missing keys (here <code>region</code>).</li><li>“3O” has a letter O, so parsing it throws; the program falls back to a safe value and says so, instead of refusing to start or silently using garbage.</li></ol>
+      </details>
+    </article>
+  </div>
+
+
+  <h3 id="scenarios">Real-world scenario questions (asked in company interviews)</h3>
+  <p class="scn-intro">Resource leaks rarely show up in testing and often show up in production. Decide your answer first, then open the model answer.</p>
+  <div class="scenarios">
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Ed-tech · fee portal</span><span class="scn__tag scn__tag--level">Fresher</span></div>
+      <h4>“Cannot get a connection” on the last day</h4>
+      <p class="scn__situation">A portal works fine in testing, but on the busiest day it hangs with “Cannot get a connection from the pool”. The payment code is <code>Connection c = pool.getConnection(); … process(c); c.close();</code>. What is wrong and how do you fix it?</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> do you recognise a resource leak on the exception path?</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>When <code>process</code> throws, <code>c.close()</code> is skipped and the connection is never returned. Each failure loses one; under load, the pool empties.</li>
+          <li>Fix: <code>try (Connection c = pool.getConnection()) { process(c); }</code>, which returns it on every path.</li>
+          <li>Add monitoring for active/idle pool connections and enable the pool's leak-detection logging to catch any remaining leaks.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> “increase the pool size”. It only delays the hang.</p>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Banking · statement export</span><span class="scn__tag scn__tag--level">1–3 years</span></div>
+      <h4>The real error was hidden by the close</h4>
+      <p class="scn__situation">Logs for a failed statement export show only <code>IOException: Stream closed</code> from a finally block that closes the writer. The developer can't find why the export failed. The code uses <code>try { … } finally { writer.close(); }</code>. Explain and fix.</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> do you know that finally can mask exceptions and how try-with-resources prevents it?</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>The export threw first (the real cause), then <code>close()</code> in finally threw too, and that second exception replaced the first.</li>
+          <li>Use <code>try (BufferedWriter writer = …)</code>: the original exception is thrown, and “Stream closed” is attached as suppressed.</li>
+          <li>Make sure logging prints the full stack trace, which includes the “Suppressed:” section.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> wrapping close() in an empty catch to silence it. That hides problems such as data not flushed to disk.</p>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Analytics · log processing</span><span class="scn__tag scn__tag--level">1–3 years</span></div>
+      <h4>“Too many open files”</h4>
+      <p class="scn__situation">A job processes thousands of log files with <code>Files.lines(path).filter(…).count()</code> in a loop. After a while it fails with <code>FileSystemException: Too many open files</code>. Why, when no reader is visible in the code?</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> do you know that some APIs return resources that must be closed?</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li><code>Files.lines</code> returns a Stream that keeps the file open until the stream is closed. Counting doesn't close it, so each loop iteration leaks one file handle until the operating-system limit is reached.</li>
+          <li>Fix: <code>try (Stream&lt;String&gt; lines = Files.lines(path)) { count = lines.filter(…).count(); }</code>. Stream implements AutoCloseable.</li>
+          <li>Check the documentation of any method returning a stream, reader or connection: “must be closed” notes matter.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> raising the open-files limit as the fix.</p>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Platform · library design</span><span class="scn__tag scn__tag--level">3+ years</span></div>
+      <h4>Designing a lock helper</h4>
+      <p class="scn__situation">Your team keeps forgetting to release distributed locks on order ids, leaving orders stuck. Design an API so the release can't be forgotten, and describe what close() should do if releasing fails.</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> can you apply AutoCloseable to your own resources thoughtfully?</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>Return an <code>OrderLock implements AutoCloseable</code> from <code>locks.acquire(orderId)</code>; callers write <code>try (OrderLock l = locks.acquire(id)) { … }</code>.</li>
+          <li>Make <code>close()</code> idempotent (safe to call twice) and narrow its throws clause (none, or a specific unchecked exception) so callers don't need a catch just for closing.</li>
+          <li>If release fails, throw a clear exception; when the body also failed it becomes suppressed, so neither problem is lost. Also give locks an expiry time as a safety net.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> a <code>release()</code> method that callers must remember to call in finally.</p>
+      </div></details>
+    </article>
+  </div>
+</section>
+
+<nav class="lesson-nav" id="lesson-nav" aria-label="Lesson navigation"></nav>
+<div class="ad-slot" data-slot="bottom"></div>
+</article>
+
+<aside class="lesson-side">
+  <nav class="toc" aria-label="In this lesson">
+    <h4>In this lesson</h4>
+    <ol>
+      <li><a href="#story">The story</a></li>
+      <li><a href="#definition">Definition</a></li>
+      <li><a href="#types">Types and ways to use it</a></li>
+      <li><a href="#steps">Step by step</a></li>
+      <li><a href="#animation">See it happen</a></li>
+      <li><a href="#real-world">Real-world use</a></li>
+      <li><a href="#run">Run the code</a></li>
+      <li><a href="#tracer">Line by line</a></li>
+      <li><a href="#worked">Worked examples</a></li>
+      <li><a href="#quiz">Quiz and revision</a></li>
+      <li><a href="#practice">Practice problems</a></li>
+      <li><a href="#scenarios">Industry scenarios</a></li>
+    </ol>
+  </nav>
+  <div class="ad-slot" data-slot="side"></div>
+  <div class="outline" id="outline"></div>
+</aside>
+</div>
+</main>
+
+<footer class="site-footer">
+  <div class="wrap">
+    <div><h4>MyPhatshala</h4><p>Free programming and IT lessons that show what happens behind the screen.</p></div>
+    <div><h4>Learn</h4><a href="../../../../#tracks">All courses</a><a href="../../">Core Java syllabus</a></div>
+    <div><h4>Site</h4><a href="../../../../about.html">About</a><a href="../../../../contact.html">Contact</a><a href="../../../../privacy.html">Privacy policy</a><a href="../../../../disclaimer.html">Disclaimer</a></div>
+    <div class="copyright">© MyPhatshala. All lesson content, diagrams and animations are original. Please do not copy without permission.</div>
+  </div>
+</footer>
+
+<script src="../../../../data/courses/core-java.js"></script>
+<script src="../../../../assets/js/lesson.js"></script>
+<script src="../../../../assets/js/ads.js"></script>
+<script src="../../../../assets/js/site.js"></script>
+</body>
+</html>

@@ -1,0 +1,425 @@
+<!--META {
+"course": "core-java", "module": "11-collections", "lesson": "08-comparable-comparator",
+"title": "Comparable vs Comparator", "courseTitle": "Core Java", "number": "11.8",
+"track": "#E8772E", "trackId": "programming", "trackTitle": "Programming Languages", "level": "Intermediate",
+"minutes": 24,
+"description": "Sorting objects in Java: Comparable (compareTo, the natural order inside the class) vs Comparator (compare, any number of orders outside it). How sort calls your method, what negative/zero/positive mean, Comparator.comparing, thenComparing, reversed and nullsFirst, the subtraction overflow bug, consistency with equals, and sorting in TreeSet, TreeMap and PriorityQueue. With animations, a JVM tracer, {{NPROB}} practice problems, quiz and interview scenarios.",
+"ogTitle": "Comparable vs Comparator: teaching Java how to sort your objects",
+"ogDescription": "Watch sort call your compareTo on the JVM, build multi-level comparators, and solve {{NPROB}} problems.",
+"lead": "Java can sort numbers and Strings out of the box, but how should it sort students, orders or trains? You have to tell it. <b>Comparable</b> puts one <i>natural</i> order inside the class (<code>compareTo</code>). <b>Comparator</b> describes extra orders outside it (<code>compare</code>): by marks, by name, by date, highest first, ties broken by roll number. You'll learn both, how sorting algorithms call them, and the small bugs that make sorts go wrong.",
+"chips": ["Module 11 · Collections", "⏱ 24 min", "Intermediate", "{{NPROB}} practice problems"]
+} META-->
+<part n="1" id="story" label="The story">
+  <h2>One class, three rank lists</h2>
+  <div class="story">
+    <p class="narration">The exam cell needs three printouts of the same students: by roll number for the attendance register, by marks (highest first) for the merit list, and by name for the certificate desk. Kabir calls <code>Collections.sort(students)</code> and gets a compile error.</p>
+    <div class="scene">
+      <svg viewBox="0 0 640 170" role="img" aria-label="The same students sorted three ways: by roll number, by marks descending, by name">
+        <g font-size="10.5">
+          <rect x="14" y="14" width="196" height="140" rx="12" class="s-soft-blue" style="stroke:var(--blue)"/>
+          <text x="26" y="36" font-weight="700" class="s-blue">By roll (natural)</text><text x="26" y="52" class="mono s-ink2">Comparable</text>
+          <text x="26" y="78" class="mono s-ink">07 Riya    92</text><text x="26" y="96" class="mono s-ink">12 Kabir   78</text><text x="26" y="114" class="mono s-ink">21 Om      92</text>
+          <rect x="222" y="14" width="196" height="140" rx="12" class="s-soft-acc" style="stroke:var(--track)"/>
+          <text x="234" y="36" font-weight="700" class="s-acc">Merit list</text><text x="234" y="52" class="mono s-ink2">Comparator: marks ↓, roll</text>
+          <text x="234" y="78" class="mono s-ink">07 Riya    92</text><text x="234" y="96" class="mono s-ink">21 Om      92</text><text x="234" y="114" class="mono s-ink">12 Kabir   78</text>
+          <rect x="430" y="14" width="196" height="140" rx="12" class="s-soft-green" style="stroke:var(--green)"/>
+          <text x="442" y="36" font-weight="700" class="s-green">Certificates</text><text x="442" y="52" class="mono s-ink2">Comparator: name</text>
+          <text x="442" y="78" class="mono s-ink">12 Kabir   78</text><text x="442" y="96" class="mono s-ink">21 Om      92</text><text x="442" y="114" class="mono s-ink">07 Riya    92</text>
+        </g>
+        <text x="632" y="166" text-anchor="end" class="s-wm">myphatshala.com</text>
+      </svg>
+    </div>
+    <riya>Sir, Java sorts numbers and names fine. Why can't it sort students?</riya>
+    <arjun>Because it doesn't know what “smaller” means for a student. Roll number? Marks? Name? You choose. If one order is the obvious, everyday one, like roll number, put it inside the class by implementing <code>Comparable</code>.</arjun>
+    <riya>And the merit list and certificates?</riya>
+    <arjun>Those are extra orders, so write them as <code>Comparator</code>s outside the class and pass them to <code>sort</code>. One class, as many orders as the exam cell wants, and modern Java builds them in one line.</arjun>
+  </div>
+</part>
+
+<part n="2" id="definition" label="Definition">
+  <h2>What are Comparable and Comparator?</h2>
+  <div class="def">
+    <div class="def__formal"><small>Formal definition (write this in exams)</small>
+      <p><b>Comparable&lt;T&gt;</b> (<code>java.lang</code>) is implemented by a class to define its <b>natural ordering</b> through the single method <code>int compareTo(T other)</code>. <b>Comparator&lt;T&gt;</b> (<code>java.util</code>) is a separate object that defines an ordering through <code>int compare(T a, T b)</code>, allowing multiple orderings and ordering of classes you can't modify. Both return a <b>negative</b> integer if the first argument comes before the second, <b>zero</b> if they are equal in the ordering, and a <b>positive</b> integer if it comes after. Sorting methods (<code>Collections.sort</code>, <code>List.sort</code>, <code>Arrays.sort</code>) and sorted collections (<code>TreeSet</code>, <code>TreeMap</code>, <code>PriorityQueue</code>) use the natural ordering unless a Comparator is supplied.</p></div>
+    <div class="def__simple"><small>In simple words</small>
+      <p>Comparable: “this is how my objects are normally ordered”, written in the class. Comparator: “sort them this way for now”, written anywhere.</p></div>
+  </div>
+  <h3>Words you'll meet in this lesson</h3>
+  <div class="terms">
+    <div class="term"><b>Natural ordering</b><span>The one default order of a type: numbers ascending, Strings alphabetical.</span></div>
+    <div class="term"><b>Sort key</b><span>The field you sort by: marks, name, date.</span></div>
+    <div class="term"><b>Tie-breaker</b><span>A second key used when the first is equal.</span></div>
+    <div class="term"><b>Stable sort</b><span>Equal elements keep their original relative order. Java's object sorts are stable.</span></div>
+    <div class="term"><b>Lexicographic</b><span>Dictionary order by character codes: “Zoya” &lt; “riya” because capitals come first.</span></div>
+    <div class="term"><b>Method reference</b><span><code>Student::marks</code> means “call <code>marks()</code> on each student” (Lesson 14.1).</span></div>
+  </div>
+  <h3>Comparable vs Comparator</h3>
+  <div class="table-wrap">
+  <table class="compare" style="min-width:560px">
+    <thead><tr><th></th><th><code>Comparable</code></th><th><code>Comparator</code></th></tr></thead>
+    <tbody>
+      <tr><td>Package</td><td><code>java.lang</code></td><td><code>java.util</code></td></tr>
+      <tr><td>Method</td><td><code>compareTo(T other)</code></td><td><code>compare(T a, T b)</code></td></tr>
+      <tr><td>Where</td><td>Inside the class being sorted</td><td>A separate object (class, lambda, method reference)</td></tr>
+      <tr><td>How many orders</td><td>One natural order</td><td>As many as you like</td></tr>
+      <tr><td>Use with</td><td><code>Collections.sort(list)</code>, <code>new TreeSet&lt;&gt;()</code></td><td><code>list.sort(cmp)</code>, <code>new TreeSet&lt;&gt;(cmp)</code></td></tr>
+      <tr><td>Classes you can't edit</td><td>Not possible</td><td>Works fine</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <exam><b>Exam tip:</b> only the <b>sign</b> of the result matters (negative / zero / positive), not the size. And <code>compareTo</code> should be <b>consistent with equals</b>: <code>a.compareTo(b) == 0</code> exactly when <code>a.equals(b)</code>; otherwise TreeSet/TreeMap behave strangely (Lesson 11.5).</exam>
+</part>
+
+{{AD}}
+
+<part n="3" id="types" label="Types and ways to use it">
+  <h2>From one natural order to many custom ones</h2>
+  <div class="cards">
+    <div class="card"><svg class="ic" viewBox="0 0 40 40" fill="none" stroke="var(--blue)" stroke-width="2"><rect x="6" y="8" width="28" height="24" rx="4"/><path d="M12 16h16M12 24h10"/></svg><h4>Comparable</h4><p>Implement <code>compareTo</code> in the class. Sorting needs no arguments.</p><span class="tag">natural order</span></div>
+    <div class="card"><svg class="ic" viewBox="0 0 40 40" fill="none" stroke="var(--track)" stroke-width="2"><path d="M8 10h24M8 20h16M8 30h8"/></svg><h4>Comparator class / lambda</h4><p><code>(a, b) -&gt; Integer.compare(a.marks, b.marks)</code></p><span class="tag">custom order</span></div>
+    <div class="card"><svg class="ic" viewBox="0 0 40 40" fill="none" stroke="var(--green)" stroke-width="2"><path d="M8 12h24M8 20h24M8 28h24"/><circle cx="32" cy="28" r="3"/></svg><h4>Comparator builders</h4><p><code>comparing</code>, <code>thenComparing</code>, <code>reversed</code>, <code>nullsFirst</code>.</p><span class="tag">readable</span></div>
+  </div>
+
+  <h3>Comparable: the natural order</h3>
+  <div class="code" data-lang="java" data-file="Main.java"><pre><code>import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+
+class Student implements Comparable&lt;Student&gt; {
+    final int roll;
+    final String name;
+    final int marks;
+
+    Student(int roll, String name, int marks) {
+        this.roll = roll;
+        this.name = name;
+        this.marks = marks;
+    }
+
+    @Override
+    public int compareTo(Student other) {
+        return Integer.compare(this.roll, other.roll);   // by roll number
+    }
+
+    @Override
+    public String toString() { return roll + " " + name + " " + marks; }
+}
+
+public class Main {
+    public static void main(String[] args) {
+        List&lt;Student&gt; list = new ArrayList&lt;&gt;(List.of(
+            new Student(21, "Om", 92), new Student(7, "Riya", 92), new Student(12, "Kabir", 78)));
+        Collections.sort(list);                 // uses compareTo
+        System.out.println(list);
+    }
+}</code></pre><div class="output">[7 Riya 92, 12 Kabir 78, 21 Om 92]</div></div>
+
+  <h3>Comparators: any order you need</h3>
+  <div class="code" data-lang="java" data-file="Main.java"><pre><code>import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.List;
+
+class Student {
+    final int roll; final String name; final int marks;
+    Student(int roll, String name, int marks) { this.roll = roll; this.name = name; this.marks = marks; }
+    int roll() { return roll; }
+    String name() { return name; }
+    int marks() { return marks; }
+    @Override public String toString() { return roll + " " + name + " " + marks; }
+}
+
+public class Main {
+    public static void main(String[] args) {
+        List&lt;Student&gt; list = new ArrayList&lt;&gt;(List.of(
+            new Student(21, "Om", 92), new Student(7, "Riya", 92), new Student(12, "Kabir", 78)));
+
+        // 1. A Comparator written as a lambda (Lesson 14.1)
+        list.sort((a, b) -&gt; a.name.compareTo(b.name));
+        System.out.println("By name:  " + list);
+
+        // 2. Built with Comparator.comparing: marks high→low, ties by roll
+        Comparator&lt;Student&gt; merit = Comparator.comparingInt(Student::marks).reversed()
+                                              .thenComparingInt(Student::roll);
+        list.sort(merit);
+        System.out.println("Merit:    " + list);
+    }
+}</code></pre><div class="output">By name:  [12 Kabir 78, 21 Om 92, 7 Riya 92]
+Merit:    [7 Riya 92, 21 Om 92, 12 Kabir 78]</div></div>
+
+  <h3>Strings: case matters</h3>
+  <div class="code" data-lang="java" data-file="Main.java"><pre><code>import java.util.*;
+
+public class Main {
+    public static void main(String[] args) {
+        List&lt;String&gt; names = new ArrayList&lt;&gt;(List.of("riya", "Zoya", "Kabir"));
+        Collections.sort(names);                              // natural: by char codes
+        System.out.println(names);
+        names.sort(String.CASE_INSENSITIVE_ORDER);           // a ready-made Comparator
+        System.out.println(names);
+        names.sort(Comparator.reverseOrder());
+        System.out.println(names);
+    }
+}</code></pre><div class="output">[Kabir, Zoya, riya]
+[Kabir, riya, Zoya]
+[riya, Zoya, Kabir]</div></div>
+
+  <h3>The subtraction trap</h3>
+  <div class="code" data-lang="java" data-file="Main.java"><pre><code>public class Main {
+    public static void main(String[] args) {
+        int a = -2_000_000_000, b = 2_000_000_000;
+        System.out.println(a - b);                  // overflows: looks positive!
+        System.out.println(Integer.compare(a, b));  // correct: negative
+    }
+}</code></pre><div class="output">294967296
+-1</div></div>
+  <warn><b>Don't write <code>return this.x - other.x;</code></b> in compareTo. For large or negative values the subtraction overflows and the sign flips, so the sort silently goes wrong. Use <code>Integer.compare</code>, <code>Long.compare</code>, <code>Double.compare</code> or <code>Comparator.comparingInt</code>.</warn>
+  <tip><b>Rule of thumb:</b> give a class a natural order only if there's one obvious, stable order (IDs, dates, version numbers). Everything else is a Comparator, ideally a named constant like <code>Student.BY_MERIT</code> built with <code>comparing(...).thenComparing(...)</code>.</tip>
+</part>
+
+<part n="4" id="steps" label="Step by step">
+  <h2>What sort does with your comparator</h2>
+  <ol class="stepper">
+    <li><h4>You hand over the rule</h4>
+      <div class="code" data-lang="java" data-file="Main.java"><pre><code>list.sort(merit);</code></pre></div>
+      <span class="behind"><code>List.sort</code> copies the elements into an array and calls <code>Arrays.sort(array, merit)</code>.</span></li>
+    <li><h4>The algorithm picks pairs</h4>
+      <span class="behind">Java sorts objects with <b>TimSort</b>, a merge sort tuned for real data (it finds already-sorted runs). For tiny arrays it uses binary insertion sort. It decides which two elements to compare next.</span></li>
+    <li><h4>Your method answers: before, same or after</h4>
+      <span class="behind">For each pair it calls <code>merit.compare(a, b)</code> (or <code>a.compareTo(b)</code>). Your code never moves elements; it only answers with a sign. The algorithm moves them.</span></li>
+    <li><h4>About n log n questions</h4>
+      <span class="behind">Sorting n elements needs roughly n·log₂n comparisons: about 10,000 for 1,000 students. That's why a comparator should be cheap and must be consistent (if a &lt; b and b &lt; c then a &lt; c), or TimSort may throw <i>Comparison method violates its general contract!</i>.</span></li>
+    <li><h4>Stable result, written back</h4>
+      <span class="behind">The sorted array is copied back into the list. Because the sort is stable, students with equal keys stay in their previous relative order, which lets you sort by a secondary key first and the primary key second if you want.</span></li>
+  </ol>
+</part>
+
+<part n="5" id="animation" label="See it happen">
+  <h2>sort asks, your comparator answers: both views</h2>
+  <p>Left: the list being sorted for the merit list. Right: each call to <code>compare</code>, its result, and what the sort does with it.</p>
+  {{ANIM}}
+</part>
+
+<part n="6" id="real-world" label="Real-world use">
+  <h2>Ordering in real systems</h2>
+  <p>Every sorted screen, ranked list and priority queue in an app has a comparator behind it.</p>
+  {{ANIM2}}
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="14" y="16" width="92" height="58" rx="6" class="s-card" style="stroke:var(--line)"/><text x="22" y="34" font-size="8" class="mono s-ink">Price ↑ | Rating ↓</text><path d="M22 44h70M22 54h70M22 64h50" style="stroke:var(--ink-3)"/></svg></div>
+    <div><h4>1. “Sort by” menus</h4><p>Shopping and travel apps offer “price low to high”, “rating”, “newest”. Each option is a Comparator (often with a tie-breaker like product ID so the order is stable across pages).</p>
+      <div class="uc-flow"><span>user picks “Price ↑”</span><i>→</i><span class="java">comparing(Product::price)</span><i>→</i><span>sorted results</span></div></div>
+  </div>
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="20" y="20" width="80" height="50" rx="6" class="s-card" style="stroke:var(--line)"/><text x="60" y="40" text-anchor="middle" font-size="8.5" class="mono s-ink">1. Riya 92</text><text x="60" y="56" text-anchor="middle" font-size="8.5" class="mono s-ink">2. Om   92</text></svg></div>
+    <div><h4>2. Rankings and leaderboards</h4><p>Exam results, sales leaderboards and cricket tables sort by a main score with tie-breakers (net run rate, then wins), exactly a <code>thenComparing</code> chain.</p>
+      <div class="uc-flow"><span>points ↓</span><i>→</i><span class="java">thenComparing(nrr ↓)</span><i>→</i><span>league table</span></div></div>
+  </div>
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="14" y="34" width="22" height="22" rx="4" class="s-soft-acc" style="stroke:var(--red)"/><rect x="40" y="34" width="22" height="22" rx="4" class="s-soft-acc" style="stroke:var(--track)"/><rect x="66" y="34" width="22" height="22" rx="4" class="s-card" style="stroke:var(--line)"/></svg></div>
+    <div><h4>3. Priority processing</h4><p>Support tickets by severity then age, hospital triage by condition, delivery jobs by deadline: a <code>PriorityQueue</code> with a Comparator always hands out the most urgent item next.</p>
+      <div class="uc-flow"><span>new ticket</span><i>→</i><span class="java">PriorityQueue(bySeverity)</span><i>→</i><span>most urgent first</span></div></div>
+  </div>
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="16" y="22" width="88" height="46" rx="6" class="s-card" style="stroke:var(--line)"/><text x="60" y="42" text-anchor="middle" font-size="8.5" class="mono s-ink">v1.10 &gt; v1.9</text><text x="60" y="58" text-anchor="middle" font-size="8.5" class="s-ink2">natural order</text></svg></div>
+    <div><h4>4. Natural orders in value types</h4><p>Types like <code>LocalDate</code>, <code>BigDecimal</code> and app version numbers implement <code>Comparable</code>, so they sort correctly in TreeMaps and reports without extra code.</p>
+      <div class="uc-flow"><span>TreeMap&lt;LocalDate, …&gt;</span><i>→</i><span class="java">compareTo</span><i>→</i><span>chronological report</span></div></div>
+  </div>
+  <p class="muted">Examples are simplified. Large lists are usually sorted by the database (<code>ORDER BY</code>) before reaching Java.</p>
+</part>
+
+{{AD}}
+
+<part n="7" id="run" label="Run the code">
+  <h2>Exam cell: three printouts from one list</h2>
+  <div class="code" data-lang="java" data-file="Main.java"><pre><code>import java.util.*;
+
+class Student implements Comparable&lt;Student&gt; {
+    final int roll;
+    final String name;
+    final int marks;
+
+    Student(int roll, String name, int marks) {
+        this.roll = roll;
+        this.name = name;
+        this.marks = marks;
+    }
+
+    int roll() { return roll; }
+    String name() { return name; }
+    int marks() { return marks; }
+
+    @Override
+    public int compareTo(Student o) { return Integer.compare(roll, o.roll); }
+
+    @Override
+    public String toString() { return String.format("%02d %-6s %d", roll, name, marks); }
+
+    static final Comparator&lt;Student&gt; BY_MERIT =
+        Comparator.comparingInt(Student::marks).reversed().thenComparing(Comparator.naturalOrder());
+    static final Comparator&lt;Student&gt; BY_NAME =
+        Comparator.comparing(Student::name, String.CASE_INSENSITIVE_ORDER);
+}
+
+public class Main {
+    static void print(String title, List&lt;Student&gt; list) {
+        System.out.println(title);
+        for (Student s : list) System.out.println("  " + s);
+    }
+
+    public static void main(String[] args) {
+        List&lt;Student&gt; students = new ArrayList&lt;&gt;(List.of(
+            new Student(21, "Om", 92), new Student(7, "Riya", 92),
+            new Student(12, "Kabir", 78), new Student(3, "zoya", 85)));
+
+        Collections.sort(students);
+        print("Register:", students);
+        students.sort(Student.BY_MERIT);
+        print("Merit list:", students);
+        students.sort(Student.BY_NAME);
+        print("Certificates:", students);
+    }
+}</code></pre><div class="output">Register:
+  03 zoya   85
+  07 Riya   92
+  12 Kabir  78
+  21 Om     92
+Merit list:
+  07 Riya   92
+  21 Om     92
+  03 zoya   85
+  12 Kabir  78
+Certificates:
+  12 Kabir  78
+  21 Om     92
+  07 Riya   92
+  03 zoya   85</div></div>
+  <ul class="anno">
+    <li><code>implements Comparable&lt;Student&gt;</code><span>The natural order: roll number. <code>Collections.sort(students)</code> uses it.</span></li>
+    <li><code>Integer.compare(roll, o.roll)</code><span>Safe comparison; no subtraction overflow.</span></li>
+    <li><code>BY_MERIT</code><span>Marks high → low, ties broken by the natural order (roll).</span></li>
+    <li><code>BY_NAME</code><span>Case-insensitive, so “zoya” doesn't jump after capitals.</span></li>
+  </ul>
+  <div class="runner">
+    <script type="application/json">{
+      "lang": "java", "file": "Main.java",
+      "tasks": [
+        { "label": "1 · Exam cell", "hint": "Press <b>Run</b>. Then add a comparator <code>BY_MARKS_ASC</code> (lowest first) and print a “needs help” list.",
+          "code": "import java.util.*;\n\nclass Student implements Comparable<Student> {\n    final int roll;\n    final String name;\n    final int marks;\n\n    Student(int roll, String name, int marks) {\n        this.roll = roll;\n        this.name = name;\n        this.marks = marks;\n    }\n\n    int roll() { return roll; }\n    String name() { return name; }\n    int marks() { return marks; }\n\n    @Override\n    public int compareTo(Student o) { return Integer.compare(roll, o.roll); }\n\n    @Override\n    public String toString() { return String.format(\"%02d %-6s %d\", roll, name, marks); }\n\n    static final Comparator<Student> BY_MERIT =\n        Comparator.comparingInt(Student::marks).reversed().thenComparing(Comparator.naturalOrder());\n    static final Comparator<Student> BY_NAME =\n        Comparator.comparing(Student::name, String.CASE_INSENSITIVE_ORDER);\n}\n\npublic class Main {\n    static void print(String title, List<Student> list) {\n        System.out.println(title);\n        for (Student s : list) System.out.println(\"  \" + s);\n    }\n\n    public static void main(String[] args) {\n        List<Student> students = new ArrayList<>(List.of(\n            new Student(21, \"Om\", 92), new Student(7, \"Riya\", 92),\n            new Student(12, \"Kabir\", 78), new Student(3, \"zoya\", 85)));\n\n        Collections.sort(students);\n        print(\"Register:\", students);\n        students.sort(Student.BY_MERIT);\n        print(\"Merit list:\", students);\n        students.sort(Student.BY_NAME);\n        print(\"Certificates:\", students);\n    }\n}\n" },
+        { "label": "2 · Spot the error: not Comparable", "hint": "<code>Collections.sort(list)</code> needs a natural order. Implement <code>Comparable&lt;Train&gt;</code>, or call <code>list.sort(...)</code> with a Comparator.",
+          "code": "import java.util.*;\n\nclass Train {\n    String no;\n    int departs;\n    Train(String no, int departs) { this.no = no; this.departs = departs; }\n}\n\npublic class Main {\n    public static void main(String[] args) {\n        List<Train> trains = new ArrayList<>(List.of(new Train(\"12123\", 1715), new Train(\"11007\", 640)));\n        Collections.sort(trains);\n        System.out.println(trains.get(0).no);\n    }\n}\n", "_expect": "compile-error" },
+        { "label": "3 · Predict: subtraction overflow", "hint": "<b>Predict first:</b> which order does each comparator produce? Then fix <code>bad</code> with <code>Integer.compare</code>.",
+          "code": "import java.util.*;\n\npublic class Main {\n    public static void main(String[] args) {\n        List<Integer> vals = new ArrayList<>(List.of(2_000_000_000, -2_000_000_000, 0));\n        Comparator<Integer> bad = (a, b) -> a - b;\n        Comparator<Integer> good = Integer::compare;\n        vals.sort(bad);\n        System.out.println(\"bad:  \" + vals);\n        vals.sort(good);\n        System.out.println(\"good: \" + vals);\n    }\n}\n" },
+        { "label": "4 · Case-insensitive names", "hint": "Press <b>Run</b>. Then sort by name length first, then alphabetically, using <code>Comparator.comparingInt(String::length).thenComparing(...)</code>.",
+          "code": "import java.util.*;\n\npublic class Main {\n    public static void main(String[] args) {\n        List<String> names = new ArrayList<>(List.of(\"riya\", \"Zoya\", \"Kabir\", \"om\"));\n        Collections.sort(names);\n        System.out.println(names);\n        names.sort(String.CASE_INSENSITIVE_ORDER);\n        System.out.println(names);\n    }\n}\n" },
+        { "label": "5 · PriorityQueue with a comparator", "hint": "Tickets: lower severity number = more urgent. Press <b>Run</b>, then break ties by ticket id.",
+          "code": "import java.util.*;\n\npublic class Main {\n    public static void main(String[] args) {\n        PriorityQueue<int[]> q = new PriorityQueue<>((a, b) -> Integer.compare(a[1], b[1]));\n        q.offer(new int[]{101, 3});\n        q.offer(new int[]{102, 1});\n        q.offer(new int[]{103, 2});\n        while (!q.isEmpty()) {\n            int[] t = q.poll();\n            System.out.println(\"Ticket \" + t[0] + \" (severity \" + t[1] + \")\");\n        }\n    }\n}\n" }
+      ]
+    }</script>
+  </div>
+</part>
+
+<part n="8" id="tracer" label="Line by line">
+  <h2>sort calls your compareTo</h2>
+  <p>This trace is recorded from the real JVM. You never call <code>compareTo</code> yourself: watch <code>Collections.sort</code> call it on pairs of students (frames appear and disappear) and the list change order.</p>
+  {{TRACER}}
+
+{{WORKED}}
+</part>
+
+<part n="9" id="quiz" label="Quiz and revision">
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <script type="application/json">[
+      { "q": "Which method does Comparable declare?", "options": ["compare(a, b)", "compareTo(other)", "equals(other)", "sort()"], "answer": 1, "why": "Comparable<T> has int compareTo(T o); Comparator<T> has int compare(T a, T b)." },
+      { "q": "a.compareTo(b) returns a negative number. This means…", "options": ["a comes after b", "a comes before b", "a equals b", "An error"], "answer": 1, "why": "Negative = before, zero = same position, positive = after." },
+      { "q": "You need students sorted by marks today and by name tomorrow, without changing the class. Use…", "options": ["Comparable", "Comparator", "equals", "hashCode"], "answer": 1, "why": "Comparators are separate objects; you can have as many as you need." },
+      { "q": "Collections.sort(list) on a class that isn't Comparable…", "options": ["Sorts by memory address", "Doesn't compile (bounded type)", "Sorts by toString", "Does nothing"], "answer": 1, "why": "sort(List<T>) requires T extends Comparable<? super T>." },
+      { "q": "Why avoid return this.x - other.x;?", "options": ["It's slow", "Integer overflow can flip the sign", "It's not allowed", "It returns double"], "answer": 1, "why": "Use Integer.compare(this.x, other.x)." },
+      { "q": "A comparator is built with comparingInt(S::marks) and then .reversed() is called on it. How does it sort?", "options": ["Sorts by marks ascending", "Sorts by marks descending", "Reverses the list", "Sorts by name"], "answer": 1, "why": "reversed() flips the comparator's order." },
+      { "q": "Which algorithm does Java use to sort objects?", "options": ["Bubble sort", "Quicksort", "TimSort (stable)", "Heap sort"], "answer": 2, "why": "Object sorts use TimSort; primitive arrays use a dual-pivot quicksort." },
+      { "q": "In thenComparing chains, the second comparator is used when…", "options": ["Always", "The first comparator returns 0", "The first returns negative", "Never"], "answer": 1, "why": "It only breaks ties of the earlier keys." }
+    ]</script>
+  </div>
+  <h3>Quick revision</h3>
+  <div class="revision">
+    <h3>Lesson 11.8 in one screen</h3>
+    <ul>
+      <li>Comparable (java.lang): <code>compareTo(o)</code> inside the class = one natural order.</li>
+      <li>Comparator (java.util): <code>compare(a, b)</code> outside = any number of orders, even for classes you can't edit.</li>
+      <li>Result sign: negative (before), 0 (same), positive (after).</li>
+      <li>Build comparators: <code>comparing</code>, <code>comparingInt</code>, <code>thenComparing</code>, <code>reversed</code>, <code>nullsFirst/Last</code>, <code>naturalOrder</code>, <code>reverseOrder</code>, <code>String.CASE_INSENSITIVE_ORDER</code>.</li>
+      <li>Use <code>Integer.compare</code>, never subtraction. Keep compareTo consistent with equals.</li>
+      <li>Used by <code>Collections.sort</code>, <code>List.sort</code>, <code>Arrays.sort</code>, TreeSet, TreeMap, PriorityQueue. Object sort = stable TimSort.</li>
+    </ul>
+  </div>
+  <h3>Interview and viva questions</h3>
+  <div class="faq">
+    <details><summary>Comparable vs Comparator: when do you use which?</summary><p>Implement Comparable when the class has one obvious, natural order (ID, date, version). Use Comparators for every other order, for orders that depend on the situation (a screen's “sort by” choice), and for classes you don't own. Many classes have both: a natural order plus named comparators.</p></details>
+    <details><summary>What does “consistent with equals” mean?</summary><p>That <code>compareTo</code> returns 0 exactly when <code>equals</code> returns true. If not, sorted collections disagree with hash collections: a TreeSet may treat two unequal objects as duplicates, or keep two equal ones. <code>BigDecimal</code> is a famous exception: 2.0 and 2.00 compare as 0 but aren't equal.</p></details>
+    <details><summary>Can you sort with a lambda?</summary><p>Yes. Comparator is a functional interface, so <code>list.sort((a, b) -&gt; Integer.compare(a.marks, b.marks))</code> works, as does <code>list.sort(Comparator.comparingInt(Student::marks))</code>. Lambdas are covered in Lesson 14.1.</p></details>
+    <details><summary>What is “Comparison method violates its general contract”?</summary><p>TimSort throws this IllegalArgumentException when it detects an inconsistent comparator, e.g. one that isn't transitive, uses random values, or overflows with subtraction. Fix the comparator so it's a proper total order.</p></details>
+    <details><summary>How do you sort in descending order?</summary><p><code>list.sort(Comparator.reverseOrder())</code> for natural order, <code>cmp.reversed()</code> for a custom comparator, or <code>Collections.sort(list, Collections.reverseOrder())</code>.</p></details>
+  </div>
+
+{{PRACTICE}}
+
+  <h3 id="scenarios">Real-world scenario questions (asked in company interviews)</h3>
+  <p class="scn-intro">Sorting questions in interviews check whether your orders are correct, stable and maintainable.</p>
+  <div class="scenarios">
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">E-commerce · bug</span><span class="scn__tag scn__tag--level">Junior</span></div>
+      <h4>Products jump between pages</h4>
+      <p class="scn__situation">Search results are sorted by price and shown 20 per page. Users report the same product appearing on page 1 and page 2, and some never appearing. Many products share the same price. What's wrong?</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> tie-breakers and deterministic ordering.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>Ties by price have no defined order, so each page request (often a separate database query) may order equal-priced products differently.</li>
+          <li>Add a unique tie-breaker: <code>comparing(Product::price).thenComparing(Product::id)</code> in Java, or <code>ORDER BY price, id</code> in SQL.</li>
+          <li>Now every request produces the same total order, so pages don't overlap.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> blaming caching. The order itself is ambiguous.</p>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Fintech · correctness</span><span class="scn__tag scn__tag--level">Junior</span></div>
+      <h4>Large transactions sorted wrongly</h4>
+      <p class="scn__situation">A report sorts transactions by amount in paise using <code>(a, b) -&gt; (int) (a.paise - b.paise)</code>. Small amounts sort fine; crore-rupee transfers appear in random places. Why?</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> overflow and casting in comparators.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>The difference of two large <code>long</code> values cast to <code>int</code> overflows, so the sign can be wrong.</li>
+          <li>Use <code>Long.compare(a.paise, b.paise)</code> or <code>Comparator.comparingLong(Txn::paise)</code>.</li>
+          <li>Add a test with very large and negative values; a broken comparator can even make TimSort throw.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> converting to double; precision issues follow.</p>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Sports · design</span><span class="scn__tag scn__tag--level">Fresher</span></div>
+      <h4>Points table for a cricket league</h4>
+      <p class="scn__situation">Rank teams by points (high first); if equal, by net run rate (high first); if still equal, by team name. Write the comparator.</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> multi-level comparators.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li><code>Comparator.comparingInt(Team::points).reversed().thenComparing(Comparator.comparingDouble(Team::nrr).reversed()).thenComparing(Team::name)</code>.</li>
+          <li>Note that <code>reversed()</code> on a chain reverses everything before it, so reverse each key's comparator separately, as above.</li>
+          <li>Keep it as a named constant (e.g. <code>Team.TABLE_ORDER</code>) and unit-test tie cases.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> a long hand-written if/else compare method; it's easy to get a branch wrong.</p>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Platform · design</span><span class="scn__tag scn__tag--level">Mid</span></div>
+      <h4>Should Order implement Comparable?</h4>
+      <p class="scn__situation">A teammate wants <code>Order implements Comparable&lt;Order&gt;</code> comparing by total amount, “because we often sort by amount”. Do you agree?</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> what a natural order should be.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>Amount isn't a natural, unique order: two different orders can have the same amount, so compareTo wouldn't be consistent with equals, and TreeSet&lt;Order&gt; would drop orders.</li>
+          <li>If anything, the natural order should be the unique order ID or creation time. Sorting by amount should be a named Comparator (<code>Order.BY_AMOUNT</code>).</li>
+          <li>This keeps sorted collections and reports correct and explicit.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> making the most frequently used sort the natural order just for convenience.</p>
+      </div></details>
+    </article>
+  </div>
+</part>

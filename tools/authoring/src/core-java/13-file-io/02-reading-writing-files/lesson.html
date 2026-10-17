@@ -1,0 +1,255 @@
+<!--META {
+"course": "core-java", "module": "13-file-io", "lesson": "02-reading-writing-files",
+"title": "Reading and writing files", "courseTitle": "Core Java", "number": "13.2",
+"track": "#E8772E", "trackId": "programming", "trackTitle": "Programming Languages", "level": "Intermediate",
+"minutes": 22,
+"description": "Reading and writing files in Java: Path and Files (writeString, readString, readAllLines, write, APPEND, createDirectories, copy, move, delete), relative paths and the working directory, java.io.File, Scanner and PrintWriter, NoSuchFileException. With animations, a JVM tracer, {{NPROB}} practice problems, quiz and interview scenarios.",
+"ogTitle": "Reading and writing files in Java with Path and Files",
+"ogDescription": "Create folders, write, append, read and delete files, see what a Path really is, and solve {{NPROB}} problems.",
+"lead": "In Lesson 13.1 you opened streams by hand. For everyday jobs (save a list, append an order, read a CSV, move a report) Java gives you one-line helpers in <code>java.nio.file.Files</code>, driven by <code>Path</code> objects. You'll learn to create, write, append, read, copy, move and delete files and folders, understand where relative paths point, and handle the errors files bring.",
+"chips": ["Module 13 · File Handling and I/O", "⏱ 22 min", "Intermediate", "{{NPROB}} practice problems"]
+} META-->
+<part n="1" id="story" label="The story">
+  <h2>“Where did today's orders go?”</h2>
+  <div class="story">
+    <p class="narration">Riya's canteen app now writes each order to orders.csv. At night the owner opens the file and finds only the last order. Riya also can't find the file on her laptop: it isn't in the folder where her code is.</p>
+    <div class="scene">
+      <svg viewBox="0 0 640 170" role="img" aria-label="A folder tree with a project folder, a data folder and an orders file; new lines are added to the end of the file">
+        <g font-size="10.5">
+          <rect x="14" y="20" width="200" height="130" rx="10" class="s-card2" style="stroke:var(--line)"/>
+          <text x="28" y="44" class="s-ink" font-weight="700">canteen-app/</text>
+          <text x="44" y="68" class="s-blue" font-weight="700">data/</text>
+          <text x="60" y="92" class="s-ink" font-family="monospace">orders.csv</text>
+          <text x="44" y="116" class="s-ink2" font-family="monospace">src/Main.java</text>
+          <text x="28" y="140" class="s-ink3">working directory</text>
+          <path d="M218 85h60" style="stroke:var(--ink-3);stroke-width:1.5"/><path d="M272 79l8 6-8 6" style="fill:none;stroke:var(--ink-3);stroke-width:1.5"/>
+          <rect x="290" y="20" width="160" height="130" rx="10" class="s-card" style="stroke:var(--red)"/>
+          <text x="370" y="44" text-anchor="middle" class="s-red" font-weight="700">overwrite</text>
+          <text x="306" y="74" class="s-ink3" font-family="monospace" text-decoration="line-through">09:10,dosa,80</text>
+          <text x="306" y="96" class="s-ink3" font-family="monospace" text-decoration="line-through">12:45,thali,120</text>
+          <text x="306" y="118" class="s-ink" font-family="monospace">16:30,chai,15</text>
+          <rect x="466" y="20" width="160" height="130" rx="10" class="s-card" style="stroke:var(--green)"/>
+          <text x="546" y="44" text-anchor="middle" class="s-green" font-weight="700">append</text>
+          <text x="482" y="74" class="s-ink" font-family="monospace">09:10,dosa,80</text>
+          <text x="482" y="96" class="s-ink" font-family="monospace">12:45,thali,120</text>
+          <text x="482" y="118" class="s-ink" font-family="monospace">16:30,chai,15</text>
+        </g>
+        <text x="632" y="166" text-anchor="end" class="s-wm">myphatshala.com</text>
+      </svg>
+    </div>
+    <riya>Sir, I write every order, but only the last one stays!</riya>
+    <arjun>Writing a file normally <b>replaces</b> it. To add at the end you must ask for <b>append</b>. And the file is where your program <i>ran</i> from, the working directory, not where your code sits.</arjun>
+    <riya>Is there an easy way, without all those stream classes?</riya>
+    <arjun>Yes: <code>Path</code> to name the file, and <code>Files</code> to do the work in one line each. Let's see what each line does on disk.</arjun>
+  </div>
+</part>
+
+<part n="2" id="definition" label="Definition">
+  <h2>What are Path and Files?</h2>
+  <div class="def">
+    <div class="def__formal"><small>Formal definition (write this in exams)</small>
+      <p><code>java.nio.file.Path</code> is an object that represents the location of a file or directory in the file system as a sequence of names; it may be <b>absolute</b> (from the root) or <b>relative</b> (resolved against the current working directory), and creating a Path does not access the disk. <code>java.nio.file.Files</code> is a utility class of static methods that operate on paths: creating, reading, writing, copying, moving and deleting files and directories and querying their attributes. Its methods open and close the required streams internally, use UTF-8 for text by default, and report failures by throwing <code>IOException</code> subclasses such as <code>NoSuchFileException</code> and <code>FileAlreadyExistsException</code>. The older <code>java.io.File</code> class serves a similar purpose.</p></div>
+    <div class="def__simple"><small>In simple words</small>
+      <p>A <code>Path</code> is an address written on an envelope. <code>Files</code> is the postman who actually goes there to drop off, pick up, copy or remove things.</p></div>
+  </div>
+  <h3>Words you'll meet in this lesson</h3>
+  <div class="terms">
+    <div class="term"><b>Absolute path</b><span>Full location from the root: <code>/home/riya/app/data/x.csv</code> or <code>E:\app\x.csv</code>.</span></div>
+    <div class="term"><b>Relative path</b><span>Location from the working directory: <code>data/x.csv</code>.</span></div>
+    <div class="term"><b>Working directory</b><span>Folder the program was started from: <code>System.getProperty("user.dir")</code>.</span></div>
+    <div class="term"><b>Append</b><span>Add to the end of a file instead of replacing it.</span></div>
+    <div class="term"><b>CSV</b><span>Comma-separated values: a plain text table, one row per line.</span></div>
+    <div class="term"><b>resolve()</b><span>Join paths: <code>dir.resolve("a.txt")</code> → <code>dir/a.txt</code>.</span></div>
+  </div>
+  <h3>Old and new file APIs</h3>
+  <div class="table-wrap">
+  <table class="compare" style="min-width:560px">
+    <thead><tr><th></th><th><code>java.io.File</code> (old)</th><th><code>Path</code> + <code>Files</code> (Java 7+)</th></tr></thead>
+    <tbody>
+      <tr><td>Name a file</td><td><code>new File("a.txt")</code></td><td><code>Path.of("a.txt")</code></td></tr>
+      <tr><td>Read whole text</td><td>open a reader and loop</td><td><code>Files.readString(p)</code></td></tr>
+      <tr><td>Errors</td><td>often just <code>false</code> (e.g. <code>delete()</code>)</td><td>specific exceptions with reasons</td></tr>
+      <tr><td>Copy / move</td><td>not built in</td><td><code>Files.copy</code>, <code>Files.move</code></td></tr>
+      <tr><td>Default charset</td><td>platform default (UTF-8 since Java 18)</td><td>UTF-8</td></tr>
+      <tr><td>Convert</td><td><code>file.toPath()</code></td><td><code>path.toFile()</code></td></tr>
+    </tbody>
+  </table>
+  </div>
+  <exam><b>Exam tip:</b> “<code>Files.writeString</code>/<code>write</code> create the file if needed and <b>truncate</b> it by default; pass <code>StandardOpenOption.APPEND</code> to add. Reading a missing file throws <code>NoSuchFileException</code> (NIO) or <code>FileNotFoundException</code> (java.io), both subclasses of <code>IOException</code>.”</exam>
+</part>
+
+{{AD}}
+
+<part n="3" id="types" label="Types and ways to use it">
+  <h2>Your file toolkit</h2>
+  {{CODE_FILES}}
+  <div class="cards">
+    <div class="card"><svg class="ic" viewBox="0 0 40 40" fill="none" stroke="var(--green)" stroke-width="2"><path d="M12 8h12l6 6v18H12z"/><path d="M16 20h10M16 26h8"/></svg><h4>Small text files</h4><p><code>readString</code>, <code>writeString</code>, <code>readAllLines</code>, <code>write(lines)</code>: one line each.</p><span class="tag">Files</span></div>
+    <div class="card"><svg class="ic" viewBox="0 0 40 40" fill="none" stroke="var(--blue)" stroke-width="2"><path d="M6 14h10l3 3h15v15H6z"/></svg><h4>Folders</h4><p><code>createDirectories</code>, <code>list</code>, <code>isDirectory</code>, <code>walk</code> for whole trees.</p><span class="tag">directories</span></div>
+    <div class="card"><svg class="ic" viewBox="0 0 40 40" fill="none" stroke="var(--track)" stroke-width="2"><rect x="8" y="8" width="16" height="20" rx="2"/><rect x="16" y="14" width="16" height="20" rx="2"/></svg><h4>Copy, move, delete</h4><p><code>copy</code>, <code>move</code>, <code>delete</code>, <code>deleteIfExists</code>, with explicit overwrite options.</p><span class="tag">management</span></div>
+    <div class="card"><svg class="ic" viewBox="0 0 40 40" fill="none" stroke="var(--ink-3)" stroke-width="2"><rect x="8" y="10" width="24" height="20" rx="3"/><path d="M13 16h14M13 22h9"/></svg><h4>Scanner &amp; PrintWriter</h4><p>Read tokens and numbers from a file; write with <code>println</code>/<code>printf</code>.</p><span class="tag">familiar style</span></div>
+  </div>
+  <h3>The older java.io.File</h3>
+  {{CODE_OLD}}
+  <warn><b>Don't trust relative paths in servers and IDEs.</b> “data/orders.csv” goes wherever the program was started: the project root in an IDE, some other folder on a server. For important files, build the path from a configured base folder: <code>Path.of(config.dataDir(), "orders.csv")</code>.</warn>
+</part>
+
+<part n="4" id="steps" label="Step by step">
+  <h2>What happens when you call Files.writeString</h2>
+  <ol class="stepper">
+    <li><h4>Resolve the path</h4>
+      <div class="code" data-lang="java" data-file="Main.java"><pre><code>Files.writeString(Path.of("data", "orders.csv"), "101,dosa,80\n");</code></pre></div>
+      <span class="behind">The relative path is joined to the working directory, e.g. /home/riya/app/data/orders.csv.</span></li>
+    <li><h4>Open with options</h4>
+      <span class="behind">With no options it opens with CREATE + TRUNCATE_EXISTING + WRITE: create the file if missing, empty it if present. If the folder <code>data</code> doesn't exist, you get <code>NoSuchFileException</code>, so create folders first.</span></li>
+    <li><h4>Encode and write</h4>
+      <span class="behind">The text is encoded as UTF-8 and written through a byte stream, as in Lesson 13.1.</span></li>
+    <li><h4>Close</h4>
+      <span class="behind">The method closes the stream before returning, so the data is handed to the OS and the file handle is released. There is nothing for you to forget.</span></li>
+    <li><h4>Or append</h4>
+      <div class="code" data-lang="java" data-file="Main.java"><pre><code>Files.writeString(p, "102,idli,40\n", StandardOpenOption.APPEND);</code></pre></div>
+      <span class="behind">APPEND moves the write position to the end; existing bytes are kept. (Add CREATE too if the file might not exist yet.)</span></li>
+  </ol>
+</part>
+
+<part n="5" id="animation" label="See it happen">
+  <h2>From Path to file and back: both views</h2>
+  <p>Left: the folder and file as you'd see them in a file manager. Right: the Path and List objects on the heap, and the file as the operating system holds it.</p>
+  {{ANIM}}
+</part>
+
+<part n="6" id="real-world" label="Real-world use">
+  <h2>Files in real systems</h2>
+  <p>Even apps backed by databases read and write plenty of files: imports, exports, configs, logs and archives.</p>
+  {{ANIM2}}
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="22" y="18" width="76" height="54" rx="6" class="s-card" style="stroke:var(--line)"/><path d="M22 34h76M48 18v54M74 18v54" style="stroke:var(--line);stroke-width:1.5"/></svg></div>
+    <div><h4>1. Imports and exports</h4><p>Banks import salary CSVs from companies; shops export GST and sales reports for accountants.</p>
+      <div class="uc-flow"><span>salary.csv</span><i>→</i><span class="java">Files.readAllLines</span><i>→</i><span>credit 500 accounts</span></div></div>
+  </div>
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="34" y="16" width="52" height="58" rx="5" class="s-soft-blue" style="stroke:var(--blue)"/><path d="M44 32h32M44 44h20M44 56h28" style="stroke:var(--blue);stroke-width:2"/></svg></div>
+    <div><h4>2. Configuration</h4><p>Apps read settings (database URL, tax rates, feature flags) from files at startup.</p>
+      <div class="uc-flow"><span>app.properties</span><i>→</i><span class="java">Files.newBufferedReader</span><i>→</i><span>settings</span></div></div>
+  </div>
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><path d="M16 30h30l6 6h52v36H16z" class="s-soft-acc" style="stroke:var(--track)"/></svg></div>
+    <div><h4>3. Archiving and cleanup</h4><p>Nightly jobs move old reports into dated folders and delete temporary files older than 30 days.</p>
+      <div class="uc-flow"><span>reports/</span><i>→</i><span class="java">Files.move</span><i>→</i><span>archive/2026-09/</span></div></div>
+  </div>
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="30" y="18" width="60" height="54" rx="6" class="s-board"/><path d="M40 32h40M40 44h40M40 56h24" style="stroke:var(--chalk);stroke-width:2"/></svg></div>
+    <div><h4>4. Uploaded documents</h4><p>KYC PDFs and invoices are saved to a storage folder under a safe generated name, never the name the user sent.</p>
+      <div class="uc-flow"><span>upload</span><i>→</i><span class="java">Files.copy(in, dir.resolve(id))</span><i>→</i><span>stored</span></div></div>
+  </div>
+  <p class="muted">Simplified. Large companies often store such files in cloud object storage, but the read-write-move ideas are the same.</p>
+</part>
+
+{{AD}}
+
+<part n="7" id="run" label="Run the code">
+  <h2>Create, append, read, delete</h2>
+  {{CODE_RUN}}
+  <ul class="anno">
+    <li><code>Path.of("data", "orders.csv")</code><span>Builds data/orders.csv with the right separator for the OS.</span></li>
+    <li><code>Files.createDirectories(file.getParent())</code><span>Make sure the folder exists before writing into it.</span></li>
+    <li><code>StandardOpenOption.APPEND</code><span>Add to the end; without it the file is replaced.</span></li>
+    <li><code>Files.delete(file)</code><span>Throws if the file is missing; <code>deleteIfExists</code> returns false instead.</span></li>
+  </ul>
+  {{RUNNER}}
+</part>
+
+<part n="8" id="tracer" label="Line by line">
+  <h2>Write, append, read and total</h2>
+  <p>Recorded from the real JVM. The Path and the List of lines appear on the heap; the file itself lives outside the JVM, so watch the notes for what happens on disk.</p>
+  {{TRACER}}
+
+{{WORKED}}
+</part>
+
+<part n="9" id="quiz" label="Quiz and revision">
+  <h2>Check yourself</h2>
+  {{QUIZ}}
+  <h3>Quick revision</h3>
+  <div class="revision">
+    <h3>Lesson 13.2 in one screen</h3>
+    <ul>
+      <li><code>Path</code> names a file; creating one doesn't touch the disk. <code>Files</code> does the work.</li>
+      <li>Relative paths resolve against the working directory (<code>user.dir</code>).</li>
+      <li><code>writeString</code>/<code>write</code> create or replace; add <code>APPEND</code> to add at the end.</li>
+      <li><code>readString</code>, <code>readAllLines</code>: whole file into memory, UTF-8 by default.</li>
+      <li><code>createDirectories</code> before writing into a new folder.</li>
+      <li><code>copy</code>/<code>move</code> refuse to overwrite unless <code>REPLACE_EXISTING</code>.</li>
+      <li>Errors: <code>NoSuchFileException</code>, <code>FileAlreadyExistsException</code>, all <code>IOException</code>.</li>
+    </ul>
+  </div>
+  <h3>Interview and viva questions</h3>
+  <div class="faq">
+    <details><summary>What is the difference between File and Path?</summary><p>Both represent file locations. <code>java.io.File</code> is the original API: many methods return booleans without saying why they failed, and copy/move aren't built in. <code>java.nio.file.Path</code> (Java 7) works with the <code>Files</code> utility class, which offers rich operations, specific exceptions, symbolic-link handling and better performance. New code should use Path and Files.</p></details>
+    <details><summary>How do you append to a file in Java?</summary><p><code>Files.writeString(path, text, StandardOpenOption.CREATE, StandardOpenOption.APPEND)</code>, or <code>new FileWriter(file, true)</code> / <code>new FileOutputStream(file, true)</code>.</p></details>
+    <details><summary>What is the difference between an absolute and a relative path?</summary><p>An absolute path starts from the file-system root and always points to the same place. A relative path is resolved against the current working directory, so the same relative path can point to different files depending on where the program was started.</p></details>
+    <details><summary>When should you not use Files.readAllLines?</summary><p>For large files, because it loads every line into memory at once. Read line by line with <code>BufferedReader.readLine()</code> or process <code>Files.lines(path)</code> as a stream, which reads lazily.</p></details>
+    <details><summary>How do you safely overwrite a file?</summary><p>Write the new content to a temporary file in the same folder, then <code>Files.move(tmp, target, REPLACE_EXISTING, ATOMIC_MOVE)</code>. Readers then see either the old file or the new one, never a half-written file.</p></details>
+  </div>
+
+{{PRACTICE}}
+
+  <h3 id="scenarios">Real-world scenario questions (asked in company interviews)</h3>
+  <p class="scn-intro">File-handling bugs tend to appear only in production, where paths, permissions and sizes differ from your laptop.</p>
+  <div class="scenarios">
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Deployment · paths</span><span class="scn__tag scn__tag--level">Fresher</span></div>
+      <h4>Works in the IDE, NoSuchFileException on the server</h4>
+      <p class="scn__situation">A report job reads <code>Path.of("config/tax-rates.csv")</code>. It works in IntelliJ, but on the server it fails with NoSuchFileException although the file is deployed in /opt/app/config. Why?</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> relative paths and the working directory.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>The path is relative; on the server the process starts from a different working directory (e.g. / or the service user's home).</li>
+          <li>Log <code>Path.toAbsolutePath()</code> to confirm, then build paths from a configured base directory (environment variable or config) or load bundled files from the classpath.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> hard-coding <code>C:\Users\me\...</code> paths.</p>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Batch · memory</span><span class="scn__tag scn__tag--level">Junior</span></div>
+      <h4>Import job crashes on month-end files</h4>
+      <p class="scn__situation">A transaction import uses <code>Files.readAllLines</code>. It works daily, but the month-end file (8 GB) crashes the job with OutOfMemoryError. How would you change it?</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> streaming large files.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>Read line by line with <code>Files.newBufferedReader</code> or <code>Files.lines</code> (closed in try-with-resources), processing and discarding each line.</li>
+          <li>Write results in batches; keep only running totals in memory.</li>
+          <li>Track the last processed line so a failed run can resume.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> just raising <code>-Xmx</code>; next month's file will be bigger.</p>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Reliability · crash</span><span class="scn__tag scn__tag--level">Mid</span></div>
+      <h4>Half-written settings file after a power cut</h4>
+      <p class="scn__situation">A POS terminal saves its settings with <code>Files.writeString(settings, json)</code>. After a power cut, the file is half-written and the terminal won't start. How do you make saving safe?</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> atomic replace.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>Write to <code>settings.json.tmp</code> in the same folder, then <code>Files.move(tmp, settings, REPLACE_EXISTING, ATOMIC_MOVE)</code>. The rename is atomic, so the file is always complete.</li>
+          <li>Keep the previous version as a backup and validate on startup, falling back if parsing fails.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> deleting the old file before writing the new one.</p>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Security · uploads</span><span class="scn__tag scn__tag--level">Mid</span></div>
+      <h4>A filename that escaped the uploads folder</h4>
+      <p class="scn__situation">An upload API saves files with <code>uploads.resolve(userGivenName)</code>. A tester uploads a file named <code>../../app/config.properties</code> and overwrites the app's config. Explain and fix.</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> path traversal.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li><code>..</code> segments let the resolved path climb out of the uploads folder: a <b>path traversal</b> attack.</li>
+          <li>Never use client file names as paths. Generate an ID (e.g. a UUID) for the stored name and keep the original name as metadata.</li>
+          <li>If you must use it, <code>normalize()</code> the result and check <code>target.startsWith(uploads)</code>; also never pass REPLACE_EXISTING for uploads.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> only stripping the text “../”; there are many encodings of the same trick.</p>
+      </div></details>
+    </article>
+  </div>
+</part>

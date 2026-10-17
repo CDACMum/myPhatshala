@@ -1,0 +1,886 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Iterator and ListIterator | MyPhatshala</title>
+<meta name="description" content="Iterator and ListIterator in Java: hasNext, next and remove; how the for-each loop uses an iterator; removing safely while looping; fail-fast iterators and ConcurrentModificationException (modCount); ListIterator&#x27;s cursor, previous, set and add; fail-safe iterators of concurrent collections; and making your own class Iterable. With animations, a JVM tracer, 8 practice problems, quiz and interview scenarios.">
+<meta name="mp:minutes" content="20">
+<link rel="canonical" href="https://myphatshala.com/courses/core-java/11-collections/07-iterator/">
+<meta property="og:title" content="Iterators: walking a collection safely · MyPhatshala">
+<meta property="og:description" content="Watch an iterator&#x27;s cursor move on the heap, remove items safely mid-loop, and solve 8 problems.">
+<link rel="icon" href="../../../../assets/img/logo.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Fraunces:ital,opsz,wght@0,9..144,600;0,9..144,700;1,9..144,600&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../../../../assets/css/style.css">
+<link rel="stylesheet" href="../../../../assets/css/lesson.css">
+<script src="../../../../assets/js/config.js"></script>
+<script>try { const t = localStorage.getItem("mp-theme"); if (t) document.documentElement.dataset.theme = t; } catch (e) {}</script>
+<script type="application/ld+json">{"@context": "https://schema.org", "@type": "LearningResource", "name": "Iterator and ListIterator", "learningResourceType": "Lesson", "educationalLevel": "Intermediate", "isAccessibleForFree": true, "inLanguage": "en", "isPartOf": {"@type": "Course", "name": "Core Java", "provider": {"@type": "Organization", "name": "MyPhatshala"}}}</script>
+</head>
+<body style="--track:#E8772E" data-lesson="11-collections/07-iterator" data-course-root="../../">
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="site-header">
+  <div class="wrap">
+    <a class="brand" href="../../../../" aria-label="MyPhatshala home"><img src="../../../../assets/img/logo.svg" width="34" height="34" alt=""><span>My<b>Phatshala</b></span></a>
+    <nav class="nav" aria-label="Main">
+      <a href="../../../../#tracks">All courses</a>
+      <a href="../../">Core Java syllabus</a>
+      <button class="theme-btn" id="theme-btn" aria-label="Toggle dark mode"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg></button>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+<section class="lesson-hero">
+  <div class="wrap">
+    <nav class="crumbs" aria-label="Breadcrumb"><a href="../../../../">Home</a><span>›</span><a href="../../../../#track-programming">Programming Languages</a><span>›</span><a href="../../">Core Java</a><span>›</span><b>Lesson 11.7</b></nav>
+    <h1>Iterator and ListIterator</h1>
+    <p class="lead">Every for-each loop over a collection quietly creates an <b>Iterator</b>: a small object with a cursor that knows how to step through that collection, whether it's an array inside, a chain of nodes or a tree. Using one directly lets you do what a for-each can't: remove elements safely while looping, and, with a <b>ListIterator</b>, walk backwards, replace and insert at the cursor. You'll also see why changing a list behind an iterator's back throws <code>ConcurrentModificationException</code>.</p>
+    <div class="lesson-meta"><span>Module 11 · Collections</span><span>⏱ 20 min</span><span>Intermediate</span><span>8 practice problems</span></div>
+  </div>
+</section>
+
+<div class="wrap lesson-layout">
+<article class="lesson-main">
+<!-- ======================= PART 1: THE STORY ======================= -->
+<section class="part" id="story">
+  <span class="part-label"><b>1</b> The story</span>
+  <h2>The ticket checker's finger</h2>
+  <div class="story">
+    <p class="narration">On the Panvel local, the ticket checker walks the compartment keeping one finger on the passenger he's checking. When a ticketless passenger is taken off at Kharghar, he removes them and his finger stays in the right place. Kabir, coding the same thing, removed passengers inside a for-each loop. His program crashed.</p>
+    <div class="scene">
+      <svg viewBox="0 0 640 170" role="img" aria-label="An iterator cursor stepping through passengers; removing through the iterator is safe, removing through the list during a for-each throws ConcurrentModificationException">
+        <g font-size="10.5">
+          <rect x="14" y="24" width="70" height="40" rx="8" class="s-soft-acc" style="stroke:var(--track)"/><text x="49" y="49" text-anchor="middle" class="s-ink" font-weight="700">Riya</text>
+          <rect x="94" y="24" width="70" height="40" rx="8" class="s-card2" style="stroke:var(--red)"/><text x="129" y="49" text-anchor="middle" class="s-red" font-weight="700">no ticket</text>
+          <rect x="174" y="24" width="70" height="40" rx="8" class="s-soft-acc" style="stroke:var(--track)"/><text x="209" y="49" text-anchor="middle" class="s-ink" font-weight="700">Om</text>
+          <text x="129" y="86" text-anchor="middle" class="s-blue" font-weight="700">▲ cursor</text>
+          <text x="14" y="112" class="mono s-green">it.remove();</text><text x="114" y="112" class="s-green" font-weight="700">✓ safe: cursor adjusts</text>
+          <text x="14" y="138" class="mono s-red">list.remove(p);</text><text x="130" y="138" class="s-red" font-weight="700">✗ inside for-each</text>
+          <rect x="300" y="20" width="326" height="124" rx="12" class="s-board"/>
+          <text x="314" y="44" class="mono s-chalk">for (String p : list)</text>
+          <text x="314" y="64" class="mono s-chalk">  if (noTicket(p)) list.remove(p);</text>
+          <text x="314" y="94" class="mono s-kw">ConcurrentModificationException</text>
+          <text x="314" y="120" class="s-chalk">the hidden iterator saw the list change</text>
+        </g>
+        <text x="632" y="166" text-anchor="end" class="s-wm">myphatshala.com</text>
+      </svg>
+    </div>
+    <div class="panel">
+      <div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#FCE6D6"/><path d="M14 64c2-12 9-18 18-18s16 6 18 18z" fill="#2E5AAC"/><circle cx="32" cy="29" r="12" fill="#C68B5E"/><path d="M19 29c0-10 6-15 13-15s13 5 13 15c-3-5-7-8-13-8s-10 3-13 8z" fill="#2A1B14"/><path d="M43 27c3 6 3 14 0 20" stroke="#2A1B14" stroke-width="4" fill="none" stroke-linecap="round"/><circle cx="27.5" cy="30" r="1.5" fill="#2A1B14"/><circle cx="36.5" cy="30" r="1.5" fill="#2A1B14"/><path d="M28 35q4 3 8 0" stroke="#2A1B14" stroke-width="1.6" fill="none" stroke-linecap="round"/><circle cx="32" cy="24" r="1.2" fill="#D64545"/></svg></div>
+      <div class="bubble"><b class="who">Riya</b><p>Sir, Kabir's loop is just a for-each. Where's the iterator?</p></div>
+    </div>
+    <div class="panel panel--right">
+      <div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#DDEFE6"/><path d="M12 64c2-12 10-18 20-18s18 6 20 18z" fill="#F4F1EA"/><path d="M28 46l4 8 4-8" fill="#2F7D5B"/><circle cx="32" cy="28" r="12" fill="#B57A50"/><path d="M20 26c0-8 5-13 12-13s12 5 12 13c-2-3-6-5-12-5s-10 2-12 5z" fill="#5A5A5A"/><path d="M22 32c1 8 5 11 10 11s9-3 10-11c-2 3-6 4-10 4s-8-1-10-4z" fill="#5A5A5A"/><circle cx="27" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><circle cx="37" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><path d="M30.4 29h3.2" stroke="#1B2433" stroke-width="1.4"/><circle cx="27" cy="29" r="1.1" fill="#1B2433"/><circle cx="37" cy="29" r="1.1" fill="#1B2433"/></svg></div>
+      <div class="bubble"><b class="who">Arjun Sir</b><p>Hidden. javac turns every for-each over a collection into <code>Iterator it = list.iterator(); while (it.hasNext()) { p = it.next(); … }</code>. When Kabir calls <code>list.remove</code>, the list changes without telling that iterator.</p></div>
+    </div>
+    <div class="panel">
+      <div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#FCE6D6"/><path d="M14 64c2-12 9-18 18-18s16 6 18 18z" fill="#2E5AAC"/><circle cx="32" cy="29" r="12" fill="#C68B5E"/><path d="M19 29c0-10 6-15 13-15s13 5 13 15c-3-5-7-8-13-8s-10 3-13 8z" fill="#2A1B14"/><path d="M43 27c3 6 3 14 0 20" stroke="#2A1B14" stroke-width="4" fill="none" stroke-linecap="round"/><circle cx="27.5" cy="30" r="1.5" fill="#2A1B14"/><circle cx="36.5" cy="30" r="1.5" fill="#2A1B14"/><path d="M28 35q4 3 8 0" stroke="#2A1B14" stroke-width="1.6" fill="none" stroke-linecap="round"/><circle cx="32" cy="24" r="1.2" fill="#D64545"/></svg></div>
+      <div class="bubble"><b class="who">Riya</b><p>And the iterator notices?</p></div>
+    </div>
+    <div class="panel panel--right">
+      <div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#DDEFE6"/><path d="M12 64c2-12 10-18 20-18s18 6 20 18z" fill="#F4F1EA"/><path d="M28 46l4 8 4-8" fill="#2F7D5B"/><circle cx="32" cy="28" r="12" fill="#B57A50"/><path d="M20 26c0-8 5-13 12-13s12 5 12 13c-2-3-6-5-12-5s-10 2-12 5z" fill="#5A5A5A"/><path d="M22 32c1 8 5 11 10 11s9-3 10-11c-2 3-6 4-10 4s-8-1-10-4z" fill="#5A5A5A"/><circle cx="27" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><circle cx="37" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><path d="M30.4 29h3.2" stroke="#1B2433" stroke-width="1.4"/><circle cx="27" cy="29" r="1.1" fill="#1B2433"/><circle cx="37" cy="29" r="1.1" fill="#1B2433"/></svg></div>
+      <div class="bubble"><b class="who">Arjun Sir</b><p>Every list keeps a change counter. The iterator remembers the value it started with and checks it on every <code>next()</code>. If someone else changed the list, it stops immediately rather than return wrong data. Remove through the iterator itself, like the checker's finger, and everything stays consistent.</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- ======================= PART 2: DEFINITION ======================= -->
+<section class="part" id="definition">
+  <span class="part-label"><b>2</b> Definition</span>
+  <h2>What are Iterator and ListIterator?</h2>
+  <div class="def">
+    <div class="def__formal"><small>Formal definition (write this in exams)</small>
+      <p>An <b>Iterator&lt;E&gt;</b> (<code>java.util</code>) is an object that traverses the elements of a collection one at a time, obtained from <code>collection.iterator()</code>. It defines <code>hasNext()</code>, <code>next()</code> and the optional <code>remove()</code>, which removes the last element returned and is the only safe way to modify a collection during iteration. The enhanced for loop uses an iterator for any <code>Iterable</code>. Iterators of most <code>java.util</code> collections are <b>fail-fast</b>: if the collection is structurally modified other than through the iterator, the next operation throws <code>ConcurrentModificationException</code>. A <b>ListIterator&lt;E&gt;</b>, obtained from <code>list.listIterator()</code>, extends Iterator for lists with bidirectional movement (<code>hasPrevious</code>, <code>previous</code>), index queries (<code>nextIndex</code>, <code>previousIndex</code>) and modification at the cursor (<code>set</code>, <code>add</code>).</p></div>
+    <div class="def__simple"><small>In simple words</small>
+      <p>An iterator is a finger moving through a collection. A ListIterator is a finger that can also go backwards and edit the list where it points.</p></div>
+  </div>
+  <h3>Words you'll meet in this lesson</h3>
+  <div class="terms">
+    <div class="term"><b>Cursor</b><span>The iterator's position, <i>between</i> elements. <code>next()</code> jumps over one element and returns it.</span></div>
+    <div class="term"><b>Structural change</b><span>Adding or removing elements (not just <code>set</code>).</span></div>
+    <div class="term"><b>modCount</b><span>A counter in the collection, increased on every structural change.</span></div>
+    <div class="term"><b>Fail-fast</b><span>Throw <code>ConcurrentModificationException</code> as soon as an unexpected change is seen.</span></div>
+    <div class="term"><b>Fail-safe</b><span>Iterate over a snapshot or tolerate changes (concurrent collections).</span></div>
+    <div class="term"><b>Iterable</b><span>Any type with an <code>iterator()</code> method; usable in for-each.</span></div>
+  </div>
+  <h3>The methods</h3>
+  <div class="table-wrap">
+  <table class="compare" style="min-width:560px">
+    <thead><tr><th>Method</th><th>Iterator</th><th>ListIterator</th><th>What it does</th></tr></thead>
+    <tbody>
+      <tr><td><code>hasNext()</code> / <code>next()</code></td><td>✓</td><td>✓</td><td>Is there more? Return the next element.</td></tr>
+      <tr><td><code>remove()</code></td><td>✓</td><td>✓</td><td>Remove the element last returned by next/previous.</td></tr>
+      <tr><td><code>hasPrevious()</code> / <code>previous()</code></td><td></td><td>✓</td><td>Walk backwards.</td></tr>
+      <tr><td><code>nextIndex()</code> / <code>previousIndex()</code></td><td></td><td>✓</td><td>Index the cursor is next to.</td></tr>
+      <tr><td><code>set(e)</code></td><td></td><td>✓</td><td>Replace the element last returned.</td></tr>
+      <tr><td><code>add(e)</code></td><td></td><td>✓</td><td>Insert at the cursor.</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <div class="callout callout--exam"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19V5a2 2 0 0 1 2-2h12v18H6a2 2 0 0 1-2-2zm0 0a2 2 0 0 1 2-2h12"/></svg><p><b>Exam tip:</b> <code>remove()</code> may be called <b>once per</b> <code>next()</code>; calling it twice, or before any <code>next()</code>, throws <code>IllegalStateException</code>. <code>next()</code> past the end throws <code>NoSuchElementException</code>. Modifying the collection directly during iteration throws <code>ConcurrentModificationException</code> (fail-fast).</p></div>
+</section>
+
+<div class="ad-slot" data-slot="mid"></div>
+
+<!-- ======================= PART 3: TYPES AND WAYS TO USE IT ======================= -->
+<section class="part" id="types">
+  <span class="part-label"><b>3</b> Types and ways to use it</span>
+  <h2>Four iterator patterns</h2>
+  <div class="cards">
+    <div class="card"><svg class="ic" viewBox="0 0 40 40" fill="none" stroke="var(--blue)" stroke-width="2"><path d="M8 20h20M22 14l6 6-6 6"/></svg><h4>Walk</h4><p><code>while (it.hasNext()) it.next()</code>: what for-each does for you.</p><span class="tag">read</span></div>
+    <div class="card"><svg class="ic" viewBox="0 0 40 40" fill="none" stroke="var(--red)" stroke-width="2"><path d="M10 20h20"/></svg><h4>Remove safely</h4><p><code>it.remove()</code> during the loop. Or <code>removeIf</code>.</p><span class="tag">filter in place</span></div>
+    <div class="card"><svg class="ic" viewBox="0 0 40 40" fill="none" stroke="var(--green)" stroke-width="2"><path d="M30 20H10M16 14l-6 6 6 6"/></svg><h4>Walk back, edit</h4><p>ListIterator: <code>previous</code>, <code>set</code>, <code>add</code>.</p><span class="tag">lists only</span></div>
+    <div class="card"><svg class="ic" viewBox="0 0 40 40" fill="none" stroke="var(--track)" stroke-width="2"><rect x="8" y="8" width="24" height="24" rx="4"/><path d="M14 20h12"/></svg><h4>Your own Iterable</h4><p>Implement <code>iterator()</code>; your class works in for-each.</p><span class="tag">custom</span></div>
+  </div>
+
+  <h3>What for-each really does</h3>
+  <div class="code" data-lang="java" data-file="Main.java"><pre><code>import java.util.*;
+
+public class Main {
+    public static void main(String[] args) {
+        List&lt;String&gt; coach = new ArrayList&lt;&gt;(List.of("Riya", "Kabir", "Om"));
+
+        for (String p : coach) System.out.print(p + ";");      // you write this…
+        System.out.println();
+
+        Iterator&lt;String&gt; it = coach.iterator();                // …javac writes this
+        while (it.hasNext()) {
+            String p = it.next();
+            System.out.print(p + ";");
+        }
+        System.out.println();
+    }
+}</code></pre><div class="output">Riya;Kabir;Om;
+Riya;Kabir;Om;</div></div>
+
+  <h3>Removing while iterating, the right way</h3>
+  <div class="code" data-lang="java" data-file="Main.java"><pre><code>import java.util.*;
+
+public class Main {
+    public static void main(String[] args) {
+        List&lt;Integer&gt; marks = new ArrayList&lt;&gt;(List.of(78, 32, 91, 28, 64));
+        Iterator&lt;Integer&gt; it = marks.iterator();
+        while (it.hasNext()) {
+            if (it.next() &lt; 35) {
+                it.remove();                       // removes the element just returned
+            }
+        }
+        System.out.println(marks);
+
+        List&lt;Integer&gt; copy = new ArrayList&lt;&gt;(List.of(78, 32, 91, 28, 64));
+        copy.removeIf(m -&gt; m &lt; 35);               // the same in one line (Lesson 14.1)
+        System.out.println(copy);
+    }
+}</code></pre><div class="output">[78, 91, 64]
+[78, 91, 64]</div></div>
+
+  <h3>ListIterator: backwards, set and add</h3>
+  <div class="code" data-lang="java" data-file="Main.java"><pre><code>import java.util.*;
+
+public class Main {
+    public static void main(String[] args) {
+        List&lt;String&gt; route = new ArrayList&lt;&gt;(List.of("Panvel", "Kharghar", "Vashi"));
+        ListIterator&lt;String&gt; li = route.listIterator();
+
+        while (li.hasNext()) {
+            int i = li.nextIndex();
+            String stop = li.next();
+            if (stop.equals("Kharghar")) {
+                li.set("Kharghar (Fest)");          // replace the element just returned
+                li.add("Belapur");                  // insert right after it, at the cursor
+            }
+            System.out.println(i + ": " + stop);
+        }
+        System.out.print("Back: ");
+        while (li.hasPrevious()) System.out.print(li.previous() + "|");
+        System.out.println();
+    }
+}</code></pre><div class="output">0: Panvel
+1: Kharghar
+3: Vashi
+Back: Vashi|Belapur|Kharghar (Fest)|Panvel|</div></div>
+  <p>Notice two things: “Belapur” wasn't printed in the forward loop, because <code>add</code> inserts <i>before</i> the cursor and the next <code>next()</code> continues with Vashi; and Vashi's index is now <b>3</b>, because Belapur took index 2.</p>
+
+  <h3>Making your own class iterable</h3>
+  <div class="code" data-lang="java" data-file="Main.java"><pre><code>import java.util.Iterator;
+
+class Countdown implements Iterable&lt;Integer&gt; {
+    private final int from;
+    Countdown(int from) { this.from = from; }
+
+    public Iterator&lt;Integer&gt; iterator() {
+        return new Iterator&lt;&gt;() {                // anonymous class (Lesson 10.5)
+            int current = from;
+            public boolean hasNext() { return current &gt; 0; }
+            public Integer next() { return current--; }
+        };
+    }
+}
+
+public class Main {
+    public static void main(String[] args) {
+        for (int n : new Countdown(3)) System.out.print(n + " ");
+        System.out.println("Launch!");
+    }
+}</code></pre><div class="output">3 2 1 Launch!</div></div>
+  <div class="callout callout--warn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3 2 21h20L12 3z"/><path d="M12 10v5M12 18v.5"/></svg><p><b>Don't change a collection behind its iterator.</b> <code>list.add</code> or <code>list.remove</code> inside a for-each over the same list throws <code>ConcurrentModificationException</code> (except by luck when removing the second-to-last element, as Lesson 11.3 showed). Use <code>it.remove()</code>, <code>ListIterator.add</code>, <code>removeIf</code>, or collect changes and apply them after the loop.</p></div>
+  <div class="callout callout--tip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18h6M10 22h4M12 2a7 7 0 0 0-4 12.7V17h8v-2.3A7 7 0 0 0 12 2z"/></svg><p><b>Rule of thumb:</b> for-each for reading; an explicit Iterator when you need to remove; ListIterator when you need to replace, insert or go backwards in a list. For collections shared between threads, use concurrent collections whose iterators don't throw (Module 12).</p></div>
+</section>
+
+<!-- ======================= PART 4: STEP BY STEP ======================= -->
+<section class="part" id="steps">
+  <span class="part-label"><b>4</b> Step by step</span>
+  <h2>How fail-fast checking works</h2>
+  <ol class="stepper">
+    <li><h4>The list counts its changes</h4>
+      <span class="behind">ArrayList inherits a field <code>modCount</code> from <code>AbstractList</code>. Every <code>add</code>/<code>remove</code>/<code>clear</code> increments it; <code>set</code> doesn't (no structural change).</span></li>
+    <li><h4>The iterator takes a note</h4>
+      <div class="code" data-lang="java" data-file="ArrayList.Itr (simplified)"><pre><code>int cursor;                       // index of the next element
+int lastRet = -1;                 // index of the last element returned
+int expectedModCount = modCount;  // the count when iteration started</code></pre></div>
+      <span class="behind"><code>list.iterator()</code> creates an <code>ArrayList.Itr</code>, an inner class (Lesson 10.5) that reads the list's private array through its outer link.</span></li>
+    <li><h4>Every next() checks</h4>
+      <span class="behind"><code>next()</code> first calls <code>checkForComodification()</code>: if <code>modCount != expectedModCount</code>, throw <code>ConcurrentModificationException</code>. Otherwise return <code>elementData[cursor]</code>, set <code>lastRet = cursor</code> and advance.</span></li>
+    <li><h4>it.remove() keeps them in sync</h4>
+      <span class="behind">It removes index <code>lastRet</code> from the list (which bumps <code>modCount</code>), moves <code>cursor</code> back to <code>lastRet</code>, sets <code>lastRet = -1</code> (so a second remove fails) and updates <code>expectedModCount</code>. No exception.</span></li>
+    <li><h4>Best effort, not a guarantee</h4>
+      <span class="behind">Fail-fast checks catch most bugs, but the Java docs warn they're not guaranteed, especially across threads. Treat the exception as a bug detector, never as program logic.</span></li>
+  </ol>
+</section>
+
+<!-- ======================= PART 5: SEE IT HAPPEN ======================= -->
+<section class="part" id="animation">
+  <span class="part-label"><b>5</b> See it happen</span>
+  <h2>The cursor and the change counter: both views</h2>
+  <p>Left: a loop that removes failing marks. Right: the iterator's <code>cursor</code>, <code>lastRet</code> and <code>expectedModCount</code> next to the list's array and <code>modCount</code>.</p>
+  <div class="anim" data-frames="6">
+    <div class="anim__title">How an iterator stays safe <span>6 steps</span></div>
+    <div class="anim__views">
+      <div class="view view--see">
+        <span class="view__tag">What you see</span>
+        <svg viewBox="0 0 360 250" role="img" aria-label="An iterator over marks: two next calls, a safe remove, another next, then a direct list change that breaks the iterator">
+          <rect x="8" y="8" width="344" height="132" rx="8" class="s-board" style="stroke:board;stroke-width:1.5"/>
+          <g data-on="1"><rect x="12" y="16" width="336" height="19" rx="4" class="" style="stroke:var(--track);stroke-width:2;fill:none"/></g>
+          <text x="20" y="30" font-size="10.5" class="s-chalk mono">it = marks.iterator();</text>
+          <g data-on="2"><rect x="12" y="36" width="336" height="19" rx="4" class="" style="stroke:var(--track);stroke-width:2;fill:none"/></g>
+          <text x="20" y="50" font-size="10.5" class="s-chalk mono">it.next();   // 78</text>
+          <g data-on="3"><rect x="12" y="56" width="336" height="19" rx="4" class="" style="stroke:var(--track);stroke-width:2;fill:none"/></g>
+          <text x="20" y="70" font-size="10.5" class="s-chalk mono">it.next();   // 32</text>
+          <g data-on="4"><rect x="12" y="76" width="336" height="19" rx="4" class="" style="stroke:var(--track);stroke-width:2;fill:none"/></g>
+          <text x="20" y="90" font-size="10.5" class="s-chalk mono">it.remove();</text>
+          <g data-on="5"><rect x="12" y="96" width="336" height="19" rx="4" class="" style="stroke:var(--track);stroke-width:2;fill:none"/></g>
+          <text x="20" y="110" font-size="10.5" class="s-chalk mono">it.next();   // 91</text>
+          <g data-on="6"><rect x="12" y="116" width="336" height="19" rx="4" class="" style="stroke:#D64545;stroke-width:2;fill:none"/></g>
+          <text x="20" y="130" font-size="10.5" class="s-kw mono">marks.remove(0); it.next();</text>
+          <rect x="8" y="150" width="344" height="50" rx="8" class="s-card2" style="stroke:var(--line);stroke-width:1.5"/>
+          <text x="18" y="168" font-size="9" font-weight="700" class="s-ink3">marks</text>
+          <text data-on="1" x="18" y="190" font-size="11" font-weight="700" class="s-ink mono">[78, 32, 91, 28]</text>
+          <text data-on="2" x="18" y="190" font-size="11" font-weight="700" class="s-ink mono">[78, 32, 91, 28]  → 78</text>
+          <text data-on="3" x="18" y="190" font-size="11" font-weight="700" class="s-ink mono">[78, 32, 91, 28]  → 32</text>
+          <text data-on="4" x="18" y="190" font-size="11" font-weight="700" class="s-ink mono">[78, 91, 28]</text>
+          <text data-on="5" x="18" y="190" font-size="11" font-weight="700" class="s-ink mono">[78, 91, 28]  → 91</text>
+          <text data-on="6" x="18" y="190" font-size="11" font-weight="700" class="s-red mono">ConcurrentModificationException</text>
+          <text data-on="1" x="180" y="226" font-size="10.5" text-anchor="middle" class="s-ink2">Get an iterator.</text>
+          <text data-on="2" x="180" y="226" font-size="10.5" text-anchor="middle" class="s-ink2">First element.</text>
+          <text data-on="3" x="180" y="226" font-size="10.5" text-anchor="middle" class="s-ink2">Second element.</text>
+          <text data-on="4" x="180" y="226" font-size="10.5" text-anchor="middle" class="s-ink2">Remove 32 through the iterator.</text>
+          <text data-on="5" x="180" y="226" font-size="10.5" text-anchor="middle" class="s-ink2">Carry on: 91.</text>
+          <text data-on="6" x="180" y="226" font-size="10.5" text-anchor="middle" class="s-ink2">Change the list directly…</text>
+          <text x="354" y="245" text-anchor="end" class="s-wm">myphatshala.com</text>
+        </svg>
+        <ol class="caps" hidden>
+          <li>Ask the list for an iterator.</li>
+          <li><code>next()</code> returns 78.</li>
+          <li><code>next()</code> returns 32.</li>
+          <li><code>it.remove()</code> removes 32, the element just returned.</li>
+          <li><code>next()</code> continues correctly with 91: nothing skipped.</li>
+          <li>Removing through the list itself and then calling <code>next()</code> throws <code>ConcurrentModificationException</code>.</li>
+        </ol>
+      </div>
+      <div class="view view--behind">
+        <span class="view__tag">Behind the screen</span>
+        <svg viewBox="0 0 360 250" role="img" aria-label="The iterator&#x27;s cursor, lastRet and expectedModCount compared with the list&#x27;s array and modCount">
+          <g data-on="1-3"><rect x="8" y="24" width="54" height="30" rx="8" class="s-soft-acc" style="stroke:var(--track);stroke-width:1.5"/><text x="35" y="42.96" font-size="11" text-anchor="middle" font-weight="700" class="s-ink mono">78</text></g>
+          <g data-on="1-3"><rect x="68" y="24" width="54" height="30" rx="8" class="s-soft-acc" style="stroke:var(--track);stroke-width:1.5"/><text x="95" y="42.96" font-size="11" text-anchor="middle" font-weight="700" class="s-ink mono">32</text></g>
+          <g data-on="1-3"><rect x="128" y="24" width="54" height="30" rx="8" class="s-soft-acc" style="stroke:var(--track);stroke-width:1.5"/><text x="155" y="42.96" font-size="11" text-anchor="middle" font-weight="700" class="s-ink mono">91</text></g>
+          <g data-on="1-3"><rect x="188" y="24" width="54" height="30" rx="8" class="s-soft-acc" style="stroke:var(--track);stroke-width:1.5"/><text x="215" y="42.96" font-size="11" text-anchor="middle" font-weight="700" class="s-ink mono">28</text></g>
+          <g data-on="4-5"><rect x="8" y="24" width="54" height="30" rx="8" class="s-soft-acc" style="stroke:var(--track);stroke-width:1.5"/><text x="35" y="42.96" font-size="11" text-anchor="middle" font-weight="700" class="s-ink mono">78</text></g>
+          <g data-on="4-5"><rect x="68" y="24" width="54" height="30" rx="8" class="s-soft-acc" style="stroke:var(--track);stroke-width:1.5"/><text x="95" y="42.96" font-size="11" text-anchor="middle" font-weight="700" class="s-ink mono">91</text></g>
+          <g data-on="4-5"><rect x="128" y="24" width="54" height="30" rx="8" class="s-soft-acc" style="stroke:var(--track);stroke-width:1.5"/><text x="155" y="42.96" font-size="11" text-anchor="middle" font-weight="700" class="s-ink mono">28</text></g>
+          <g data-on="6"><rect x="8" y="24" width="54" height="30" rx="8" class="s-soft-acc" style="stroke:var(--track);stroke-width:1.5"/><text x="35" y="42.96" font-size="11" text-anchor="middle" font-weight="700" class="s-ink mono">91</text></g>
+          <g data-on="6"><rect x="68" y="24" width="54" height="30" rx="8" class="s-soft-acc" style="stroke:var(--track);stroke-width:1.5"/><text x="95" y="42.96" font-size="11" text-anchor="middle" font-weight="700" class="s-ink mono">28</text></g>
+          <text x="5" y="70" font-size="8.5" class="s-ink3 mono">0</text>
+          <text x="65" y="70" font-size="8.5" class="s-ink3 mono">1</text>
+          <text x="125" y="70" font-size="8.5" class="s-ink3 mono">2</text>
+          <text x="185" y="70" font-size="8.5" class="s-ink3 mono">3</text>
+          <text x="245" y="70" font-size="8.5" class="s-ink3 mono">4</text>
+          <text data-on="1" x="5" y="86" font-size="9.5" font-weight="700" class="s-blue">▲ cursor</text>
+          <text data-on="2" x="65" y="86" font-size="9.5" font-weight="700" class="s-blue">▲ cursor</text>
+          <text data-on="3" x="125" y="86" font-size="9.5" font-weight="700" class="s-blue">▲ cursor</text>
+          <text data-on="4" x="65" y="86" font-size="9.5" font-weight="700" class="s-blue">▲ cursor</text>
+          <text data-on="5" x="125" y="86" font-size="9.5" font-weight="700" class="s-blue">▲ cursor</text>
+          <text data-on="6" x="125" y="86" font-size="9.5" font-weight="700" class="s-blue">▲ cursor</text>
+          <text x="8" y="16" font-size="9" font-weight="700" class="s-ink2">list elementData</text>
+          <rect x="254" y="18" width="98" height="40" rx="8" class="s-card2" style="stroke:var(--line);stroke-width:1.5"/>
+          <text x="262" y="34" font-size="9" class="s-ink2">modCount</text>
+          <text data-on="1" x="262" y="52" font-size="12" font-weight="700" class="s-ink mono">0</text>
+          <text data-on="2" x="262" y="52" font-size="12" font-weight="700" class="s-ink mono">0</text>
+          <text data-on="3" x="262" y="52" font-size="12" font-weight="700" class="s-ink mono">0</text>
+          <text data-on="4" x="262" y="52" font-size="12" font-weight="700" class="s-ink mono">1</text>
+          <text data-on="5" x="262" y="52" font-size="12" font-weight="700" class="s-ink mono">1</text>
+          <text data-on="6" x="262" y="52" font-size="12" font-weight="700" class="s-red mono">2</text>
+          <rect x="8" y="104" width="344" height="70" rx="8" class="s-soft-blue" style="stroke:var(--blue);stroke-width:1.5"/>
+          <text x="16" y="122" font-size="10" font-weight="700" class="s-blue">Itr object</text>
+          <text data-on="1" x="16" y="144" font-size="10.5" class="s-ink mono">cursor = 0   lastRet = -1</text>
+          <text data-on="1" x="16" y="164" font-size="10.5" class="s-ink mono">expectedModCount = 0</text>
+          <text data-on="2" x="16" y="144" font-size="10.5" class="s-ink mono">cursor = 1   lastRet = 0</text>
+          <text data-on="2" x="16" y="164" font-size="10.5" class="s-ink mono">expectedModCount = 0</text>
+          <text data-on="3" x="16" y="144" font-size="10.5" class="s-ink mono">cursor = 2   lastRet = 1</text>
+          <text data-on="3" x="16" y="164" font-size="10.5" class="s-ink mono">expectedModCount = 0</text>
+          <text data-on="4" x="16" y="144" font-size="10.5" class="s-ink mono">cursor = 1   lastRet = -1</text>
+          <text data-on="4" x="16" y="164" font-size="10.5" class="s-ink mono">expectedModCount = 1</text>
+          <text data-on="5" x="16" y="144" font-size="10.5" class="s-ink mono">cursor = 2   lastRet = 1</text>
+          <text data-on="5" x="16" y="164" font-size="10.5" class="s-ink mono">expectedModCount = 1</text>
+          <text data-on="6" x="16" y="144" font-size="10.5" class="s-ink mono">cursor = 2   lastRet = 1</text>
+          <text data-on="6" x="16" y="164" font-size="10.5" class="s-red mono">expectedModCount = 1</text>
+          <text data-on="6" x="250" y="164" font-size="10" font-weight="700" class="s-red mono">2 ≠ 1 → throw</text>
+          <text data-on="1" x="180" y="196" font-size="10" text-anchor="middle" class="s-ink2">Cursor before index 0; counts match.</text>
+          <text data-on="2" x="180" y="196" font-size="10" text-anchor="middle" class="s-ink2">Return [0], cursor → 1.</text>
+          <text data-on="3" x="180" y="196" font-size="10" text-anchor="middle" class="s-ink2">Return [1], cursor → 2.</text>
+          <text data-on="4" x="180" y="196" font-size="10" text-anchor="middle" class="s-ink2">Remove [lastRet]; cursor back to 1; counts re-synced.</text>
+          <text data-on="5" x="180" y="196" font-size="10" text-anchor="middle" class="s-ink2">Return [1] = 91.</text>
+          <text data-on="6" x="180" y="196" font-size="10" text-anchor="middle" class="s-ink2">Direct change: counts disagree.</text>
+          <text x="354" y="245" text-anchor="end" class="s-wm">myphatshala.com</text>
+        </svg>
+        <ol class="caps" hidden>
+          <li>A new <code>ArrayList.Itr</code>: <code>cursor = 0</code>, <code>lastRet = -1</code>, and it copies the list's <code>modCount</code> (0) into <code>expectedModCount</code>.</li>
+          <li><code>next()</code> checks the counts (equal), returns <code>elementData[0]</code> = 78, sets <code>lastRet = 0</code>, <code>cursor = 1</code>.</li>
+          <li>Again: returns 32, <code>lastRet = 1</code>, <code>cursor = 2</code>.</li>
+          <li><code>it.remove()</code> removes index <code>lastRet</code> (32); later elements shift left. The list's <code>modCount</code> becomes 1, and the iterator <b>updates its own copy</b> to 1, moves <code>cursor</code> back to 1 and sets <code>lastRet = -1</code>.</li>
+          <li><code>next()</code>: counts equal, returns <code>elementData[1]</code> = 91. Nothing was skipped.</li>
+          <li><code>marks.remove(0)</code> bypasses the iterator: <code>modCount</code> becomes 2 but the iterator still expects 1. The next <code>next()</code> notices and throws <code>ConcurrentModificationException</code>.</li>
+        </ol>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ======================= PART 6: REAL-WORLD USE ======================= -->
+<section class="part" id="real-world">
+  <span class="part-label"><b>6</b> Real-world use</span>
+  <h2>Iterators in real systems</h2>
+  <p>Iterators matter whenever code walks large or changing data, and when you build your own data types.</p>
+  <!--ANIM2-->
+  <h3 id="animated-example">Watch it with an example: clearing expired OTPs</h3>
+  <p class="anim-intro">A login service keeps one-time passwords in a map with their expiry. A cleanup job walks the entries with an iterator and removes expired ones in place.</p>
+  <div class="anim anim--one" data-frames="5" data-delay="4600">
+    <div class="anim__title">Removing expired entries with an iterator <span>5 steps</span></div>
+    <div class="anim__views">
+      <div class="view view--story">
+        <span class="view__tag">Animated example</span>
+        <svg viewBox="0 0 360 210" role="img" aria-label="An iterator walks map entries and removes expired ones; valid ones remain">
+          <g data-on="1-"><rect x="10" y="14" width="200" height="28" rx="8" class="s-soft-green" style="stroke:var(--green);stroke-width:1.5"/><text x="110" y="31.6" font-size="10" text-anchor="middle" class="s-ink mono">riya → OTP (valid)</text></g>
+          <g data-on="1-2"><rect x="10" y="48" width="200" height="28" rx="8" class="s-soft-acc" style="stroke:#D64545;stroke-width:1.5"/><text x="110" y="65.6" font-size="10" text-anchor="middle" class="s-ink mono">kabir → OTP (expired)</text></g>
+          <g data-on="3-"><rect x="10" y="48" width="200" height="28" rx="8" class="s-card2" style="stroke:var(--line);stroke-width:1.5"/><text x="110" y="65.6" font-size="10" text-anchor="middle" class="s-ink mono">kabir: removed</text></g>
+          <g data-on="1-"><rect x="10" y="82" width="200" height="28" rx="8" class="s-soft-green" style="stroke:var(--green);stroke-width:1.5"/><text x="110" y="99.6" font-size="10" text-anchor="middle" class="s-ink mono">om → OTP (valid)</text></g>
+          <g data-on="1-4"><rect x="10" y="116" width="200" height="28" rx="8" class="s-soft-acc" style="stroke:#D64545;stroke-width:1.5"/><text x="110" y="133.6" font-size="10" text-anchor="middle" class="s-ink mono">zoya → OTP (expired)</text></g>
+          <g data-on="5"><rect x="10" y="116" width="200" height="28" rx="8" class="s-card2" style="stroke:var(--line);stroke-width:1.5"/><text x="110" y="133.6" font-size="10" text-anchor="middle" class="s-ink mono">zoya: removed</text></g>
+          <text data-on="1" x="222" y="32" font-size="11" font-weight="700" class="s-blue">◀ it</text>
+          <text data-on="2" x="222" y="66" font-size="11" font-weight="700" class="s-blue">◀ it</text>
+          <text data-on="3" x="222" y="66" font-size="11" font-weight="700" class="s-blue">◀ it</text>
+          <text data-on="4" x="222" y="100" font-size="11" font-weight="700" class="s-blue">◀ it</text>
+          <text data-on="5" x="222" y="134" font-size="11" font-weight="700" class="s-blue">◀ it</text>
+          <text data-on="1-2,4" x="260" y="40" font-size="10" class="s-ink mono">it.next()</text>
+          <text data-on="1,4" x="260" y="58" font-size="10" font-weight="700" class="s-green">valid: keep</text>
+          <text data-on="2" x="260" y="58" font-size="10" font-weight="700" class="s-red">expired!</text>
+          <text data-on="3,5" x="260" y="40" font-size="10" font-weight="700" class="s-red mono">it.remove()</text>
+          <text data-on="3,5" x="260" y="58" font-size="10" class="s-ink2">safe, in place</text>
+          <text data-on="1" x="180" y="170" font-size="11" text-anchor="middle" class="s-ink2">Riya's OTP is still valid.</text>
+          <text data-on="2" x="180" y="170" font-size="11" text-anchor="middle" class="s-ink2">Kabir's has expired.</text>
+          <text data-on="3" x="180" y="170" font-size="11" text-anchor="middle" class="s-ink2">Remove it through the iterator.</text>
+          <text data-on="4" x="180" y="170" font-size="11" text-anchor="middle" class="s-ink2">Om's is valid.</text>
+          <text data-on="5" x="180" y="170" font-size="11" text-anchor="middle" class="s-ink2">Zoya's expired: removed.</text>
+          <text x="354" y="205" text-anchor="end" class="s-wm">myphatshala.com</text>
+        </svg>
+        <ol class="caps" hidden>
+          <li>The job calls <code>map.entrySet().iterator()</code> and checks the first entry: still valid, so it stays.</li>
+          <li>Kabir's OTP is older than 5 minutes.</li>
+          <li><code>it.remove()</code> deletes that entry from the map itself. No copy, no exception.</li>
+          <li>Om's OTP is valid.</li>
+          <li>Zoya's has expired and is removed too. The map now holds only valid OTPs. (Simplified: real services use ConcurrentHashMap or a store with built-in expiry, since logins happen on many threads.)</li>
+        </ol>
+      </div>
+    </div>
+  </div>
+  <!--/ANIM2-->
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="14" y="22" width="92" height="46" rx="6" class="s-card" style="stroke:var(--line)"/><text x="60" y="42" text-anchor="middle" font-size="8.5" class="mono s-ink">expired sessions</text><text x="60" y="58" text-anchor="middle" font-size="8.5" class="mono s-red">it.remove()</text></svg></div>
+    <div><h4>1. Cleaning up in place</h4><p>Background jobs remove expired sessions, cancelled orders or stale cache entries while scanning, using <code>iterator.remove()</code> or <code>removeIf</code> on the collection or a map's <code>entrySet()</code>.</p>
+      <div class="uc-flow"><span>scan entries</span><i>→</i><span class="java">it.remove()</span><i>→</i><span>no CME, no copy</span></div></div>
+  </div>
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="18" y="20" width="84" height="50" rx="6" class="s-board"/><text x="26" y="40" font-size="8" class="mono s-chalk">rs.next()</text><text x="26" y="56" font-size="8" class="mono s-chalk">reader.readLine()</text></svg></div>
+    <div><h4>2. Streaming large data</h4><p>Database result sets, file readers and paged API clients follow the same “has next / get next” idea, so millions of rows can be processed without loading them all.</p>
+      <div class="uc-flow"><span>while (rs.next())</span><i>→</i><span class="java">one row at a time</span><i>→</i><span>constant memory</span></div></div>
+  </div>
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="22" y="22" width="76" height="46" rx="6" class="s-card" style="stroke:var(--line)"/><text x="60" y="49" text-anchor="middle" font-size="8.5" class="mono s-ink">implements Iterable</text></svg></div>
+    <div><h4>3. Custom collections</h4><p>A <code>Playlist</code>, <code>Route</code> or <code>Portfolio</code> class that implements <code>Iterable</code> works in for-each and hides how it stores its items.</p>
+      <div class="uc-flow"><span>for (Song s : playlist)</span><i>→</i><span class="java">playlist.iterator()</span><i>→</i><span>internals hidden</span></div></div>
+  </div>
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="16" y="22" width="88" height="46" rx="6" class="s-card" style="stroke:var(--green)"/><text x="60" y="42" text-anchor="middle" font-size="8.5" class="mono s-ink">CopyOnWriteArrayList</text><text x="60" y="58" text-anchor="middle" font-size="8.5" class="s-green">snapshot iterator</text></svg></div>
+    <div><h4>4. Listener lists</h4><p>Event systems keep listeners in a <code>CopyOnWriteArrayList</code>: iterating (firing events) is frequent, changes are rare, and its iterator walks a snapshot, so a listener can unregister itself mid-event without an exception.</p>
+      <div class="uc-flow"><span>fire event</span><i>→</i><span class="java">snapshot iteration</span><i>→</i><span>safe removal</span></div></div>
+  </div>
+  <p class="muted">Examples are simplified. JDBC's ResultSet isn't a java.util.Iterator, but follows the same pattern.</p>
+</section>
+
+<div class="ad-slot" data-slot="mid"></div>
+
+<!-- ======================= PART 7: RUN THE CODE ======================= -->
+<section class="part" id="run">
+  <span class="part-label"><b>7</b> Run the code</span>
+  <h2>Checking tickets on a train</h2>
+  <div class="code" data-lang="java" data-file="Main.java"><pre><code>import java.util.*;
+
+public class Main {
+    public static void main(String[] args) {
+        List&lt;String&gt; coach = new ArrayList&lt;&gt;(List.of("Riya:T", "Kabir:-", "Om:T", "Zoya:-", "Meera:T"));
+        List&lt;String&gt; fined = new ArrayList&lt;&gt;();
+
+        Iterator&lt;String&gt; it = coach.iterator();
+        while (it.hasNext()) {
+            String[] p = it.next().split(":");
+            if (p[1].equals("-")) {               // no ticket
+                fined.add(p[0]);
+                it.remove();                      // safe removal at the cursor
+            }
+        }
+
+        ListIterator&lt;String&gt; li = coach.listIterator();
+        while (li.hasNext()) {
+            String name = li.next().split(":")[0];
+            li.set(name + " ✓");                  // mark as checked
+        }
+
+        System.out.println("Fined: " + fined);
+        System.out.println("Checked: " + coach);
+    }
+}</code></pre><div class="output">Fined: [Kabir, Zoya]
+Checked: [Riya ✓, Om ✓, Meera ✓]</div></div>
+  <ul class="anno">
+    <li><code>coach.iterator()</code><span>A fresh iterator with its cursor before the first passenger.</span></li>
+    <li><code>it.remove()</code><span>Removes the passenger just returned by <code>next()</code>; the iterator adjusts.</span></li>
+    <li><code>listIterator()</code> + <code>set</code><span>Replaces each element in place as we pass it.</span></li>
+    <li>Adding to <code>fined</code><span>Fine: it's a different list from the one being iterated.</span></li>
+  </ul>
+  <div class="runner">
+    <script type="application/json">{
+      "lang": "java", "file": "Main.java",
+      "tasks": [
+        { "label": "1 · Ticket check", "hint": "Press <b>Run</b>. Then use <code>li.add(\"TTE\")</code> after Om to show where the checker is standing.",
+          "code": "import java.util.*;\n\npublic class Main {\n    public static void main(String[] args) {\n        List<String> coach = new ArrayList<>(List.of(\"Riya:T\", \"Kabir:-\", \"Om:T\", \"Zoya:-\", \"Meera:T\"));\n        List<String> fined = new ArrayList<>();\n\n        Iterator<String> it = coach.iterator();\n        while (it.hasNext()) {\n            String[] p = it.next().split(\":\");\n            if (p[1].equals(\"-\")) {\n                fined.add(p[0]);\n                it.remove();\n            }\n        }\n\n        ListIterator<String> li = coach.listIterator();\n        while (li.hasNext()) {\n            String name = li.next().split(\":\")[0];\n            li.set(name + \" ✓\");\n        }\n\n        System.out.println(\"Fined: \" + fined);\n        System.out.println(\"Checked: \" + coach);\n    }\n}\n" },
+        { "label": "2 · Spot the error: remove inside for-each", "hint": "Rewrite the loop with an explicit <code>Iterator</code> and <code>it.remove()</code>.",
+          "code": "import java.util.*;\n\npublic class Main {\n    public static void main(String[] args) {\n        List<Integer> marks = new ArrayList<>(List.of(78, 32, 91, 28, 64));\n        for (Integer m : marks) {\n            if (m < 35) {\n                marks.remove(m);\n            }\n        }\n        System.out.println(marks);\n    }\n}\n", "_expect": "exception" },
+        { "label": "3 · Spot the error: remove twice", "hint": "<code>remove()</code> is allowed once per <code>next()</code>. Delete the second call.",
+          "code": "import java.util.*;\n\npublic class Main {\n    public static void main(String[] args) {\n        List<String> l = new ArrayList<>(List.of(\"a\", \"b\", \"c\"));\n        Iterator<String> it = l.iterator();\n        it.next();\n        it.remove();\n        it.remove();\n        System.out.println(l);\n    }\n}\n", "_expect": "exception" },
+        { "label": "4 · Predict: where does add go?", "hint": "<b>Predict first:</b> what's printed inside the loop, and what's the final list?",
+          "code": "import java.util.*;\n\npublic class Main {\n    public static void main(String[] args) {\n        List<String> l = new ArrayList<>(List.of(\"A\", \"B\", \"C\"));\n        ListIterator<String> li = l.listIterator();\n        while (li.hasNext()) {\n            String s = li.next();\n            System.out.print(s + \" \");\n            if (s.equals(\"A\")) li.add(\"X\");\n        }\n        System.out.println(\"→ \" + l);\n    }\n}\n" },
+        { "label": "5 · Your own Iterable", "hint": "Make <code>Range</code> iterable from <code>start</code> to <code>end</code> (inclusive), so the for-each prints 5 6 7 8.",
+          "code": "import java.util.Iterator;\n\nclass Range implements Iterable<Integer> {\n    private final int start, end;\n    Range(int start, int end) { this.start = start; this.end = end; }\n\n    public Iterator<Integer> iterator() {\n        return new Iterator<>() {\n            int next = start;\n            public boolean hasNext() { return next <= end; }\n            public Integer next() { return next++; }\n        };\n    }\n}\n\npublic class Main {\n    public static void main(String[] args) {\n        for (int n : new Range(5, 8)) System.out.print(n + \" \");\n        System.out.println();\n    }\n}\n" }
+      ]
+    }</script>
+  </div>
+</section>
+
+<!-- ======================= PART 8: LINE BY LINE ======================= -->
+<section class="part" id="tracer">
+  <span class="part-label"><b>8</b> Line by line</span>
+  <h2>The iterator object on the heap</h2>
+  <p>This trace is recorded from the real JVM. The iterator is an object, <code>ArrayList.Itr</code>, with a <code>cursor</code> (index of the next element) and <code>lastRet</code> (index last returned). Watch <code>it.remove()</code> move the cursor back so nothing is skipped.</p>
+  <div class="tracer">
+    <script type="application/json">{"lang": "java", "code": ["import java.util.ArrayList;", "import java.util.Iterator;", "import java.util.List;", "", "public class Main {", "    public static void main(String[] args) {", "        List<Integer> marks = new ArrayList<>(List.of(78, 32, 91));", "        Iterator<Integer> it = marks.iterator();", "        while (it.hasNext()) {", "            int m = it.next();", "            if (m < 35) {", "                it.remove();", "            }", "        }", "        System.out.println(marks);", "    }", "}"], "steps": [{"line": 7, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["marks", "→ #1 ArrayList"]]}], "heap": ["<b>#1</b> ArrayList size 3, capacity 3 [78, 32, 91]", "<b>#2</b> String[0] (args, empty)"], "newVar": "marks", "phase": "Assign", "note": "Now <code>marks</code> = → #1 ArrayList. New object <b>#1</b> on the heap: ArrayList size 3, capacity 3 [78, 32, 91]."}, {"line": 8, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["marks", "→ #1 ArrayList"], ["it", "→ #3 ArrayList.Itr"]]}], "heap": ["<b>#1</b> ArrayList size 3, capacity 3 [78, 32, 91]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> ArrayList.Itr {cursor=0, lastRet=-1}"], "newVar": "it", "phase": "Iterator", "note": "<code>it</code> = → an <code>ArrayList.Itr</code> object: <code>cursor=0</code>, <code>lastRet=-1</code>. It belongs to the list (an inner class, Lesson 10.5)."}, {"line": 9, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["marks", "→ #1 ArrayList"], ["it", "→ #3 ArrayList.Itr"]]}], "heap": ["<b>#1</b> ArrayList size 3, capacity 3 [78, 32, 91]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> ArrayList.Itr {cursor=0, lastRet=-1}"], "phase": "Check", "note": "The condition <code>it.hasNext()</code> is checked: <b>true</b>, so the block runs."}, {"line": 10, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["marks", "→ #1 ArrayList"], ["it", "→ #3 ArrayList.Itr"], ["m", "78"]]}], "heap": ["<b>#1</b> ArrayList size 3, capacity 3 [78, 32, 91]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> ArrayList.Itr {cursor=1, lastRet=0}"], "newVar": "m", "phase": "next()", "note": "Returns 78; cursor moves to 1, lastRet = 0. Now <code>m</code> = 78. Object <b>#3</b> changes: ArrayList.Itr {cursor=1, lastRet=0}."}, {"line": 11, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["marks", "→ #1 ArrayList"], ["it", "→ #3 ArrayList.Itr"]]}], "heap": ["<b>#1</b> ArrayList size 3, capacity 3 [78, 32, 91]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> ArrayList.Itr {cursor=1, lastRet=0}"], "phase": "Check", "note": "The condition <code>m &lt; 35</code> is checked: <b>false</b>, so the block is skipped."}, {"line": 14, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["marks", "→ #1 ArrayList"], ["it", "→ #3 ArrayList.Itr"]]}], "heap": ["<b>#1</b> ArrayList size 3, capacity 3 [78, 32, 91]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> ArrayList.Itr {cursor=1, lastRet=0}"], "phase": "Step", "note": "End of the block."}, {"line": 9, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["marks", "→ #1 ArrayList"], ["it", "→ #3 ArrayList.Itr"]]}], "heap": ["<b>#1</b> ArrayList size 3, capacity 3 [78, 32, 91]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> ArrayList.Itr {cursor=1, lastRet=0}"], "phase": "Check", "note": "The condition <code>it.hasNext()</code> is checked: <b>true</b>, so the block runs."}, {"line": 10, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["marks", "→ #1 ArrayList"], ["it", "→ #3 ArrayList.Itr"], ["m", "32"]]}], "heap": ["<b>#1</b> ArrayList size 3, capacity 3 [78, 32, 91]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> ArrayList.Itr {cursor=2, lastRet=1}"], "newVar": "m", "phase": "next()", "note": "Returns 32; cursor 2, lastRet 1. Now <code>m</code> = 32. Object <b>#3</b> changes: ArrayList.Itr {cursor=2, lastRet=1}."}, {"line": 11, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["marks", "→ #1 ArrayList"], ["it", "→ #3 ArrayList.Itr"], ["m", "32"]]}], "heap": ["<b>#1</b> ArrayList size 3, capacity 3 [78, 32, 91]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> ArrayList.Itr {cursor=2, lastRet=1}"], "phase": "Check", "note": "The condition <code>m &lt; 35</code> is checked: <b>true</b>, so the block runs."}, {"line": 12, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["marks", "→ #1 ArrayList"], ["it", "→ #3 ArrayList.Itr"]]}], "heap": ["<b>#1</b> ArrayList size 2, capacity 3 [78, 91]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> ArrayList.Itr {cursor=1, lastRet=-1}"], "phase": "remove()", "note": "Removes index <code>lastRet</code> (32) from the list. The iterator moves <code>cursor</code> back to 1 and sets <code>lastRet=-1</code>, so 91 won't be skipped."}, {"line": 14, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["marks", "→ #1 ArrayList"], ["it", "→ #3 ArrayList.Itr"]]}], "heap": ["<b>#1</b> ArrayList size 2, capacity 3 [78, 91]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> ArrayList.Itr {cursor=1, lastRet=-1}"], "phase": "Step", "note": "End of the block."}, {"line": 9, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["marks", "→ #1 ArrayList"], ["it", "→ #3 ArrayList.Itr"]]}], "heap": ["<b>#1</b> ArrayList size 2, capacity 3 [78, 91]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> ArrayList.Itr {cursor=1, lastRet=-1}"], "phase": "Check", "note": "The condition <code>it.hasNext()</code> is checked: <b>true</b>, so the block runs."}, {"line": 10, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["marks", "→ #1 ArrayList"], ["it", "→ #3 ArrayList.Itr"], ["m", "91"]]}], "heap": ["<b>#1</b> ArrayList size 2, capacity 3 [78, 91]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> ArrayList.Itr {cursor=2, lastRet=1}"], "newVar": "m", "phase": "next()", "note": "Returns 91 from index 1. Nothing was skipped."}, {"line": 11, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["marks", "→ #1 ArrayList"], ["it", "→ #3 ArrayList.Itr"]]}], "heap": ["<b>#1</b> ArrayList size 2, capacity 3 [78, 91]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> ArrayList.Itr {cursor=2, lastRet=1}"], "phase": "Check", "note": "The condition <code>m &lt; 35</code> is checked: <b>false</b>, so the block is skipped."}, {"line": 14, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["marks", "→ #1 ArrayList"], ["it", "→ #3 ArrayList.Itr"]]}], "heap": ["<b>#1</b> ArrayList size 2, capacity 3 [78, 91]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> ArrayList.Itr {cursor=2, lastRet=1}"], "phase": "Step", "note": "End of the block."}, {"line": 9, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["marks", "→ #1 ArrayList"], ["it", "→ #3 ArrayList.Itr"]]}], "heap": ["<b>#1</b> ArrayList size 2, capacity 3 [78, 91]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> ArrayList.Itr {cursor=2, lastRet=1}"], "phase": "Check", "note": "The condition <code>it.hasNext()</code> is checked: <b>false</b>, so the loop ends."}, {"line": 15, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["marks", "→ #1 ArrayList"], ["it", "→ #3 ArrayList.Itr"]]}], "heap": ["<b>#1</b> ArrayList size 2, capacity 3 [78, 91]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> ArrayList.Itr {cursor=2, lastRet=1}"], "out": "[78, 91]\n", "phase": "Print", "note": " Prints <code>[78, 91]</code>."}, {"line": 16, "phase": "Program ends", "note": "<code>main</code> returns, its frame is popped and the program ends.", "stack": [], "heap": []}]}</script>
+  </div>
+
+<h3 id="worked">Worked examples: real problems, solved and traced in memory</h3>
+  <p class="wx-intro">Three iterator jobs from real apps: safe removal, editing at the cursor and a custom iterable.</p>
+  <article class="wx">
+    <div class="wx__head"><span class="wx__num">Example 1</span><span class="wx__tag">Login · map cleanup</span></div>
+    <h4>Remove expired OTPs from a map</h4>
+    <div class="wx__problem"><p class="wx__label">Problem statement</p><p>OTPs are stored as user → expiry minute. At minute 10, remove every entry whose expiry is before 10, while iterating.</p></div>
+    <div class="prob__io"><div><small>Input</small><pre>{riya=12, kabir=8, om=15, zoya=9}, now = 10</pre></div><div><small>Expected output</small><pre>{riya=12, om=15}</pre></div></div>
+    <div class="wx__approach"><p class="wx__label">Approach</p><ol><li>Iterate over <code>entrySet().iterator()</code>.</li><li>If an entry's value is less than <code>now</code>, call <code>it.remove()</code>.</li><li>Print what remains.</li></ol></div>
+    <p class="wx__label">Solution: run it live</p>
+    <div class="runner">
+    <script type="application/json">{"lang": "java", "file": "Main.java", "tasks": [{"label": "Run · Remove expired OTPs from a map", "hint": "Press <b>Run</b>. Then rewrite the loop as <code>otpExpiry.values().removeIf(v -&gt; v &lt; now);</code>.", "code": "import java.util.Iterator;\nimport java.util.LinkedHashMap;\nimport java.util.Map;\n\npublic class Main {\n    public static void main(String[] args) {\n        Map<String, Integer> otpExpiry = new LinkedHashMap<>();\n        otpExpiry.put(\"riya\", 12);\n        otpExpiry.put(\"kabir\", 8);\n        otpExpiry.put(\"om\", 15);\n        int now = 10;\n        Iterator<Map.Entry<String, Integer>> it = otpExpiry.entrySet().iterator();\n        while (it.hasNext()) {\n            Map.Entry<String, Integer> e = it.next();\n            if (e.getValue() < now) {\n                it.remove();\n            }\n        }\n        System.out.println(otpExpiry);\n    }\n}\n"}]}</script>
+    </div>
+    <p class="wx__label">What happens in memory, step by step</p>
+    <p class="wx__how">Recorded from the real JVM: press <b>Next</b> to execute one line at a time. Watch method calls push and pop frames on the stack, and objects (numbered #1, #2 …) appear on the heap.</p>
+    <div class="tracer">
+    <script type="application/json">{"lang": "java", "code": ["import java.util.Iterator;", "import java.util.LinkedHashMap;", "import java.util.Map;", "", "public class Main {", "    public static void main(String[] args) {", "        Map<String, Integer> otpExpiry = new LinkedHashMap<>();", "        otpExpiry.put(\"riya\", 12);", "        otpExpiry.put(\"kabir\", 8);", "        otpExpiry.put(\"om\", 15);", "        int now = 10;", "        Iterator<Map.Entry<String, Integer>> it = otpExpiry.entrySet().iterator();", "        while (it.hasNext()) {", "            Map.Entry<String, Integer> e = it.next();", "            if (e.getValue() < now) {", "                it.remove();", "            }", "        }", "        System.out.println(otpExpiry);", "    }", "}"], "steps": [{"line": 7, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["otpExpiry", "→ #1 LinkedHashMap"]]}], "heap": ["<b>#1</b> LinkedHashMap size 0 {} (insertion order)", "<b>#2</b> String[0] (args, empty)"], "newVar": "otpExpiry", "phase": "Assign", "note": "Now <code>otpExpiry</code> = → #1 LinkedHashMap. New object <b>#1</b> on the heap: LinkedHashMap size 0 {} (insertion order)."}, {"line": 8, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["otpExpiry", "→ #1 LinkedHashMap"]]}], "heap": ["<b>#1</b> LinkedHashMap size 1 {&quot;riya&quot;=12} (insertion order)", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> String &quot;riya&quot;"], "phase": "Update", "note": "Object <b>#1</b> changes: LinkedHashMap size 1 {&quot;riya&quot;=12} (insertion order). New object <b>#3</b> on the heap: String &quot;riya&quot;."}, {"line": 9, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["otpExpiry", "→ #1 LinkedHashMap"]]}], "heap": ["<b>#1</b> LinkedHashMap size 2 {&quot;riya&quot;=12, &quot;kabir&quot;=8} (insertion order)", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> String &quot;riya&quot;", "<b>#4</b> String &quot;kabir&quot;"], "phase": "Update", "note": "Object <b>#1</b> changes: LinkedHashMap size 2 {&quot;riya&quot;=12, &quot;kabir&quot;=8} (insertion order). New object <b>#4</b> on the heap: String &quot;kabir&quot;."}, {"line": 10, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["otpExpiry", "→ #1 LinkedHashMap"]]}], "heap": ["<b>#1</b> LinkedHashMap size 3 {&quot;riya&quot;=12, &quot;kabir&quot;=8, &quot;om&quot;=15} (insertion order)", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> String &quot;riya&quot;", "<b>#4</b> String &quot;kabir&quot;", "<b>#5</b> String &quot;om&quot;"], "phase": "Update", "note": "Object <b>#1</b> changes: LinkedHashMap size 3 {&quot;riya&quot;=12, &quot;kabir&quot;=8, &quot;om&quot;=15} (insertion order). New object <b>#5</b> on the heap: String &quot;om&quot;."}, {"line": 11, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["otpExpiry", "→ #1 LinkedHashMap"], ["now", "10"]]}], "heap": ["<b>#1</b> LinkedHashMap size 3 {&quot;riya&quot;=12, &quot;kabir&quot;=8, &quot;om&quot;=15} (insertion order)", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> String &quot;riya&quot;", "<b>#4</b> String &quot;kabir&quot;", "<b>#5</b> String &quot;om&quot;"], "newVar": "now", "phase": "Assign", "note": "Now <code>now</code> = 10."}, {"line": 12, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["otpExpiry", "→ #1 LinkedHashMap"], ["now", "10"], ["it", "→ #6 LinkedHashMap.LinkedEntryIterator"]]}], "heap": ["<b>#1</b> LinkedHashMap size 3 {&quot;riya&quot;=12, &quot;kabir&quot;=8, &quot;om&quot;=15} (insertion order)", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> String &quot;riya&quot;", "<b>#4</b> String &quot;kabir&quot;", "<b>#5</b> String &quot;om&quot;", "<b>#6</b> LinkedHashMap.LinkedEntryIterator"], "newVar": "it", "phase": "Assign", "note": "Now <code>it</code> = → #6 LinkedHashMap.LinkedEntryIterator. New object <b>#6</b> on the heap: LinkedHashMap.LinkedEntryIterator."}, {"line": 13, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["otpExpiry", "→ #1 LinkedHashMap"], ["now", "10"], ["it", "→ #6 LinkedHashMap.LinkedEntryIterator"]]}], "heap": ["<b>#1</b> LinkedHashMap size 3 {&quot;riya&quot;=12, &quot;kabir&quot;=8, &quot;om&quot;=15} (insertion order)", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> String &quot;riya&quot;", "<b>#4</b> String &quot;kabir&quot;", "<b>#5</b> String &quot;om&quot;", "<b>#6</b> LinkedHashMap.LinkedEntryIterator"], "phase": "Check", "note": "The condition <code>it.hasNext()</code> is checked: <b>true</b>, so the block runs."}, {"line": 14, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["otpExpiry", "→ #1 LinkedHashMap"], ["now", "10"], ["it", "→ #6 LinkedHashMap.LinkedEntryIterator"], ["e", "→ #7 LinkedHashMap.Entry"]]}], "heap": ["<b>#1</b> LinkedHashMap size 3 {&quot;riya&quot;=12, &quot;kabir&quot;=8, &quot;om&quot;=15} (insertion order)", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> String &quot;riya&quot;", "<b>#4</b> String &quot;kabir&quot;", "<b>#5</b> String &quot;om&quot;", "<b>#6</b> LinkedHashMap.LinkedEntryIterator", "<b>#7</b> LinkedHashMap.Entry"], "newVar": "e", "phase": "Assign", "note": "Now <code>e</code> = → #7 LinkedHashMap.Entry. New object <b>#7</b> on the heap: LinkedHashMap.Entry."}, {"line": 15, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["otpExpiry", "→ #1 LinkedHashMap"], ["now", "10"], ["it", "→ #6 LinkedHashMap.LinkedEntryIterator"]]}], "heap": ["<b>#1</b> LinkedHashMap size 3 {&quot;riya&quot;=12, &quot;kabir&quot;=8, &quot;om&quot;=15} (insertion order)", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> String &quot;riya&quot;", "<b>#4</b> String &quot;kabir&quot;", "<b>#5</b> String &quot;om&quot;", "<b>#6</b> LinkedHashMap.LinkedEntryIterator"], "phase": "Check", "note": "The condition <code>e.getValue() &lt; now</code> is checked: <b>false</b>, so the block is skipped."}, {"line": 18, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["otpExpiry", "→ #1 LinkedHashMap"], ["now", "10"], ["it", "→ #6 LinkedHashMap.LinkedEntryIterator"]]}], "heap": ["<b>#1</b> LinkedHashMap size 3 {&quot;riya&quot;=12, &quot;kabir&quot;=8, &quot;om&quot;=15} (insertion order)", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> String &quot;riya&quot;", "<b>#4</b> String &quot;kabir&quot;", "<b>#5</b> String &quot;om&quot;", "<b>#6</b> LinkedHashMap.LinkedEntryIterator"], "phase": "Step", "note": "End of the block."}, {"line": 13, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["otpExpiry", "→ #1 LinkedHashMap"], ["now", "10"], ["it", "→ #6 LinkedHashMap.LinkedEntryIterator"]]}], "heap": ["<b>#1</b> LinkedHashMap size 3 {&quot;riya&quot;=12, &quot;kabir&quot;=8, &quot;om&quot;=15} (insertion order)", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> String &quot;riya&quot;", "<b>#4</b> String &quot;kabir&quot;", "<b>#5</b> String &quot;om&quot;", "<b>#6</b> LinkedHashMap.LinkedEntryIterator"], "phase": "Check", "note": "The condition <code>it.hasNext()</code> is checked: <b>true</b>, so the block runs."}, {"line": 14, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["otpExpiry", "→ #1 LinkedHashMap"], ["now", "10"], ["it", "→ #6 LinkedHashMap.LinkedEntryIterator"], ["e", "→ #8 LinkedHashMap.Entry"]]}], "heap": ["<b>#1</b> LinkedHashMap size 3 {&quot;riya&quot;=12, &quot;kabir&quot;=8, &quot;om&quot;=15} (insertion order)", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> String &quot;riya&quot;", "<b>#4</b> String &quot;kabir&quot;", "<b>#5</b> String &quot;om&quot;", "<b>#6</b> LinkedHashMap.LinkedEntryIterator", "<b>#8</b> LinkedHashMap.Entry"], "newVar": "e", "phase": "Assign", "note": "Now <code>e</code> = → #8 LinkedHashMap.Entry. New object <b>#8</b> on the heap: LinkedHashMap.Entry."}, {"line": 15, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["otpExpiry", "→ #1 LinkedHashMap"], ["now", "10"], ["it", "→ #6 LinkedHashMap.LinkedEntryIterator"], ["e", "→ #8 LinkedHashMap.Entry"]]}], "heap": ["<b>#1</b> LinkedHashMap size 3 {&quot;riya&quot;=12, &quot;kabir&quot;=8, &quot;om&quot;=15} (insertion order)", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> String &quot;riya&quot;", "<b>#4</b> String &quot;kabir&quot;", "<b>#5</b> String &quot;om&quot;", "<b>#6</b> LinkedHashMap.LinkedEntryIterator", "<b>#8</b> LinkedHashMap.Entry"], "phase": "Check", "note": "The condition <code>e.getValue() &lt; now</code> is checked: <b>true</b>, so the block runs."}, {"line": 16, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["otpExpiry", "→ #1 LinkedHashMap"], ["now", "10"], ["it", "→ #6 LinkedHashMap.LinkedEntryIterator"]]}], "heap": ["<b>#1</b> LinkedHashMap size 2 {&quot;riya&quot;=12, &quot;om&quot;=15} (insertion order)", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> String &quot;riya&quot;", "<b>#5</b> String &quot;om&quot;", "<b>#6</b> LinkedHashMap.LinkedEntryIterator"], "phase": "Update", "note": "Object <b>#1</b> changes: LinkedHashMap size 2 {&quot;riya&quot;=12, &quot;om&quot;=15} (insertion order)."}, {"line": 18, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["otpExpiry", "→ #1 LinkedHashMap"], ["now", "10"], ["it", "→ #6 LinkedHashMap.LinkedEntryIterator"]]}], "heap": ["<b>#1</b> LinkedHashMap size 2 {&quot;riya&quot;=12, &quot;om&quot;=15} (insertion order)", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> String &quot;riya&quot;", "<b>#5</b> String &quot;om&quot;", "<b>#6</b> LinkedHashMap.LinkedEntryIterator"], "phase": "Step", "note": "End of the block."}, {"line": 13, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["otpExpiry", "→ #1 LinkedHashMap"], ["now", "10"], ["it", "→ #6 LinkedHashMap.LinkedEntryIterator"]]}], "heap": ["<b>#1</b> LinkedHashMap size 2 {&quot;riya&quot;=12, &quot;om&quot;=15} (insertion order)", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> String &quot;riya&quot;", "<b>#5</b> String &quot;om&quot;", "<b>#6</b> LinkedHashMap.LinkedEntryIterator"], "phase": "Check", "note": "The condition <code>it.hasNext()</code> is checked: <b>true</b>, so the block runs."}, {"line": 14, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["otpExpiry", "→ #1 LinkedHashMap"], ["now", "10"], ["it", "→ #6 LinkedHashMap.LinkedEntryIterator"], ["e", "→ #9 LinkedHashMap.Entry"]]}], "heap": ["<b>#1</b> LinkedHashMap size 2 {&quot;riya&quot;=12, &quot;om&quot;=15} (insertion order)", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> String &quot;riya&quot;", "<b>#5</b> String &quot;om&quot;", "<b>#6</b> LinkedHashMap.LinkedEntryIterator", "<b>#9</b> LinkedHashMap.Entry"], "newVar": "e", "phase": "Assign", "note": "Now <code>e</code> = → #9 LinkedHashMap.Entry. New object <b>#9</b> on the heap: LinkedHashMap.Entry."}, {"line": 15, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["otpExpiry", "→ #1 LinkedHashMap"], ["now", "10"], ["it", "→ #6 LinkedHashMap.LinkedEntryIterator"]]}], "heap": ["<b>#1</b> LinkedHashMap size 2 {&quot;riya&quot;=12, &quot;om&quot;=15} (insertion order)", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> String &quot;riya&quot;", "<b>#5</b> String &quot;om&quot;", "<b>#6</b> LinkedHashMap.LinkedEntryIterator"], "phase": "Check", "note": "The condition <code>e.getValue() &lt; now</code> is checked: <b>false</b>, so the block is skipped."}, {"line": 18, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["otpExpiry", "→ #1 LinkedHashMap"], ["now", "10"], ["it", "→ #6 LinkedHashMap.LinkedEntryIterator"]]}], "heap": ["<b>#1</b> LinkedHashMap size 2 {&quot;riya&quot;=12, &quot;om&quot;=15} (insertion order)", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> String &quot;riya&quot;", "<b>#5</b> String &quot;om&quot;", "<b>#6</b> LinkedHashMap.LinkedEntryIterator"], "phase": "Step", "note": "End of the block."}, {"line": 13, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["otpExpiry", "→ #1 LinkedHashMap"], ["now", "10"], ["it", "→ #6 LinkedHashMap.LinkedEntryIterator"]]}], "heap": ["<b>#1</b> LinkedHashMap size 2 {&quot;riya&quot;=12, &quot;om&quot;=15} (insertion order)", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> String &quot;riya&quot;", "<b>#5</b> String &quot;om&quot;", "<b>#6</b> LinkedHashMap.LinkedEntryIterator"], "phase": "Check", "note": "The condition <code>it.hasNext()</code> is checked: <b>false</b>, so the loop ends."}, {"line": 19, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["otpExpiry", "→ #1 LinkedHashMap"], ["now", "10"], ["it", "→ #6 LinkedHashMap.LinkedEntryIterator"]]}], "heap": ["<b>#1</b> LinkedHashMap size 2 {&quot;riya&quot;=12, &quot;om&quot;=15} (insertion order)", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> String &quot;riya&quot;", "<b>#5</b> String &quot;om&quot;", "<b>#6</b> LinkedHashMap.LinkedEntryIterator"], "out": "{riya=12, om=15}\n", "phase": "Print", "note": "Prints <code>{riya=12, om=15}</code>."}, {"line": 20, "phase": "Program ends", "note": "<code>main</code> returns, its frame is popped and the program ends.", "stack": [], "heap": []}]}</script>
+  </div>
+  </article>
+  <article class="wx">
+    <div class="wx__head"><span class="wx__num">Example 2</span><span class="wx__tag">Exams · ListIterator</span></div>
+    <h4>Apply grace marks in place</h4>
+    <div class="wx__problem"><p class="wx__label">Problem statement</p><p>Students who scored 33 or 34 get grace marks up to 35. Update the list in place with a ListIterator's <code>set</code>, and count how many were changed.</p></div>
+    <div class="prob__io"><div><small>Input</small><pre>[33, 72, 34, 20]</pre></div><div><small>Expected output</small><pre>[35, 72, 35, 20], grace given to 2</pre></div></div>
+    <div class="wx__approach"><p class="wx__label">Approach</p><ol><li>Walk with <code>listIterator()</code>.</li><li>If a mark is 33 or 34, <code>set(35)</code> replaces it where the cursor just passed.</li><li>Count the changes.</li></ol></div>
+    <p class="wx__label">Solution: run it live</p>
+    <div class="runner">
+    <script type="application/json">{"lang": "java", "file": "Main.java", "tasks": [{"label": "Run · Apply grace marks in place", "hint": "Press <b>Run</b>. Then also <i>insert</i> a note “*” after each changed mark using <code>li.add</code> (change the list to <code>List&lt;Object&gt;</code>).", "code": "import java.util.ArrayList;\nimport java.util.List;\nimport java.util.ListIterator;\n\npublic class Main {\n    public static void main(String[] args) {\n        List<Integer> marks = new ArrayList<>(List.of(33, 72, 34, 20));\n        int changed = 0;\n        ListIterator<Integer> li = marks.listIterator();\n        while (li.hasNext()) {\n            int m = li.next();\n            if (m == 33 || m == 34) {\n                li.set(35);\n                changed++;\n            }\n        }\n        System.out.println(marks + \", grace given to \" + changed);\n    }\n}\n"}]}</script>
+    </div>
+    <p class="wx__label">What happens in memory, step by step</p>
+    <p class="wx__how">Recorded from the real JVM: press <b>Next</b> to execute one line at a time. Watch method calls push and pop frames on the stack, and objects (numbered #1, #2 …) appear on the heap.</p>
+    <div class="tracer">
+    <script type="application/json">{"lang": "java", "code": ["import java.util.ArrayList;", "import java.util.List;", "import java.util.ListIterator;", "", "public class Main {", "    public static void main(String[] args) {", "        List<Integer> marks = new ArrayList<>(List.of(33, 72, 34, 20));", "        int changed = 0;", "        ListIterator<Integer> li = marks.listIterator();", "        while (li.hasNext()) {", "            int m = li.next();", "            if (m == 33 || m == 34) {", "                li.set(35);", "                changed++;", "            }", "        }", "        System.out.println(marks + \", grace given to \" + changed);", "    }", "}"], "steps": [{"line": 7, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["marks", "→ #1 ArrayList"]]}], "heap": ["<b>#1</b> ArrayList size 4, capacity 4 [33, 72, 34, 20]", "<b>#2</b> String[0] (args, empty)"], "newVar": "marks", "phase": "Assign", "note": "Now <code>marks</code> = → #1 ArrayList. New object <b>#1</b> on the heap: ArrayList size 4, capacity 4 [33, 72, 34, 20]."}, {"line": 8, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["marks", "→ #1 ArrayList"], ["changed", "0"]]}], "heap": ["<b>#1</b> ArrayList size 4, capacity 4 [33, 72, 34, 20]", "<b>#2</b> String[0] (args, empty)"], "newVar": "changed", "phase": "Assign", "note": "Now <code>changed</code> = 0."}, {"line": 9, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["marks", "→ #1 ArrayList"], ["changed", "0"], ["li", "→ #3 ArrayList.ListItr"]]}], "heap": ["<b>#1</b> ArrayList size 4, capacity 4 [33, 72, 34, 20]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> ArrayList.ListItr {cursor=0, lastRet=-1}"], "newVar": "li", "phase": "Assign", "note": "Now <code>li</code> = → #3 ArrayList.ListItr. New object <b>#3</b> on the heap: ArrayList.ListItr {cursor=0, lastRet=-1}."}, {"line": 10, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["marks", "→ #1 ArrayList"], ["changed", "0"], ["li", "→ #3 ArrayList.ListItr"]]}], "heap": ["<b>#1</b> ArrayList size 4, capacity 4 [33, 72, 34, 20]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> ArrayList.ListItr {cursor=0, lastRet=-1}"], "phase": "Check", "note": "The condition <code>li.hasNext()</code> is checked: <b>true</b>, so the block runs."}, {"line": 11, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["marks", "→ #1 ArrayList"], ["changed", "0"], ["li", "→ #3 ArrayList.ListItr"], ["m", "33"]]}], "heap": ["<b>#1</b> ArrayList size 4, capacity 4 [33, 72, 34, 20]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> ArrayList.ListItr {cursor=1, lastRet=0}"], "newVar": "m", "phase": "Assign", "note": "Now <code>m</code> = 33. Object <b>#3</b> changes: ArrayList.ListItr {cursor=1, lastRet=0}."}, {"line": 12, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["marks", "→ #1 ArrayList"], ["changed", "0"], ["li", "→ #3 ArrayList.ListItr"], ["m", "33"]]}], "heap": ["<b>#1</b> ArrayList size 4, capacity 4 [33, 72, 34, 20]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> ArrayList.ListItr {cursor=1, lastRet=0}"], "phase": "Check", "note": "The condition <code>m == 33 || m == 34</code> is checked: <b>true</b>, so the block runs."}, {"line": 13, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["marks", "→ #1 ArrayList"], ["changed", "0"], ["li", "→ #3 ArrayList.ListItr"], ["m", "33"]]}], "heap": ["<b>#1</b> ArrayList size 4, capacity 4 [35, 72, 34, 20]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> ArrayList.ListItr {cursor=1, lastRet=0}"], "phase": "Update", "note": "Object <b>#1</b> changes: ArrayList size 4, capacity 4 [35, 72, 34, 20]."}, {"line": 14, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["marks", "→ #1 ArrayList"], ["changed", "1"], ["li", "→ #3 ArrayList.ListItr"]]}], "heap": ["<b>#1</b> ArrayList size 4, capacity 4 [35, 72, 34, 20]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> ArrayList.ListItr {cursor=1, lastRet=0}"], "newVar": "changed", "phase": "Assign", "note": "Now <code>changed</code> = 1."}, {"line": 16, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["marks", "→ #1 ArrayList"], ["changed", "1"], ["li", "→ #3 ArrayList.ListItr"]]}], "heap": ["<b>#1</b> ArrayList size 4, capacity 4 [35, 72, 34, 20]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> ArrayList.ListItr {cursor=1, lastRet=0}"], "phase": "Step", "note": "End of the block."}, {"line": 10, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["marks", "→ #1 ArrayList"], ["changed", "1"], ["li", "→ #3 ArrayList.ListItr"]]}], "heap": ["<b>#1</b> ArrayList size 4, capacity 4 [35, 72, 34, 20]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> ArrayList.ListItr {cursor=1, lastRet=0}"], "phase": "Check", "note": "The condition <code>li.hasNext()</code> is checked: <b>true</b>, so the block runs."}, {"line": 11, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["marks", "→ #1 ArrayList"], ["changed", "1"], ["li", "→ #3 ArrayList.ListItr"], ["m", "72"]]}], "heap": ["<b>#1</b> ArrayList size 4, capacity 4 [35, 72, 34, 20]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> ArrayList.ListItr {cursor=2, lastRet=1}"], "newVar": "m", "phase": "Assign", "note": "Now <code>m</code> = 72. Object <b>#3</b> changes: ArrayList.ListItr {cursor=2, lastRet=1}."}, {"line": 12, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["marks", "→ #1 ArrayList"], ["changed", "1"], ["li", "→ #3 ArrayList.ListItr"]]}], "heap": ["<b>#1</b> ArrayList size 4, capacity 4 [35, 72, 34, 20]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> ArrayList.ListItr {cursor=2, lastRet=1}"], "phase": "Check", "note": "The condition <code>m == 33 || m == 34</code> is checked: <b>false</b>, so the block is skipped."}, {"line": 16, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["marks", "→ #1 ArrayList"], ["changed", "1"], ["li", "→ #3 ArrayList.ListItr"]]}], "heap": ["<b>#1</b> ArrayList size 4, capacity 4 [35, 72, 34, 20]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> ArrayList.ListItr {cursor=2, lastRet=1}"], "phase": "Step", "note": "End of the block."}, {"line": 10, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["marks", "→ #1 ArrayList"], ["changed", "1"], ["li", "→ #3 ArrayList.ListItr"]]}], "heap": ["<b>#1</b> ArrayList size 4, capacity 4 [35, 72, 34, 20]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> ArrayList.ListItr {cursor=2, lastRet=1}"], "phase": "Check", "note": "The condition <code>li.hasNext()</code> is checked: <b>true</b>, so the block runs."}, {"line": 11, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["marks", "→ #1 ArrayList"], ["changed", "1"], ["li", "→ #3 ArrayList.ListItr"], ["m", "34"]]}], "heap": ["<b>#1</b> ArrayList size 4, capacity 4 [35, 72, 34, 20]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> ArrayList.ListItr {cursor=3, lastRet=2}"], "newVar": "m", "phase": "Assign", "note": "Now <code>m</code> = 34. Object <b>#3</b> changes: ArrayList.ListItr {cursor=3, lastRet=2}."}, {"line": 12, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["marks", "→ #1 ArrayList"], ["changed", "1"], ["li", "→ #3 ArrayList.ListItr"], ["m", "34"]]}], "heap": ["<b>#1</b> ArrayList size 4, capacity 4 [35, 72, 34, 20]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> ArrayList.ListItr {cursor=3, lastRet=2}"], "phase": "Check", "note": "The condition <code>m == 33 || m == 34</code> is checked: <b>true</b>, so the block runs."}, {"line": 13, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["marks", "→ #1 ArrayList"], ["changed", "1"], ["li", "→ #3 ArrayList.ListItr"], ["m", "34"]]}], "heap": ["<b>#1</b> ArrayList size 4, capacity 4 [35, 72, 35, 20]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> ArrayList.ListItr {cursor=3, lastRet=2}"], "phase": "Update", "note": "Object <b>#1</b> changes: ArrayList size 4, capacity 4 [35, 72, 35, 20]."}, {"line": 14, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["marks", "→ #1 ArrayList"], ["changed", "2"], ["li", "→ #3 ArrayList.ListItr"]]}], "heap": ["<b>#1</b> ArrayList size 4, capacity 4 [35, 72, 35, 20]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> ArrayList.ListItr {cursor=3, lastRet=2}"], "newVar": "changed", "phase": "Assign", "note": "Now <code>changed</code> = 2."}, {"line": 16, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["marks", "→ #1 ArrayList"], ["changed", "2"], ["li", "→ #3 ArrayList.ListItr"]]}], "heap": ["<b>#1</b> ArrayList size 4, capacity 4 [35, 72, 35, 20]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> ArrayList.ListItr {cursor=3, lastRet=2}"], "phase": "Step", "note": "End of the block."}, {"line": 10, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["marks", "→ #1 ArrayList"], ["changed", "2"], ["li", "→ #3 ArrayList.ListItr"]]}], "heap": ["<b>#1</b> ArrayList size 4, capacity 4 [35, 72, 35, 20]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> ArrayList.ListItr {cursor=3, lastRet=2}"], "phase": "Check", "note": "The condition <code>li.hasNext()</code> is checked: <b>true</b>, so the block runs."}, {"line": 11, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["marks", "→ #1 ArrayList"], ["changed", "2"], ["li", "→ #3 ArrayList.ListItr"], ["m", "20"]]}], "heap": ["<b>#1</b> ArrayList size 4, capacity 4 [35, 72, 35, 20]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> ArrayList.ListItr {cursor=4, lastRet=3}"], "newVar": "m", "phase": "Assign", "note": "Now <code>m</code> = 20. Object <b>#3</b> changes: ArrayList.ListItr {cursor=4, lastRet=3}."}, {"line": 12, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["marks", "→ #1 ArrayList"], ["changed", "2"], ["li", "→ #3 ArrayList.ListItr"]]}], "heap": ["<b>#1</b> ArrayList size 4, capacity 4 [35, 72, 35, 20]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> ArrayList.ListItr {cursor=4, lastRet=3}"], "phase": "Check", "note": "The condition <code>m == 33 || m == 34</code> is checked: <b>false</b>, so the block is skipped."}, {"line": 16, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["marks", "→ #1 ArrayList"], ["changed", "2"], ["li", "→ #3 ArrayList.ListItr"]]}], "heap": ["<b>#1</b> ArrayList size 4, capacity 4 [35, 72, 35, 20]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> ArrayList.ListItr {cursor=4, lastRet=3}"], "phase": "Step", "note": "End of the block."}, {"line": 10, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["marks", "→ #1 ArrayList"], ["changed", "2"], ["li", "→ #3 ArrayList.ListItr"]]}], "heap": ["<b>#1</b> ArrayList size 4, capacity 4 [35, 72, 35, 20]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> ArrayList.ListItr {cursor=4, lastRet=3}"], "phase": "Check", "note": "The condition <code>li.hasNext()</code> is checked: <b>false</b>, so the loop ends."}, {"line": 17, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["marks", "→ #1 ArrayList"], ["changed", "2"], ["li", "→ #3 ArrayList.ListItr"]]}], "heap": ["<b>#1</b> ArrayList size 4, capacity 4 [35, 72, 35, 20]", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> ArrayList.ListItr {cursor=4, lastRet=3}"], "out": "[35, 72, 35, 20], grace given to 2\n", "phase": "Print", "note": "Prints <code>[35, 72, 35, 20], grace given to 2</code>."}, {"line": 18, "phase": "Program ends", "note": "<code>main</code> returns, its frame is popped and the program ends.", "stack": [], "heap": []}]}</script>
+  </div>
+  </article>
+  <article class="wx">
+    <div class="wx__head"><span class="wx__num">Example 3</span><span class="wx__tag">Fitness · custom Iterable</span></div>
+    <h4>Iterate over a workout plan's days</h4>
+    <div class="wx__problem"><p class="wx__label">Problem statement</p><p>A <code>Plan</code> stores exercises per day. Make it <code>Iterable&lt;String&gt;</code> so a for-each prints each day's line.</p></div>
+    <div class="prob__io"><div><small>Input</small><pre>Plan with &quot;Push&quot;, &quot;Pull&quot;, &quot;Legs&quot;</pre></div><div><small>Expected output</small><pre>Day 1: Push
+Day 2: Pull
+Day 3: Legs</pre></div></div>
+    <div class="wx__approach"><p class="wx__label">Approach</p><ol><li><code>Plan</code> keeps a private String array.</li><li><code>iterator()</code> returns an anonymous Iterator with an index.</li><li>main uses for-each; Plan's storage stays hidden.</li></ol></div>
+    <p class="wx__label">Solution: run it live</p>
+    <div class="runner">
+    <script type="application/json">{"lang": "java", "file": "Main.java", "tasks": [{"label": "Run · Iterate over a workout plan's days", "hint": "Press <b>Run</b>. Then add a rest day after every three days inside <code>next()</code>.", "code": "import java.util.Iterator;\n\nclass Plan implements Iterable<String> {\n    private final String[] days;\n\n    Plan(String... days) {\n        this.days = days;\n    }\n\n    public Iterator<String> iterator() {\n        return new Iterator<>() {\n            int i = 0;\n            public boolean hasNext() {\n                return i < days.length;\n            }\n            public String next() {\n                return \"Day \" + (i + 1) + \": \" + days[i++];\n            }\n        };\n    }\n}\n\npublic class Main {\n    public static void main(String[] args) {\n        for (String line : new Plan(\"Push\", \"Pull\", \"Legs\")) {\n            System.out.println(line);\n        }\n    }\n}\n"}]}</script>
+    </div>
+    <p class="wx__label">What happens in memory, step by step</p>
+    <p class="wx__how">Recorded from the real JVM: press <b>Next</b> to execute one line at a time. Watch method calls push and pop frames on the stack, and objects (numbered #1, #2 …) appear on the heap.</p>
+    <div class="tracer">
+    <script type="application/json">{"lang": "java", "code": ["import java.util.Iterator;", "", "class Plan implements Iterable<String> {", "    private final String[] days;", "", "    Plan(String... days) {", "        this.days = days;", "    }", "", "    public Iterator<String> iterator() {", "        return new Iterator<>() {", "            int i = 0;", "            public boolean hasNext() {", "                return i < days.length;", "            }", "            public String next() {", "                return \"Day \" + (i + 1) + \": \" + days[i++];", "            }", "        };", "    }", "}", "", "public class Main {", "    public static void main(String[] args) {", "        for (String line : new Plan(\"Push\", \"Pull\", \"Legs\")) {", "            System.out.println(line);", "        }", "    }", "}"], "steps": [{"line": 25, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "new Plan(String[] days)", "vars": [["this", "→ #1 Plan"], ["days", "→ #2 String[3]"]]}], "heap": ["<b>#1</b> Plan {days=null}", "<b>#2</b> String[3] {&quot;Push&quot;, &quot;Pull&quot;, &quot;Legs&quot;}", "<b>#3</b> String[0] (args, empty)", "<b>#4</b> String &quot;Push&quot;", "<b>#5</b> String &quot;Pull&quot;", "<b>#6</b> String &quot;Legs&quot;"], "newVar": "this", "phase": "Call", "note": "<code>new Plan()</code> is called: a new frame is pushed with <code>this</code> = → #1 Plan, <code>days</code> = → #2 String[3]. New object <b>#1</b> on the heap: Plan {days=null}. New object <b>#2</b> on the heap: String[3] {&quot;Push&quot;, &quot;Pull&quot;, &quot;Legs&quot;}. New object <b>#4</b> on the heap: String &quot;Push&quot;."}, {"line": 6, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "new Plan(String[] days)", "vars": [["this", "→ #1 Plan"], ["days", "→ #2 String[3]"]]}], "heap": ["<b>#1</b> Plan {days=null}", "<b>#2</b> String[3] {&quot;Push&quot;, &quot;Pull&quot;, &quot;Legs&quot;}", "<b>#3</b> String[0] (args, empty)", "<b>#4</b> String &quot;Push&quot;", "<b>#5</b> String &quot;Pull&quot;", "<b>#6</b> String &quot;Legs&quot;"], "phase": "Constructor", "note": "The constructor starts. The new object already exists, with default values (0, null, false) in its fields."}, {"line": 7, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "new Plan(String[] days)", "vars": [["this", "→ #1 Plan"], ["days", "→ #2 String[3]"]]}], "heap": ["<b>#1</b> Plan {days=→#2}", "<b>#2</b> String[3] {&quot;Push&quot;, &quot;Pull&quot;, &quot;Legs&quot;}", "<b>#3</b> String[0] (args, empty)", "<b>#4</b> String &quot;Push&quot;", "<b>#5</b> String &quot;Pull&quot;", "<b>#6</b> String &quot;Legs&quot;"], "phase": "Update", "note": "Object <b>#1</b> changes: Plan {days=→#2}."}, {"line": 8, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}], "heap": ["<b>#3</b> String[0] (args, empty)"], "phase": "Return", "note": "<code>new Plan()</code> returns and its frame is popped."}, {"line": 25, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "Plan.iterator()", "vars": [["this", "→ #1 Plan"]]}], "heap": ["<b>#1</b> Plan {days=→#2}", "<b>#2</b> String[3] {&quot;Push&quot;, &quot;Pull&quot;, &quot;Legs&quot;}", "<b>#3</b> String[0] (args, empty)", "<b>#4</b> String &quot;Push&quot;", "<b>#5</b> String &quot;Pull&quot;", "<b>#6</b> String &quot;Legs&quot;"], "newVar": "this", "phase": "for-each", "note": "The for-each calls <code>iterator()</code> on the Plan."}, {"line": 11, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "Plan.iterator()", "vars": [["this", "→ #1 Plan"]]}, {"frame": "new Plan.1()", "vars": [["this", "→ #7 Plan.1"]]}], "heap": ["<b>#1</b> Plan {days=→#2}", "<b>#2</b> String[3] {&quot;Push&quot;, &quot;Pull&quot;, &quot;Legs&quot;}", "<b>#3</b> String[0] (args, empty)", "<b>#4</b> String &quot;Push&quot;", "<b>#5</b> String &quot;Pull&quot;", "<b>#6</b> String &quot;Legs&quot;", "<b>#7</b> Plan.1 {i=0, this$0=null}"], "newVar": "this", "phase": "Iterator object", "note": "An object of the anonymous class (shown as Plan.1) is created with <code>i=0</code>."}, {"line": 11, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "Plan.iterator()", "vars": [["this", "→ #1 Plan"]]}, {"frame": "new Plan.1()", "vars": [["this", "→ #7 Plan.1"]]}], "heap": ["<b>#1</b> Plan {days=→#2}", "<b>#2</b> String[3] {&quot;Push&quot;, &quot;Pull&quot;, &quot;Legs&quot;}", "<b>#3</b> String[0] (args, empty)", "<b>#4</b> String &quot;Push&quot;", "<b>#5</b> String &quot;Pull&quot;", "<b>#6</b> String &quot;Legs&quot;", "<b>#7</b> Plan.1 {i=0, this$0=→#1}"], "phase": "Outer link", "note": "Its hidden <code>this$0</code> now points to the Plan, which is how <code>next()</code> can read the private <code>days</code> array (Lesson 10.5)."}, {"line": 12, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "Plan.iterator()", "vars": [["this", "→ #1 Plan"]]}], "heap": ["<b>#1</b> Plan {days=→#2}", "<b>#2</b> String[3] {&quot;Push&quot;, &quot;Pull&quot;, &quot;Legs&quot;}", "<b>#3</b> String[0] (args, empty)", "<b>#4</b> String &quot;Push&quot;", "<b>#5</b> String &quot;Pull&quot;", "<b>#6</b> String &quot;Legs&quot;"], "phase": "Return", "note": "<code>new Plan.1()</code> returns and its frame is popped."}, {"line": 11, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}], "heap": ["<b>#3</b> String[0] (args, empty)"], "phase": "Return", "note": "<code>Plan.iterator()</code> returns and its frame is popped."}, {"line": 25, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "Plan.1.hasNext()", "vars": [["this", "→ #7 Plan.1"]]}], "heap": ["<b>#1</b> Plan {days=→#2}", "<b>#2</b> String[3] {&quot;Push&quot;, &quot;Pull&quot;, &quot;Legs&quot;}", "<b>#3</b> String[0] (args, empty)", "<b>#4</b> String &quot;Push&quot;", "<b>#5</b> String &quot;Pull&quot;", "<b>#6</b> String &quot;Legs&quot;", "<b>#7</b> Plan.1 {i=0, this$0=→#1}"], "newVar": "this", "phase": "hasNext", "note": "The loop asks <code>hasNext()</code>: is 0 &lt; 3?"}, {"line": 14, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}], "heap": ["<b>#3</b> String[0] (args, empty)"], "phase": "Return", "note": "<code>Plan.1.hasNext()</code> returns and its frame is popped."}, {"line": 25, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "Plan.1.next()", "vars": [["this", "→ #7 Plan.1"]]}], "heap": ["<b>#1</b> Plan {days=→#2}", "<b>#2</b> String[3] {&quot;Push&quot;, &quot;Pull&quot;, &quot;Legs&quot;}", "<b>#3</b> String[0] (args, empty)", "<b>#4</b> String &quot;Push&quot;", "<b>#5</b> String &quot;Pull&quot;", "<b>#6</b> String &quot;Legs&quot;", "<b>#7</b> Plan.1 {i=0, this$0=→#1}"], "newVar": "this", "phase": "next", "note": "Then <code>next()</code>, which builds \"Day 1: Push\" and increases <code>i</code>."}, {"line": 17, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}], "heap": ["<b>#3</b> String[0] (args, empty)"], "phase": "Return", "note": "<code>Plan.1.next()</code> returns and its frame is popped."}, {"line": 25, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["line", "→ #8 \"Day 1: Push\""]]}], "heap": ["<b>#3</b> String[0] (args, empty)", "<b>#8</b> String &quot;Day 1: Push&quot;"], "newVar": "line", "phase": "Assign", "note": "Now <code>line</code> = → #8 &quot;Day 1: Push&quot;. New object <b>#8</b> on the heap: String &quot;Day 1: Push&quot;."}, {"line": 26, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}], "heap": ["<b>#3</b> String[0] (args, empty)"], "out": "Day 1: Push\n", "phase": "Print", "note": "Prints <code>Day 1: Push</code>."}, {"line": 27, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}], "heap": ["<b>#3</b> String[0] (args, empty)"], "phase": "Step", "note": "End of the block."}, {"line": 25, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "Plan.1.hasNext()", "vars": [["this", "→ #7 Plan.1"]]}], "heap": ["<b>#1</b> Plan {days=→#2}", "<b>#2</b> String[3] {&quot;Push&quot;, &quot;Pull&quot;, &quot;Legs&quot;}", "<b>#3</b> String[0] (args, empty)", "<b>#4</b> String &quot;Push&quot;", "<b>#5</b> String &quot;Pull&quot;", "<b>#6</b> String &quot;Legs&quot;", "<b>#7</b> Plan.1 {i=1, this$0=→#1}"], "newVar": "this", "phase": "Call", "note": "<code>Plan.1.hasNext()</code> is called: a new frame is pushed with <code>this</code> = → #7 Plan.1."}, {"line": 14, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}], "heap": ["<b>#3</b> String[0] (args, empty)"], "phase": "Return", "note": "<code>Plan.1.hasNext()</code> returns and its frame is popped."}, {"line": 25, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "Plan.1.next()", "vars": [["this", "→ #7 Plan.1"]]}], "heap": ["<b>#1</b> Plan {days=→#2}", "<b>#2</b> String[3] {&quot;Push&quot;, &quot;Pull&quot;, &quot;Legs&quot;}", "<b>#3</b> String[0] (args, empty)", "<b>#4</b> String &quot;Push&quot;", "<b>#5</b> String &quot;Pull&quot;", "<b>#6</b> String &quot;Legs&quot;", "<b>#7</b> Plan.1 {i=1, this$0=→#1}"], "newVar": "this", "phase": "Call", "note": "<code>Plan.1.next()</code> is called: a new frame is pushed with <code>this</code> = → #7 Plan.1."}, {"line": 17, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}], "heap": ["<b>#3</b> String[0] (args, empty)"], "phase": "Return", "note": "<code>Plan.1.next()</code> returns and its frame is popped."}, {"line": 25, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["line", "→ #9 \"Day 2: Pull\""]]}], "heap": ["<b>#3</b> String[0] (args, empty)", "<b>#9</b> String &quot;Day 2: Pull&quot;"], "newVar": "line", "phase": "Assign", "note": "Now <code>line</code> = → #9 &quot;Day 2: Pull&quot;. New object <b>#9</b> on the heap: String &quot;Day 2: Pull&quot;."}, {"line": 26, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}], "heap": ["<b>#3</b> String[0] (args, empty)"], "out": "Day 2: Pull\n", "phase": "Print", "note": "Prints <code>Day 2: Pull</code>."}, {"line": 27, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}], "heap": ["<b>#3</b> String[0] (args, empty)"], "phase": "Step", "note": "End of the block."}, {"line": 25, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "Plan.1.hasNext()", "vars": [["this", "→ #7 Plan.1"]]}], "heap": ["<b>#1</b> Plan {days=→#2}", "<b>#2</b> String[3] {&quot;Push&quot;, &quot;Pull&quot;, &quot;Legs&quot;}", "<b>#3</b> String[0] (args, empty)", "<b>#4</b> String &quot;Push&quot;", "<b>#5</b> String &quot;Pull&quot;", "<b>#6</b> String &quot;Legs&quot;", "<b>#7</b> Plan.1 {i=2, this$0=→#1}"], "newVar": "this", "phase": "Call", "note": "<code>Plan.1.hasNext()</code> is called: a new frame is pushed with <code>this</code> = → #7 Plan.1."}, {"line": 14, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}], "heap": ["<b>#3</b> String[0] (args, empty)"], "phase": "Return", "note": "<code>Plan.1.hasNext()</code> returns and its frame is popped."}, {"line": 25, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "Plan.1.next()", "vars": [["this", "→ #7 Plan.1"]]}], "heap": ["<b>#1</b> Plan {days=→#2}", "<b>#2</b> String[3] {&quot;Push&quot;, &quot;Pull&quot;, &quot;Legs&quot;}", "<b>#3</b> String[0] (args, empty)", "<b>#4</b> String &quot;Push&quot;", "<b>#5</b> String &quot;Pull&quot;", "<b>#6</b> String &quot;Legs&quot;", "<b>#7</b> Plan.1 {i=2, this$0=→#1}"], "newVar": "this", "phase": "Call", "note": "<code>Plan.1.next()</code> is called: a new frame is pushed with <code>this</code> = → #7 Plan.1."}, {"line": 17, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}], "heap": ["<b>#3</b> String[0] (args, empty)"], "phase": "Return", "note": "<code>Plan.1.next()</code> returns and its frame is popped."}, {"line": 25, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["line", "→ #10 \"Day 3: Legs\""]]}], "heap": ["<b>#3</b> String[0] (args, empty)", "<b>#10</b> String &quot;Day 3: Legs&quot;"], "newVar": "line", "phase": "Assign", "note": "Now <code>line</code> = → #10 &quot;Day 3: Legs&quot;. New object <b>#10</b> on the heap: String &quot;Day 3: Legs&quot;."}, {"line": 26, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}], "heap": ["<b>#3</b> String[0] (args, empty)"], "out": "Day 3: Legs\n", "phase": "Print", "note": "Prints <code>Day 3: Legs</code>."}, {"line": 27, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}], "heap": ["<b>#3</b> String[0] (args, empty)"], "phase": "Step", "note": "End of the block."}, {"line": 25, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "Plan.1.hasNext()", "vars": [["this", "→ #7 Plan.1"]]}], "heap": ["<b>#1</b> Plan {days=→#2}", "<b>#2</b> String[3] {&quot;Push&quot;, &quot;Pull&quot;, &quot;Legs&quot;}", "<b>#3</b> String[0] (args, empty)", "<b>#4</b> String &quot;Push&quot;", "<b>#5</b> String &quot;Pull&quot;", "<b>#6</b> String &quot;Legs&quot;", "<b>#7</b> Plan.1 {i=3, this$0=→#1}"], "newVar": "this", "phase": "Call", "note": "<code>Plan.1.hasNext()</code> is called: a new frame is pushed with <code>this</code> = → #7 Plan.1."}, {"line": 14, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}], "heap": ["<b>#3</b> String[0] (args, empty)"], "phase": "Return", "note": "<code>Plan.1.hasNext()</code> returns and its frame is popped."}, {"line": 25, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}], "heap": ["<b>#3</b> String[0] (args, empty)"], "phase": "Loop ends", "note": "No elements left, so the loop ends."}, {"line": 28, "phase": "Program ends", "note": "<code>main</code> returns, its frame is popped and the program ends.", "stack": [], "heap": []}]}</script>
+  </div>
+  </article>
+
+</section>
+
+<!-- ======================= PART 9: QUIZ AND REVISION ======================= -->
+<section class="part" id="quiz">
+  <span class="part-label"><b>9</b> Quiz and revision</span>
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <script type="application/json">[
+      { "q": "Which three methods does Iterator declare?", "options": ["add, get, size", "hasNext, next, remove", "first, last, next", "begin, end, step"], "answer": 1, "why": "remove is optional (it may throw UnsupportedOperationException in read-only collections)." },
+      { "q": "What does the for-each loop over a List use?", "options": ["Indexes", "An Iterator", "A ListIterator always", "Recursion"], "answer": 1, "why": "javac compiles it to iterator(), hasNext() and next()." },
+      { "q": "Calling list.remove(x) inside a for-each over the same list usually throws…", "options": ["IllegalStateException", "ConcurrentModificationException", "NoSuchElementException", "Nothing"], "answer": 1, "why": "The list's modCount no longer matches the iterator's expectedModCount." },
+      { "q": "it.next(); it.remove(); it.remove(); throws…", "options": ["Nothing", "IllegalStateException", "ConcurrentModificationException", "IndexOutOfBoundsException"], "answer": 1, "why": "remove is allowed once per next()." },
+      { "q": "Which can ListIterator do that Iterator can't?", "options": ["remove", "hasNext", "previous and set", "next"], "answer": 2, "why": "ListIterator adds previous, nextIndex, set and add." },
+      { "q": "ListIterator.add(e) inserts the element…", "options": ["At the end", "At the front", "At the cursor, before the next element", "Replaces the current element"], "answer": 2, "why": "So the following next() is not affected and won't return e." },
+      { "q": "What makes an iterator 'fail-fast'?", "options": ["It's very fast", "It throws as soon as it detects a concurrent structural change", "It never fails", "It copies the collection"], "answer": 1, "why": "It compares modCount with its expected value on each operation." },
+      { "q": "To use your class in a for-each loop, it must implement…", "options": ["Iterator", "Iterable", "Collection", "Comparable"], "answer": 1, "why": "for-each calls iterator() on any Iterable." }
+    ]</script>
+  </div>
+  <h3>Quick revision</h3>
+  <div class="revision">
+    <h3>Lesson 11.7 in one screen</h3>
+    <ul>
+      <li>Iterator: <code>hasNext()</code>, <code>next()</code>, <code>remove()</code>. for-each = hidden iterator.</li>
+      <li>Remove while looping: <code>it.remove()</code> (once per next) or <code>removeIf</code>. Never <code>list.remove</code> inside for-each.</li>
+      <li>Fail-fast: <code>modCount</code> vs <code>expectedModCount</code> → <code>ConcurrentModificationException</code>. Best effort only.</li>
+      <li>Errors: second remove → <code>IllegalStateException</code>; next past end → <code>NoSuchElementException</code>.</li>
+      <li>ListIterator: <code>hasPrevious/previous</code>, <code>nextIndex/previousIndex</code>, <code>set</code>, <code>add</code> (at the cursor).</li>
+      <li>Implement <code>Iterable</code> to use your class in for-each. Concurrent collections have fail-safe iterators.</li>
+    </ul>
+  </div>
+  <h3>Interview and viva questions</h3>
+  <div class="faq">
+    <details><summary>What is ConcurrentModificationException and how do you avoid it?</summary><p>It's thrown by fail-fast iterators when a collection is structurally modified during iteration by anything other than the iterator itself. Avoid it by removing through <code>Iterator.remove()</code>, using <code>removeIf</code>, collecting changes and applying them after the loop, iterating over a copy, or using a concurrent collection. It can happen in a single thread; it's not only a threading issue.</p></details>
+    <details><summary>Fail-fast vs fail-safe iterators?</summary><p>Fail-fast iterators (ArrayList, HashMap…) throw on concurrent modification. Fail-safe (more precisely weakly consistent or snapshot) iterators, as in <code>CopyOnWriteArrayList</code> and <code>ConcurrentHashMap</code>, don't throw: they iterate over a snapshot or tolerate concurrent changes, possibly not reflecting the latest updates.</p></details>
+    <details><summary>Iterator vs ListIterator?</summary><p>Iterator works on any Collection and moves forward only, with remove. ListIterator works on Lists, moves both ways, knows indexes, and can set and add at the cursor.</p></details>
+    <details><summary>Iterator vs Enumeration?</summary><p>Enumeration (<code>hasMoreElements</code>, <code>nextElement</code>) is the legacy interface of Vector and Hashtable. Iterator replaced it with shorter names and a <code>remove</code> method.</p></details>
+    <details><summary>How do you remove entries from a HashMap while iterating?</summary><p>Iterate over <code>map.entrySet().iterator()</code> and call <code>it.remove()</code>, or use <code>map.entrySet().removeIf(e -&gt; …)</code> / <code>map.values().removeIf(…)</code>. Calling <code>map.remove(key)</code> inside a for-each over the map throws ConcurrentModificationException.</p></details>
+  </div>
+
+  <h3 id="practice">Practice problems</h3>
+  <p class="prob-intro">Iterate, remove and edit safely. The last three are business tasks.</p>
+  <div class="probs">
+    <article class="prob"><div class="prob__head"><span class="prob__num">P1</span><span class="prob__tag prob__tag--easy">Easy</span><h4>Walk with an explicit iterator</h4></div>
+      <p>Print the elements of <code>["UPI", "Card", "Cash"]</code> using <code>hasNext</code>/<code>next</code>.</p>
+      <div class="prob__io"><div><small>Input</small><pre>[&quot;UPI&quot;, &quot;Card&quot;, &quot;Cash&quot;]</pre></div><div><small>Expected output</small><pre>UPI
+Card
+Cash</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="java" data-file="Main.java"><pre><code>import java.util.*;
+
+public class Main {
+    public static void main(String[] args) {
+        Iterator&lt;String&gt; it = List.of(&quot;UPI&quot;, &quot;Card&quot;, &quot;Cash&quot;).iterator();
+        while (it.hasNext()) System.out.println(it.next());
+    }
+}</code></pre><div class="output">UPI
+Card
+Cash</div></div>
+        <p><b>How it works:</b> exactly what a for-each compiles to.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P2</span><span class="prob__tag prob__tag--easy">Easy</span><h4>Remove empty strings</h4></div>
+      <p>Remove all empty strings from <code>["a", "", "b", ""]</code> using an iterator.</p>
+      <div class="prob__io"><div><small>Input</small><pre>[&quot;a&quot;, &quot;&quot;, &quot;b&quot;, &quot;&quot;]</pre></div><div><small>Expected output</small><pre>[a, b]</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="java" data-file="Main.java"><pre><code>import java.util.*;
+
+public class Main {
+    public static void main(String[] args) {
+        List&lt;String&gt; l = new ArrayList&lt;&gt;(List.of(&quot;a&quot;, &quot;&quot;, &quot;b&quot;, &quot;&quot;));
+        Iterator&lt;String&gt; it = l.iterator();
+        while (it.hasNext()) if (it.next().isEmpty()) it.remove();
+        System.out.println(l);
+    }
+}</code></pre><div class="output">[a, b]</div></div>
+        <p><b>How it works:</b> <code>it.remove()</code> keeps the iterator consistent, so adjacent empty strings aren't skipped.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P3</span><span class="prob__tag prob__tag--easy">Easy</span><h4>Print a list backwards</h4></div>
+      <p>Print <code>[1, 2, 3, 4]</code> in reverse using a ListIterator started at the end.</p>
+      <div class="prob__io"><div><small>Input</small><pre>[1, 2, 3, 4]</pre></div><div><small>Expected output</small><pre>4 3 2 1 </pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="java" data-file="Main.java"><pre><code>import java.util.*;
+
+public class Main {
+    public static void main(String[] args) {
+        List&lt;Integer&gt; l = List.of(1, 2, 3, 4);
+        ListIterator&lt;Integer&gt; li = l.listIterator(l.size());
+        while (li.hasPrevious()) System.out.print(li.previous() + &quot; &quot;);
+        System.out.println();
+    }
+}</code></pre><div class="output">4 3 2 1 </div></div>
+        <p><b>How it works:</b> <code>listIterator(size)</code> starts the cursor after the last element; <code>previous()</code> walks back.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P4</span><span class="prob__tag prob__tag--medium">Medium</span><h4>Double every even number in place</h4></div>
+      <p>In <code>[1, 2, 3, 4]</code> replace each even number with double its value; remove odd numbers.</p>
+      <div class="prob__io"><div><small>Input</small><pre>[1, 2, 3, 4]</pre></div><div><small>Expected output</small><pre>[4, 8]</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="java" data-file="Main.java"><pre><code>import java.util.*;
+
+public class Main {
+    public static void main(String[] args) {
+        List&lt;Integer&gt; l = new ArrayList&lt;&gt;(List.of(1, 2, 3, 4));
+        ListIterator&lt;Integer&gt; li = l.listIterator();
+        while (li.hasNext()) {
+            int v = li.next();
+            if (v % 2 == 0) li.set(v * 2);
+            else li.remove();
+        }
+        System.out.println(l);
+    }
+}</code></pre><div class="output">[4, 8]</div></div>
+        <p><b>How it works:</b> <code>set</code> and <code>remove</code> both act on the element last returned by <code>next()</code>.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P5</span><span class="prob__tag prob__tag--medium">Medium</span><h4>Interleave a separator</h4></div>
+      <p>Insert "|" between every pair of items in <code>[A, B, C]</code> using <code>ListIterator.add</code>.</p>
+      <div class="prob__io"><div><small>Input</small><pre>[A, B, C]</pre></div><div><small>Expected output</small><pre>[A, |, B, |, C]</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="java" data-file="Main.java"><pre><code>import java.util.*;
+
+public class Main {
+    public static void main(String[] args) {
+        List&lt;String&gt; l = new ArrayList&lt;&gt;(List.of(&quot;A&quot;, &quot;B&quot;, &quot;C&quot;));
+        ListIterator&lt;String&gt; li = l.listIterator();
+        while (li.hasNext()) {
+            li.next();
+            if (li.hasNext()) li.add(&quot;|&quot;);
+        }
+        System.out.println(l);
+    }
+}</code></pre><div class="output">[A, |, B, |, C]</div></div>
+        <p><b>How it works:</b> <code>add</code> inserts at the cursor, before the next element, and the loop continues with that next element, so separators aren't revisited.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P6</span><span class="prob__tag prob__tag--business">Business problem</span><h4>Drop out-of-stock products</h4></div>
+      <p>Products as "name:stock": [Pen:4, Ink:0, Book:2, Clip:0]. Remove those with 0 stock and print the rest.</p>
+      <div class="prob__io"><div><small>Input</small><pre>4 products</pre></div><div><small>Expected output</small><pre>[Pen:4, Book:2]</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="java" data-file="Main.java"><pre><code>import java.util.*;
+
+public class Main {
+    public static void main(String[] args) {
+        List&lt;String&gt; products = new ArrayList&lt;&gt;(List.of(&quot;Pen:4&quot;, &quot;Ink:0&quot;, &quot;Book:2&quot;, &quot;Clip:0&quot;));
+        Iterator&lt;String&gt; it = products.iterator();
+        while (it.hasNext()) {
+            String p = it.next();
+            if (p.endsWith(&quot;:0&quot;)) it.remove();
+        }
+        System.out.println(products);
+    }
+}</code></pre><div class="output">[Pen:4, Book:2]</div></div>
+        <p><b>How it works:</b> safe in-place filtering in one pass.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P7</span><span class="prob__tag prob__tag--business">Business problem</span><h4>Mask phone numbers in a list</h4></div>
+      <p>Replace each phone number in a contact list with a masked form (last 4 digits visible) using <code>set</code>.</p>
+      <div class="prob__io"><div><small>Input</small><pre>[&quot;9876543210&quot;, &quot;9123456789&quot;]</pre></div><div><small>Expected output</small><pre>[XXXXXX3210, XXXXXX6789]</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="java" data-file="Main.java"><pre><code>import java.util.*;
+
+public class Main {
+    public static void main(String[] args) {
+        List&lt;String&gt; phones = new ArrayList&lt;&gt;(List.of(&quot;9876543210&quot;, &quot;9123456789&quot;));
+        ListIterator&lt;String&gt; li = phones.listIterator();
+        while (li.hasNext()) {
+            String p = li.next();
+            li.set(&quot;XXXXXX&quot; + p.substring(6));
+        }
+        System.out.println(phones);
+    }
+}</code></pre><div class="output">[XXXXXX3210, XXXXXX6789]</div></div>
+        <p><b>How it works:</b> <code>set</code> replaces in place without changing the list's size, so it's not a structural change.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P8</span><span class="prob__tag prob__tag--business">Business problem</span><h4>Pages of results as an Iterable</h4></div>
+      <p>Write <code>Pages</code> that iterates over a list in pages of size 2, so a for-each gets one page (a sub-list) at a time.</p>
+      <div class="prob__io"><div><small>Input</small><pre>[O1..O5], page size 2</pre></div><div><small>Expected output</small><pre>[O1, O2]
+[O3, O4]
+[O5]</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="java" data-file="Main.java"><pre><code>import java.util.*;
+
+class Pages implements Iterable&lt;List&lt;String&gt;&gt; {
+    private final List&lt;String&gt; all;
+    private final int size;
+
+    Pages(List&lt;String&gt; all, int size) { this.all = all; this.size = size; }
+
+    public Iterator&lt;List&lt;String&gt;&gt; iterator() {
+        return new Iterator&lt;&gt;() {
+            int from = 0;
+            public boolean hasNext() { return from &lt; all.size(); }
+            public List&lt;String&gt; next() {
+                List&lt;String&gt; page = all.subList(from, Math.min(from + size, all.size()));
+                from += size;
+                return page;
+            }
+        };
+    }
+}
+
+public class Main {
+    public static void main(String[] args) {
+        for (List&lt;String&gt; page : new Pages(List.of(&quot;O1&quot;, &quot;O2&quot;, &quot;O3&quot;, &quot;O4&quot;, &quot;O5&quot;), 2)) {
+            System.out.println(page);
+        }
+    }
+}</code></pre><div class="output">[O1, O2]
+[O3, O4]
+[O5]</div></div>
+        <p><b>How it works:</b> callers just loop over pages; the paging logic lives inside the iterator.</p>
+      </details>
+    </article>
+  </div>
+
+
+
+  <h3 id="scenarios">Real-world scenario questions (asked in company interviews)</h3>
+  <p class="scn-intro">Iterator questions are usually ConcurrentModificationException stories. Explain the mechanism, then the fix.</p>
+  <div class="scenarios">
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Backend · bug</span><span class="scn__tag scn__tag--level">Fresher</span></div>
+      <h4>CME in a single-threaded job</h4>
+      <p class="scn__situation">A colleague says “ConcurrentModificationException means two threads are fighting”. But the failing job runs on one thread: it loops over orders and calls <code>orders.remove(o)</code> for cancelled ones. Explain.</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> what “concurrent” means here.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>“Concurrent” means “during iteration”, not “multi-threaded”. The for-each's hidden iterator saw <code>modCount</code> change because the list was modified directly.</li>
+          <li>Fix: <code>orders.removeIf(Order::isCancelled)</code>, or an explicit iterator with <code>it.remove()</code>.</li>
+          <li>Add a test with two adjacent cancelled orders to make sure none is skipped.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> switching to <code>CopyOnWriteArrayList</code> just to silence it in single-threaded code; it copies the whole array on every write.</p>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Caching · maps</span><span class="scn__tag scn__tag--level">Junior</span></div>
+      <h4>Evicting expired cache entries</h4>
+      <p class="scn__situation">A cache is a <code>HashMap&lt;String, Entry&gt;</code>. A cleanup task does <code>for (String k : cache.keySet()) if (expired(k)) cache.remove(k);</code> and crashes. How do you write it correctly?</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> removing from maps during iteration.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li><code>cache.entrySet().removeIf(e -&gt; e.getValue().isExpired());</code>, or an explicit <code>Iterator&lt;Map.Entry&lt;…&gt;&gt;</code> with <code>it.remove()</code>.</li>
+          <li>If other threads read/write the cache, make it a <code>ConcurrentHashMap</code>, whose iterators don't throw and whose <code>removeIf</code> is safe.</li>
+          <li>Consider a cache library with built-in expiry.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> catching the exception and restarting the loop. It's O(n²) and hides the bug.</p>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Library · API design</span><span class="scn__tag scn__tag--level">Junior</span></div>
+      <h4>Exposing a class's items without exposing the list</h4>
+      <p class="scn__situation">A <code>Playlist</code> class stores songs in a private ArrayList. Callers want to loop over songs with for-each, but must not add or remove songs directly. How?</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> Iterable and encapsulation.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>Make <code>Playlist implements Iterable&lt;Song&gt;</code> and return <code>Collections.unmodifiableList(songs).iterator()</code>, whose <code>remove()</code> throws <code>UnsupportedOperationException</code>.</li>
+          <li>Offer explicit methods (<code>addSong</code>, <code>removeSong</code>) that apply business rules.</li>
+          <li>The internal list can later change type without affecting callers.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> a getter returning the internal ArrayList. Any caller could <code>clear()</code> it.</p>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Events · concurrency</span><span class="scn__tag scn__tag--level">Mid</span></div>
+      <h4>A listener that unsubscribes itself</h4>
+      <p class="scn__situation">An event bus loops over its listeners and calls each one. One listener unsubscribes itself when called, and the bus crashes with ConcurrentModificationException. What are your options?</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> snapshot iteration and its trade-offs.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>Store listeners in a <code>CopyOnWriteArrayList</code>: iteration walks a snapshot, so unsubscribing during an event is safe. Ideal when events are frequent and subscriptions rare.</li>
+          <li>Alternatively iterate over a copy (<code>new ArrayList&lt;&gt;(listeners)</code>) per event, or queue unsubscriptions and apply them after the loop.</li>
+          <li>Note the semantics: the removed listener may still receive the current event.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> synchronising the whole loop if listeners can call back into the bus; it risks deadlocks.</p>
+      </div></details>
+    </article>
+  </div>
+</section>
+
+<nav class="lesson-nav" id="lesson-nav" aria-label="Lesson navigation"></nav>
+<div class="ad-slot" data-slot="bottom"></div>
+</article>
+
+<aside class="lesson-side">
+  <nav class="toc" aria-label="In this lesson">
+    <h4>In this lesson</h4>
+    <ol>
+      <li><a href="#story">The story</a></li>
+      <li><a href="#definition">Definition</a></li>
+      <li><a href="#types">Types and ways to use it</a></li>
+      <li><a href="#steps">Step by step</a></li>
+      <li><a href="#animation">See it happen</a></li>
+      <li><a href="#real-world">Real-world use</a></li>
+      <li><a href="#run">Run the code</a></li>
+      <li><a href="#tracer">Line by line</a></li>
+      <li><a href="#worked">Worked examples</a></li>
+      <li><a href="#quiz">Quiz and revision</a></li>
+      <li><a href="#practice">Practice problems</a></li>
+      <li><a href="#scenarios">Industry scenarios</a></li>
+    </ol>
+  </nav>
+  <div class="ad-slot" data-slot="side"></div>
+  <div class="outline" id="outline"></div>
+</aside>
+</div>
+</main>
+
+<footer class="site-footer">
+  <div class="wrap">
+    <div><h4>MyPhatshala</h4><p>Free programming and IT lessons that show what happens behind the screen.</p></div>
+    <div><h4>Learn</h4><a href="../../../../#tracks">All courses</a><a href="../../">Core Java syllabus</a></div>
+    <div><h4>Site</h4><a href="../../../../about.html">About</a><a href="../../../../contact.html">Contact</a><a href="../../../../privacy.html">Privacy policy</a><a href="../../../../disclaimer.html">Disclaimer</a></div>
+    <div class="copyright">© MyPhatshala. All lesson content, diagrams and animations are original. Please do not copy without permission.</div>
+  </div>
+</footer>
+
+<script src="../../../../data/courses/core-java.js"></script>
+<script src="../../../../assets/js/lesson.js"></script>
+<script src="../../../../assets/js/ads.js"></script>
+<script src="../../../../assets/js/site.js"></script>
+</body>
+</html>

@@ -1,0 +1,245 @@
+<!--META {
+"course": "core-java", "module": "14-modern-java", "lesson": "01-lambda-expressions",
+"title": "Lambda expressions", "courseTitle": "Core Java", "number": "14.1",
+"track": "#E8772E", "trackId": "programming", "trackTitle": "Programming Languages", "level": "Intermediate",
+"minutes": 22,
+"description": "Lambda expressions in Java: syntax forms, from anonymous classes to lambdas, type inference, effectively final captured variables, this inside a lambda, how invokedynamic runs lambdas, and using lambdas with sort, removeIf, replaceAll and forEach. With animations, a JVM tracer, {{NPROB}} practice problems, quiz and interview scenarios.",
+"ogTitle": "Lambda expressions in Java, explained with animations",
+"ogDescription": "Shrink an anonymous class into a one-line lambda, see how the JVM runs it, and solve {{NPROB}} problems.",
+"lead": "Java 8 changed how Java code looks. Instead of writing a whole class just to pass one small piece of behaviour (“compare by price”, “keep only items under ₹500”), you write a <b>lambda expression</b>: a short, anonymous function. You'll learn the syntax, what a lambda can and can't use from around it, how the JVM actually runs one, and the list methods that make lambdas useful from day one.",
+"chips": ["Module 14 · Modern Java", "⏱ 22 min", "Intermediate", "{{NPROB}} practice problems"]
+} META-->
+<part n="1" id="story" label="The story">
+  <h2>Six lines to say “sort by price”</h2>
+  <div class="story">
+    <p class="narration">Riya wants the canteen menu sorted by price, then by name, then by popularity, each on a different screen. Every time she writes a new class implementing <code>Comparator</code>, with a method, types, braces… for one line of real logic.</p>
+    <div class="scene">
+      <svg viewBox="0 0 640 170" role="img" aria-label="A large block of code for an anonymous class beside a single short lambda line that does the same thing">
+        <g font-size="10.5">
+          <rect x="14" y="16" width="300" height="130" rx="10" class="s-board"/>
+          <text x="28" y="40" class="s-chalk" font-family="monospace">menu.sort(new Comparator&lt;Dish&gt;() {</text>
+          <text x="28" y="60" class="s-chalk" font-family="monospace">  public int compare(Dish a, Dish b) {</text>
+          <text x="28" y="80" class="s-chalk" font-family="monospace" font-weight="700">    return a.price - b.price;</text>
+          <text x="28" y="100" class="s-chalk" font-family="monospace">  }</text>
+          <text x="28" y="120" class="s-chalk" font-family="monospace">});</text>
+          <text x="164" y="164" text-anchor="middle" class="s-ink2">anonymous class: 5 lines</text>
+          <path d="M324 80h40" style="stroke:var(--ink-3);stroke-width:1.5"/><path d="M358 74l8 6-8 6" style="fill:none;stroke:var(--ink-3);stroke-width:1.5"/>
+          <rect x="376" y="58" width="250" height="44" rx="10" class="s-soft-green" style="stroke:var(--green)"/>
+          <text x="501" y="85" text-anchor="middle" class="s-ink" font-family="monospace" font-weight="700">menu.sort((a, b) -&gt; a.price - b.price);</text>
+          <text x="501" y="126" text-anchor="middle" class="s-green">lambda: 1 line, same result</text>
+        </g>
+        <text x="632" y="166" text-anchor="end" class="s-wm">myphatshala.com</text>
+      </svg>
+    </div>
+    <riya>Sir, the only line that matters is <code>a.price - b.price</code>. Why all this wrapping?</riya>
+    <arjun>Before Java 8 there was no other way to pass behaviour. Now you can pass just the logic: <code>(a, b) -&gt; a.price - b.price</code>. That's a <b>lambda expression</b>.</arjun>
+    <riya>But <code>sort</code> expects a Comparator object. How does a line of code become an object?</riya>
+    <arjun>The JVM builds the object for you. Let's shrink the class step by step, then look behind the screen.</arjun>
+  </div>
+</part>
+
+<part n="2" id="definition" label="Definition">
+  <h2>What is a lambda expression?</h2>
+  <div class="def">
+    <div class="def__formal"><small>Formal definition (write this in exams)</small>
+      <p>A <b>lambda expression</b> is an anonymous function, written as a parameter list, the arrow token <code>-&gt;</code> and a body (a single expression or a block), that provides the implementation of the single abstract method of a <b>functional interface</b>. Its parameter and return types are inferred from the target functional interface type. A lambda may use local variables of the enclosing scope only if they are <b>final or effectively final</b>; it does not introduce a new scope for <code>this</code>. At run time a lambda evaluates to an object that implements the functional interface; the JVM creates it through the <code>invokedynamic</code> instruction.</p></div>
+    <div class="def__simple"><small>In simple words</small>
+      <p>A lambda is a small piece of code you can hand to a method: “here's how to compare”, “here's what to keep”. Java wraps it into an object automatically.</p></div>
+  </div>
+  <h3>Words you'll meet in this lesson</h3>
+  <div class="terms">
+    <div class="term"><b>Arrow -&gt;</b><span>Separates parameters from the body.</span></div>
+    <div class="term"><b>Functional interface</b><span>An interface with exactly one abstract method (Lesson 14.2).</span></div>
+    <div class="term"><b>Target type</b><span>The interface the lambda is assigned or passed to.</span></div>
+    <div class="term"><b>Type inference</b><span>The compiler works out the parameter types for you.</span></div>
+    <div class="term"><b>Capture</b><span>Using a local variable from outside the lambda.</span></div>
+    <div class="term"><b>Effectively final</b><span>Never reassigned after being given its value.</span></div>
+  </div>
+  <h3>Anonymous class vs lambda</h3>
+  <div class="table-wrap">
+  <table class="compare" style="min-width:560px">
+    <thead><tr><th></th><th>Anonymous class</th><th>Lambda</th></tr></thead>
+    <tbody>
+      <tr><td>Code size</td><td>Class + method + types</td><td>Parameters → body</td></tr>
+      <tr><td>Works with</td><td>Any interface or abstract class</td><td>Functional interfaces only</td></tr>
+      <tr><td><code>this</code> means</td><td>The anonymous object</td><td>The enclosing object</td></tr>
+      <tr><td>Can have fields/state</td><td>Yes</td><td>No (only captured values)</td></tr>
+      <tr><td>Compiled to</td><td>Its own .class file (<code>Main$1</code>)</td><td>A private method + <code>invokedynamic</code></td></tr>
+    </tbody>
+  </table>
+  </div>
+  <exam><b>Exam tip:</b> Syntax: <code>(parameters) -&gt; expression</code> or <code>(parameters) -&gt; { statements; }</code>. A lambda can only be used where a <b>functional interface</b> is expected, and it can only use local variables that are <b>effectively final</b>.</exam>
+</part>
+
+{{AD}}
+
+<part n="3" id="types" label="Types and ways to use it">
+  <h2>Lambda syntax, all forms</h2>
+  {{CODE_FORMS}}
+  <div class="cards">
+    <div class="card"><svg class="ic" viewBox="0 0 40 40" fill="none" stroke="var(--green)" stroke-width="2"><path d="M10 28l8-16 4 8 8-8"/></svg><h4>Expression lambda</h4><p>One expression, value returned automatically: <code>p -&gt; p * 1.18</code>.</p><span class="tag">most common</span></div>
+    <div class="card"><svg class="ic" viewBox="0 0 40 40" fill="none" stroke="var(--blue)" stroke-width="2"><path d="M14 10c-4 0-4 4-4 6s-2 4-4 4c2 0 4 2 4 4s0 6 4 6M26 10c4 0 4 4 4 6s2 4 4 4c-2 0-4 2-4 4s0 6-4 6"/></svg><h4>Block lambda</h4><p>Several statements in braces, with an explicit <code>return</code> if it returns a value.</p><span class="tag">{ … }</span></div>
+    <div class="card"><svg class="ic" viewBox="0 0 40 40" fill="none" stroke="var(--track)" stroke-width="2"><circle cx="20" cy="20" r="11"/><path d="M16 20h8"/></svg><h4>No-parameter lambda</h4><p><code>() -&gt; sendSms()</code>: used for Runnable tasks and callbacks.</p><span class="tag">Runnable</span></div>
+    <div class="card"><svg class="ic" viewBox="0 0 40 40" fill="none" stroke="var(--ink-3)" stroke-width="2"><path d="M10 20h20M24 14l6 6-6 6"/></svg><h4>Method reference</h4><p><code>String::toUpperCase</code>, a shorter form when the lambda only calls one method (Lesson 14.2).</p><span class="tag">::</span></div>
+  </div>
+  <h3>A lambda has no <code>this</code> of its own</h3>
+  {{CODE_THIS}}
+  <warn><b>Captured variables must not change.</b> A lambda stores a <i>copy</i> of each local variable it uses. If the variable could change afterwards, the copy would silently be wrong, so the compiler requires it to be effectively final. To count inside a lambda, use the list's size, a stream's <code>count()</code>, or an <code>AtomicInteger</code>.</warn>
+</part>
+
+<part n="4" id="steps" label="Step by step">
+  <h2>What happens at <code>list.sort((a, b) -&gt; a - b)</code></h2>
+  <ol class="stepper">
+    <li><h4>The compiler finds the target type</h4>
+      <span class="behind"><code>List.sort</code> expects a <code>Comparator&lt;Integer&gt;</code>. Its one abstract method is <code>int compare(Integer, Integer)</code>, so <code>a</code> and <code>b</code> are Integers and the body must give an int.</span></li>
+    <li><h4>The body becomes a hidden method</h4>
+      <span class="behind">javac moves <code>a - b</code> into a private static method like <code>lambda$main$0(Integer a, Integer b)</code> inside your class.</span></li>
+    <li><h4>invokedynamic makes an object</h4>
+      <span class="behind">At the lambda's position, an <code>invokedynamic</code> instruction asks the JVM (once) to generate a tiny class implementing Comparator, and returns an instance of it.</span></li>
+    <li><h4>sort calls the object</h4>
+      <span class="behind"><code>sort</code> calls <code>compare(x, y)</code> on that object whenever it needs to order two elements; the call is forwarded to <code>lambda$main$0</code>.</span></li>
+    <li><h4>Captured values travel with the object</h4>
+      <span class="behind">If the lambda uses a local variable (like <code>budget</code>), the generated object gets a field holding a copy of its value at the moment the lambda was created.</span></li>
+  </ol>
+</part>
+
+<part n="5" id="animation" label="See it happen">
+  <h2>From anonymous class to lambda: both views</h2>
+  <p>Left: the code shrinking from an anonymous class to a one-liner. Right: what the compiler and JVM build so the lambda can run.</p>
+  {{ANIM}}
+</part>
+
+<part n="6" id="real-world" label="Real-world use">
+  <h2>Lambdas in real systems</h2>
+  <p>Modern Java code uses lambdas everywhere behaviour is passed around: sorting, filtering, callbacks, tasks and stream pipelines.</p>
+  {{ANIM2}}
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="20" y="20" width="80" height="50" rx="6" class="s-card" style="stroke:var(--line)"/><path d="M30 34h40M30 46h52M30 58h28" style="stroke:var(--ink-3);stroke-width:2"/></svg></div>
+    <div><h4>1. Sorting and filtering screens</h4><p>Product lists, transactions and search results are sorted and filtered with comparator and predicate lambdas.</p>
+      <div class="uc-flow"><span>“Price: low to high”</span><i>→</i><span class="java">sort((a, b) -&gt; …)</span><i>→</i><span>sorted list</span></div></div>
+  </div>
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="36" y="26" width="48" height="38" rx="8" class="s-soft-blue" style="stroke:var(--blue)"/><text x="60" y="50" text-anchor="middle" class="s-blue" font-weight="700">Pay</text></svg></div>
+    <div><h4>2. Event handlers and callbacks</h4><p>Button clicks, payment results and HTTP responses are handled by lambdas registered ahead of time.</p>
+      <div class="uc-flow"><span>payment success</span><i>→</i><span class="java">() -&gt; showReceipt()</span><i>→</i><span>receipt screen</span></div></div>
+  </div>
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="20" y="22" width="22" height="46" rx="4" class="s-soft-green" style="stroke:var(--green)"/><rect x="49" y="22" width="22" height="46" rx="4" class="s-soft-green" style="stroke:var(--green)"/><rect x="78" y="22" width="22" height="46" rx="4" class="s-soft-green" style="stroke:var(--green)"/></svg></div>
+    <div><h4>3. Background tasks</h4><p>Tasks submitted to thread pools are lambdas (Lesson 12.6): <code>pool.submit(() -&gt; sendInvoice(id))</code>.</p>
+      <div class="uc-flow"><span>order placed</span><i>→</i><span class="java">submit(() -&gt; …)</span><i>→</i><span>worker thread</span></div></div>
+  </div>
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><path d="M14 45h20l10-14 12 28 10-14h40" style="fill:none;stroke:var(--track);stroke-width:2.5"/></svg></div>
+    <div><h4>4. Data pipelines</h4><p>Reports and analytics chain lambdas through the Stream API (Lesson 14.3): filter, transform, total.</p>
+      <div class="uc-flow"><span>10 lakh orders</span><i>→</i><span class="java">filter / map / sum</span><i>→</i><span>daily revenue</span></div></div>
+  </div>
+  <p class="muted">Simplified: real apps usually sort and filter a copy (or a stream) so the original data stays untouched.</p>
+</part>
+
+{{AD}}
+
+<part n="7" id="run" label="Run the code">
+  <h2>Sort, filter and print a menu</h2>
+  {{CODE_RUN}}
+  <ul class="anno">
+    <li><code>(a, b) -&gt; a.compareTo(b)</code><span>Alphabetical order: a Comparator lambda.</span></li>
+    <li><code>(a, b) -&gt; b.length() - a.length()</code><span>b before a: longest names first.</span></li>
+    <li><code>d -&gt; d.length() &gt; maxLen</code><span>A Predicate lambda that captures <code>maxLen</code>.</span></li>
+    <li><code>d -&gt; System.out.println(...)</code><span>A Consumer lambda called for each element.</span></li>
+  </ul>
+  {{RUNNER}}
+</part>
+
+<part n="8" id="tracer" label="Line by line">
+  <h2>Three lambdas on a price list</h2>
+  <p>Recorded from the real JVM. Each time a library method calls your lambda, a “lambda body” frame appears on the stack. Watch the lambda objects appear on the heap.</p>
+  {{TRACER}}
+
+{{WORKED}}
+</part>
+
+<part n="9" id="quiz" label="Quiz and revision">
+  <h2>Check yourself</h2>
+  {{QUIZ}}
+  <h3>Quick revision</h3>
+  <div class="revision">
+    <h3>Lesson 14.1 in one screen</h3>
+    <ul>
+      <li>Lambda = anonymous function: <code>(params) -&gt; expression</code> or <code>(params) -&gt; { statements }</code>.</li>
+      <li>It implements the one abstract method of a functional interface; types are inferred.</li>
+      <li>One parameter: brackets optional. No parameters: <code>()</code>. Block body: use <code>return</code>.</li>
+      <li>Captured locals must be effectively final; the lambda keeps a copy.</li>
+      <li><code>this</code> inside a lambda is the enclosing object.</li>
+      <li>Compiled to a private method + <code>invokedynamic</code>; at run time it's an object.</li>
+      <li>Useful list methods: <code>sort</code>, <code>removeIf</code>, <code>replaceAll</code>, <code>forEach</code>.</li>
+    </ul>
+  </div>
+  <h3>Interview and viva questions</h3>
+  <div class="faq">
+    <details><summary>What is a lambda expression and why was it added?</summary><p>An anonymous function that implements a functional interface concisely. Added in Java 8 to make passing behaviour easy (callbacks, comparators, predicates), enabling the Stream API and a more functional style without verbose anonymous classes.</p></details>
+    <details><summary>Why must captured variables be effectively final?</summary><p>A lambda may run later, even on another thread, after the method has returned and its stack frame is gone. So it captures a copy of the value. If the variable could change, the copy and the variable would disagree; requiring effective finality prevents that confusion and race conditions.</p></details>
+    <details><summary>Lambda vs anonymous class: what's different?</summary><p>Lambdas only implement functional interfaces, have no state of their own, don't create a new <code>this</code> scope, and are compiled to a private method linked through invokedynamic rather than a separate class file. Anonymous classes can implement any interface or extend a class, have fields, and <code>this</code> refers to the anonymous object.</p></details>
+    <details><summary>How does the JVM execute a lambda?</summary><p>javac compiles the body into a private (often static) synthetic method and emits an invokedynamic call site. On first execution, the bootstrap method (LambdaMetafactory) generates a hidden class implementing the interface; subsequent executions reuse the linked call site. Non-capturing lambdas can reuse a single instance.</p></details>
+    <details><summary>Can a lambda throw a checked exception?</summary><p>Only if the functional interface's method declares it. <code>Runnable.run()</code> doesn't, so a Runnable lambda must catch checked exceptions itself; <code>Callable.call()</code> declares <code>throws Exception</code>, so a Callable lambda may throw.</p></details>
+  </div>
+
+{{PRACTICE}}
+
+  <h3 id="scenarios">Real-world scenario questions (asked in company interviews)</h3>
+  <p class="scn-intro">Lambdas are in almost every code review today; interviewers check that you can read them and spot their traps.</p>
+  <div class="scenarios">
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Code review · sorting</span><span class="scn__tag scn__tag--level">Fresher</span></div>
+      <h4>Big amounts sorted in the wrong order</h4>
+      <p class="scn__situation">Transactions are sorted with <code>(a, b) -&gt; a.amountPaise - b.amountPaise</code> on <code>int</code> fields. For very large and very negative values (refunds), the order is sometimes wrong. Why?</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> integer overflow in comparators.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>Subtracting two ints can overflow (e.g. 2,000,000,000 − (−2,000,000,000)), flipping the sign of the result.</li>
+          <li>Use <code>Integer.compare(a.amountPaise, b.amountPaise)</code> or <code>Comparator.comparingInt(T::getAmountPaise)</code>.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> “subtraction is fine for numbers”; it's only safe for small ranges.</p>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Code review · counting</span><span class="scn__tag scn__tag--level">Fresher</span></div>
+      <h4>“Variable used in lambda should be final”</h4>
+      <p class="scn__situation">A colleague wants to count failed payments with <code>int failed = 0; payments.forEach(p -&gt; { if (p.failed()) failed++; });</code> and asks how to silence the compiler error. What do you suggest?</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> effectively final and idiomatic alternatives.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>Captured locals can't be modified. Don't fight it: use <code>payments.stream().filter(Payment::failed).count()</code>, or a plain for-each loop.</li>
+          <li>Tricks like an <code>int[]</code> or <code>AtomicInteger</code> work but hide intent, and an int[] is unsafe if the lambda runs on several threads.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> making <code>failed</code> a static field just to compile; that introduces shared mutable state.</p>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Debugging · stack traces</span><span class="scn__tag scn__tag--level">Junior</span></div>
+      <h4>A stack trace full of lambda$ frames</h4>
+      <p class="scn__situation">Production logs show <code>NullPointerException at OrderService.lambda$process$3(OrderService.java:88)</code>. A teammate says “lambdas make debugging impossible”. How do you read this trace?</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> knowing how lambdas compile.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li><code>lambda$process$3</code> is the synthetic method for the fourth lambda in <code>process()</code>; line 88 is inside its body.</li>
+          <li>Open line 88, see which value can be null (often an element or a field of the element), and handle it.</li>
+          <li>If a lambda grows long, extract it into a named method and use a method reference: clearer traces and easier testing.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> rewriting everything as anonymous classes; the trace would just say <code>OrderService$4</code>.</p>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Design · readability</span><span class="scn__tag scn__tag--level">Mid</span></div>
+      <h4>A 40-line lambda</h4>
+      <p class="scn__situation">A pull request passes a 40-line block lambda with nested ifs and try/catch into <code>forEach</code>. It works. Would you approve it?</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> judgement about when lambdas help.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>Lambdas are best for short, clear behaviour. A 40-line body hides a real piece of logic without a name, tests or reuse.</li>
+          <li>Extract it into a well-named private method (<code>reconcile(Payment p)</code>) and pass <code>this::reconcile</code>; or use a normal loop if it has side effects and early exits.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> “lambdas are modern, so longer lambdas are better”.</p>
+      </div></details>
+    </article>
+  </div>
+</part>

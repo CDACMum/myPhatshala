@@ -1,0 +1,254 @@
+<!--META {
+"course": "core-java", "module": "13-file-io", "lesson": "04-serialization",
+"title": "Serialization and deserialization", "courseTitle": "Core Java", "number": "13.4",
+"track": "#E8772E", "trackId": "programming", "trackTitle": "Programming Languages", "level": "Intermediate",
+"minutes": 24,
+"description": "Java serialization and deserialization: Serializable, ObjectOutputStream.writeObject, ObjectInputStream.readObject, transient and static fields, object graphs and shared references, serialVersionUID and InvalidClassException, NotSerializableException, constructors not running, and security risks with untrusted data. With animations, a JVM tracer, {{NPROB}} practice problems, quiz and interview scenarios.",
+"ogTitle": "Serialization in Java: saving objects to files",
+"ogDescription": "Turn a Customer object into bytes and back, see what transient skips, watch shared references survive, and solve {{NPROB}} problems.",
+"lead": "Files so far held text and raw bytes. But your program's data lives in <b>objects</b>: customers, carts, game progress. <b>Serialization</b> turns a whole object, with everything it points to, into bytes you can save or send, and <b>deserialization</b> rebuilds it later. You'll learn how to opt in, how to keep secrets out with <code>transient</code>, what <code>serialVersionUID</code> protects, and why reading serialized data from strangers is dangerous.",
+"chips": ["Module 13 · File Handling and I/O", "⏱ 24 min", "Intermediate", "{{NPROB}} practice problems"]
+} META-->
+<part n="1" id="story" label="The story">
+  <h2>The cart that vanished</h2>
+  <div class="story">
+    <p class="narration">Riya's canteen app lets students build a cart before paying. If the app closes, the cart disappears and students have to add everything again. She could write each item as text, but the cart has items, quantities, a coupon and the student's details, all objects pointing to objects.</p>
+    <div class="scene">
+      <svg viewBox="0 0 640 170" role="img" aria-label="An object made of linked boxes is flattened into a row of bytes in a file, then rebuilt into the same shape">
+        <g font-size="10.5">
+          <rect x="14" y="30" width="110" height="40" rx="8" class="s-soft-green" style="stroke:var(--green)"/><text x="69" y="55" text-anchor="middle" class="s-ink" font-weight="700">Cart</text>
+          <rect x="14" y="100" width="50" height="34" rx="6" class="s-soft-green" style="stroke:var(--green)"/><text x="39" y="122" text-anchor="middle" class="s-ink">item</text>
+          <rect x="74" y="100" width="50" height="34" rx="6" class="s-soft-green" style="stroke:var(--green)"/><text x="99" y="122" text-anchor="middle" class="s-ink">item</text>
+          <path d="M50 70v28M90 70v28" style="stroke:var(--green);stroke-width:1.5"/>
+          <path d="M136 84h50" style="stroke:var(--ink-3);stroke-width:1.5"/><path d="M180 78l8 6-8 6" style="fill:none;stroke:var(--ink-3);stroke-width:1.5"/>
+          <text x="160" y="72" text-anchor="middle" class="s-acc">serialize</text>
+          <rect x="196" y="62" width="250" height="44" rx="8" class="s-soft-acc" style="stroke:var(--track)"/>
+          <text x="321" y="89" text-anchor="middle" class="s-ink" font-family="monospace" font-size="12">AC ED 00 05 73 72 00 04 43 61 …</text>
+          <text x="321" y="126" text-anchor="middle" class="s-ink2">cart.ser</text>
+          <path d="M454 84h50" style="stroke:var(--ink-3);stroke-width:1.5"/><path d="M498 78l8 6-8 6" style="fill:none;stroke:var(--ink-3);stroke-width:1.5"/>
+          <text x="478" y="72" text-anchor="middle" class="s-blue">deserialize</text>
+          <rect x="514" y="30" width="110" height="40" rx="8" class="s-soft-blue" style="stroke:var(--blue)"/><text x="569" y="55" text-anchor="middle" class="s-ink" font-weight="700">Cart</text>
+          <rect x="514" y="100" width="50" height="34" rx="6" class="s-soft-blue" style="stroke:var(--blue)"/><text x="539" y="122" text-anchor="middle" class="s-ink">item</text>
+          <rect x="574" y="100" width="50" height="34" rx="6" class="s-soft-blue" style="stroke:var(--blue)"/><text x="599" y="122" text-anchor="middle" class="s-ink">item</text>
+          <path d="M550 70v28M590 70v28" style="stroke:var(--blue);stroke-width:1.5"/>
+        </g>
+        <text x="632" y="166" text-anchor="end" class="s-wm">myphatshala.com</text>
+      </svg>
+    </div>
+    <riya>Sir, can't I just save the whole cart object as it is?</riya>
+    <arjun>You can. Mark the class <code>Serializable</code> and an <code>ObjectOutputStream</code> will flatten the cart and everything it points to into bytes.</arjun>
+    <riya>And the student's UPI PIN that's stored in there?</riya>
+    <arjun>That must <i>never</i> reach a file. Mark it <code>transient</code>. Let's see exactly what gets written.</arjun>
+  </div>
+</part>
+
+<part n="2" id="definition" label="Definition">
+  <h2>What are serialization and deserialization?</h2>
+  <div class="def">
+    <div class="def__formal"><small>Formal definition (write this in exams)</small>
+      <p><b>Serialization</b> is the process of converting an object's state, together with the objects it references (its <b>object graph</b>), into a sequence of bytes that can be stored or transmitted. <b>Deserialization</b> reconstructs new objects with the same state from those bytes. In Java, a class opts in by implementing the marker interface <code>java.io.Serializable</code>; objects are written with <code>ObjectOutputStream.writeObject()</code> and read with <code>ObjectInputStream.readObject()</code>. Fields declared <code>transient</code> and <code>static</code> fields are not serialized. A <code>serialVersionUID</code> identifies the version of the class and is checked during deserialization; a mismatch causes <code>InvalidClassException</code>.</p></div>
+    <div class="def__simple"><small>In simple words</small>
+      <p>Serialization packs an object flat into a box of bytes. Deserialization unpacks the box and builds an identical object, a twin, not the original.</p></div>
+  </div>
+  <h3>Words you'll meet in this lesson</h3>
+  <div class="terms">
+    <div class="term"><b>Serializable</b><span>Marker interface: “objects of this class may be serialized”.</span></div>
+    <div class="term"><b>Object graph</b><span>An object plus everything reachable from its reference fields.</span></div>
+    <div class="term"><b>transient</b><span>Field modifier: skip this field when serializing.</span></div>
+    <div class="term"><b>serialVersionUID</b><span>A <code>long</code> that labels the class version stored in the bytes.</span></div>
+    <div class="term"><b>Magic number</b><span>Every stream begins with <code>AC ED 00 05</code>.</span></div>
+    <div class="term"><b>Persistence</b><span>Keeping data after the program ends.</span></div>
+  </div>
+  <h3>What gets saved?</h3>
+  <div class="table-wrap">
+  <table class="compare" style="min-width:540px">
+    <thead><tr><th>Field</th><th>Saved?</th><th>After reading</th></tr></thead>
+    <tbody>
+      <tr><td>Normal instance field (<code>int points</code>)</td><td>Yes</td><td>Saved value</td></tr>
+      <tr><td>Reference to a Serializable object</td><td>Yes, the whole object</td><td>A new equal object</td></tr>
+      <tr><td>Reference to a non-Serializable object</td><td>—</td><td><code>NotSerializableException</code> while writing</td></tr>
+      <tr><td><code>transient</code> field</td><td>No</td><td>Default: <code>null</code>, 0, false</td></tr>
+      <tr><td><code>static</code> field</td><td>No</td><td>Whatever the class has now</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <exam><b>Exam tip:</b> “<code>Serializable</code> is a marker interface. <code>transient</code> and <code>static</code> fields are not serialized. Deserialization does not call the constructor of a serializable class. Declare <code>private static final long serialVersionUID</code> to control version compatibility.”</exam>
+</part>
+
+{{AD}}
+
+<part n="3" id="types" label="Types and ways to use it">
+  <h2>The rules in one class</h2>
+  {{CODE_RULES}}
+  <div class="cards">
+    <div class="card"><svg class="ic" viewBox="0 0 40 40" fill="none" stroke="var(--green)" stroke-width="2"><rect x="8" y="10" width="24" height="20" rx="3"/><path d="M14 20l4 4 8-8"/></svg><h4>Default serialization</h4><p>Implement Serializable; Java writes all non-transient fields. Enough for most cases.</p><span class="tag">writeObject</span></div>
+    <div class="card"><svg class="ic" viewBox="0 0 40 40" fill="none" stroke="var(--red)" stroke-width="2"><rect x="11" y="18" width="18" height="13" rx="2"/><path d="M15 18v-4a5 5 0 0110 0v4"/></svg><h4>transient</h4><p>Leave out secrets (PINs, passwords), caches and things that can't be serialized (open files, threads).</p><span class="tag">skip a field</span></div>
+    <div class="card"><svg class="ic" viewBox="0 0 40 40" fill="none" stroke="var(--track)" stroke-width="2"><path d="M12 28V12h16v16"/><path d="M12 20h16"/></svg><h4>Custom writeObject/readObject</h4><p>Private methods in your class to encrypt, validate or convert fields yourself.</p><span class="tag">advanced</span></div>
+    <div class="card"><svg class="ic" viewBox="0 0 40 40" fill="none" stroke="var(--blue)" stroke-width="2"><path d="M10 14h20M10 20h14M10 26h18"/><path d="M8 8h24v24H8z"/></svg><h4>JSON instead</h4><p>For APIs and long-term storage, text formats (JSON with Jackson/Gson) are readable, language-neutral and safer.</p><span class="tag">common today</span></div>
+  </div>
+  <h3>When the class changes</h3>
+  <p>If you serialize with one version of a class and read with another whose <code>serialVersionUID</code> differs (or, if you didn't declare one, whose computed UID changed because you edited the class), reading fails:</p>
+  {{CODE_UID}}
+  <warn><b>Never deserialize data you don't trust.</b> <code>readObject</code> can create objects of any serializable class on your classpath, without running constructors. Attackers have used crafted byte streams to run code on servers. Accept JSON (validated) from outside, or use deserialization filters (<code>ObjectInputFilter</code>) to allow only expected classes.</warn>
+</part>
+
+<part n="4" id="steps" label="Step by step">
+  <h2>What writeObject and readObject do</h2>
+  <ol class="stepper">
+    <li><h4>Open an object stream</h4>
+      <div class="code" data-lang="java" data-file="Main.java"><pre><code>ObjectOutputStream out = new ObjectOutputStream(new FileOutputStream("cart.ser"));</code></pre></div>
+      <span class="behind">It wraps a byte stream and immediately writes the header <code>AC ED 00 05</code>.</span></li>
+    <li><h4>writeObject(cart)</h4>
+      <span class="behind">It checks the class implements Serializable, writes a class description (name, serialVersionUID, field names and types), then the values of each non-transient, non-static field.</span></li>
+    <li><h4>Follow references</h4>
+      <span class="behind">For each reference field it serializes the referenced object the same way, recursively. Objects already written in this stream are stored as a short back-reference, so cycles and shared objects work.</span></li>
+    <li><h4>readObject()</h4>
+      <div class="code" data-lang="java" data-file="Main.java"><pre><code>Cart cart = (Cart) in.readObject();</code></pre></div>
+      <span class="behind">It reads the class description, checks the UID, allocates a new object <b>without calling its constructor</b>, and sets the fields from the stream. Transient fields keep default values.</span></li>
+    <li><h4>Cast and use</h4>
+      <span class="behind"><code>readObject</code> returns <code>Object</code>; you cast it. It throws <code>ClassNotFoundException</code> if the class isn't available, and <code>InvalidClassException</code> if the versions don't match.</span></li>
+  </ol>
+</part>
+
+<part n="5" id="animation" label="See it happen">
+  <h2>Object to bytes and back: both views</h2>
+  <p>Left: a Customer saved to a file and read back later. Right: how serialization walks an object graph and keeps a shared object shared.</p>
+  {{ANIM}}
+</part>
+
+<part n="6" id="real-world" label="Real-world use">
+  <h2>Where serialization is used</h2>
+  <p>Java serialization still appears in caches, sessions and older systems, and the same idea, turning objects into bytes, is everywhere in modern formats such as JSON and Protocol Buffers.</p>
+  {{ANIM2}}
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="20" y="22" width="34" height="46" rx="5" class="s-soft-green" style="stroke:var(--green)"/><rect x="66" y="22" width="34" height="46" rx="5" class="s-soft-green" style="stroke:var(--green)"/><path d="M54 45h12" style="stroke:var(--ink-3);stroke-width:2"/></svg></div>
+    <div><h4>1. Web sessions across servers</h4><p>Some servers serialize HTTP session objects (logged-in user, cart) to share them across machines or survive restarts.</p>
+      <div class="uc-flow"><span>session</span><i>→</i><span class="java">serialize</span><i>→</i><span>other server</span></div></div>
+  </div>
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="30" y="18" width="60" height="54" rx="6" class="s-soft-blue" style="stroke:var(--blue)"/><path d="M40 34h40M40 46h40M40 58h24" style="stroke:var(--blue);stroke-width:2"/></svg></div>
+    <div><h4>2. Caches</h4><p>Distributed caches store objects as bytes; Java serialization or a faster format turns them into bytes and back.</p>
+      <div class="uc-flow"><span>product object</span><i>→</i><span class="java">bytes</span><i>→</i><span>cache server</span></div></div>
+  </div>
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><circle cx="60" cy="45" r="24" class="s-soft-acc" style="stroke:var(--track)"/><path d="M48 45h24M60 33v24" style="stroke:var(--track);stroke-width:3"/></svg></div>
+    <div><h4>3. Saving app state</h4><p>Games, desktop tools and mobile apps save progress and drafts so users can continue later.</p>
+      <div class="uc-flow"><span>quit game</span><i>→</i><span class="java">writeObject(progress)</span><i>→</i><span>save.dat</span></div></div>
+  </div>
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="18" y="20" width="84" height="50" rx="6" class="s-card" style="stroke:var(--line)"/><text x="60" y="51" text-anchor="middle" class="s-ink" font-family="monospace" font-size="12">{"id":1}</text></svg></div>
+    <div><h4>4. APIs (with JSON)</h4><p>REST APIs serialize Java objects to JSON text and deserialize requests back into objects: the same idea in a portable, safer format.</p>
+      <div class="uc-flow"><span>Order object</span><i>→</i><span class="java">Jackson</span><i>→</i><span>JSON response</span></div></div>
+  </div>
+  <p class="muted">Simplified. New systems usually prefer JSON or Protocol Buffers over Java's built-in serialization, mainly for safety and compatibility with other languages.</p>
+</part>
+
+{{AD}}
+
+<part n="7" id="run" label="Run the code">
+  <h2>Save a customer, load a twin</h2>
+  {{CODE_RUN}}
+  <ul class="anno">
+    <li><code>implements Serializable</code><span>Without it, <code>writeObject</code> throws <code>NotSerializableException</code>.</span></li>
+    <li><code>transient String otp</code><span>Not written; comes back as <code>null</code>.</span></li>
+    <li><code>(Customer) in.readObject()</code><span>Returns Object, so cast. Throws <code>ClassNotFoundException</code> (checked) if the class is missing.</span></li>
+    <li><code>back == c</code><span>false: deserialization always creates new objects.</span></li>
+  </ul>
+  {{RUNNER}}
+</part>
+
+<part n="8" id="tracer" label="Line by line">
+  <h2>A Customer saved and restored</h2>
+  <p>Recorded from the real JVM. Watch a second Customer object appear on the heap after <code>readObject</code>: same name and points, OTP <code>null</code>, different object number.</p>
+  {{TRACER}}
+
+{{WORKED}}
+</part>
+
+<part n="9" id="quiz" label="Quiz and revision">
+  <h2>Check yourself</h2>
+  {{QUIZ}}
+  <h3>Quick revision</h3>
+  <div class="revision">
+    <h3>Lesson 13.4 in one screen</h3>
+    <ul>
+      <li>Serialization: object graph → bytes. Deserialization: bytes → new objects.</li>
+      <li>Opt in with the marker interface <code>Serializable</code>; every object in the graph must be serializable.</li>
+      <li><code>ObjectOutputStream.writeObject</code>, <code>ObjectInputStream.readObject</code> (returns Object; cast it).</li>
+      <li><code>transient</code> and <code>static</code> fields are not saved; transient comes back as the default value.</li>
+      <li>Constructors of serializable classes don't run on deserialization.</li>
+      <li>Declare <code>serialVersionUID</code>; a mismatch gives <code>InvalidClassException</code>.</li>
+      <li>Never deserialize untrusted data; prefer JSON for external data.</li>
+    </ul>
+  </div>
+  <h3>Interview and viva questions</h3>
+  <div class="faq">
+    <details><summary>What is serialization, and why is Serializable a marker interface?</summary><p>Serialization converts an object's state into bytes for storage or transfer. <code>Serializable</code> has no methods: it only marks a class as permitted, so classes don't get serialized (and their internals exposed) by accident.</p></details>
+    <details><summary>What is the use of the transient keyword?</summary><p>It excludes a field from serialization. Use it for secrets (passwords, PINs), derived or cached values that can be recomputed, and fields whose types aren't serializable (threads, streams, connections). After deserialization the field has its default value.</p></details>
+    <details><summary>What is serialVersionUID and what happens if you don't declare it?</summary><p>It's a version number stored in the stream and checked when reading. If you don't declare one, Java computes it from the class's structure, so small changes (adding a method or field) change it and old files can no longer be read (<code>InvalidClassException</code>). Declaring it explicitly keeps compatible changes working.</p></details>
+    <details><summary>Is the constructor called during deserialization?</summary><p>Not for the serializable class or its serializable superclasses. The JVM calls only the no-arg constructor of the first non-serializable superclass (often <code>Object</code>), then restores fields from the stream. Validation in constructors is therefore bypassed.</p></details>
+    <details><summary>What are the risks of Java serialization?</summary><p>Deserializing untrusted data can instantiate unexpected classes and trigger “gadget chains” leading to remote code execution. It's also Java-only, fragile across class changes, and exposes private fields in the bytes. Mitigate with ObjectInputFilter allow-lists, or use JSON/Protocol Buffers with validation.</p></details>
+  </div>
+
+{{PRACTICE}}
+
+  <h3 id="scenarios">Real-world scenario questions (asked in company interviews)</h3>
+  <p class="scn-intro">Serialization questions test both mechanics and judgement: when to use it, and when not to.</p>
+  <div class="scenarios">
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Release · compatibility</span><span class="scn__tag scn__tag--level">Junior</span></div>
+      <h4>After the update, saved carts won't load</h4>
+      <p class="scn__situation">A desktop billing app saves open bills with Java serialization. After a release that added one field to <code>Bill</code>, every saved bill fails with <code>InvalidClassException: local class incompatible</code>. What happened, and how do you prevent it?</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> serialVersionUID.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li><code>Bill</code> had no declared serialVersionUID, so Java computed one; adding a field changed it and old streams no longer match.</li>
+          <li>Declare <code>private static final long serialVersionUID</code> from the first release. Adding a field is then a compatible change: old data loads with the new field at its default.</li>
+          <li>For this release, re-add the old computed UID (find it with the <code>serialver</code> tool) to recover existing files.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> telling users to delete their saved bills.</p>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Security · data leak</span><span class="scn__tag scn__tag--level">Fresher</span></div>
+      <h4>Card numbers found in session files</h4>
+      <p class="scn__situation">A security audit finds full card numbers inside the server's serialized session files on disk. The session object holds a <code>PaymentInfo</code> field. What would you change?</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> transient and handling sensitive data.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>Serialization writes every non-transient field in plain bytes; there's no encryption.</li>
+          <li>Don't keep card data in the session at all: store a token from the payment gateway. If a field must exist, mark it <code>transient</code>.</li>
+          <li>Encrypt session storage and restrict file permissions.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> making the field <code>private</code> and assuming that hides it; private fields are serialized too.</p>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Security · attack</span><span class="scn__tag scn__tag--level">Mid</span></div>
+      <h4>An endpoint that accepts serialized objects</h4>
+      <p class="scn__situation">An internal API receives orders as Java-serialized objects in the HTTP body and calls <code>readObject()</code>. The team wants to expose it to partners. What's your advice?</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> deserialization vulnerabilities.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>Deserializing attacker-controlled bytes can instantiate arbitrary classes from the classpath and lead to remote code execution.</li>
+          <li>Switch the API to JSON with a strict schema and validation; it's also language-neutral for partners.</li>
+          <li>If Java serialization must stay, apply an <code>ObjectInputFilter</code> allow-list of expected classes, size limits, and authentication.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> “we only accept our Order class”. The cast happens <i>after</i> readObject has already built the objects.</p>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Design · graphs</span><span class="scn__tag scn__tag--level">Mid</span></div>
+      <h4>Serialized files are huge and slow</h4>
+      <p class="scn__situation">A <code>Customer</code> object is cached by serializing it, but each file is several MB. Investigation shows Customer has a reference to a shared <code>CatalogService</code> that holds the entire product catalogue. Explain and fix.</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> object graphs and transient.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>Serialization follows every reference, so the whole catalogue is written with each customer.</li>
+          <li>Mark service references <code>transient</code> and re-inject them after loading, or serialize a small DTO with only the customer's data.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> compressing the files and ignoring the design problem.</p>
+      </div></details>
+    </article>
+  </div>
+</part>

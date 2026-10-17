@@ -1,0 +1,255 @@
+<!--META {
+"course": "core-java", "module": "13-file-io", "lesson": "01-io-streams",
+"title": "I/O streams: byte and character", "courseTitle": "Core Java", "number": "13.1",
+"track": "#E8772E", "trackId": "programming", "trackTitle": "Programming Languages", "level": "Intermediate",
+"minutes": 22,
+"description": "Java I/O streams explained: byte streams (InputStream, OutputStream) vs character streams (Reader, Writer), read() returning -1, UTF-8 and charsets, InputStreamReader and OutputStreamWriter bridges, System.in/out/err and try-with-resources. With animations, a JVM tracer, {{NPROB}} practice problems, quiz and interview scenarios.",
+"ogTitle": "Java I/O streams: bytes vs characters",
+"ogDescription": "See why ₹ is one character but three bytes, watch text travel through Writer, encoder and OutputStream to disk, and solve {{NPROB}} problems.",
+"lead": "Until now your programs forgot everything when they ended. To save data and read it back, Java uses <b>streams</b>: one-way flows of data between your program and a file, the console or the network. You'll learn the two families, byte streams and character streams, why the difference matters for text like ₹ and हिंदी, and the habits that keep files from getting corrupted.",
+"chips": ["Module 13 · File Handling and I/O", "⏱ 22 min", "Intermediate", "{{NPROB}} practice problems"]
+} META-->
+<part n="1" id="story" label="The story">
+  <h2>The receipt that printed “â‚¹”</h2>
+  <div class="story">
+    <p class="narration">Riya's canteen app now saves every order to a file so the owner can open it at night. Orders with English names look fine, but every price shows “â‚¹120” instead of “₹120”, and a dish called “पनीर” is complete gibberish.</p>
+    <div class="scene">
+      <svg viewBox="0 0 640 170" role="img" aria-label="Text goes into a pipe as characters, travels as numbered bytes, and comes out either correctly or garbled depending on the decoder">
+        <g font-size="10.5">
+          <rect x="14" y="50" width="110" height="46" rx="8" class="s-soft-green" style="stroke:var(--green)"/>
+          <text x="69" y="78" text-anchor="middle" class="s-ink" font-weight="700" font-size="15">₹120</text>
+          <text x="69" y="116" text-anchor="middle" class="s-ink2">characters</text>
+          <path d="M126 73h40" style="stroke:var(--ink-3);stroke-width:1.5"/><path d="M160 68l7 5-7 5" style="fill:none;stroke:var(--ink-3);stroke-width:1.5"/>
+          <rect x="172" y="50" width="240" height="46" rx="8" class="s-soft-acc" style="stroke:var(--track)"/>
+          <text x="292" y="78" text-anchor="middle" class="s-ink" font-family="monospace" font-size="12">226 130 185 49 50 48</text>
+          <text x="292" y="116" text-anchor="middle" class="s-ink2">bytes in the file</text>
+          <path d="M414 64l40-24M414 82l40 24" style="stroke:var(--ink-3);stroke-width:1.5"/>
+          <rect x="460" y="18" width="160" height="40" rx="8" class="s-card" style="stroke:var(--red)"/>
+          <text x="540" y="43" text-anchor="middle" class="s-red" font-weight="700" font-size="13">â‚¹120</text>
+          <rect x="460" y="90" width="160" height="40" rx="8" class="s-card" style="stroke:var(--green)"/>
+          <text x="540" y="115" text-anchor="middle" class="s-green" font-weight="700" font-size="13">₹120</text>
+          <text x="540" y="72" text-anchor="middle" class="s-ink2">wrong decoder</text>
+          <text x="540" y="146" text-anchor="middle" class="s-ink2">right decoder (UTF-8)</text>
+        </g>
+        <text x="632" y="166" text-anchor="end" class="s-wm">myphatshala.com</text>
+      </svg>
+    </div>
+    <riya>Sir, the file has my text. Why does the owner's laptop show rubbish?</riya>
+    <arjun>The file doesn't have your text. It has <b>bytes</b>. ₹ became three bytes when you saved it, and his program turned each byte back into a separate character.</arjun>
+    <riya>So text and bytes are different things?</riya>
+    <arjun>Completely. Java even has two separate families of streams for them. Let's open the pipes and look inside.</arjun>
+  </div>
+</part>
+
+<part n="2" id="definition" label="Definition">
+  <h2>What is an I/O stream?</h2>
+  <div class="def">
+    <div class="def__formal"><small>Formal definition (write this in exams)</small>
+      <p>An <b>I/O stream</b> is a sequential flow of data between a program and a source or destination such as a file, the console, memory or a network connection. Input streams read data in; output streams write data out. Java's <code>java.io</code> package has two hierarchies: <b>byte streams</b>, rooted at the abstract classes <code>InputStream</code> and <code>OutputStream</code>, which transfer raw 8-bit bytes; and <b>character streams</b>, rooted at <code>Reader</code> and <code>Writer</code>, which transfer 16-bit Unicode characters and convert to and from bytes using a <b>charset</b> such as UTF-8. <code>InputStreamReader</code> and <code>OutputStreamWriter</code> bridge the two.</p></div>
+    <div class="def__simple"><small>In simple words</small>
+      <p>A stream is a pipe. Byte pipes carry numbers 0–255 and don't care what they mean. Character pipes carry letters, and do the translation to and from bytes for you.</p></div>
+  </div>
+  <h3>Words you'll meet in this lesson</h3>
+  <div class="terms">
+    <div class="term"><b>Byte</b><span>A number from 0 to 255. Everything stored or sent is bytes.</span></div>
+    <div class="term"><b>Character</b><span>A letter or symbol: <code>A</code>, <code>₹</code>, <code>न</code>.</span></div>
+    <div class="term"><b>Charset / encoding</b><span>The rule that turns characters into bytes and back. UTF-8 is the standard.</span></div>
+    <div class="term"><b>Source / sink</b><span>Where a stream reads from / writes to: file, console, memory, socket.</span></div>
+    <div class="term"><b>End of stream</b><span><code>read()</code> returns −1 when nothing is left.</span></div>
+    <div class="term"><b>Closing</b><span>Releases the file handle and flushes pending data. Use try-with-resources.</span></div>
+  </div>
+  <h3>Byte streams vs character streams</h3>
+  <div class="table-wrap">
+  <table class="compare" style="min-width:560px">
+    <thead><tr><th></th><th>Byte streams</th><th>Character streams</th></tr></thead>
+    <tbody>
+      <tr><td>Base classes</td><td><code>InputStream</code>, <code>OutputStream</code></td><td><code>Reader</code>, <code>Writer</code></td></tr>
+      <tr><td>Unit</td><td>byte (8 bits)</td><td>char (16 bits)</td></tr>
+      <tr><td><code>read()</code> returns</td><td>0–255, or −1</td><td>a character code 0–65535, or −1</td></tr>
+      <tr><td>Charset involved?</td><td>No</td><td>Yes (encode/decode)</td></tr>
+      <tr><td>Use for</td><td>images, PDFs, zip, any binary</td><td>text: .txt, .csv, .json, .html</td></tr>
+      <tr><td>File classes</td><td><code>FileInputStream</code>, <code>FileOutputStream</code></td><td><code>FileReader</code>, <code>FileWriter</code></td></tr>
+    </tbody>
+  </table>
+  </div>
+  <exam><b>Exam tip:</b> “Byte streams handle 8-bit binary data (<code>InputStream</code>/<code>OutputStream</code>); character streams handle 16-bit Unicode text (<code>Reader</code>/<code>Writer</code>) and use a charset to convert. <code>read()</code> returns <code>int</code> so that −1 can signal end of stream.”</exam>
+</part>
+
+{{AD}}
+
+<part n="3" id="types" label="Types and ways to use it">
+  <h2>The stream family</h2>
+  {{CODE_TREE}}
+  <div class="cards">
+    <div class="card"><svg class="ic" viewBox="0 0 40 40" fill="none" stroke="var(--blue)" stroke-width="2"><rect x="8" y="12" width="24" height="16" rx="3"/><path d="M13 20h3M19 20h3M25 20h3"/></svg><h4>File streams</h4><p>Read and write files on disk: <code>FileInputStream</code>, <code>FileReader</code> and their output twins.</p><span class="tag">source / sink</span></div>
+    <div class="card"><svg class="ic" viewBox="0 0 40 40" fill="none" stroke="var(--green)" stroke-width="2"><path d="M8 20h24M26 14l6 6-6 6"/><path d="M8 14h8M8 26h8"/></svg><h4>Bridges</h4><p><code>InputStreamReader</code> / <code>OutputStreamWriter</code> turn bytes into characters and back, with a charset.</p><span class="tag">bytes ⇄ chars</span></div>
+    <div class="card"><svg class="ic" viewBox="0 0 40 40" fill="none" stroke="var(--track)" stroke-width="2"><rect x="10" y="10" width="20" height="20" rx="3"/><rect x="15" y="15" width="10" height="10" rx="2"/></svg><h4>Filters / wrappers</h4><p>Add features on top of another stream: buffering, primitives (<code>DataInputStream</code>), objects (13.4).</p><span class="tag">decorators</span></div>
+    <div class="card"><svg class="ic" viewBox="0 0 40 40" fill="none" stroke="var(--ink-3)" stroke-width="2"><rect x="8" y="10" width="24" height="18" rx="2"/><path d="M14 32h12"/></svg><h4>Standard streams</h4><p><code>System.in</code>, <code>System.out</code>, <code>System.err</code>: byte streams already open for you.</p><span class="tag">console</span></div>
+  </div>
+  <h3>The streams you've used since day one</h3>
+  {{CODE_STD}}
+  <p class="muted">The System.err line goes to a separate error stream; consoles often show it in red.</p>
+  <warn><b>Always name the charset when converting text.</b> <code>"₹".getBytes()</code> or <code>new String(bytes)</code> without a charset uses the platform default, which differs between Windows, Linux and servers. Write <code>getBytes(StandardCharsets.UTF_8)</code> and <code>new String(bytes, StandardCharsets.UTF_8)</code>.</warn>
+</part>
+
+<part n="4" id="steps" label="Step by step">
+  <h2>Writing text to a file, layer by layer</h2>
+  <ol class="stepper">
+    <li><h4>Open the stream</h4>
+      <div class="code" data-lang="java" data-file="Main.java"><pre><code>try (Writer w = new OutputStreamWriter(
+        new FileOutputStream("note.txt"), StandardCharsets.UTF_8)) {</code></pre></div>
+      <span class="behind"><code>FileOutputStream</code> asks the OS to create (or empty) note.txt and gets a file handle. The writer wraps it with a UTF-8 encoder.</span></li>
+    <li><h4>Write characters</h4>
+      <div class="code" data-lang="java" data-file="Main.java"><pre><code>    w.write("Hi₹");</code></pre></div>
+      <span class="behind">The encoder turns 3 characters into 5 bytes: 72 105 226 130 185.</span></li>
+    <li><h4>Bytes go down</h4>
+      <span class="behind">The writer hands those bytes to the FileOutputStream, which passes them to the OS. The OS may keep them in its own cache for a moment before the disk.</span></li>
+    <li><h4>Close</h4>
+      <div class="code" data-lang="java" data-file="Main.java"><pre><code>}   // try-with-resources calls w.close()</code></pre></div>
+      <span class="behind">Closing the writer flushes anything still waiting and closes the inner stream and the file handle. Forgetting to close can leave a file empty or half-written.</span></li>
+    <li><h4>Reading goes back up</h4>
+      <span class="behind"><code>FileInputStream</code> returns the 5 bytes; <code>InputStreamReader</code> with UTF-8 decodes them into H, i, ₹. Decode with a different charset and you get different characters.</span></li>
+  </ol>
+</part>
+
+<part n="5" id="animation" label="See it happen">
+  <h2>Bytes vs characters: both views</h2>
+  <p>Left: what a byte stream and a character stream each see for the text “Hi₹”. Right: the layers your text passes through on its way to the disk.</p>
+  {{ANIM}}
+</part>
+
+<part n="6" id="real-world" label="Real-world use">
+  <h2>Streams in real systems</h2>
+  <p>Every upload, download, log file, report export and API call in Java goes through streams.</p>
+  {{ANIM2}}
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="30" y="16" width="60" height="58" rx="5" class="s-card" style="stroke:var(--line)"/><path d="M40 30h40M40 42h40M40 54h28" style="stroke:var(--ink-3);stroke-width:2"/></svg></div>
+    <div><h4>1. Reports and exports</h4><p>CSV statements, GST reports and invoices are written with character streams in UTF-8 so ₹ and regional names survive.</p>
+      <div class="uc-flow"><span>transactions</span><i>→</i><span class="java">Writer (UTF-8)</span><i>→</i><span>statement.csv</span></div></div>
+  </div>
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="24" y="20" width="72" height="50" rx="6" class="s-soft-blue" style="stroke:var(--blue)"/><circle cx="46" cy="40" r="7" class="s-soft-acc"/><path d="M30 64l20-16 14 10 12-8 18 14" style="fill:none;stroke:var(--green);stroke-width:2"/></svg></div>
+    <div><h4>2. Uploads and downloads</h4><p>Profile photos, KYC PDFs and app updates are copied with byte streams; a charset would corrupt them.</p>
+      <div class="uc-flow"><span>photo.jpg</span><i>→</i><span class="java">InputStream → OutputStream</span><i>→</i><span>storage</span></div></div>
+  </div>
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="22" y="20" width="76" height="50" rx="6" class="s-board"/><path d="M32 34h44M32 46h56M32 58h30" style="stroke:var(--chalk);stroke-width:2"/></svg></div>
+    <div><h4>3. Logs</h4><p>Servers append log lines to files all day. Opening in append mode, and rotating files, keeps history safe.</p>
+      <div class="uc-flow"><span>each request</span><i>→</i><span class="java">FileWriter(file, true)</span><i>→</i><span>app.log</span></div></div>
+  </div>
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><circle cx="34" cy="45" r="14" class="s-soft-green" style="stroke:var(--green)"/><circle cx="86" cy="45" r="14" class="s-soft-acc" style="stroke:var(--track)"/><path d="M48 45h24" style="stroke:var(--ink-3);stroke-width:2;stroke-dasharray:4 3"/></svg></div>
+    <div><h4>4. Network calls</h4><p>An HTTP response body is an <code>InputStream</code> of bytes; reading it as JSON text needs the right charset, usually UTF-8.</p>
+      <div class="uc-flow"><span>bank API</span><i>→</i><span class="java">InputStreamReader(UTF-8)</span><i>→</i><span>JSON text</span></div></div>
+  </div>
+  <p class="muted">Simplified. Modern code often uses the <code>java.nio.file.Files</code> helpers (Lesson 13.2) on top of these same streams.</p>
+</part>
+
+{{AD}}
+
+<part n="7" id="run" label="Run the code">
+  <h2>One file, read as bytes and as characters</h2>
+  {{CODE_RUN}}
+  <ul class="anno">
+    <li><code>try (OutputStream out = …)</code><span>try-with-resources closes the stream automatically, even if an exception is thrown.</span></li>
+    <li><code>note.getBytes(StandardCharsets.UTF_8)</code><span>Turn text into bytes with a named charset before writing to a byte stream.</span></li>
+    <li><code>in.read()</code><span>One byte, as an int: 79 is the code for <code>O</code>.</span></li>
+    <li><code>r.read(buf)</code><span>Reads up to 100 characters into the array and returns how many it read.</span></li>
+  </ul>
+  {{RUNNER}}
+</part>
+
+<part n="8" id="tracer" label="Line by line">
+  <h2>Five bytes, three characters</h2>
+  <p>Recorded from the real JVM. Watch the <code>byte[]</code> on the heap (Java bytes are signed, so 226 shows as −30) and the two kinds of stream reading the same data.</p>
+  {{TRACER}}
+
+{{WORKED}}
+</part>
+
+<part n="9" id="quiz" label="Quiz and revision">
+  <h2>Check yourself</h2>
+  {{QUIZ}}
+  <h3>Quick revision</h3>
+  <div class="revision">
+    <h3>Lesson 13.1 in one screen</h3>
+    <ul>
+      <li>Stream = one-way flow of data. Input reads in, output writes out.</li>
+      <li>Byte streams: <code>InputStream</code>/<code>OutputStream</code>, for binary data. Character streams: <code>Reader</code>/<code>Writer</code>, for text.</li>
+      <li><code>read()</code> returns an int; −1 means end of stream.</li>
+      <li>Characters ≠ bytes: in UTF-8, ₹ and Hindi letters take 3 bytes each.</li>
+      <li>Bridges: <code>InputStreamReader</code>, <code>OutputStreamWriter</code>. Always name the charset.</li>
+      <li><code>new FileOutputStream(f)</code> empties the file; <code>(f, true)</code> appends.</li>
+      <li>Close streams with try-with-resources; catch or declare <code>IOException</code>.</li>
+    </ul>
+  </div>
+  <h3>Interview and viva questions</h3>
+  <div class="faq">
+    <details><summary>What is the difference between byte streams and character streams?</summary><p>Byte streams (<code>InputStream</code>/<code>OutputStream</code>) read and write raw 8-bit bytes and are used for binary data. Character streams (<code>Reader</code>/<code>Writer</code>) read and write 16-bit characters and use a charset to encode and decode, so they are used for text. Character streams are usually built on top of byte streams.</p></details>
+    <details><summary>Why does read() return int and not byte?</summary><p>So it can return every possible byte value (0–255) and still have a separate value, −1, for end of stream. A Java <code>byte</code> only holds −128 to 127, with no spare value.</p></details>
+    <details><summary>What are InputStreamReader and OutputStreamWriter?</summary><p>Bridge classes. <code>InputStreamReader</code> wraps an InputStream and decodes its bytes into characters using a charset; <code>OutputStreamWriter</code> wraps an OutputStream and encodes characters into bytes. They let you read text from any byte source (files, sockets, System.in).</p></details>
+    <details><summary>What happens if you don't close a stream?</summary><p>The file handle stays open (the OS has a limit, so a long-running server eventually fails with “too many open files”), and data in buffers may never be written. Use try-with-resources so <code>close()</code> always runs.</p></details>
+    <details><summary>What is a charset, and why does it matter?</summary><p>A charset maps characters to bytes. The same bytes decoded with different charsets give different text, which causes garbled output like “â‚¹”. UTF-8 can represent every Unicode character and is the standard for files and the web; specify it explicitly.</p></details>
+  </div>
+
+{{PRACTICE}}
+
+  <h3 id="scenarios">Real-world scenario questions (asked in company interviews)</h3>
+  <p class="scn-intro">I/O bugs reach customers directly: corrupted files, missing data and server outages. These questions check whether you know why.</p>
+  <div class="scenarios">
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Fintech · exports</span><span class="scn__tag scn__tag--level">Fresher</span></div>
+      <h4>₹ shows as “?” in exported reports</h4>
+      <p class="scn__situation">Statements generated on the Linux server show “?500” instead of “₹500”, while on a developer's laptop they look fine. The code uses <code>new FileWriter(path)</code> and <code>text.getBytes()</code>. Explain.</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> platform default charsets.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>Without a charset, Java uses a platform default that can differ between machines (older JDKs and some server locales use ASCII or Latin-1, where ₹ doesn't exist, so it's replaced by “?”).</li>
+          <li>Always pass <code>StandardCharsets.UTF_8</code> to writers, readers, <code>getBytes</code> and <code>new String</code>.</li>
+          <li>For CSVs opened in Excel, a UTF-8 BOM or an explicit import charset may also be needed.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> replacing ₹ with “Rs” as the fix; the next customer name in Hindi will break too.</p>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Media · uploads</span><span class="scn__tag scn__tag--level">Fresher</span></div>
+      <h4>Uploaded photos are corrupted</h4>
+      <p class="scn__situation">A KYC service copies uploaded photos with <code>BufferedReader.readLine()</code> and <code>FileWriter.write()</code>. The saved images won't open. Why?</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> binary vs text streams.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>Images are binary. Readers decode bytes as characters (invalid sequences become replacement characters) and readLine drops line-ending bytes, so the data changes.</li>
+          <li>Copy with byte streams: <code>InputStream.transferTo(OutputStream)</code> or <code>Files.copy</code>.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> “try a different charset”. No charset is right for non-text data.</p>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Backend · outage</span><span class="scn__tag scn__tag--level">Junior</span></div>
+      <h4>“Too many open files” after a few days</h4>
+      <p class="scn__situation">A report service works for days, then every request fails with <code>IOException: Too many open files</code>. The code opens a <code>FileInputStream</code> per request and calls <code>close()</code> at the end of the method. What's wrong?</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> resource leaks and try-with-resources.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>When an exception happens before <code>close()</code>, the stream is never closed. Each failure leaks a file handle until the OS limit is reached.</li>
+          <li>Use try-with-resources so the stream is closed on every path.</li>
+          <li>Monitor open file descriptors and add a test that exercises the error path.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> raising the OS file limit as the fix; it only delays the outage.</p>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Logging · data loss</span><span class="scn__tag scn__tag--level">Junior</span></div>
+      <h4>Yesterday's audit log disappeared</h4>
+      <p class="scn__situation">An audit logger opens <code>new FileWriter("audit.log")</code> each time the app starts. After a restart, all old entries are gone. Explain and fix.</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> append mode.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>The one-argument constructor truncates the file. Use <code>new FileWriter("audit.log", StandardCharsets.UTF_8, true)</code> to append.</li>
+          <li>For real systems, use a logging framework with file rotation and keep audit data in durable storage.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> reading the whole old file and rewriting it each time; it's slow and risks losing everything on a crash.</p>
+      </div></details>
+    </article>
+  </div>
+</part>

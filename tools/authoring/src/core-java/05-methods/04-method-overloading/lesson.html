@@ -1,0 +1,451 @@
+<!--META {
+"course": "core-java", "module": "05-methods", "lesson": "04-method-overloading",
+"title": "Method overloading", "courseTitle": "Core Java", "number": "5.4",
+"track": "#E8772E", "trackId": "programming", "trackTitle": "Programming Languages", "level": "Beginner",
+"minutes": 20,
+"description": "Method overloading in Java: same method name, different parameter lists. Learn the rules (number, type and order of parameters), why the return type alone is not enough, how javac picks a method (exact match, widening, boxing, varargs), ambiguous calls, and real uses like println. With animations, a JVM tracer, {{NPROB}} practice problems, quiz and interview scenarios.",
+"ogTitle": "Method overloading: one name, many parameter lists",
+"ogDescription": "See javac choose between overloaded methods, step through real calls, and solve {{NPROB}} problems.",
+"lead": "<code>System.out.println</code> prints an int, a double, a String or a char, yet you never write <code>printlnInt</code>. That's <b>method overloading</b>: several methods share one name and differ only in their parameters. You'll see exactly how the compiler picks the right one, what makes a call ambiguous, and how real APIs use it.",
+"chips": ["Module 5 · Methods", "⏱ 20 min", "Beginner", "{{NPROB}} practice problems"]
+} META-->
+<part n="1" id="story" label="The story">
+  <h2>Three names for one idea</h2>
+  <div class="story">
+    <p class="narration">Riya's canteen app adds up a bill. She has written <code>totalOfTwo(a, b)</code>, <code>totalOfThree(a, b, c)</code> and <code>totalWithDiscount(a, b, percent)</code>. Her friend Kabir keeps calling the wrong one, and every new case needs a new name.</p>
+    <div class="scene">
+      <svg viewBox="0 0 640 170" role="img" aria-label="Three differently named methods on the left become one method name total with three parameter lists on the right. Calls with 2 or 3 arguments go to the matching version.">
+        <g font-size="10.5">
+          <rect x="16" y="20" width="190" height="34" rx="6" class="s-board"/><text x="26" y="41" class="mono s-chalk">totalOfTwo(a, b)</text>
+          <rect x="16" y="66" width="190" height="34" rx="6" class="s-board"/><text x="26" y="87" class="mono s-chalk">totalOfThree(a, b, c)</text>
+          <rect x="16" y="112" width="190" height="34" rx="6" class="s-board"/><text x="26" y="133" class="mono s-chalk">totalWithDiscount(…)</text>
+          <path d="M218 83 H262" style="stroke:var(--track);stroke-width:2.5"/><path d="M255 77l8 6-8 6" style="stroke:var(--track);stroke-width:2.5;fill:none"/>
+          <rect x="276" y="20" width="200" height="126" rx="10" class="s-card2" style="stroke:var(--green);stroke-width:1.5"/>
+          <text x="376" y="42" text-anchor="middle" font-weight="700" class="s-green">one name: total</text>
+          <text x="290" y="68" class="mono s-ink">total(int a, int b)</text>
+          <text x="290" y="94" class="mono s-ink">total(int a, int b, int c)</text>
+          <text x="290" y="120" class="mono s-ink">total(int a, int b, double off)</text>
+          <text x="496" y="68" class="mono s-ink2">total(40, 25)</text>
+          <text x="496" y="94" class="mono s-ink2">total(40, 25, 15)</text>
+          <text x="496" y="120" class="mono s-ink2">total(40, 25, 0.1)</text>
+          <text x="496" y="146" class="s-ink3">javac picks by the arguments</text>
+        </g>
+        <text x="632" y="166" text-anchor="end" class="s-wm">myphatshala.com</text>
+      </svg>
+    </div>
+    <riya>Sir, I keep inventing names: totalOfTwo, totalOfThree… Is there a better way?</riya>
+    <arjun>Give them all the same name, <code>total</code>. Java allows several methods with one name as long as their <b>parameter lists</b> differ. The compiler looks at the arguments in each call and picks the matching version.</arjun>
+    <riya>So when I write <code>total(40, 25, 15)</code>, Java decides at run time which one to use?</riya>
+    <arjun>No, earlier! The <b>compiler</b> decides, while compiling. By the time the program runs, each call already points to one exact method. You use this every day: <code>println</code> has ten versions.</arjun>
+  </div>
+</part>
+
+<part n="2" id="definition" label="Definition">
+  <h2>What is method overloading?</h2>
+  <div class="def">
+    <div class="def__formal"><small>Formal definition (write this in exams)</small>
+      <p><b>Method overloading</b> means defining two or more methods in the same class with the <b>same name</b> but <b>different parameter lists</b>: a different number of parameters, different parameter types, or a different order of types. The method's <b>signature</b> (its name plus its parameter types) must be unique; the return type and parameter names are not part of it. The compiler chooses which overloaded method to call from the static types of the arguments, so overloading is a form of <b>compile-time (static) polymorphism</b>.</p></div>
+    <div class="def__simple"><small>In simple words</small>
+      <p>Same name, different inputs. You call <code>total(…)</code>; Java looks at what you passed in and runs the version written for exactly those inputs.</p></div>
+  </div>
+  <h3>Words you'll meet in this lesson</h3>
+  <div class="terms">
+    <div class="term"><b>Overloading</b><span>Several methods with one name and different parameter lists.</span></div>
+    <div class="term"><b>Signature</b><span>Method name + parameter types, e.g. <code>total(int, int)</code>. Must be unique in a class.</span></div>
+    <div class="term"><b>Overload resolution</b><span>The compiler's process of choosing one method for a call.</span></div>
+    <div class="term"><b>Widening</b><span>Automatic conversion to a bigger type: int → long → float → double.</span></div>
+    <div class="term"><b>Boxing</b><span>Automatic conversion of a primitive to its wrapper: int → Integer.</span></div>
+    <div class="term"><b>Ambiguous call</b><span>Two methods fit equally well, so javac refuses to choose.</span></div>
+  </div>
+  <h3>What counts as a different parameter list?</h3>
+  <div class="table-wrap">
+  <table class="compare" style="min-width:560px">
+    <thead><tr><th>Change</th><th>Example pair</th><th>Valid overload?</th></tr></thead>
+    <tbody>
+      <tr><td>Number of parameters</td><td><code>area(int)</code> and <code>area(int, int)</code></td><td>Yes</td></tr>
+      <tr><td>Type of parameters</td><td><code>area(int)</code> and <code>area(double)</code></td><td>Yes</td></tr>
+      <tr><td>Order of parameter types</td><td><code>pay(int, String)</code> and <code>pay(String, int)</code></td><td>Yes (but confusing; avoid)</td></tr>
+      <tr><td>Only the return type</td><td><code>int calc(int)</code> and <code>double calc(int)</code></td><td>No: <i>method calc(int) is already defined</i></td></tr>
+      <tr><td>Only parameter names</td><td><code>fee(int days)</code> and <code>fee(int hours)</code></td><td>No: same signature</td></tr>
+      <tr><td>Only <code>static</code> or access modifier</td><td><code>static void log(String)</code> and <code>void log(String)</code></td><td>No: same signature</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <exam><b>Exam tip:</b> “Can we overload by return type?” No. A call like <code>calc(5);</code> doesn't have to use the result, so the compiler couldn't tell the two apart. Overloading is <b>compile-time</b> polymorphism; overriding (Lesson 7.4) is <b>run-time</b> polymorphism.</exam>
+</part>
+
+{{AD}}
+
+<part n="3" id="types" label="Types and ways to use it">
+  <h2>Three ways to overload, and where you've already seen them</h2>
+  <div class="cards">
+    <div class="card"><svg class="ic" viewBox="0 0 40 40" fill="none" stroke="var(--blue)" stroke-width="2"><rect x="6" y="10" width="8" height="20" rx="2"/><rect x="18" y="10" width="8" height="20" rx="2"/><rect x="30" y="10" width="6" height="20" rx="2"/></svg><h4>By number of parameters</h4><p><code>total(a, b)</code> and <code>total(a, b, c)</code>. The most common kind, often used for optional extras.</p><span class="tag">String.format, ArrayList(…)</span></div>
+    <div class="card"><svg class="ic" viewBox="0 0 40 40" fill="none" stroke="var(--track)" stroke-width="2"><circle cx="13" cy="20" r="7"/><rect x="24" y="13" width="13" height="14" rx="2"/></svg><h4>By type of parameters</h4><p><code>print(int)</code>, <code>print(double)</code>, <code>print(String)</code>. Same idea, different kinds of data.</p><span class="tag">println, Math.abs, String.valueOf</span></div>
+    <div class="card"><svg class="ic" viewBox="0 0 40 40" fill="none" stroke="var(--green)" stroke-width="2"><path d="M8 14h24M8 26h24"/><path d="M26 9l6 5-6 5M14 21l-6 5 6 5"/></svg><h4>By order of types</h4><p><code>book(int seats, String show)</code> and <code>book(String show, int seats)</code>. Legal, but easy to misuse: prefer different names.</p><span class="tag">legal, rarely wise</span></div>
+  </div>
+  <h3>The JDK is full of overloads</h3>
+  <div class="code" data-lang="java" data-file="Main.java"><pre><code>public class Main {
+    public static void main(String[] args) {
+        System.out.println(42);            // println(int)
+        System.out.println(4.5);           // println(double)
+        System.out.println('A');           // println(char)
+        System.out.println("Chai");        // println(String)
+        System.out.println(Math.abs(-7));    // abs(int)    returns int
+        System.out.println(Math.abs(-7.5));  // abs(double) returns double
+        System.out.println(String.valueOf(true) + String.valueOf(99));
+    }
+}</code></pre><div class="output">42
+4.5
+A
+Chai
+7
+7.5
+true99</div></div>
+  <p>Each line calls a <b>different method</b> that happens to share a name. Notice that the two <code>Math.abs</code> methods also return different types. That's allowed, because their <b>parameters</b> differ too.</p>
+  <h3>Constructors can be overloaded too</h3>
+  <div class="code" data-lang="java" data-file="Main.java"><pre><code>import java.util.ArrayList;
+
+public class Main {
+    public static void main(String[] args) {
+        ArrayList&lt;String&gt; a = new ArrayList&lt;&gt;();      // ArrayList()
+        ArrayList&lt;String&gt; b = new ArrayList&lt;&gt;(500);   // ArrayList(int initialCapacity)
+        StringBuilder s1 = new StringBuilder();          // StringBuilder()
+        StringBuilder s2 = new StringBuilder("Bill: ");  // StringBuilder(String)
+        System.out.println(a.size() + " " + b.size() + " [" + s1 + "] [" + s2 + "]");
+    }
+}</code></pre><div class="output">0 0 [] [Bill: ]</div></div>
+  <tip><b>Good practice:</b> overloads should all do <b>the same job</b>. A common pattern is for the short versions to call the full one: <code>total(a, b)</code> just returns <code>total(a, b, 0)</code>. Then the real logic lives in one place.</tip>
+</part>
+
+<part n="4" id="steps" label="Step by step">
+  <h2>How javac chooses one method for a call</h2>
+  <ol class="stepper">
+    <li><h4>Collect every method with that name</h4>
+      <div class="code" data-lang="java" data-file="Main.java"><pre><code>static void show(long x)    { System.out.println("long"); }
+static void show(Integer x) { System.out.println("Integer"); }
+static void show(int... x)  { System.out.println("varargs"); }
+
+show(5);   // which one?</code></pre></div>
+      <span class="behind">javac finds the three <code>show</code> methods in the class. Methods with a different name are never considered.</span></li>
+    <li><h4>Phase 1: exact match or widening only</h4>
+      <span class="behind">The argument <code>5</code> is an <code>int</code>. No <code>show(int)</code> exists, but <code>int</code> can <b>widen</b> to <code>long</code>. So <code>show(long)</code> is applicable in phase 1, and javac stops here: it prints <b>long</b>. Boxing and varargs are not even tried.</span></li>
+    <li><h4>Phase 2: allow boxing and unboxing</h4>
+      <span class="behind">Only if phase 1 finds nothing. Remove <code>show(long)</code> and the call boxes <code>5</code> into an <code>Integer</code>: it prints <b>Integer</b>.</span></li>
+    <li><h4>Phase 3: allow varargs</h4>
+      <span class="behind">Last resort. Remove the first two and <code>show(int...)</code> is used: the JVM receives a new <code>int[]{5}</code>. Varargs come in Lesson 5.6.</span></li>
+    <li><h4>Several fit in the same phase? Pick the most specific, or fail</h4>
+      <div class="code" data-lang="bash" data-file="javac output"><pre><code>Main.java:6: error: reference to add is ambiguous
+    add(1, 1);
+    ^
+  both method add(int,long) in Main and method add(long,int) in Main match</code></pre></div>
+      <span class="behind">If one candidate's parameters are all “narrower” than another's, it wins (<code>String</code> beats <code>Object</code>; <code>int</code> beats <code>long</code>). Here each method is better for one argument and worse for the other, so neither is more specific: compile error.</span></li>
+    <li><h4>The choice is written into the bytecode</h4>
+      <div class="code" data-lang="bash" data-file="javap -c Main"><pre><code>invokestatic  #33   // Method area:(I)I
+invokestatic  #42   // Method area:(II)I
+invokestatic  #47   // Method area:(D)D</code></pre></div>
+      <span class="behind">Each call instruction names the method <b>and its descriptor</b>: <code>(I)I</code> means “takes an int, returns an int”, <code>(D)D</code> double to double. The JVM never has to choose; javac already did.</span></li>
+  </ol>
+</part>
+
+<part n="5" id="animation" label="See it happen">
+  <h2>Three calls, three different methods</h2>
+  <p>Left: the call you write and what it prints. Right: how javac matches the arguments to a signature and what it writes into the class file.</p>
+  <div class="anim" data-frames="6">
+    <div class="anim__title">Overload resolution for area(…) <span>6 steps</span></div>
+    <div class="anim__views">
+      <div class="view view--see">
+        <span class="view__tag">What you see</span>
+        <svg viewBox="0 0 360 250" role="img" aria-label="Calls to area with different arguments and their printed results">
+          <rect x="10" y="12" width="340" height="40" rx="8" class="s-board"/>
+          <g font-size="11.5" class="mono s-chalk">
+            <text x="22" y="37" data-on="1">area(5)</text>
+            <text x="22" y="37" data-on="2">area(4, 6)</text>
+            <text x="22" y="37" data-on="3">area(2.5)</text>
+            <text x="22" y="37" data-on="4">area('A')    // a char!</text>
+            <text x="22" y="37" data-on="5">area(5L)     // a long</text>
+            <text x="22" y="37" data-on="6">int calc(int) + double calc(int)</text>
+          </g>
+          <g font-size="10.5" class="mono">
+            <rect x="10" y="64" width="160" height="30" rx="6" class="s-card2"/><text x="20" y="84" class="s-ink">int area(int side)</text>
+            <rect x="10" y="100" width="160" height="30" rx="6" class="s-card2"/><text x="20" y="120" class="s-ink">int area(int l, int w)</text>
+            <rect x="10" y="136" width="160" height="30" rx="6" class="s-card2"/><text x="20" y="156" class="s-ink">double area(double r)</text>
+          </g>
+          <rect x="10" y="64" width="160" height="30" rx="6" data-on="1,4" style="fill:none;stroke:var(--green);stroke-width:3"/>
+          <rect x="10" y="100" width="160" height="30" rx="6" data-on="2" style="fill:none;stroke:var(--green);stroke-width:3"/>
+          <rect x="10" y="136" width="160" height="30" rx="6" data-on="3,5" style="fill:none;stroke:var(--green);stroke-width:3"/>
+          <rect x="190" y="64" width="160" height="102" rx="8" style="fill:#0F1512"/>
+          <g font-size="11" class="mono" style="fill:#B9F5D0">
+            <text x="202" y="90" data-on="1">25</text>
+            <text x="202" y="90" data-on="2">24</text>
+            <text x="202" y="90" data-on="3">19.625</text>
+            <text x="202" y="90" data-on="4">4225</text>
+            <text x="202" y="90" data-on="5">78.5</text>
+          </g>
+          <g font-size="10" class="mono" style="fill:#FF9B8A" data-on="6">
+            <text x="202" y="90">error: method</text>
+            <text x="202" y="106">calc(int) is already</text>
+            <text x="202" y="122">defined in class Main</text>
+          </g>
+          <g font-size="10.2" class="s-ink2" text-anchor="middle">
+            <text x="180" y="196" data-on="1">One int argument → area(int).</text>
+            <text x="180" y="196" data-on="2">Two ints → the two-parameter version.</text>
+            <text x="180" y="196" data-on="3">A double → area(double).</text>
+            <text x="180" y="196" data-on="4">'A' is 65: char widens to int → 65 × 65.</text>
+            <text x="180" y="196" data-on="5">long can't narrow to int, but widens to double.</text>
+            <text x="180" y="196" data-on="6">Same parameters, different return type: not allowed.</text>
+          </g>
+          <text x="354" y="246" text-anchor="end" class="s-wm">myphatshala.com</text>
+        </svg>
+        <ol class="caps" hidden>
+          <li><code>area(5)</code> matches <code>area(int)</code> exactly and prints 25.</li>
+          <li>With two int arguments only <code>area(int, int)</code> has the right number of parameters: 4 × 6 = 24.</li>
+          <li><code>2.5</code> is a double, so <code>area(double)</code> runs: 3.14 × 2.5 × 2.5 = 19.625.</li>
+          <li><b>Surprise:</b> a <code>char</code> is a number (its Unicode value). 'A' is 65, which widens to int, so <code>area(int)</code> prints 4225.</li>
+          <li>A <code>long</code> cannot go into an <code>int</code> parameter without a cast, but it can widen to <code>double</code>, so <code>area(double)</code> is chosen: 3.14 × 5.0 × 5.0 = 78.5.</li>
+          <li>Two methods that differ only by return type have the same signature, <code>calc(int)</code>. That's a compile error.</li>
+        </ol>
+      </div>
+      <div class="view view--behind">
+        <span class="view__tag">Behind the screen</span>
+        <svg viewBox="0 0 360 250" role="img" aria-label="javac compares argument types with each signature and writes the chosen descriptor into the bytecode">
+          <text x="180" y="22" text-anchor="middle" font-size="10" font-weight="700" class="s-ink2">javac: argument types vs signatures</text>
+          <g font-size="10" class="mono">
+            <rect x="12" y="32" width="336" height="28" rx="6" class="s-soft-blue" style="stroke:var(--blue)"/>
+            <text x="22" y="51" class="s-blue" data-on="1">argument types: (int)</text>
+            <text x="22" y="51" class="s-blue" data-on="2">argument types: (int, int)</text>
+            <text x="22" y="51" class="s-blue" data-on="3">argument types: (double)</text>
+            <text x="22" y="51" class="s-blue" data-on="4">argument types: (char)</text>
+            <text x="22" y="51" class="s-blue" data-on="5">argument types: (long)</text>
+            <text x="22" y="51" class="s-blue" data-on="6">two methods: calc(int), calc(int)</text>
+          </g>
+          <g font-size="9.6" data-on="1-5">
+            <text x="22" y="82" class="mono s-ink">area(int)</text>
+            <text x="22" y="102" class="mono s-ink">area(int,int)</text>
+            <text x="22" y="122" class="mono s-ink">area(double)</text>
+          </g>
+          <g font-size="9.6" font-weight="700">
+            <text x="130" y="82" class="s-green" data-on="1">✓ exact</text><text x="130" y="102" class="s-red" data-on="1">✗ 2 params</text><text x="130" y="122" class="s-ink3" data-on="1">✓ by widening (worse)</text>
+            <text x="130" y="82" class="s-red" data-on="2">✗ 1 param</text><text x="130" y="102" class="s-green" data-on="2">✓ exact</text><text x="130" y="122" class="s-red" data-on="2">✗ 1 param</text>
+            <text x="130" y="82" class="s-red" data-on="3">✗ double → int narrows</text><text x="130" y="102" class="s-red" data-on="3">✗ 2 params</text><text x="130" y="122" class="s-green" data-on="3">✓ exact</text>
+            <text x="130" y="82" class="s-green" data-on="4">✓ char → int widens</text><text x="130" y="102" class="s-red" data-on="4">✗ 2 params</text><text x="130" y="122" class="s-ink3" data-on="4">✓ but less specific</text>
+            <text x="130" y="82" class="s-red" data-on="5">✗ long → int narrows</text><text x="130" y="102" class="s-red" data-on="5">✗ 2 params</text><text x="130" y="122" class="s-green" data-on="5">✓ long → double widens</text>
+          </g>
+          <g data-on="6">
+            <rect x="12" y="70" width="336" height="60" rx="6" class="s-soft-acc" style="stroke:#D64545"/>
+            <text x="22" y="92" font-size="9.8" class="s-red" font-weight="700">Signatures are identical: calc(int)</text>
+            <text x="22" y="112" font-size="9.6" class="s-ink">The return type isn't part of the signature.</text>
+          </g>
+          <rect x="12" y="142" width="336" height="44" rx="6" class="s-board" data-on="1-5"/>
+          <g font-size="10" class="mono s-chalk">
+            <text x="22" y="160" data-on="1-5">bytecode:</text>
+            <text x="22" y="178" data-on="1,4" class="s-kw">invokestatic area:(I)I</text>
+            <text x="22" y="178" data-on="2" class="s-kw">invokestatic area:(II)I</text>
+            <text x="22" y="178" data-on="3,5" class="s-kw">invokestatic area:(D)D</text>
+          </g>
+          <g font-size="9.6" class="s-ink2" text-anchor="middle">
+            <text x="180" y="212" data-on="1">The exact match is the most specific.</text>
+            <text x="180" y="212" data-on="2">Only one method has two parameters.</text>
+            <text x="180" y="212" data-on="3">double never narrows to int silently.</text>
+            <text x="180" y="212" data-on="4">In bytecode a char is already an int.</text>
+            <text x="180" y="212" data-on="5">The argument is widened to 5.0 before the call.</text>
+            <text x="180" y="212" data-on="6">No class file is written.</text>
+          </g>
+          <text x="354" y="246" text-anchor="end" class="s-wm">myphatshala.com</text>
+        </svg>
+        <ol class="caps" hidden>
+          <li>javac lists the argument types, here just <code>(int)</code>, and checks every <code>area</code>. Two are applicable; <code>area(int)</code> is more specific than <code>area(double)</code>, so it wins. The call is compiled as <code>invokestatic area:(I)I</code>.</li>
+          <li>The number of arguments rules out the one-parameter versions immediately.</li>
+          <li>A double can't be passed to an int parameter (that would lose the fraction), so only <code>area(double)</code> applies. Descriptor <code>(D)D</code>.</li>
+          <li>char can widen to int (and to double). The int version is more specific. In the bytecode a char is already held as an int, so no conversion instruction is needed.</li>
+          <li>long → int is narrowing (not automatic); long → double is widening. javac picks <code>area(double)</code> and widens the argument. For the literal <code>5L</code> it simply stores 5.0; for a long variable it would insert an <code>l2d</code> (long to double) instruction.</li>
+          <li>The rule check happens before any bytecode exists. Because both methods would have the signature <code>calc(int)</code>, the class can't be compiled.</li>
+        </ol>
+      </div>
+    </div>
+  </div>
+</part>
+
+<part n="6" id="real-world" label="Real-world use">
+  <h2>Where overloading shows up in real code</h2>
+  <p>Overloading is how good APIs stay easy to use: one name to remember, and sensible defaults for the details you don't care about.</p>
+  {{ANIM2}}
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="18" y="20" width="84" height="50" rx="6" class="s-board"/><text x="30" y="42" font-size="10" class="mono s-chalk">println(</text><text x="30" y="58" font-size="10" class="mono s-kw">int|String…</text></svg></div>
+    <div><h4>1. Printing and converting: println, valueOf</h4><p><code>PrintStream.println</code> has versions for every primitive, <code>char[]</code>, <code>String</code> and <code>Object</code>. <code>String.valueOf</code> works the same way. You write one name; the right conversion happens.</p>
+      <div class="uc-flow"><span>Any value</span><i>→</i><span class="java">println(…) overloads</span><i>→</i><span>Text on screen</span></div></div>
+  </div>
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="16" y="18" width="88" height="54" rx="8" class="s-card2" style="stroke:var(--line)"/><path d="M28 36h40M28 50h60M28 62h30" class="s-line" style="stroke-width:2"/></svg></div>
+    <div><h4>2. Optional details with defaults</h4><p>Logging libraries offer <code>log(message)</code> and <code>log(message, exception)</code>. HTTP clients offer <code>get(url)</code> and <code>get(url, headers)</code>. The short versions call the long one with default values.</p>
+      <div class="uc-flow"><span>log("Saved")</span><i>→</i><span class="java">log(msg, null)</span><i>→</i><span>One real implementation</span></div></div>
+  </div>
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="20" y="16" width="34" height="58" rx="5" class="s-soft-blue" style="stroke:var(--blue)"/><rect x="66" y="16" width="34" height="58" rx="5" class="s-soft-green" style="stroke:var(--green)"/></svg></div>
+    <div><h4>3. Different ways to build an object</h4><p>Constructors are overloaded constantly: <code>new ArrayList&lt;&gt;()</code>, <code>new ArrayList&lt;&gt;(500)</code>, <code>new ArrayList&lt;&gt;(otherList)</code>. A booking class might accept a seat number or a seat code.</p>
+      <div class="uc-flow"><span>Different inputs</span><i>→</i><span class="java">overloaded constructors</span><i>→</i><span>Same kind of object</span></div></div>
+  </div>
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><circle cx="40" cy="45" r="20" class="s-soft-acc" style="stroke:var(--track)"/><rect x="66" y="27" width="36" height="36" rx="4" class="s-soft-acc" style="stroke:var(--track)"/></svg></div>
+    <div><h4>4. Same operation, different data types</h4><p><code>Math.max</code>, <code>Math.abs</code> and <code>Arrays.sort</code> each have versions for int, long, float, double (and more), so each type gets fast code without boxing.</p>
+      <div class="uc-flow"><span>int[] or double[]</span><i>→</i><span class="java">Arrays.sort overloads</span><i>→</i><span>Type-specific sorting</span></div></div>
+  </div>
+  <p class="muted">Examples are simplified. Library designers keep overload sets small and consistent; when two overloads would behave differently, they choose different method names instead.</p>
+</part>
+
+{{AD}}
+
+<part n="7" id="run" label="Run the code">
+  <h2>Riya's bill calculator with overloads</h2>
+  <div class="code" data-lang="java" data-file="Main.java"><pre><code>public class Main {
+    static int total(int a, int b) {
+        return total(a, b, 0);
+    }
+
+    static int total(int a, int b, int c) {
+        return a + b + c;
+    }
+
+    static double total(int a, int b, double discount) {
+        return (a + b) * (1 - discount);
+    }
+
+    public static void main(String[] args) {
+        System.out.println("Tea + Vada: " + total(10, 25));
+        System.out.println("Tea + Vada + Samosa: " + total(10, 25, 15));
+        System.out.println("With 10% off: " + total(40, 60, 0.10));
+    }
+}</code></pre><div class="output">Tea + Vada: 35
+Tea + Vada + Samosa: 50
+With 10% off: 90.0</div></div>
+  <ul class="anno">
+    <li><code>total(int a, int b)</code><span>The short version doesn't repeat the logic: it calls the three-int version with 0.</span></li>
+    <li><code>total(int, int, int)</code> vs <code>total(int, int, double)</code><span>Same count, different type of the third parameter: a valid overload.</span></li>
+    <li><code>total(10, 25, 15)</code><span>15 is an int, so the exact match <code>(int, int, int)</code> wins over widening to double.</span></li>
+    <li><code>total(40, 60, 0.10)</code><span>0.10 is a double, so only the discount version applies. It returns a double: 90.0.</span></li>
+  </ul>
+  <div class="runner">
+    <script type="application/json">{
+      "lang": "java", "file": "Main.java",
+      "tasks": [
+        { "label": "1 · Bill calculator", "hint": "Press <b>Run</b>. Then add a fourth overload <code>total(int a, int b, int c, int d)</code> and call it with four prices.",
+          "code": "public class Main {\n    static int total(int a, int b) {\n        return total(a, b, 0);\n    }\n\n    static int total(int a, int b, int c) {\n        return a + b + c;\n    }\n\n    static double total(int a, int b, double discount) {\n        return (a + b) * (1 - discount);\n    }\n\n    public static void main(String[] args) {\n        System.out.println(\"Tea + Vada: \" + total(10, 25));\n        System.out.println(\"Tea + Vada + Samosa: \" + total(10, 25, 15));\n        System.out.println(\"With 10% off: \" + total(40, 60, 0.10));\n    }\n}\n" },
+        { "label": "2 · Predict: which show() runs?", "hint": "<b>Predict first</b> for each call: int, long or double? Then run. Next, delete <code>show(int)</code> and predict again.",
+          "code": "public class Main {\n    static void show(int x)    { System.out.println(x + \" -> show(int)\"); }\n    static void show(long x)   { System.out.println(x + \" -> show(long)\"); }\n    static void show(double x) { System.out.println(x + \" -> show(double)\"); }\n\n    public static void main(String[] args) {\n        byte b = 7;\n        show(b);\n        show(5);\n        show(5L);\n        show(5.0f);\n        show('A');\n    }\n}\n" },
+        { "label": "3 · Widening beats boxing", "hint": "<b>Predict first:</b> <code>show(5)</code> could widen to long or box to Integer. Which phase does javac try first? Then remove <code>show(long)</code> and run again.",
+          "code": "public class Main {\n    static void show(long x)    { System.out.println(\"long\"); }\n    static void show(Integer x) { System.out.println(\"Integer\"); }\n    static void show(int... x)  { System.out.println(\"varargs\"); }\n\n    public static void main(String[] args) {\n        show(5);\n    }\n}\n" },
+        { "label": "4 · Spot the error: return type only", "hint": "Read the compile error. Fix it by changing the <b>parameter</b> of one method (for example <code>double calc(double x)</code>), not its return type.",
+          "code": "public class Main {\n    static int calc(int x) {\n        return x * 2;\n    }\n\n    static double calc(int x) {\n        return x * 2.5;\n    }\n\n    public static void main(String[] args) {\n        System.out.println(calc(4));\n    }\n}\n", "_expect": "compile-error" },
+        { "label": "5 · Spot the error: ambiguous call", "hint": "Both methods fit <code>add(1, 1)</code> equally well. Fix the call with <code>add(1, 1L)</code> or <code>add(1L, 1)</code>, or remove one method.",
+          "code": "public class Main {\n    static void add(int a, long b) { System.out.println(\"int, long\"); }\n    static void add(long a, int b) { System.out.println(\"long, int\"); }\n\n    public static void main(String[] args) {\n        add(1, 1);\n    }\n}\n", "_expect": "compile-error" }
+      ]
+    }</script>
+  </div>
+</part>
+
+<part n="8" id="tracer" label="Line by line">
+  <h2>One overload calling another</h2>
+  <p>The two-argument <code>total</code> delegates to the three-argument one. Watch two frames with the same method name sit on the stack at the same time.</p>
+  {{TRACER}}
+
+{{WORKED}}
+</part>
+
+<part n="9" id="quiz" label="Quiz and revision">
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <script type="application/json">[
+      { "q": "Which pair is a valid overload?", "options": ["int f(int x) and double f(int y)", "void f(int x) and void f(double x)", "void f(int a) and void f(int b)", "static void f(int x) and void f(int x)"], "answer": 1, "why": "Only the parameter types differ in a valid overload. Return type, parameter names and static do not count." },
+      { "q": "When is the overloaded method chosen?", "options": ["At run time, by the JVM", "At compile time, by javac", "When the class is loaded", "Randomly"], "answer": 1, "why": "Overload resolution happens at compile time from the static types of the arguments. The bytecode already names the chosen method." },
+      { "q": "Methods: show(long) and show(Integer). What does show(5) call?", "options": ["show(long)", "show(Integer)", "Compile error: ambiguous", "Run-time error"], "answer": 0, "why": "Phase 1 allows widening but not boxing. int → long is widening, so show(long) is found in phase 1 and boxing is never tried." },
+      { "q": "Methods: area(int) and area(double). What does area('B') call?", "options": ["area(double), since 'B' is a character", "area(int)", "Compile error", "Neither; chars can't be passed"], "answer": 1, "why": "char widens to int (and to double). The int version is more specific, so it wins. 'B' is 66." },
+      { "q": "Methods: m(String s) and m(Object o). What does m(null) call?", "options": ["m(Object)", "m(String)", "Compile error: ambiguous", "NullPointerException"], "answer": 1, "why": "Both fit, but String is a subclass of Object, so m(String) is more specific." },
+      { "q": "What is the error in: add(int, long) and add(long, int), called as add(1, 1)?", "options": ["No error, add(int,long) runs", "No error, add(long,int) runs", "Compile error: reference to add is ambiguous", "Run-time error"], "answer": 2, "why": "Each method is better for one argument and worse for the other, so neither is more specific." },
+      { "q": "Overloading is also called…", "options": ["Run-time polymorphism", "Compile-time (static) polymorphism", "Dynamic binding", "Encapsulation"], "answer": 1, "why": "The decision is made by the compiler. Overriding is run-time polymorphism (Lesson 7.4)." },
+      { "q": "Can main be overloaded?", "options": ["No, never", "Yes, but the JVM still starts the program from main(String[] args)", "Yes, and the JVM picks the one with the fewest parameters", "Only if it is private"], "answer": 1, "why": "main is an ordinary static method, so overloads are allowed. The JVM only looks for public static void main(String[])." }
+    ]</script>
+  </div>
+  <h3>Quick revision</h3>
+  <div class="revision">
+    <h3>Lesson 5.4 in one screen</h3>
+    <ul>
+      <li>Overloading = same method name, different <b>parameter lists</b> (number, type or order of types) in one class.</li>
+      <li>Signature = name + parameter types. Return type, parameter names, static and access modifiers don't count.</li>
+      <li>javac chooses at compile time: phase 1 exact/widening → phase 2 boxing → phase 3 varargs; then the most specific method.</li>
+      <li>No single most specific method → <i>reference to … is ambiguous</i>. Same signature twice → <i>already defined</i>.</li>
+      <li>The choice is stored in the bytecode as a descriptor like <code>area:(I)I</code>.</li>
+      <li>Good overloads all do the same job; short versions delegate to the full one.</li>
+      <li>Constructors and <code>main</code> can be overloaded too.</li>
+    </ul>
+  </div>
+  <h3>Interview and viva questions</h3>
+  <div class="faq">
+    <details><summary>What is method overloading? Give an example from the JDK.</summary><p>Defining several methods with the same name but different parameter lists in one class. The compiler picks one based on the argument types. <code>System.out.println</code> is the classic example: there are versions for int, long, double, char, boolean, char[], String and Object.</p></details>
+    <details><summary>Why can't we overload by return type alone?</summary><p>Because a call doesn't always use its result (<code>calc(5);</code> is a valid statement), the compiler would have no way to choose. Java therefore defines the signature as name plus parameter types only, and two methods with the same signature are a compile error.</p></details>
+    <details><summary>What is the difference between overloading and overriding?</summary><p>Overloading: same name, different parameters, usually in the same class, chosen by the compiler (static polymorphism). Overriding: a subclass gives a new body for a method with the <i>same</i> signature as in the parent, chosen at run time from the object's actual class (dynamic polymorphism).</p></details>
+    <details><summary>In what order does Java try widening, boxing and varargs?</summary><p>First only exact matches and widening, then boxing/unboxing, and varargs only as the last resort. Within a phase, the most specific method wins. This order keeps old code (written before boxing and varargs existed in Java 5) behaving the same way.</p></details>
+    <details><summary>Can static methods be overloaded? Can main be overloaded?</summary><p>Yes to both. Overloading works for static and instance methods alike. You can write <code>main(int x)</code>, but the JVM only starts a program from <code>public static void main(String[] args)</code>.</p></details>
+  </div>
+
+{{PRACTICE}}
+
+  <h3 id="scenarios">Real-world scenario questions (asked in company interviews)</h3>
+  <p class="scn-intro">Interviewers like overloading because it tests whether you know what the compiler does, not just the syntax. Think of your answer first, then open the model answer.</p>
+  <div class="scenarios">
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Payments · API design</span><span class="scn__tag scn__tag--level">Fresher</span></div>
+      <h4>“Can I add a version that returns a receipt?”</h4>
+      <p class="scn__situation">A <code>PaymentService</code> has <code>void pay(int amount, String upiId)</code>. A teammate wants a version that returns a <code>Receipt</code> and writes <code>Receipt pay(int amount, String upiId)</code> next to it. It won't compile. Explain and suggest a fix.</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> do you know that the return type is not part of the signature?</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>Both methods have the signature <code>pay(int, String)</code>. Return type doesn't count, so javac reports <i>method pay(int,String) is already defined</i>.</li>
+          <li>Either change the existing method to return the Receipt (callers can ignore it), or give the new one a clear name like <code>payAndGetReceipt</code>.</li>
+          <li>Don't “fix” it by swapping parameter order; <code>pay(String, int)</code> compiles but invites mistakes.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> saying the JVM will choose based on how the result is used.</p>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">E-commerce · bug hunt</span><span class="scn__tag scn__tag--level">1–3 years</span></div>
+      <h4>The discount that became an extra item</h4>
+      <p class="scn__situation">A cart has <code>total(int a, int b, int extraItem)</code> and <code>total(int a, int b, double discount)</code>. A developer meant to give 10% off and wrote <code>total(400, 600, 10)</code>. Customers were charged Rs 1010 instead of Rs 900. Why, and how would you prevent it?</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> do you understand overload resolution and API design risks?</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li><code>10</code> is an int, so the exact match <code>total(int, int, int)</code> is chosen at compile time: 400 + 600 + 10 = 1010.</li>
+          <li>The overloads do different jobs under one name. Rename them: <code>totalWithExtra</code> and <code>totalWithDiscount</code>, or use a <code>Discount</code> type so the compiler catches mistakes.</li>
+          <li>Add a unit test for the discount path; this bug passes compilation silently.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> overloads whose meaning changes with the parameter type.</p>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Library · compatibility</span><span class="scn__tag scn__tag--level">1–3 years</span></div>
+      <h4>Adding an overload broke someone's build</h4>
+      <p class="scn__situation">Your shared library had <code>send(String userId, Object payload)</code>. You added <code>send(String userId, String message)</code>. Another team's code <code>send(id, null)</code> still compiles, but now behaves differently. What happened?</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> do you know that overload choice is fixed at compile time and depends on “most specific”?</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>When they recompiled, <code>null</code> fits both, and <code>String</code> is more specific than <code>Object</code>, so javac now picks the new method.</li>
+          <li>Code compiled against the old version keeps calling the old method until it is recompiled, because the descriptor is stored in their class files.</li>
+          <li>Adding overloads to a public API is a compatibility risk; document it, or use a new method name.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> assuming that adding a method can never change existing behaviour.</p>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Analytics · performance</span><span class="scn__tag scn__tag--level">3+ years</span></div>
+      <h4>Why does Math.max have four versions?</h4>
+      <p class="scn__situation">A junior asks why the JDK has <code>max(int,int)</code>, <code>max(long,long)</code>, <code>max(float,float)</code> and <code>max(double,double)</code> instead of one <code>max(Number, Number)</code>. What do you say?</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> can you connect overloading to boxing costs and type safety?</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>Primitive overloads avoid boxing: no <code>Integer</code> objects are created in hot loops, and the result keeps its exact type.</li>
+          <li>Each version uses the right comparison for its type (for doubles, special handling of NaN and −0.0).</li>
+          <li>Callers still write just <code>Math.max(a, b)</code>; the compiler picks the fastest matching version.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> “it's just old code”. It is a deliberate performance and correctness choice.</p>
+      </div></details>
+    </article>
+  </div>
+</part>

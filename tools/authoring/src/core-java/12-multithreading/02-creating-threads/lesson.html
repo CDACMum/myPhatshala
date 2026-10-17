@@ -1,0 +1,257 @@
+<!--META {
+"course": "core-java", "module": "12-multithreading", "lesson": "02-creating-threads",
+"title": "Creating threads: Thread vs Runnable", "courseTitle": "Core Java", "number": "12.2",
+"track": "#E8772E", "trackId": "programming", "trackTitle": "Programming Languages", "level": "Intermediate",
+"minutes": 22,
+"description": "How to create threads in Java: extending Thread, implementing Runnable, lambdas and method references, thread names, start() vs run(), and why Runnable is preferred. With animations, a JVM tracer, {{NPROB}} practice problems, quiz and interview scenarios.",
+"ogTitle": "Creating threads in Java: Thread vs Runnable",
+"ogDescription": "See how a Thread object stores its Runnable job, how start() builds a new stack, and solve {{NPROB}} problems.",
+"lead": "In Lesson 12.1 you saw what threads are. Now you'll create them yourself, in the four styles real code uses: a subclass of <code>Thread</code>, a <code>Runnable</code> class, a lambda and a method reference. You'll see what each one puts on the heap, why <code>start()</code> and <code>run()</code> are very different, and which style to choose.",
+"chips": ["Module 12 · Multithreading", "⏱ 22 min", "Intermediate", "{{NPROB}} practice problems"]
+} META-->
+<part n="1" id="story" label="The story">
+  <h2>The job and the worker</h2>
+  <div class="story">
+    <p class="narration">Riya wants her canteen app to send order-ready notifications in the background. She writes <code>class Notifier extends Thread</code>, but her class already extends <code>BaseService</code>, and the compiler refuses.</p>
+    <div class="scene">
+      <svg viewBox="0 0 640 170" role="img" aria-label="A job card is handed to a worker. Left: the worker and the job are glued together. Right: a separate job card handed to any worker">
+        <g font-size="10.5">
+          <text x="14" y="24" font-weight="700" class="s-acc">extends Thread: job and worker in one</text>
+          <rect x="14" y="40" width="200" height="70" rx="10" class="s-soft-acc" style="stroke:var(--track)"/>
+          <text x="114" y="68" text-anchor="middle" class="s-ink" font-weight="700">Notifier</text>
+          <text x="114" y="88" text-anchor="middle" class="s-ink2">is a Thread + does the work</text>
+          <text x="14" y="132" class="s-red">can't extend BaseService too</text>
+          <path d="M318 20v130" style="stroke:var(--line);stroke-width:1;stroke-dasharray:4 4"/>
+          <text x="340" y="24" font-weight="700" class="s-green">implements Runnable: job handed to a worker</text>
+          <rect x="340" y="44" width="120" height="56" rx="8" class="s-soft-green" style="stroke:var(--green)"/>
+          <text x="400" y="68" text-anchor="middle" class="s-ink" font-weight="700">job</text>
+          <text x="400" y="86" text-anchor="middle" class="s-ink2">Runnable</text>
+          <path d="M462 72h50" style="stroke:var(--green);stroke-width:1.6"/><path d="M506 66l8 6-8 6" style="fill:none;stroke:var(--green);stroke-width:1.6"/>
+          <rect x="518" y="44" width="104" height="56" rx="8" class="s-soft-blue" style="stroke:var(--blue)"/>
+          <text x="570" y="68" text-anchor="middle" class="s-ink" font-weight="700">worker</text>
+          <text x="570" y="86" text-anchor="middle" class="s-ink2">Thread</text>
+          <text x="340" y="132" class="s-green">the class is free to extend anything</text>
+        </g>
+        <text x="632" y="166" text-anchor="end" class="s-wm">myphatshala.com</text>
+      </svg>
+    </div>
+    <riya>Sir, Java allows only one superclass. How do I make a thread now?</riya>
+    <arjun>Don't make your class <i>be</i> a thread. Make it a <b>job</b>: implement <code>Runnable</code>. Then hand the job to a <code>Thread</code>, the worker.</arjun>
+    <riya>Job and worker. And can a lambda be the job?</riya>
+    <arjun>Yes, that's the shortest way. Let's see all four styles, and what each creates in memory.</arjun>
+  </div>
+</part>
+
+<part n="2" id="definition" label="Definition">
+  <h2>What does it mean to create a thread?</h2>
+  <div class="def">
+    <div class="def__formal"><small>Formal definition (write this in exams)</small>
+      <p>In Java a thread is represented by an object of class <code>java.lang.Thread</code>. Its work is the code of its <code>run()</code> method. You supply that work either by <b>extending</b> <code>Thread</code> and overriding <code>run()</code>, or by passing an object that implements the functional interface <code>java.lang.Runnable</code> (method <code>void run()</code>) to a Thread constructor, where it is stored as the thread's <b>target</b>. Calling <code>start()</code> makes the JVM create a new thread of execution that invokes <code>run()</code>; calling <code>run()</code> directly is an ordinary method call on the current thread.</p></div>
+    <div class="def__simple"><small>In simple words</small>
+      <p>The <b>Runnable</b> is the job card. The <b>Thread</b> is the worker. <code>start()</code> is “go!”. Without <code>start()</code>, no new worker ever begins.</p></div>
+  </div>
+  <h3>Words you'll meet in this lesson</h3>
+  <div class="terms">
+    <div class="term"><b>Runnable</b><span>An interface with one method, <code>void run()</code>: a piece of work.</span></div>
+    <div class="term"><b>Target</b><span>The Runnable stored inside a Thread object.</span></div>
+    <div class="term"><b>start()</b><span>Creates the new thread, which then calls <code>run()</code>.</span></div>
+    <div class="term"><b>run()</b><span>The thread's work. Calling it yourself runs it on the current thread.</span></div>
+    <div class="term"><b>Thread name</b><span>A label like <code>"mail-1"</code> shown in logs and thread dumps.</span></div>
+    <div class="term"><b>@Override</b><span>Asks the compiler to check that you really override <code>run()</code>.</span></div>
+  </div>
+  <h3>extends Thread vs implements Runnable</h3>
+  <div class="table-wrap">
+  <table class="compare" style="min-width:560px">
+    <thead><tr><th></th><th>extends Thread</th><th>implements Runnable</th></tr></thead>
+    <tbody>
+      <tr><td>Your class is…</td><td>a thread</td><td>a job</td></tr>
+      <tr><td>Can extend another class?</td><td>No (one superclass only)</td><td>Yes</td></tr>
+      <tr><td>Start it</td><td><code>new MyThread().start()</code></td><td><code>new Thread(job).start()</code></td></tr>
+      <tr><td>Reuse the work</td><td>New object each time</td><td>Same job, any number of workers or a pool</td></tr>
+      <tr><td>Lambda possible?</td><td>No</td><td>Yes: <code>() -&gt; work()</code></td></tr>
+      <tr><td>Used in modern code</td><td>Rarely</td><td>Almost always (with executors, Lesson 12.6)</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <exam><b>Exam tip:</b> “Implementing <code>Runnable</code> is preferred because Java supports single inheritance of classes, and it separates the task from the thread that runs it.” And: calling <code>run()</code> does <b>not</b> create a thread; only <code>start()</code> does.</exam>
+</part>
+
+{{AD}}
+
+<part n="3" id="types" label="Types and ways to use it">
+  <h2>Four ways to write the job</h2>
+  <div class="cards">
+    <div class="card"><svg class="ic" viewBox="0 0 40 40" fill="none" stroke="var(--track)" stroke-width="2"><rect x="8" y="8" width="24" height="24" rx="4"/><path d="M14 20h12M20 14v12"/></svg><h4>Subclass of Thread</h4><p><code>class X extends Thread</code> with <code>run()</code>. Simple, but uses up your one superclass.</p><span class="tag">old style</span></div>
+    <div class="card"><svg class="ic" viewBox="0 0 40 40" fill="none" stroke="var(--green)" stroke-width="2"><rect x="9" y="9" width="22" height="22" rx="3"/><path d="M14 16h12M14 22h8"/></svg><h4>Runnable class</h4><p><code>class X implements Runnable</code>. Best when the job carries its own data (fields).</p><span class="tag">job with data</span></div>
+    <div class="card"><svg class="ic" viewBox="0 0 40 40" fill="none" stroke="var(--blue)" stroke-width="2"><path d="M10 28L20 12l10 16"/><path d="M14 22h12"/></svg><h4>Lambda</h4><p><code>new Thread(() -&gt; send(otp))</code>. Shortest; captures effectively final locals.</p><span class="tag">most common</span></div>
+    <div class="card"><svg class="ic" viewBox="0 0 40 40" fill="none" stroke="var(--ink-3)" stroke-width="2"><path d="M10 20h20M24 14l6 6-6 6"/></svg><h4>Method reference</h4><p><code>new Thread(Main::backup)</code> for an existing method with no parameters.</p><span class="tag">reuse a method</span></div>
+  </div>
+
+  <h3>All four, one program</h3>
+  {{CODE_WAYS}}
+  <p>Each thread is joined before the next one starts, so the lines always come out in order. Normally you'd start them all first and join afterwards.</p>
+
+  <h3>Thread constructors you'll use</h3>
+  {{CODE_CTOR}}
+  <warn><b>Name your threads.</b> When a production server has 200 threads called <code>Thread-37</code>, nobody can read the logs. <code>new Thread(job, "invoice-mailer")</code> costs nothing and saves hours.</warn>
+</part>
+
+<part n="4" id="steps" label="Step by step">
+  <h2>From <code>new Thread(job)</code> to TERMINATED</h2>
+  <ol class="stepper">
+    <li><h4>Create the job</h4>
+      <div class="code" data-lang="java" data-file="Main.java"><pre><code>Runnable job = () -&gt; send("98xxx-101");</code></pre></div>
+      <span class="behind">The lambda becomes an object on the heap that implements <code>Runnable</code>. Nothing runs yet.</span></li>
+    <li><h4>Create the worker</h4>
+      <div class="code" data-lang="java" data-file="Main.java"><pre><code>Thread t = new Thread(job, "otp-1");</code></pre></div>
+      <span class="behind">A Thread object is created on the heap, storing <code>job</code> as its target and "otp-1" as its name. State: <b>NEW</b>. Still no new thread of execution.</span></li>
+    <li><h4>start()</h4>
+      <span class="behind">The JVM asks the OS for a real thread, gives it its own stack, and marks it <b>RUNNABLE</b>. <code>start()</code> returns at once; main does not wait.</span></li>
+    <li><h4>The new thread calls run()</h4>
+      <span class="behind">The first frame on the new stack is <code>Thread.run()</code>. It calls <code>target.run()</code>, which runs your lambda. If you extended Thread, your own <code>run()</code> override is the first frame instead.</span></li>
+    <li><h4>run() returns</h4>
+      <span class="behind">The thread ends (<b>TERMINATED</b>), its stack is freed, and any thread waiting in <code>join()</code> wakes up. The Thread object can't be started again.</span></li>
+  </ol>
+</part>
+
+<part n="5" id="animation" label="See it happen">
+  <h2>Job and worker: both views</h2>
+  <p>Left: the code you write in each style. Right: the objects on the heap and the new stack that <code>start()</code> creates.</p>
+  {{ANIM}}
+</part>
+
+<part n="6" id="real-world" label="Real-world use">
+  <h2>Where these styles show up</h2>
+  <p>In real projects you'll mostly write the job (a Runnable or lambda) and let something else provide the worker.</p>
+  {{ANIM2}}
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="18" y="22" width="40" height="46" rx="6" class="s-soft-green" style="stroke:var(--green)"/><rect x="66" y="22" width="40" height="46" rx="6" class="s-soft-blue" style="stroke:var(--blue)"/><path d="M58 45h8" style="stroke:var(--ink-3);stroke-width:2"/></svg></div>
+    <div><h4>1. Background jobs in apps</h4><p>Upload a photo, refresh a feed, sync contacts: each is written as a small Runnable and handed to a background worker.</p>
+      <div class="uc-flow"><span>tap “Upload”</span><i>→</i><span class="java">Runnable job</span><i>→</i><span>worker thread</span></div></div>
+  </div>
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="40" y="16" width="40" height="58" rx="4" class="s-board"/><path d="M48 30h24M48 42h24M48 54h16" style="stroke:var(--chalk);stroke-width:2"/></svg></div>
+    <div><h4>2. Thread pools and executors</h4><p>Executors accept Runnables (and Callables), not Thread subclasses. That's the main reason the Runnable style won (Lesson 12.6).</p>
+      <div class="uc-flow"><span>job</span><i>→</i><span class="java">executor.submit(job)</span><i>→</i><span>pooled worker</span></div></div>
+  </div>
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><circle cx="60" cy="45" r="26" class="s-card" style="stroke:var(--line)"/><path d="M60 45V27M60 45l13 8" style="stroke:var(--ink-3);stroke-width:2.5"/></svg></div>
+    <div><h4>3. Scheduled tasks</h4><p>Nightly backups, hourly report emails and cache refreshes are Runnables given to a scheduler that runs them at the right time.</p>
+      <div class="uc-flow"><span>every night 2 AM</span><i>→</i><span class="java">Runnable backup</span><i>→</i><span>done</span></div></div>
+  </div>
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="20" y="20" width="80" height="50" rx="6" class="s-card" style="stroke:var(--line)"/><path d="M30 34h60M30 46h40M30 58h50" style="stroke:var(--ink-3);stroke-width:2"/></svg></div>
+    <div><h4>4. Readable logs</h4><p>Production logs print the thread name on every line, such as <code>[payment-worker-3]</code>. Naming threads makes problems traceable.</p>
+      <div class="uc-flow"><span>new Thread(job, "payment-worker-3")</span><i>→</i><span class="java">logs</span><i>→</i><span>easy debugging</span></div></div>
+  </div>
+  <p class="muted">Examples are simplified: real systems usually submit jobs to thread pools instead of creating raw threads.</p>
+</part>
+
+{{AD}}
+
+<part n="7" id="run" label="Run the code">
+  <h2>Three cooks, three orders</h2>
+  {{CODE_RUN}}
+  <p class="muted">The “prepares” lines can appear in any order, because the threads run at the same time. The last line is fixed because main joins every cook first.</p>
+  <ul class="anno">
+    <li><code>String order = orders[i];</code><span>A fresh local per loop pass, so the lambda can capture it (it never changes).</span></li>
+    <li><code>new Thread(() -&gt; prepare(order), "cook-" + (i + 1))</code><span>Job (lambda) plus name. <code>i</code> is used outside the lambda, so that's allowed.</span></li>
+    <li><code>cooks[i].start()</code><span>Each cook starts at once; the loop moves on without waiting.</span></li>
+    <li><code>c.join()</code><span>Waits for each cook before printing the summary.</span></li>
+  </ul>
+  {{RUNNER}}
+</part>
+
+<part n="8" id="tracer" label="Line by line">
+  <h2>A Runnable job filled in by another thread</h2>
+  <p>Recorded from the real JVM, following the <b>main</b> thread. Watch two separate objects appear: the <code>Greeter</code> job and the <code>Thread</code> worker that holds it as its target.</p>
+  {{TRACER}}
+
+{{WORKED}}
+</part>
+
+<part n="9" id="quiz" label="Quiz and revision">
+  <h2>Check yourself</h2>
+  {{QUIZ}}
+  <h3>Quick revision</h3>
+  <div class="revision">
+    <h3>Lesson 12.2 in one screen</h3>
+    <ul>
+      <li>Two ways to supply work: <code>extends Thread</code> + override <code>run()</code>, or <code>implements Runnable</code> and pass it to <code>new Thread(job)</code>.</li>
+      <li>Runnable is a functional interface: write it as a lambda or a method reference.</li>
+      <li>Prefer Runnable: keeps your one superclass free and separates job from worker.</li>
+      <li><code>start()</code> creates a new thread, which calls <code>run()</code>. Calling <code>run()</code> yourself runs it on the current thread.</li>
+      <li>A Thread object can be started once; a Runnable job can be reused.</li>
+      <li>Give threads names; call <code>setDaemon</code> before <code>start()</code>.</li>
+      <li><code>run()</code> can't throw checked exceptions: catch them inside.</li>
+    </ul>
+  </div>
+  <h3>Interview and viva questions</h3>
+  <div class="faq">
+    <details><summary>What are the ways to create a thread in Java?</summary><p>Extend <code>Thread</code> and override <code>run()</code>, or implement <code>Runnable</code> (as a class, lambda or method reference) and pass it to a Thread constructor. For tasks that return a value, implement <code>Callable</code> and submit it to an <code>ExecutorService</code> (Lesson 12.6). In every case, <code>start()</code> begins execution.</p></details>
+    <details><summary>Which is better: extending Thread or implementing Runnable?</summary><p>Implementing Runnable. Java has single inheritance, so extending Thread blocks your class from extending anything else. Runnable also separates the task from the execution mechanism, so the same task can run on a raw thread, a pool or a scheduler.</p></details>
+    <details><summary>What is the difference between start() and run()?</summary><p><code>start()</code> asks the JVM to create a new thread with its own stack; that thread then calls <code>run()</code>. Calling <code>run()</code> directly is a normal method call executed by the current thread; no new thread is created.</p></details>
+    <details><summary>Can we call start() twice on the same Thread?</summary><p>No. The second call throws <code>IllegalThreadStateException</code>. Create a new Thread object (you can reuse the same Runnable).</p></details>
+    <details><summary>Can we override start()?</summary><p>You technically can, but you shouldn't: if your override doesn't call <code>super.start()</code>, no thread is created. Override <code>run()</code> only.</p></details>
+  </div>
+
+{{PRACTICE}}
+
+  <h3 id="scenarios">Real-world scenario questions (asked in company interviews)</h3>
+  <p class="scn-intro">These come up when interviewers want to see whether you can read and fix real thread-creation code.</p>
+  <div class="scenarios">
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Code review · bug</span><span class="scn__tag scn__tag--level">Fresher</span></div>
+      <h4>“The background thread is slow”</h4>
+      <p class="scn__situation">A teammate says: “I moved the report generation to a background thread, but the screen still freezes.” The code is <code>new Thread(reportJob).run();</code>. What's wrong?</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> start() vs run().</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li><code>run()</code> is a plain method call, so the report still runs on the UI thread.</li>
+          <li>Use <code>start()</code>. Print <code>Thread.currentThread().getName()</code> inside the job to confirm which thread runs it.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> blaming the report code's speed before checking which thread runs it.</p>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Design · inheritance</span><span class="scn__tag scn__tag--level">Junior</span></div>
+      <h4>A service class that must run in the background</h4>
+      <p class="scn__situation"><code>SmsService extends BaseService</code> and must send messages on a background thread. A colleague suggests changing it to <code>extends Thread</code>. What do you propose?</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> single inheritance and separating task from thread.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>Keep <code>extends BaseService</code>; add <code>implements Runnable</code>, or pass a lambda like <code>() -&gt; sms.sendPending()</code>.</li>
+          <li>Better still, submit the task to an <code>ExecutorService</code> so threads are reused.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> copying BaseService's code into a Thread subclass.</p>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Production · logs</span><span class="scn__tag scn__tag--level">Junior</span></div>
+      <h4>Which thread failed?</h4>
+      <p class="scn__situation">At 2 AM the logs show <code>Exception in thread "Thread-147" java.lang.NullPointerException</code>. The app creates threads in twelve places. How do you make the next incident easier to diagnose?</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> naming threads and handling uncaught exceptions.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>Give every thread a meaningful name (<code>"invoice-mailer"</code>), or use a thread factory that names pool threads.</li>
+          <li>Catch and log exceptions inside <code>run()</code> with context (order id, customer id), or set an <code>UncaughtExceptionHandler</code>.</li>
+          <li>Remember an uncaught exception kills only that thread; other threads continue, so failures can go unnoticed.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> wrapping run() in an empty catch block; that hides the problem completely.</p>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Batch · reuse</span><span class="scn__tag scn__tag--level">Mid</span></div>
+      <h4>Restarting a finished job</h4>
+      <p class="scn__situation">A nightly <code>SyncThread extends Thread</code> object is stored in a field. The next night the code calls <code>syncThread.start()</code> again and the job crashes with <code>IllegalThreadStateException</code>. How would you redesign it?</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> thread lifecycle and reusable tasks.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>A thread can't be restarted once TERMINATED. Store the <b>job</b> (a Runnable), not the thread.</li>
+          <li>Create a new Thread each night, or better, use a <code>ScheduledExecutorService</code> to run the Runnable every 24 hours.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> catching the exception and ignoring it: the sync would silently never run again.</p>
+      </div></details>
+    </article>
+  </div>
+</part>

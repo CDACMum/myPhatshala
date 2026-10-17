@@ -1,0 +1,250 @@
+<!--META {
+"course": "core-java", "module": "13-file-io", "lesson": "03-buffered-io",
+"title": "BufferedReader and BufferedWriter", "courseTitle": "Core Java", "number": "13.3",
+"track": "#E8772E", "trackId": "programming", "trackTitle": "Programming Languages", "level": "Intermediate",
+"minutes": 22,
+"description": "Buffered I/O in Java: why buffering is fast (fewer system calls), BufferedReader.readLine(), BufferedWriter.newLine(), flush() vs close(), the decorator pattern, BufferedInputStream/BufferedOutputStream and Files.newBufferedReader/Writer, plus processing large files line by line. With animations, a JVM tracer, {{NPROB}} practice problems, quiz and interview scenarios.",
+"ogTitle": "BufferedReader and BufferedWriter in Java",
+"ogDescription": "Count the OS calls a buffer saves, watch readLine() serve lines from memory, and solve {{NPROB}} problems.",
+"lead": "Reading or writing a file one character at a time works, but it's painfully slow, because every call goes all the way to the operating system. <b>Buffered streams</b> collect data in memory and move it in big blocks. You'll measure the difference, learn the <code>readLine()</code> loop you'll use for the rest of your career, and learn why forgetting <code>close()</code> silently loses data.",
+"chips": ["Module 13 · File Handling and I/O", "⏱ 22 min", "Intermediate", "{{NPROB}} practice problems"]
+} META-->
+<part n="1" id="story" label="The story">
+  <h2>The export that took four minutes</h2>
+  <div class="story">
+    <p class="narration">The canteen now has a year of orders: about 2 lakh lines. Riya's export writes them straight to a <code>FileOutputStream</code>, a few bytes at a time. It takes minutes. Worse, one night the last few hundred orders are simply missing from the file.</p>
+    <div class="scene">
+      <svg viewBox="0 0 640 170" role="img" aria-label="Left: one person carrying letters to the post office one at a time. Right: letters collected in a bag and carried in one trip">
+        <g font-size="10.5">
+          <text x="14" y="24" font-weight="700" class="s-red">one letter per trip</text>
+          <rect x="14" y="40" width="60" height="80" rx="6" class="s-card2" style="stroke:var(--line)"/><text x="44" y="84" text-anchor="middle" class="s-ink" font-weight="700">app</text>
+          <rect x="230" y="40" width="70" height="80" rx="6" class="s-card" style="stroke:var(--line)"/><text x="265" y="84" text-anchor="middle" class="s-ink" font-weight="700">disk</text>
+          <g style="stroke:var(--red);stroke-width:1.3"><path d="M78 52h148M78 66h148M78 80h148M78 94h148M78 108h148"/></g>
+          <text x="14" y="146" class="s-red">2,00,000 trips</text>
+          <path d="M318 20v130" style="stroke:var(--line);stroke-width:1;stroke-dasharray:4 4"/>
+          <text x="340" y="24" font-weight="700" class="s-green">collect, then one trip</text>
+          <rect x="340" y="40" width="60" height="80" rx="6" class="s-card2" style="stroke:var(--line)"/><text x="370" y="84" text-anchor="middle" class="s-ink" font-weight="700">app</text>
+          <rect x="420" y="56" width="90" height="48" rx="8" class="s-soft-acc" style="stroke:var(--track)"/><text x="465" y="84" text-anchor="middle" class="s-acc" font-weight="700">buffer</text>
+          <path d="M512 80h40" style="stroke:var(--green);stroke-width:3"/><path d="M546 72l9 8-9 8" style="fill:none;stroke:var(--green);stroke-width:2.5"/>
+          <rect x="560" y="40" width="66" height="80" rx="6" class="s-card" style="stroke:var(--line)"/><text x="593" y="84" text-anchor="middle" class="s-ink" font-weight="700">disk</text>
+          <text x="340" y="146" class="s-green">a few hundred trips</text>
+        </g>
+        <text x="632" y="166" text-anchor="end" class="s-wm">myphatshala.com</text>
+      </svg>
+    </div>
+    <riya>Sir, why is writing a file so slow? My laptop has an SSD!</riya>
+    <arjun>The disk isn't the slow part. Every little write is a request to the operating system, and you're making two lakh of them. Put a <b>buffer</b> in between: collect 8 KB in memory, then send it in one go.</arjun>
+    <riya>And the missing orders at the end?</riya>
+    <arjun>Those were still sitting in a buffer when your program stopped. A buffer must be <b>flushed</b>, and <code>close()</code> does that. Let's see both.</arjun>
+  </div>
+</part>
+
+<part n="2" id="definition" label="Definition">
+  <h2>What is buffered I/O?</h2>
+  <div class="def">
+    <div class="def__formal"><small>Formal definition (write this in exams)</small>
+      <p><b>Buffered I/O</b> places an in-memory array (a <b>buffer</b>) between a program and an underlying stream, so that many small read or write operations are served from or collected in memory and transferred to the underlying stream in large blocks, reducing costly system calls. In Java, <code>BufferedReader</code> and <code>BufferedWriter</code> wrap any <code>Reader</code> or <code>Writer</code> (default buffer 8,192 characters), and <code>BufferedInputStream</code> and <code>BufferedOutputStream</code> wrap byte streams. <code>BufferedReader.readLine()</code> returns the next line without its terminator, or <code>null</code> at end of stream. Output buffers are written when full, on <code>flush()</code>, or on <code>close()</code>.</p></div>
+    <div class="def__simple"><small>In simple words</small>
+      <p>Don't run to the post office with every letter. Fill a bag, then go once. But remember to actually take the bag before you leave.</p></div>
+  </div>
+  <h3>Words you'll meet in this lesson</h3>
+  <div class="terms">
+    <div class="term"><b>Buffer</b><span>An array in memory where data waits before moving on.</span></div>
+    <div class="term"><b>System call</b><span>A request from your program to the OS (read, write). Relatively expensive.</span></div>
+    <div class="term"><b>flush()</b><span>Send whatever is in the buffer now, without closing.</span></div>
+    <div class="term"><b>close()</b><span>Flush, then release the file. Closing the outer stream closes the inner ones.</span></div>
+    <div class="term"><b>readLine()</b><span>Next line of text without the line break; <code>null</code> at the end.</span></div>
+    <div class="term"><b>Decorator</b><span>An object that wraps another of the same type to add a feature.</span></div>
+  </div>
+  <h3>Plain vs buffered</h3>
+  <div class="table-wrap">
+  <table class="compare" style="min-width:560px">
+    <thead><tr><th></th><th>Plain file streams</th><th>Buffered wrappers</th></tr></thead>
+    <tbody>
+      <tr><td>Read a line</td><td>No such method</td><td><code>readLine()</code></td></tr>
+      <tr><td>Write a line break</td><td><code>write("\n")</code></td><td><code>newLine()</code> (platform separator)</td></tr>
+      <tr><td>OS calls for many small writes</td><td><code>FileOutputStream</code>: one per call. (<code>FileWriter</code> has a small byte buffer inside its encoder, but every call still goes through it.)</td><td>One per full buffer</td></tr>
+      <tr><td>Data waits in memory?</td><td>Little</td><td>Yes, until flush/close</td></tr>
+      <tr><td>Create the modern way</td><td>—</td><td><code>Files.newBufferedReader/Writer(path)</code></td></tr>
+    </tbody>
+  </table>
+  </div>
+  <exam><b>Exam tip:</b> “Buffered streams improve performance by reducing the number of I/O operations. <code>readLine()</code> returns <code>null</code> at end of file. Always <code>close()</code> (or <code>flush()</code>) a buffered writer, or buffered data may be lost.” Also name the pattern: wrapping streams is the <b>decorator</b> design pattern.</exam>
+</part>
+
+{{AD}}
+
+<part n="3" id="types" label="Types and ways to use it">
+  <h2>The buffered family</h2>
+  {{CODE_WRAP}}
+  <div class="cards">
+    <div class="card"><svg class="ic" viewBox="0 0 40 40" fill="none" stroke="var(--green)" stroke-width="2"><path d="M10 12h20M10 20h20M10 28h14"/></svg><h4>BufferedReader</h4><p>Reads text in blocks; <code>readLine()</code> and <code>lines()</code> for line-by-line processing.</p><span class="tag">text in</span></div>
+    <div class="card"><svg class="ic" viewBox="0 0 40 40" fill="none" stroke="var(--blue)" stroke-width="2"><path d="M10 12h20M10 20h20M10 28h14"/><path d="M30 26l4 4-4 4"/></svg><h4>BufferedWriter</h4><p>Collects text; <code>newLine()</code> writes the platform line separator.</p><span class="tag">text out</span></div>
+    <div class="card"><svg class="ic" viewBox="0 0 40 40" fill="none" stroke="var(--track)" stroke-width="2"><rect x="8" y="12" width="24" height="16" rx="3"/><path d="M14 20h12"/></svg><h4>Buffered byte streams</h4><p><code>BufferedInputStream</code>, <code>BufferedOutputStream</code> for images, PDFs, binary data.</p><span class="tag">bytes</span></div>
+    <div class="card"><svg class="ic" viewBox="0 0 40 40" fill="none" stroke="var(--ink-3)" stroke-width="2"><rect x="8" y="8" width="24" height="24" rx="4"/><path d="M14 20h12M20 14v12"/></svg><h4>Files helpers</h4><p><code>Files.newBufferedReader</code>/<code>Writer</code>: buffered and UTF-8 in one call.</p><span class="tag">recommended</span></div>
+  </div>
+  <h3>The data that wasn't there</h3>
+  {{CODE_LOST}}
+  <warn><b>Unclosed buffered writers lose data.</b> Nothing is wrong with the code until the very end: the text sits in memory and the file stays empty. If the program crashes or exits first, it's gone. Use try-with-resources every time, and call <code>flush()</code> if another program must see the data before you close.</warn>
+</part>
+
+<part n="4" id="steps" label="Step by step">
+  <h2>Inside the readLine() loop</h2>
+  <ol class="stepper">
+    <li><h4>Wrap the reader</h4>
+      <div class="code" data-lang="java" data-file="Main.java"><pre><code>try (BufferedReader br = Files.newBufferedReader(Path.of("orders.txt"))) {</code></pre></div>
+      <span class="behind">A decoder reader on the file, wrapped by a BufferedReader with an empty <code>char[8192]</code>.</span></li>
+    <li><h4>First readLine(): fill</h4>
+      <div class="code" data-lang="java" data-file="Main.java"><pre><code>    String line;
+    while ((line = br.readLine()) != null) {</code></pre></div>
+      <span class="behind">The buffer is empty, so the reader asks the file for up to 8,192 characters in one call.</span></li>
+    <li><h4>Cut out one line</h4>
+      <span class="behind">It scans forward from <code>pos</code> to the next <code>\n</code> (or <code>\r\n</code>), creates a String from those characters, and moves <code>pos</code> past the line break.</span></li>
+    <li><h4>Next calls: from memory</h4>
+      <span class="behind">Following lines come straight from the array until it runs out; then one more big read refills it.</span></li>
+    <li><h4>End</h4>
+      <span class="behind">When the file has no more data, <code>readLine()</code> returns <code>null</code>, the loop ends, and try-with-resources closes the reader and the file.</span></li>
+  </ol>
+</part>
+
+<part n="5" id="animation" label="See it happen">
+  <h2>Buffers on the way out and on the way in</h2>
+  <p>Left: writing with and without a buffer. Right: a BufferedReader on the heap, filling its array once and serving lines from it.</p>
+  {{ANIM}}
+</part>
+
+<part n="6" id="real-world" label="Real-world use">
+  <h2>Buffered I/O in real systems</h2>
+  <p>Practically every file and network stream in production Java code is buffered.</p>
+  {{ANIM2}}
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="20" y="16" width="80" height="58" rx="6" class="s-board"/><path d="M30 30h52M30 42h60M30 54h40" style="stroke:var(--chalk);stroke-width:2"/></svg></div>
+    <div><h4>1. Log processing</h4><p>Support teams scan gigabytes of logs for errors, reading line by line so memory stays tiny.</p>
+      <div class="uc-flow"><span>app.log (5 GB)</span><i>→</i><span class="java">readLine() loop</span><i>→</i><span>errors.txt</span></div></div>
+  </div>
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="22" y="18" width="76" height="54" rx="6" class="s-card" style="stroke:var(--line)"/><path d="M22 34h76M48 18v54M74 18v54" style="stroke:var(--line);stroke-width:1.5"/></svg></div>
+    <div><h4>2. Bulk exports</h4><p>Statements, GST returns and data dumps with lakhs of lines are written through BufferedWriter.</p>
+      <div class="uc-flow"><span>2 lakh rows</span><i>→</i><span class="java">BufferedWriter</span><i>→</i><span>statement.csv</span></div></div>
+  </div>
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><circle cx="34" cy="45" r="14" class="s-soft-green" style="stroke:var(--green)"/><circle cx="86" cy="45" r="14" class="s-soft-blue" style="stroke:var(--blue)"/><path d="M48 45h24" style="stroke:var(--ink-3);stroke-width:2"/></svg></div>
+    <div><h4>3. Network sockets</h4><p>Reading an HTTP response or a chat protocol line by line uses a BufferedReader on the socket's InputStream.</p>
+      <div class="uc-flow"><span>socket</span><i>→</i><span class="java">BufferedReader(InputStreamReader)</span><i>→</i><span>lines</span></div></div>
+  </div>
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="38" y="16" width="44" height="58" rx="6" class="s-soft-acc" style="stroke:var(--track)"/><path d="M48 30h24M48 42h24M48 54h16" style="stroke:var(--track);stroke-width:2"/></svg></div>
+    <div><h4>4. Competitive programming and input</h4><p>Fast solutions read huge inputs with BufferedReader instead of Scanner, which does more work per token.</p>
+      <div class="uc-flow"><span>10 lakh numbers</span><i>→</i><span class="java">BufferedReader(System.in)</span><i>→</i><span>accepted in time</span></div></div>
+  </div>
+  <p class="muted">Counts and sizes are illustrative; exact numbers depend on line lengths and buffer sizes.</p>
+</part>
+
+{{AD}}
+
+<part n="7" id="run" label="Run the code">
+  <h2>Write a menu, read it line by line</h2>
+  {{CODE_RUN}}
+  <ul class="anno">
+    <li><code>Files.newBufferedWriter(Path.of("menu.txt"))</code><span>Buffered, UTF-8, creates or replaces the file.</span></li>
+    <li><code>w.newLine()</code><span>Writes the line separator for the current OS.</span></li>
+    <li><code>(line = r.readLine()) != null</code><span>Read and test in one step; stops at end of file.</span></li>
+    <li><code>printf("%-14s Rs %3s%n", …)</code><span>Aligned columns: name left-aligned in 14 characters, price right-aligned in 3.</span></li>
+  </ul>
+  {{RUNNER}}
+</part>
+
+<part n="8" id="tracer" label="Line by line">
+  <h2>Reading orders with readLine()</h2>
+  <p>Recorded from the real JVM. Watch <code>line</code> on the stack take each value, and <code>total</code> grow; on the heap, the BufferedReader holds the FileReader it wraps.</p>
+  {{TRACER}}
+
+{{WORKED}}
+</part>
+
+<part n="9" id="quiz" label="Quiz and revision">
+  <h2>Check yourself</h2>
+  {{QUIZ}}
+  <h3>Quick revision</h3>
+  <div class="revision">
+    <h3>Lesson 13.3 in one screen</h3>
+    <ul>
+      <li>A buffer collects data in memory so the OS is called once per block, not once per character.</li>
+      <li>Wrap: <code>new BufferedReader(reader)</code>, <code>new BufferedWriter(writer)</code>, or use <code>Files.newBufferedReader/Writer</code>.</li>
+      <li>Loop: <code>while ((line = br.readLine()) != null)</code>; lines come without the line break.</li>
+      <li><code>newLine()</code> writes the platform separator.</li>
+      <li>Buffered output is only on disk after <code>flush()</code> or <code>close()</code>; use try-with-resources.</li>
+      <li>Closing the outer wrapper closes the inner streams too.</li>
+      <li>Process big files line by line: memory stays constant.</li>
+    </ul>
+  </div>
+  <h3>Interview and viva questions</h3>
+  <div class="faq">
+    <details><summary>Why is BufferedReader faster than FileReader?</summary><p>Every <code>FileReader.read()</code> call goes through the charset decoder and its locking for a single character. BufferedReader pulls 8,192 characters at once into its own array and serves later reads with plain array access. With raw byte streams such as <code>FileInputStream</code>, where each <code>read()</code> is a system call, the difference is even larger. BufferedReader also adds <code>readLine()</code>.</p></details>
+    <details><summary>What is the difference between flush() and close()?</summary><p><code>flush()</code> writes out buffered data but keeps the stream open for more writes. <code>close()</code> flushes and then releases the stream and its underlying resources; the stream can't be used afterwards.</p></details>
+    <details><summary>BufferedReader vs Scanner?</summary><p>BufferedReader reads lines of text quickly with a large buffer and does no parsing. Scanner parses tokens (ints, words) with regular expressions, which is convenient but slower, and has a smaller buffer. For large inputs, read lines with BufferedReader and parse them yourself.</p></details>
+    <details><summary>What design pattern do Java I/O wrappers use?</summary><p>The decorator pattern: a BufferedReader <i>is</i> a Reader and <i>wraps</i> a Reader, adding buffering without changing the interface. You can stack decorators, e.g. a BufferedReader over an InputStreamReader over a FileInputStream.</p></details>
+    <details><summary>When must you call flush() explicitly?</summary><p>When someone else must see the data before you close: e.g. sending a message over a socket and waiting for a reply, or writing a progress file that another program monitors. Otherwise, closing (via try-with-resources) is enough.</p></details>
+  </div>
+
+{{PRACTICE}}
+
+  <h3 id="scenarios">Real-world scenario questions (asked in company interviews)</h3>
+  <p class="scn-intro">These come up whenever a role involves batch jobs, reports or integrations.</p>
+  <div class="scenarios">
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Batch · data loss</span><span class="scn__tag scn__tag--level">Fresher</span></div>
+      <h4>The last 300 rows are missing</h4>
+      <p class="scn__situation">An export writes 50,000 rows with a BufferedWriter. The file always ends a few hundred rows short, and the last row is cut in half. The code calls <code>System.exit(0)</code> right after the loop. Explain.</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> buffers and flushing.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>The writer is never closed, so the final partly-filled buffer (up to 8 KB) never reaches the file; <code>System.exit</code> doesn't flush it.</li>
+          <li>Wrap the writer in try-with-resources (or close it in finally) before exiting.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> adding <code>flush()</code> after every row; that removes the benefit of buffering.</p>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Performance · I/O</span><span class="scn__tag scn__tag--level">Junior</span></div>
+      <h4>A 10-minute report that should take seconds</h4>
+      <p class="scn__situation">Profiling shows a report spends 95% of its time inside <code>FileOutputStream.write</code>, called once per character. How do you fix it with minimal code change?</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> recognising unbuffered I/O.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>Each call is a system call. Wrap the stream: <code>new BufferedOutputStream(new FileOutputStream(f))</code>, or use <code>Files.newBufferedWriter</code> for text.</li>
+          <li>Optionally use a larger buffer (64 KB) for very large outputs, and write whole strings rather than single characters.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> rewriting the report in multiple threads first; the bottleneck is the call pattern.</p>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Integration · sockets</span><span class="scn__tag scn__tag--level">Junior</span></div>
+      <h4>The partner server never answers</h4>
+      <p class="scn__situation">A client sends a request line to a payment partner over a socket with a BufferedWriter, then waits for the reply with <code>readLine()</code>. It hangs forever, though the partner says it never received anything. Why?</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> when explicit flush is needed.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>The request is still in the client's buffer; it's never sent because the writer wasn't flushed. Both sides wait for each other.</li>
+          <li>Call <code>writer.flush()</code> after writing a complete request, before reading the reply.</li>
+          <li>Also set read timeouts so a missing reply can't hang the client forever.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> closing the writer to force sending; closing the socket stream closes the connection.</p>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Data · line endings</span><span class="scn__tag scn__tag--level">Mid</span></div>
+      <h4>Files from Windows have an extra character</h4>
+      <p class="scn__situation">A Linux job reads a CSV uploaded from a Windows machine with <code>Files.readString</code>, splits the text on <code>"\n"</code>, then parses the last column of each row. It fails with <code>NumberFormatException: For input string: "450\r"</code>. Why, and how should it read the file?</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> line terminators and defensive parsing.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>Windows ends lines with <code>\r\n</code>. Splitting on <code>"\n"</code> leaves the <code>\r</code> at the end of every row.</li>
+          <li><code>readLine()</code> (and <code>lines()</code>) treat <code>\n</code>, <code>\r</code> and <code>\r\n</code> all as line ends and strip them, so use those instead of splitting by hand.</li>
+          <li>Read with readLine (or <code>lines()</code>), <code>trim()</code> fields before parsing, and watch for a UTF-8 BOM at the start of files from Excel.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> assuming every file uses your OS's line endings.</p>
+      </div></details>
+    </article>
+  </div>
+</part>

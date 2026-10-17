@@ -1,0 +1,384 @@
+<!--META {
+"course": "core-java", "module": "11-collections", "lesson": "03-arraylist",
+"title": "ArrayList", "courseTitle": "Core Java", "number": "11.3",
+"track": "#E8772E", "trackId": "programming", "trackTitle": "Programming Languages", "level": "Intermediate",
+"minutes": 22,
+"description": "ArrayList in Java: a resizable array. Create, add, get, set, remove, search and sort; how it works inside (elementData, size vs capacity, default capacity 10, growth by 1.5x), the cost of each operation, remove(int) vs remove(Object), ConcurrentModificationException and removeIf, and when to choose something else. With animations, a JVM tracer, {{NPROB}} practice problems, quiz and interview scenarios.",
+"ogTitle": "ArrayList: the array that grows",
+"ogDescription": "Watch an ArrayList's capacity jump from 10 to 15 on the heap, avoid the remove-in-a-loop crash, and solve {{NPROB}} problems.",
+"lead": "<code>ArrayList</code> is the collection you'll use most: an ordered list that grows as you add to it, with instant access by position. Inside, it's just an ordinary array plus a counter, and a plan for what to do when the array fills up. You'll learn every everyday operation, what each one costs, and the two mistakes (removing while looping, and removing by index by accident) that catch almost every beginner.",
+"chips": ["Module 11 · Collections", "⏱ 22 min", "Intermediate", "{{NPROB}} practice problems"]
+} META-->
+<part n="1" id="story" label="The story">
+  <h2>The waiting list that wouldn't fit</h2>
+  <div class="story">
+    <p class="narration">Kabir's train-booking practice project keeps the waiting list in <code>String[] waitlist = new String[10]</code>. On a festival weekend the 11th passenger crashes the app with <code>ArrayIndexOutOfBoundsException</code>, and cancelling passenger 3 leaves a hole that every loop must skip.</p>
+    <div class="scene">
+      <svg viewBox="0 0 640 170" role="img" aria-label="A full array of 10 slots cannot take an 11th passenger; an ArrayList copies into a bigger array of 15 and keeps going">
+        <g font-size="10.5">
+          <text x="14" y="26" font-weight="700" class="s-red">String[10]: full</text>
+          <g class="mono">
+            <rect x="14" y="36" width="280" height="30" rx="6" class="s-card2" style="stroke:var(--red)"/>
+            <text x="22" y="56" class="s-ink">W1 W2 W3 W4 W5 W6 W7 W8 W9 W10</text>
+          </g>
+          <text x="14" y="88" class="mono s-ink">waitlist[10] = "W11";</text>
+          <text x="14" y="106" class="s-red" font-weight="700">ArrayIndexOutOfBoundsException</text>
+          <path d="M310 60h30" style="stroke:var(--track);stroke-width:2"/><path d="M334 55l6 5-6 5" style="stroke:var(--track);stroke-width:2;fill:none"/>
+          <text x="354" y="26" font-weight="700" class="s-green">ArrayList: grows by itself</text>
+          <rect x="354" y="36" width="272" height="30" rx="6" class="s-soft-green" style="stroke:var(--green)"/>
+          <text x="362" y="56" class="mono s-ink">W1 … W10 W11 _ _ _ _</text>
+          <text x="354" y="88" class="mono s-ink">waitlist.add("W11");</text>
+          <text x="354" y="106" class="s-green" font-weight="700">size 11, capacity 15</text>
+          <text x="354" y="132" class="mono s-ink">waitlist.remove("W3");</text>
+          <text x="354" y="150" class="s-ink2">the rest shift left: no holes</text>
+        </g>
+        <text x="632" y="166" text-anchor="end" class="s-wm">myphatshala.com</text>
+      </svg>
+    </div>
+    <riya>Sir, can't Kabir just make the array bigger? Say 1000?</riya>
+    <arjun>And waste memory on quiet days, and still crash on the busiest one. Use an <code>ArrayList</code>. It holds an array inside too, but when that array fills up it quietly makes a bigger one and copies everything across.</arjun>
+    <riya>What about the gap when someone cancels?</riya>
+    <arjun><code>remove</code> shifts everyone after them one place left, so positions stay continuous. That shifting has a cost, though, and it's one of several things worth knowing about what happens inside. Let's open it up.</arjun>
+  </div>
+</part>
+
+<part n="2" id="definition" label="Definition">
+  <h2>What is an ArrayList?</h2>
+  <div class="def">
+    <div class="def__formal"><small>Formal definition (write this in exams)</small>
+      <p><code>java.util.ArrayList&lt;E&gt;</code> is a <b>resizable-array implementation of the <code>List</code> interface</b>. It maintains insertion order, allows duplicates and <code>null</code>, and provides <b>constant-time random access</b> by index. Internally it stores elements in an <code>Object[]</code> called <code>elementData</code> and tracks the number of elements in <code>size</code>; when the array is full, it allocates a larger array (about 1.5 times the old capacity) and copies the elements. ArrayList is <b>not synchronised</b>, and its iterators are <b>fail-fast</b>.</p></div>
+    <div class="def__simple"><small>In simple words</small>
+      <p>A list backed by an array that grows when needed. Reading position 5 is instant; inserting or deleting in the middle means shifting the elements after it.</p></div>
+  </div>
+  <h3>Words you'll meet in this lesson</h3>
+  <div class="terms">
+    <div class="term"><b>Size</b><span>How many elements the list holds: <code>size()</code>.</span></div>
+    <div class="term"><b>Capacity</b><span>How many slots the internal array has. Always ≥ size.</span></div>
+    <div class="term"><b>Index</b><span>Position, starting at 0. Valid indexes: 0 to size − 1.</span></div>
+    <div class="term"><b>Amortised O(1)</b><span>Usually instant; occasionally slow (when growing), but cheap on average.</span></div>
+    <div class="term"><b>Shift</b><span>Moving elements one place to make room or close a gap: O(n).</span></div>
+    <div class="term"><b>Fail-fast</b><span>Iterators throw <code>ConcurrentModificationException</code> if the list changes under them.</span></div>
+  </div>
+  <h3>Cost of each operation</h3>
+  <div class="table-wrap">
+  <table class="compare" style="min-width:560px">
+    <thead><tr><th>Operation</th><th>Cost</th><th>Why</th></tr></thead>
+    <tbody>
+      <tr><td><code>get(i)</code>, <code>set(i, x)</code></td><td>O(1)</td><td>Direct array access</td></tr>
+      <tr><td><code>add(x)</code> at the end</td><td>O(1) amortised</td><td>Usually a free slot; sometimes grow and copy</td></tr>
+      <tr><td><code>add(i, x)</code>, <code>remove(i)</code></td><td>O(n)</td><td>Elements after <code>i</code> shift</td></tr>
+      <tr><td><code>contains(x)</code>, <code>indexOf(x)</code>, <code>remove(x)</code></td><td>O(n)</td><td>Linear search with <code>equals</code></td></tr>
+      <tr><td><code>size()</code>, <code>isEmpty()</code></td><td>O(1)</td><td>Reads the counter</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <exam><b>Exam tip:</b> <code>new ArrayList&lt;&gt;()</code> starts with an <b>empty array</b>; the default capacity of <b>10</b> is allocated on the first <code>add</code>. When full, the new capacity is <code>old + old/2</code> (10 → 15 → 22 → 33 …). Capacity is not size: <code>size()</code> counts elements, not slots.</exam>
+</part>
+
+{{AD}}
+
+<part n="3" id="types" label="Types and ways to use it">
+  <h2>Everyday ArrayList operations</h2>
+  <div class="cards">
+    <div class="card"><svg class="ic" viewBox="0 0 40 40" fill="none" stroke="var(--green)" stroke-width="2"><path d="M20 8v24M8 20h24"/></svg><h4>Add</h4><p><code>add(x)</code> at the end, <code>add(i, x)</code> at a position, <code>addAll(other)</code>.</p><span class="tag">grow</span></div>
+    <div class="card"><svg class="ic" viewBox="0 0 40 40" fill="none" stroke="var(--blue)" stroke-width="2"><circle cx="18" cy="18" r="9"/><path d="M25 25l8 8"/></svg><h4>Read and search</h4><p><code>get(i)</code>, <code>indexOf(x)</code>, <code>contains(x)</code>, <code>size()</code>.</p><span class="tag">read</span></div>
+    <div class="card"><svg class="ic" viewBox="0 0 40 40" fill="none" stroke="var(--track)" stroke-width="2"><path d="M10 28l6-6 14-14 4 4-14 14-6 6z"/></svg><h4>Change</h4><p><code>set(i, x)</code> replaces; <code>sort</code>, <code>Collections.reverse</code>.</p><span class="tag">update</span></div>
+    <div class="card"><svg class="ic" viewBox="0 0 40 40" fill="none" stroke="var(--red)" stroke-width="2"><path d="M10 20h20"/></svg><h4>Remove</h4><p><code>remove(i)</code> by index, <code>remove(obj)</code> by value, <code>removeIf</code>, <code>clear</code>.</p><span class="tag">shrink</span></div>
+  </div>
+
+  <h3>The full tour</h3>
+  <div class="code" data-lang="java" data-file="Main.java"><pre><code>import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+
+public class Main {
+    public static void main(String[] args) {
+        List&lt;String&gt; menu = new ArrayList&lt;&gt;();
+        menu.add("dosa");
+        menu.add("chai");
+        menu.add("idli");
+        menu.add(1, "vada");                     // insert at index 1: the rest shift right
+        System.out.println(menu + " size " + menu.size());
+
+        System.out.println(menu.get(0) + ", " + menu.indexOf("idli") + ", " + menu.contains("poha"));
+        menu.set(2, "masala chai");              // replace index 2
+        menu.remove("dosa");                     // by value: the rest shift left
+        Collections.sort(menu);
+        System.out.println(menu);
+
+        for (int i = 0; i &lt; menu.size(); i++) {
+            System.out.println(i + ": " + menu.get(i));
+        }
+    }
+}</code></pre><div class="output">[dosa, vada, chai, idli] size 4
+dosa, 3, false
+[idli, masala chai, vada]
+0: idli
+1: masala chai
+2: vada</div></div>
+
+  <h3>remove(int) or remove(Object)?</h3>
+  <div class="code" data-lang="java" data-file="Main.java"><pre><code>import java.util.ArrayList;
+import java.util.List;
+
+public class Main {
+    public static void main(String[] args) {
+        List&lt;Integer&gt; seats = new ArrayList&lt;&gt;(List.of(12, 3, 7));
+        seats.remove(1);                          // index 1 → removes 3
+        System.out.println(seats);
+        seats.remove(Integer.valueOf(12));        // value 12
+        System.out.println(seats);
+    }
+}</code></pre><div class="output">[12, 7]
+[7]</div></div>
+
+  <h3>Removing while looping</h3>
+  <div class="code" data-lang="java" data-file="Main.java"><pre><code>import java.util.ArrayList;
+import java.util.List;
+
+public class Main {
+    public static void main(String[] args) {
+        List&lt;String&gt; cart = new ArrayList&lt;&gt;(List.of("tea", "coffee", "juice", "tea"));
+        try {
+            for (String item : cart) {
+                if (item.equals("coffee")) cart.remove(item);   // changes the list mid-loop
+            }
+        } catch (java.util.ConcurrentModificationException e) {
+            System.out.println("ConcurrentModificationException");
+        }
+
+        cart.removeIf(item -&gt; item.equals("tea"));             // the safe way (a lambda, Lesson 14.1)
+        System.out.println(cart);
+    }
+}</code></pre><div class="output">ConcurrentModificationException
+[juice]</div></div>
+  <warn><b>Never</b> call <code>list.remove(…)</code> inside a for-each loop over the same list. The hidden iterator notices the change (<code>modCount</code>) and throws <code>ConcurrentModificationException</code>. Use <code>removeIf</code>, an explicit <code>Iterator</code> with <code>it.remove()</code> (Lesson 11.7), or loop backwards by index.</warn>
+  <tip><b>Rule of thumb:</b> ArrayList is the right default list. If you know roughly how many elements are coming, pass the capacity: <code>new ArrayList&lt;&gt;(5000)</code> avoids repeated growing. If you add and remove mostly at the <i>front</i>, use <code>ArrayDeque</code> instead.</tip>
+</part>
+
+<part n="4" id="steps" label="Step by step">
+  <h2>Inside <code>add</code> when the array is full</h2>
+  <ol class="stepper">
+    <li><h4>An empty list has an empty array</h4>
+      <div class="code" data-lang="java" data-file="Main.java"><pre><code>List&lt;String&gt; w = new ArrayList&lt;&gt;();   // elementData = {} , size = 0</code></pre></div>
+      <span class="behind">Since Java 8 no array of 10 is created up front; many lists stay empty forever, so this saves memory.</span></li>
+    <li><h4>First add: capacity 10</h4>
+      <span class="behind"><code>add</code> sees there's no room, allocates <code>Object[10]</code>, stores the reference in slot 0, and sets <code>size = 1</code>.</span></li>
+    <li><h4>Adds 2 to 10: just fill slots</h4>
+      <span class="behind">Each <code>add</code> writes into <code>elementData[size]</code> and increments <code>size</code>. O(1), no copying.</span></li>
+    <li><h4>The 11th add: grow</h4>
+      <span class="behind"><code>size == elementData.length</code>, so <code>grow</code> computes <code>10 + (10 &gt;&gt; 1) = 15</code>, allocates <code>Object[15]</code>, copies the 10 references with <code>Arrays.copyOf</code>, then stores the new element. The old array becomes garbage.</span></li>
+    <li><h4>Why it's still fast on average</h4>
+      <span class="behind">Growing costs O(n), but it happens rarely and the capacity grows by 50% each time, so the total copying for n adds stays proportional to n: amortised O(1) per add.</span></li>
+  </ol>
+</part>
+
+<part n="5" id="animation" label="See it happen">
+  <h2>Grow and shift: both views</h2>
+  <p>Left: the list as your code sees it. Right: the internal <code>elementData</code> array, its capacity, and the copying and shifting it does.</p>
+  {{ANIM}}
+</part>
+
+<part n="6" id="real-world" label="Real-world use">
+  <h2>ArrayList in real systems</h2>
+  <p>Whenever code builds a sequence and reads it back in order or by position, an ArrayList is usually underneath.</p>
+  {{ANIM2}}
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="16" y="16" width="88" height="58" rx="6" class="s-card" style="stroke:var(--line)"/><path d="M24 30h72M24 44h72M24 58h50" style="stroke:var(--ink-3);stroke-width:2"/></svg></div>
+    <div><h4>1. Query results</h4><p>Code that loads rows from a database, or items from a JSON response, collects them into a <code>List</code> (almost always an ArrayList) to display, sort or page through.</p>
+      <div class="uc-flow"><span>SELECT … rows</span><i>→</i><span class="java">list.add(row)</span><i>→</i><span>shown as a table</span></div></div>
+  </div>
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="14" y="30" width="20" height="30" rx="3" class="s-soft-acc" style="stroke:var(--track)"/><rect x="38" y="30" width="20" height="30" rx="3" class="s-soft-acc" style="stroke:var(--track)"/><rect x="62" y="30" width="20" height="30" rx="3" class="s-soft-acc" style="stroke:var(--track)"/><rect x="86" y="30" width="20" height="30" rx="3" class="s-card" style="stroke:var(--line);stroke-dasharray:3 2"/></svg></div>
+    <div><h4>2. Carts, playlists and feeds</h4><p>Items in a cart, songs in a playlist, posts in a feed: ordered, repeatable, and read by position as the screen scrolls.</p>
+      <div class="uc-flow"><span>scroll to row 40</span><i>→</i><span class="java">feed.get(40)</span><i>→</i><span>instant</span></div></div>
+  </div>
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="16" y="20" width="88" height="50" rx="6" class="s-board"/><text x="24" y="40" font-size="8" class="mono s-chalk">new ArrayList&lt;&gt;(</text><text x="24" y="56" font-size="8" class="mono s-chalk">  rows.size())</text></svg></div>
+    <div><h4>3. Batch processing with known sizes</h4><p>Import jobs that know they'll read 50,000 records create the list with that capacity, avoiding a dozen grow-and-copy steps.</p>
+      <div class="uc-flow"><span>file with 50k lines</span><i>→</i><span class="java">new ArrayList&lt;&gt;(50_000)</span><i>→</i><span>no resizing</span></div></div>
+  </div>
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="20" y="22" width="80" height="46" rx="6" class="s-card" style="stroke:var(--red)"/><text x="60" y="49" text-anchor="middle" font-size="8.5" class="s-red">contains() in a loop</text></svg></div>
+    <div><h4>4. A common performance bug</h4><p>Checking <code>list.contains(id)</code> inside a loop over another big list is O(n × m). Production fixes usually convert the lookup list to a <code>HashSet</code> first.</p>
+      <div class="uc-flow"><span>100k × contains on 100k</span><i>→</i><span class="java">HashSet instead</span><i>→</i><span>seconds → milliseconds</span></div></div>
+  </div>
+  <p class="muted">Examples are simplified. Framework and driver code may use other List types internally.</p>
+</part>
+
+{{AD}}
+
+<part n="7" id="run" label="Run the code">
+  <h2>A train waiting list</h2>
+  <div class="code" data-lang="java" data-file="Main.java"><pre><code>import java.util.ArrayList;
+import java.util.List;
+
+public class Main {
+    static List&lt;String&gt; waitlist = new ArrayList&lt;&gt;();
+
+    static void join(String name) {
+        waitlist.add(name);
+        System.out.println(name + " is WL" + waitlist.size());
+    }
+
+    static void cancel(String name) {
+        int pos = waitlist.indexOf(name);
+        if (pos == -1) {
+            System.out.println(name + " is not on the list");
+            return;
+        }
+        waitlist.remove(pos);                       // everyone after moves up
+        System.out.println(name + " cancelled; list now " + waitlist);
+    }
+
+    static void confirmFirst() {
+        if (!waitlist.isEmpty()) {
+            System.out.println("Seat confirmed for " + waitlist.remove(0));
+        }
+    }
+
+    public static void main(String[] args) {
+        join("Riya");
+        join("Kabir");
+        join("Om");
+        cancel("Kabir");
+        confirmFirst();
+        System.out.println("Remaining: " + waitlist);
+    }
+}</code></pre><div class="output">Riya is WL1
+Kabir is WL2
+Om is WL3
+Kabir cancelled; list now [Riya, Om]
+Seat confirmed for Riya
+Remaining: [Om]</div></div>
+  <ul class="anno">
+    <li><code>waitlist.add(name)</code><span>Appends at the end: O(1) amortised. The position is <code>size()</code>.</span></li>
+    <li><code>indexOf(name)</code><span>Linear search with <code>equals</code>; −1 if absent.</span></li>
+    <li><code>remove(pos)</code><span>Removes by index; later passengers shift up one place.</span></li>
+    <li><code>remove(0)</code><span>Returns the removed element. On a long list this shifts everything: consider ArrayDeque for queues.</span></li>
+  </ul>
+  <div class="runner">
+    <script type="application/json">{
+      "lang": "java", "file": "Main.java",
+      "tasks": [
+        { "label": "1 · Waiting list", "hint": "Press <b>Run</b>. Then add a method <code>position(String name)</code> that prints “WLn” for a passenger, or “not found”.",
+          "code": "import java.util.ArrayList;\nimport java.util.List;\n\npublic class Main {\n    static List<String> waitlist = new ArrayList<>();\n\n    static void join(String name) {\n        waitlist.add(name);\n        System.out.println(name + \" is WL\" + waitlist.size());\n    }\n\n    static void cancel(String name) {\n        int pos = waitlist.indexOf(name);\n        if (pos == -1) {\n            System.out.println(name + \" is not on the list\");\n            return;\n        }\n        waitlist.remove(pos);\n        System.out.println(name + \" cancelled; list now \" + waitlist);\n    }\n\n    static void confirmFirst() {\n        if (!waitlist.isEmpty()) {\n            System.out.println(\"Seat confirmed for \" + waitlist.remove(0));\n        }\n    }\n\n    public static void main(String[] args) {\n        join(\"Riya\");\n        join(\"Kabir\");\n        join(\"Om\");\n        cancel(\"Kabir\");\n        confirmFirst();\n        System.out.println(\"Remaining: \" + waitlist);\n    }\n}\n" },
+        { "label": "2 · Spot the error: remove in for-each", "hint": "It crashes with <code>ConcurrentModificationException</code>. Replace the loop with <code>cart.removeIf(item -&gt; item.equals(\"coffee\"));</code>.",
+          "code": "import java.util.ArrayList;\nimport java.util.List;\n\npublic class Main {\n    public static void main(String[] args) {\n        List<String> cart = new ArrayList<>(List.of(\"tea\", \"coffee\", \"juice\", \"tea\"));\n        for (String item : cart) {\n            if (item.equals(\"coffee\")) {\n                cart.remove(item);\n            }\n        }\n        System.out.println(cart);\n    }\n}\n", "_expect": "exception" },
+        { "label": "3 · Predict: the lucky removal", "hint": "<b>Predict first:</b> same mistake as task 2, but removing \"juice\" (second-to-last). Does it crash? Run it, then think about when the loop checks <code>hasNext()</code>.",
+          "code": "import java.util.ArrayList;\nimport java.util.List;\n\npublic class Main {\n    public static void main(String[] args) {\n        List<String> cart = new ArrayList<>(List.of(\"tea\", \"coffee\", \"juice\", \"tea\"));\n        for (String item : cart) {\n            if (item.equals(\"juice\")) {\n                cart.remove(item);\n            }\n        }\n        System.out.println(cart);\n    }\n}\n" },
+        { "label": "4 · Spot the error: bad index", "hint": "Valid indexes are 0 to size − 1. Fix the loop condition.",
+          "code": "import java.util.ArrayList;\nimport java.util.List;\n\npublic class Main {\n    public static void main(String[] args) {\n        List<Integer> marks = new ArrayList<>(List.of(78, 91, 64));\n        for (int i = 0; i <= marks.size(); i++) {\n            System.out.println(marks.get(i));\n        }\n    }\n}\n", "_expect": "exception" },
+        { "label": "5 · Predict: remove(1)", "hint": "<b>Predict first:</b> which number disappears? Then change it to remove the <i>value</i> 1.",
+          "code": "import java.util.ArrayList;\nimport java.util.List;\n\npublic class Main {\n    public static void main(String[] args) {\n        List<Integer> seats = new ArrayList<>(List.of(5, 1, 9, 1));\n        seats.remove(1);\n        System.out.println(seats);\n    }\n}\n" }
+      ]
+    }</script>
+  </div>
+</part>
+
+<part n="8" id="tracer" label="Line by line">
+  <h2>Watch the capacity jump from 10 to 15</h2>
+  <p>This trace is recorded from the real JVM. Each heap line shows the list's <b>size</b> and the length of its internal array, the <b>capacity</b>. Watch the 11th <code>add</code>.</p>
+  {{TRACER}}
+
+{{WORKED}}
+</part>
+
+<part n="9" id="quiz" label="Quiz and revision">
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <script type="application/json">[
+      { "q": "What is the time complexity of get(i) on an ArrayList?", "options": ["O(1)", "O(log n)", "O(n)", "O(n²)"], "answer": 0, "why": "It reads elementData[i] directly." },
+      { "q": "new ArrayList<>() then one add. What is the capacity now?", "options": ["0", "1", "10", "16"], "answer": 2, "why": "The default capacity of 10 is allocated on the first add." },
+      { "q": "A full ArrayList has capacity 10. After one more add, the capacity is…", "options": ["11", "15", "20", "16"], "answer": 1, "why": "new = old + old/2 = 15." },
+      { "q": "Why is add(0, x) slow on a big ArrayList?", "options": ["It sorts the list", "All existing elements shift right by one", "It grows every time", "It isn't slow"], "answer": 1, "why": "Inserting at the front moves n references: O(n)." },
+      { "q": "List<Integer> l = [5, 1, 9]; l.remove(1); → ?", "options": ["[5, 9]", "[5, 1, 9]", "[1, 9]", "[9]"], "answer": 0, "why": "remove(int index) is chosen: index 1 (value 1) is removed." },
+      { "q": "Removing an element inside a for-each over the same list usually causes…", "options": ["Nothing", "ConcurrentModificationException", "NullPointerException", "A compile error"], "answer": 1, "why": "The iterator is fail-fast: it detects the structural change." },
+      { "q": "What's the difference between size and capacity?", "options": ["None", "Size = elements stored; capacity = slots in the internal array", "Capacity = elements stored", "Size is fixed"], "answer": 1, "why": "Capacity ≥ size; extra slots are reserved for future adds." },
+      { "q": "Is ArrayList thread-safe?", "options": ["Yes", "No; use a concurrent or synchronised alternative", "Only for reads", "Only with generics"], "answer": 1, "why": "ArrayList isn't synchronised (Vector is, but it's legacy)." }
+    ]</script>
+  </div>
+  <h3>Quick revision</h3>
+  <div class="revision">
+    <h3>Lesson 11.3 in one screen</h3>
+    <ul>
+      <li>ArrayList = resizable array implementing List: ordered, duplicates and null allowed.</li>
+      <li>Inside: <code>Object[] elementData</code> + <code>int size</code>. Empty at first; capacity 10 on first add; grows to old × 1.5.</li>
+      <li><code>get/set</code> O(1); <code>add</code> at end O(1) amortised; insert/remove in middle O(n); <code>contains/indexOf</code> O(n).</li>
+      <li><code>remove(int)</code> by index vs <code>remove(Object)</code> by value: watch out with Integer lists.</li>
+      <li>Don't remove inside for-each: <code>ConcurrentModificationException</code>. Use <code>removeIf</code> or <code>Iterator.remove</code>.</li>
+      <li>Pre-size with <code>new ArrayList&lt;&gt;(n)</code>; not thread-safe; use ArrayDeque for queue-like work at the front.</li>
+    </ul>
+  </div>
+  <h3>Interview and viva questions</h3>
+  <div class="faq">
+    <details><summary>How does ArrayList grow internally?</summary><p>When <code>size</code> equals the array length, <code>grow()</code> computes a new capacity of about 1.5 × the old one (<code>old + (old &gt;&gt; 1)</code>), allocates a new array, copies the references with <code>Arrays.copyOf</code>, and replaces <code>elementData</code>. The default empty list allocates 10 slots on its first add.</p></details>
+    <details><summary>ArrayList vs array?</summary><p>An array has a fixed length, can hold primitives, and has no methods beyond <code>length</code>. An ArrayList grows automatically, holds only objects (primitives are boxed), and offers add/remove/search/sort methods. Arrays are slightly faster and smaller for fixed-size primitive data.</p></details>
+    <details><summary>ArrayList vs Vector?</summary><p>Both are resizable arrays. Vector (legacy, Java 1.0) synchronises every method and doubles its capacity; ArrayList isn't synchronised and grows by 1.5×. For thread-safe lists today use <code>CopyOnWriteArrayList</code> or external synchronisation.</p></details>
+    <details><summary>How do you remove elements while iterating?</summary><p>Use <code>list.removeIf(condition)</code>, or an explicit <code>Iterator</code> and its <code>remove()</code> method, or loop backwards by index. Calling <code>list.remove</code> inside a for-each changes <code>modCount</code> and the iterator throws <code>ConcurrentModificationException</code>.</p></details>
+    <details><summary>What does trimToSize() do?</summary><p>It shrinks the internal array to exactly <code>size</code>, releasing unused slots. Useful for a large list that's finished growing and will be kept in memory for a long time.</p></details>
+  </div>
+
+{{PRACTICE}}
+
+  <h3 id="scenarios">Real-world scenario questions (asked in company interviews)</h3>
+  <p class="scn-intro">ArrayList questions in interviews test whether you know what happens inside, and when that matters.</p>
+  <div class="scenarios">
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">E-commerce · bug</span><span class="scn__tag scn__tag--level">Fresher</span></div>
+      <h4>Removing out-of-stock items crashes</h4>
+      <p class="scn__situation">A nightly job loops over the product list with for-each and removes items whose stock is 0. It throws <code>ConcurrentModificationException</code>. Explain and fix.</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> fail-fast iterators.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>For-each uses an iterator. <code>list.remove</code> changes the list's <code>modCount</code>; the iterator's next <code>next()</code> sees the mismatch and throws.</li>
+          <li>Fix: <code>products.removeIf(p -&gt; p.getStock() == 0);</code> or <code>Iterator&lt;Product&gt; it = …; if (…) it.remove();</code>.</li>
+          <li>Better still, filter in the database query so out-of-stock items never load.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> catching and ignoring the exception. Some items will silently stay in the list.</p>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Analytics · performance</span><span class="scn__tag scn__tag--level">Junior</span></div>
+      <h4>A report that takes 20 minutes</h4>
+      <p class="scn__situation">A report checks, for each of 200,000 orders, whether <code>blockedCustomers.contains(order.getCustomerId())</code>, where <code>blockedCustomers</code> is an ArrayList of 50,000 IDs. It's painfully slow. Why, and what's the fix?</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> O(n) contains and choosing a HashSet.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li><code>ArrayList.contains</code> is a linear scan: up to 50,000 <code>equals</code> calls per order, about 10 billion in total.</li>
+          <li>Build <code>Set&lt;Long&gt; blocked = new HashSet&lt;&gt;(blockedCustomers)</code> once; each lookup becomes O(1) on average.</li>
+          <li>Measure before and after; mention memory cost of the set.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> sorting and binary searching unless the data is already sorted; the HashSet is simpler.</p>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Logistics · design</span><span class="scn__tag scn__tag--level">Junior</span></div>
+      <h4>A queue built on remove(0)</h4>
+      <p class="scn__situation">A dispatch service keeps pending deliveries in an ArrayList, adds at the end and takes the next with <code>remove(0)</code>. With 100,000 pending items it slows down badly. Why?</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> cost of removing at the front.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li><code>remove(0)</code> shifts all remaining elements left: O(n) per removal.</li>
+          <li>Use <code>ArrayDeque</code> (<code>offer</code>/<code>poll</code>, both O(1)) or a <code>BlockingQueue</code> if producers and consumers are separate threads.</li>
+          <li>Keep the variable typed as <code>Queue</code> so the intent is obvious.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> switching to LinkedList by default; ArrayDeque is usually faster and lighter (Lesson 11.4).</p>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Batch jobs · memory</span><span class="scn__tag scn__tag--level">Mid</span></div>
+      <h4>Spiky memory while loading a big file</h4>
+      <p class="scn__situation">A job reads 2 million records into an ArrayList. Profiling shows memory spikes and many large garbage arrays during loading. How do you smooth it out?</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> growth copies and pre-sizing.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>Each grow allocates a 1.5× bigger array and copies; during the copy both arrays exist, and the old one becomes garbage.</li>
+          <li>If the count is known (file header, <code>COUNT(*)</code>), create <code>new ArrayList&lt;&gt;(count)</code> or call <code>ensureCapacity</code>.</li>
+          <li>Better, process records in a stream or in batches instead of holding all 2 million at once.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> simply raising the heap size. It hides the pattern instead of fixing it.</p>
+      </div></details>
+    </article>
+  </div>
+</part>

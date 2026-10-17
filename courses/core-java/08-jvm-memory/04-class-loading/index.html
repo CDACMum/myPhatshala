@@ -1,0 +1,964 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Class loaders and class loading | MyPhatshala</title>
+<meta name="description" content="Java class loading explained: loading, linking (verify, prepare, resolve) and initialization, exactly when a class is initialized (first active use) with static block print-order demos, the bootstrap, platform and application class loaders, parent delegation, ClassNotFoundException vs NoClassDefFoundError, and -verbose:class. With animations, a JVM tracer, 8 practice problems, quiz and industry scenarios.">
+<meta name="mp:minutes" content="24">
+<link rel="canonical" href="https://myphatshala.com/courses/core-java/08-jvm-memory/04-class-loading/">
+<meta property="og:title" content="How the JVM loads your classes, and when static blocks run · MyPhatshala">
+<meta property="og:description" content="Follow a class from .class file to initialised, meet the three class loaders, and solve 8 problems including business tasks.">
+<link rel="icon" href="../../../../assets/img/logo.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Fraunces:ital,opsz,wght@0,9..144,600;0,9..144,700;1,9..144,600&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../../../../assets/css/style.css">
+<link rel="stylesheet" href="../../../../assets/css/lesson.css">
+<script src="../../../../assets/js/config.js"></script>
+<script>try { const t = localStorage.getItem("mp-theme"); if (t) document.documentElement.dataset.theme = t; } catch (e) {}</script>
+<script type="application/ld+json">{"@context": "https://schema.org", "@type": "LearningResource", "name": "Class loaders and class loading", "learningResourceType": "Lesson", "educationalLevel": "Beginner", "isAccessibleForFree": true, "inLanguage": "en", "isPartOf": {"@type": "Course", "name": "Core Java", "provider": {"@type": "Organization", "name": "MyPhatshala"}}}</script>
+</head>
+<body style="--track:#E8772E" data-lesson="08-jvm-memory/04-class-loading" data-course-root="../../">
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="site-header">
+  <div class="wrap">
+    <a class="brand" href="../../../../" aria-label="MyPhatshala home"><img src="../../../../assets/img/logo.svg" width="34" height="34" alt=""><span>My<b>Phatshala</b></span></a>
+    <nav class="nav" aria-label="Main">
+      <a href="../../../../#tracks">All courses</a>
+      <a href="../../">Core Java syllabus</a>
+      <button class="theme-btn" id="theme-btn" aria-label="Toggle dark mode"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg></button>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+<section class="lesson-hero">
+  <div class="wrap">
+    <nav class="crumbs" aria-label="Breadcrumb"><a href="../../../../">Home</a><span>›</span><a href="../../../../#track-programming">Programming Languages</a><span>›</span><a href="../../">Core Java</a><span>›</span><b>Lesson 8.4</b></nav>
+    <h1>Class loaders and class loading</h1>
+    <p class="lead">Your program doesn't load all its classes at start-up. The JVM pulls each class in the first time it is needed, checks it, gives its static fields default values, and only then runs its static initializer. You'll see every phase, learn the exact rules for when a static block runs, meet the three built-in class loaders and how they delegate, tell ClassNotFoundException from NoClassDefFoundError, and then practise with 8 problems.</p>
+    <div class="lesson-meta"><span>Module 8 · JVM Memory</span><span>⏱ 24 min</span><span>Intermediate</span><span>8 practice problems</span></div>
+  </div>
+</section>
+
+<div class="wrap lesson-layout">
+<article class="lesson-main">
+<!-- ======================= PART 1: THE STORY ======================= -->
+<section class="part" id="story">
+  <span class="part-label"><b>1</b> The story</span>
+  <h2>The static block that printed “too late”</h2>
+  <div class="story">
+    <p class="narration">Riya's team wrote a <code>Config</code> class whose static block prints “Config loaded” and reads settings. She expected the message as soon as the app started. Instead it appeared halfway through the logs, right before the first payment. And on the test server, a missing JAR made the app fail with <code>NoClassDefFoundError</code>, an error she had never seen in college.</p>
+    <div class="scene">
+      <svg viewBox="0 0 640 170" role="img" aria-label="A .class file travels from disk through three class loaders, bootstrap, platform and application, then through verify, prepare and initialise stages before the class is ready.">
+        <g font-size="10">
+          <rect x="14" y="56" width="70" height="52" rx="6" class="s-card2" style="stroke:var(--line)"/>
+          <text x="49" y="78" text-anchor="middle" class="mono s-ink">Config</text><text x="49" y="94" text-anchor="middle" class="mono s-ink2">.class</text>
+          <path d="M88 82 H118" style="stroke:var(--blue);stroke-width:2"/><path d="M112 76l8 6-8 6" style="stroke:var(--blue);stroke-width:2;fill:none"/>
+          <text x="196" y="18" text-anchor="middle" font-weight="700" class="s-blue">Class loaders</text>
+          <rect x="126" y="28" width="140" height="30" rx="6" class="s-soft-blue" style="stroke:var(--blue)"/><text x="196" y="47" text-anchor="middle" class="s-ink">Bootstrap (java.base)</text>
+          <rect x="126" y="66" width="140" height="30" rx="6" class="s-soft-blue" style="stroke:var(--blue)"/><text x="196" y="85" text-anchor="middle" class="s-ink">Platform (java.sql …)</text>
+          <rect x="126" y="104" width="140" height="30" rx="6" class="s-soft-acc" style="stroke:var(--track);stroke-width:1.6"/><text x="196" y="123" text-anchor="middle" class="s-ink" font-weight="700">Application (your code)</text>
+          <path d="M274 119 H304" style="stroke:var(--blue);stroke-width:2"/><path d="M298 113l8 6-8 6" style="stroke:var(--blue);stroke-width:2;fill:none"/>
+          <text x="470" y="18" text-anchor="middle" font-weight="700" class="s-green">Linking, then initialisation</text>
+          <g class="s-soft-green" style="stroke:var(--green)"><rect x="312" y="40" width="70" height="30" rx="6"/><rect x="390" y="40" width="70" height="30" rx="6"/><rect x="468" y="40" width="70" height="30" rx="6"/></g>
+          <rect x="546" y="40" width="80" height="30" rx="6" class="s-soft-acc" style="stroke:var(--track);stroke-width:1.6"/>
+          <g text-anchor="middle" class="s-ink"><text x="347" y="59">verify</text><text x="425" y="59">prepare</text><text x="503" y="59">resolve</text><text x="586" y="59" font-weight="700">initialise</text></g>
+          <path d="M310 119 C330 119, 340 90, 346 74" style="stroke:var(--blue);stroke-width:1.6;fill:none;stroke-dasharray:4 3"/>
+          <text x="425" y="96" text-anchor="middle" class="mono s-ink2">statics = 0 / null</text>
+          <text x="586" y="96" text-anchor="middle" class="mono s-acc">static { … }</text>
+          <text x="586" y="112" text-anchor="middle" class="s-ink2">on first use</text>
+          <text x="470" y="146" text-anchor="middle" class="s-ink2">“Config loaded” prints only here, the first time Config is really used</text>
+        </g>
+        <text x="632" y="166" text-anchor="end" class="s-wm">myphatshala.com</text>
+      </svg>
+    </div>
+    <div class="panel">
+      <div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#FCE6D6"/><path d="M14 64c2-12 9-18 18-18s16 6 18 18z" fill="#2E5AAC"/><circle cx="32" cy="29" r="12" fill="#C68B5E"/><path d="M19 29c0-10 6-15 13-15s13 5 13 15c-3-5-7-8-13-8s-10 3-13 8z" fill="#2A1B14"/><path d="M43 27c3 6 3 14 0 20" stroke="#2A1B14" stroke-width="4" fill="none" stroke-linecap="round"/><circle cx="27.5" cy="30" r="1.5" fill="#2A1B14"/><circle cx="36.5" cy="30" r="1.5" fill="#2A1B14"/><path d="M28 35q4 3 8 0" stroke="#2A1B14" stroke-width="1.6" fill="none" stroke-linecap="round"/><circle cx="32" cy="24" r="1.2" fill="#D64545"/></svg></div>
+      <div class="bubble"><b class="who">Riya</b><p>Sir, why did “Config loaded” print so late? The app had been running for a minute.</p></div>
+    </div>
+    <div class="panel panel--right">
+      <div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#DDEFE6"/><path d="M12 64c2-12 10-18 20-18s18 6 20 18z" fill="#F4F1EA"/><path d="M28 46l4 8 4-8" fill="#2F7D5B"/><circle cx="32" cy="28" r="12" fill="#B57A50"/><path d="M20 26c0-8 5-13 12-13s12 5 12 13c-2-3-6-5-12-5s-10 2-12 5z" fill="#5A5A5A"/><path d="M22 32c1 8 5 11 10 11s9-3 10-11c-2 3-6 4-10 4s-8-1-10-4z" fill="#5A5A5A"/><circle cx="27" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><circle cx="37" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><path d="M30.4 29h3.2" stroke="#1B2433" stroke-width="1.4"/><circle cx="27" cy="29" r="1.1" fill="#1B2433"/><circle cx="37" cy="29" r="1.1" fill="#1B2433"/></svg></div>
+      <div class="bubble"><b class="who">Arjun Sir</b><p>Because the JVM loads classes <b>lazily</b>. A class's static block runs on its <b>first active use</b>: creating an object, calling a static method, or reading a non-constant static field. Nobody touched Config until the first payment.</p></div>
+    </div>
+    <div class="panel">
+      <div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#FCE6D6"/><path d="M14 64c2-12 9-18 18-18s16 6 18 18z" fill="#2E5AAC"/><circle cx="32" cy="29" r="12" fill="#C68B5E"/><path d="M19 29c0-10 6-15 13-15s13 5 13 15c-3-5-7-8-13-8s-10 3-13 8z" fill="#2A1B14"/><path d="M43 27c3 6 3 14 0 20" stroke="#2A1B14" stroke-width="4" fill="none" stroke-linecap="round"/><circle cx="27.5" cy="30" r="1.5" fill="#2A1B14"/><circle cx="36.5" cy="30" r="1.5" fill="#2A1B14"/><path d="M28 35q4 3 8 0" stroke="#2A1B14" stroke-width="1.6" fill="none" stroke-linecap="round"/><circle cx="32" cy="24" r="1.2" fill="#D64545"/></svg></div>
+      <div class="bubble"><b class="who">Riya</b><p>And the NoClassDefFoundError on the test server?</p></div>
+    </div>
+    <div class="panel panel--right">
+      <div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#DDEFE6"/><path d="M12 64c2-12 10-18 20-18s18 6 20 18z" fill="#F4F1EA"/><path d="M28 46l4 8 4-8" fill="#2F7D5B"/><circle cx="32" cy="28" r="12" fill="#B57A50"/><path d="M20 26c0-8 5-13 12-13s12 5 12 13c-2-3-6-5-12-5s-10 2-12 5z" fill="#5A5A5A"/><path d="M22 32c1 8 5 11 10 11s9-3 10-11c-2 3-6 4-10 4s-8-1-10-4z" fill="#5A5A5A"/><circle cx="27" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><circle cx="37" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><path d="M30.4 29h3.2" stroke="#1B2433" stroke-width="1.4"/><circle cx="27" cy="29" r="1.1" fill="#1B2433"/><circle cx="37" cy="29" r="1.1" fill="#1B2433"/></svg></div>
+      <div class="bubble"><b class="who">Arjun Sir</b><p>The class was there when you compiled, but missing (or broken) when the JVM tried to load it. Let's follow a class from the <code>.class</code> file to “ready”, and both mysteries will make sense.</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- ======================= PART 2: DEFINITION ======================= -->
+<section class="part" id="definition">
+  <span class="part-label"><b>2</b> Definition</span>
+  <h2>What is class loading?</h2>
+  <div class="def">
+    <div class="def__formal"><small>Formal definition (write this in exams)</small>
+      <p><b>Class loading</b> is the process by which the JVM makes a class available at run time. It has three phases. <b>Loading:</b> a <b>class loader</b> finds the binary representation (the <code>.class</code> bytes) and creates the class in the method area. <b>Linking:</b> <b>verification</b> checks the bytecode is valid and safe, <b>preparation</b> allocates static fields and sets them to default values, and <b>resolution</b> replaces symbolic references with direct ones (this may happen lazily). <b>Initialization:</b> the class's static initializer (<code>&lt;clinit&gt;</code>: static field initializers and static blocks, in source order) runs exactly once, on the class's <b>first active use</b>, after its superclass has been initialized.</p></div>
+    <div class="def__simple"><small>In simple words</small>
+      <p>Before a new employee starts work: HR finds their file (loading), checks the documents (verify), gives them an empty desk (prepare), adds their phone number to the directory (resolve), and on their first real day they set up their desk (initialise), only once.</p></div>
+  </div>
+  <h3>Words you'll meet in this lesson</h3>
+  <div class="terms">
+    <div class="term"><b>Class loader</b><span>An object that finds and loads classes. Every class remembers which loader loaded it.</span></div>
+    <div class="term"><b>Parent delegation</b><span>A loader first asks its parent to load a class, and only tries itself if the parent can't.</span></div>
+    <div class="term"><b>Static initializer</b><span><code>&lt;clinit&gt;</code>: the static field initializers and <code>static { }</code> blocks of a class.</span></div>
+    <div class="term"><b>Active use</b><span>An action that forces initialisation: <code>new</code>, static method call, non-constant static field access…</span></div>
+    <div class="term"><b>Compile-time constant</b><span>A <code>static final</code> primitive or String with a constant value. javac copies it into the user's code.</span></div>
+    <div class="term"><b>CDS</b><span>Class Data Sharing: a pre-parsed archive of JDK classes that speeds up start-up.</span></div>
+  </div>
+  <h3>Class loading facts at a glance</h3>
+  <table class="facts">
+    <tr><th>Phases</th><td>Load → Link (verify, prepare, resolve) → Initialise</td></tr>
+    <tr><th>Initialised when</th><td><code>new</code>, a static method call, reading or writing a non-constant static field, <code>Class.forName(name)</code>, a subclass being initialised, or being the main class</td></tr>
+    <tr><th>NOT initialised by</th><td>Reading a compile-time constant, creating an array of the type (<code>new Config[3]</code>), a class literal (<code>Config.class</code>), accessing a parent's static field through a child</td></tr>
+    <tr><th>Built-in loaders</th><td>Bootstrap (core JDK, shown as <code>null</code>) → Platform (Java 9+, other JDK modules; was “Extension” in Java 8) → Application/System (your class path)</td></tr>
+    <tr><th>Errors</th><td><code>ClassNotFoundException</code> (checked, from <code>Class.forName</code>/<code>loadClass</code>); <code>NoClassDefFoundError</code> (class present at compile time, missing or failed at run time); <code>ExceptionInInitializerError</code> (static initializer threw)</td></tr>
+    <tr><th>Watch it</th><td><code>java -verbose:class Main</code> prints every class as it is loaded</td></tr>
+  </table>
+  <div class="callout callout--exam"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19V5a2 2 0 0 1 2-2h12v18H6a2 2 0 0 1-2-2zm0 0a2 2 0 0 1 2-2h12"/></svg><p><b>Exam tip:</b> a class is <b>loaded</b> and <b>initialised</b> at different moments. <code>new Config[3]</code> may load Config but does not initialise it, so its static block doesn't run. Initialisation happens at most once per class (per class loader), and a superclass is always initialised before its subclass.</p></div>
+</section>
+
+<div class="ad-slot" data-slot="mid"></div>
+
+<!-- ======================= PART 3: TYPES AND WAYS TO USE IT ======================= -->
+<section class="part" id="types">
+  <span class="part-label"><b>3</b> Types and ways to use it</span>
+  <h2>Three class loaders, one delegation rule</h2>
+  <div class="cards">
+    <div class="card"><svg class="ic" viewBox="0 0 40 40" fill="none" stroke="var(--blue)" stroke-width="2"><rect x="6" y="6" width="28" height="28" rx="4"/><path d="M14 14h12M14 20h12M14 26h8"/></svg><h4>Bootstrap</h4><p>Built into the JVM (native code). Loads the core classes of <code>java.base</code>: <code>String</code>, <code>Object</code>, <code>ArrayList</code>. Java shows it as <code>null</code>.</p><span class="tag">getClassLoader() == null</span></div>
+    <div class="card"><svg class="ic" viewBox="0 0 40 40" fill="none" stroke="var(--green)" stroke-width="2"><rect x="4" y="12" width="32" height="20" rx="3"/><path d="M12 12V8h16v4"/></svg><h4>Platform</h4><p>Java 9+ (replaced the Java 8 “extension” loader). Loads other JDK modules such as <code>java.sql</code> and <code>java.xml</code>.</p><span class="tag">"platform"</span></div>
+    <div class="card"><svg class="ic" viewBox="0 0 40 40" fill="none" stroke="var(--track)" stroke-width="2"><path d="M8 32V12l12-6 12 6v20z"/><path d="M16 32V22h8v10"/></svg><h4>Application</h4><p>Also called the system class loader. Loads your classes and libraries from the class path (<code>-cp</code>) or module path.</p><span class="tag">"app"</span></div>
+  </div>
+  <h3>Watching loading vs initialisation</h3>
+  <div class="code" data-lang="java" data-file="Main.java"><pre><code>public class Main {
+    static class AppConfig {
+        static final int MAX_USERS = 100;          // compile-time constant
+        static String env = load();
+
+        static {
+            System.out.println("  AppConfig static block, env = " + env);
+        }
+
+        static String load() {
+            System.out.println("  AppConfig.load() runs");
+            return "prod";
+        }
+    }
+
+    static {
+        System.out.println("Main initialised");
+    }
+
+    public static void main(String[] args) {
+        System.out.println("main starts");
+        System.out.println("MAX_USERS = " + AppConfig.MAX_USERS);
+        AppConfig[] slots = new AppConfig[3];
+        System.out.println("array of " + slots.length + " created");
+        Class&lt;?&gt; c = AppConfig.class;
+        System.out.println("class literal: " + c.getSimpleName());
+        System.out.println("env = " + AppConfig.env);
+        System.out.println("env again = " + AppConfig.env);
+    }
+}</code></pre><div class="output">Main initialised
+main starts
+MAX_USERS = 100
+array of 3 created
+class literal: AppConfig
+  AppConfig.load() runs
+  AppConfig static block, env = prod
+env = prod
+env again = prod</div></div>
+  <p>The same program with <code>-verbose:class</code>, keeping only our two classes (about 530 JDK classes, mostly from the CDS archive, and a few generated helper classes are left out; the path is shortened):</p>
+  <div class="code" data-lang="bash" data-file="Terminal"><pre><code>java -verbose:class Main</code></pre><div class="output">[0.034s][info][class,load] Main source: file:/home/riya/app/
+Main initialised
+main starts
+MAX_USERS = 100
+[0.035s][info][class,load] Main$AppConfig source: file:/home/riya/app/
+array of 3 created
+class literal: AppConfig
+  AppConfig.load() runs
+  AppConfig static block, env = prod
+env = prod
+env again = prod</div></div>
+  <p>Notice: <code>Main$AppConfig</code> is <b>loaded</b> when the array is created, but its static block runs only when <code>env</code> is read.</p>
+  <h3>ClassNotFoundException vs NoClassDefFoundError</h3>
+  <div class="table-wrap">
+  <table class="compare" style="min-width:560px">
+    <thead><tr><th></th><th><code>ClassNotFoundException</code></th><th><code>NoClassDefFoundError</code></th></tr></thead>
+    <tbody>
+      <tr><td>Type</td><td>Checked exception</td><td>Error (a <code>LinkageError</code>)</td></tr>
+      <tr><td>Thrown when</td><td>You load a class <b>by name</b> (<code>Class.forName</code>, <code>loadClass</code>) and no loader finds it</td><td>Code compiled against a class runs, but the class is missing at run time, or its initialisation failed earlier</td></tr>
+      <tr><td>Typical cause</td><td>Typo in a class name, driver JAR not on the class path</td><td>Missing JAR at deploy time; a static initializer threw (“Could not initialize class X”)</td></tr>
+      <tr><td>Example message</td><td><code>java.lang.ClassNotFoundException: com.shop.PaymentGateway</code></td><td><code>java.lang.NoClassDefFoundError: Helper</code> with <code>Caused by: java.lang.ClassNotFoundException: Helper</code></td></tr>
+      <tr><td>Handle it?</td><td>Yes, catch it and report or fall back</td><td>Fix the deployment or the initializer; don't catch and continue</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <div class="callout callout--warn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3 2 21h20L12 3z"/><path d="M12 10v5M12 18v.5"/></svg><p><b>Static initializers are fragile:</b> if one throws, the JVM wraps the exception in <code>ExceptionInInitializerError</code> and marks the class as failed. Every later use throws <code>NoClassDefFoundError: Could not initialize class …</code> until the JVM restarts. Keep static blocks small and never let them depend on things that can fail, like a network call.</p></div>
+</section>
+
+<!-- ======================= PART 4: STEP BY STEP ======================= -->
+<section class="part" id="steps">
+  <span class="part-label"><b>4</b> Step by step</span>
+  <h2>From .class file to a ready class</h2>
+  <ol class="stepper">
+    <li><h4>Loading: find the bytes, with delegation</h4>
+      <div class="code" data-lang="java" data-file="Main.java"><pre><code>new TaxConfig();   // first time TaxConfig is needed</code></pre></div>
+      <span class="behind">The application loader first asks its parent (platform), which asks the bootstrap loader. Neither has <code>TaxConfig</code>, so the application loader reads <code>TaxConfig.class</code> from the class path and defines the class. Delegation stops anyone from replacing core classes such as <code>java.lang.String</code> with their own.</span></li>
+    <li><h4>Verify</h4>
+      <p>The verifier checks the bytecode: correct types on the operand stack, no jumps outside the method, valid references to fields and methods.</p>
+      <span class="behind">This is why a hand-edited or corrupted <code>.class</code> file fails with a <code>VerifyError</code> instead of crashing the JVM. JDK classes from the CDS archive are already verified, which helps start-up.</span></li>
+    <li><h4>Prepare</h4>
+      <div class="code" data-lang="java" data-file="TaxConfig.java"><pre><code>static String state = loadState();   // state = null for now
+static int gstPercent;               // 0</code></pre></div>
+      <span class="behind">Memory for static fields is allocated and set to defaults: 0, 0.0, false, null. Compile-time constants (<code>static final int MAX = 100</code>) already get their real value here. No Java code runs in this phase.</span></li>
+    <li><h4>Resolve</h4>
+      <p>Symbolic names in the constant pool (“method <code>TaxConfig.loadState</code>”) are turned into direct references.</p>
+      <span class="behind">HotSpot resolves lazily: each reference is resolved the first time the instruction using it runs. That's also when a missing class referenced from your code surfaces as <code>NoClassDefFoundError</code>.</span></li>
+    <li><h4>Initialise: run &lt;clinit&gt; once</h4>
+      <div class="code" data-lang="java" data-file="TaxConfig.java"><pre><code>static {
+    gstPercent = state.equals("MH") ? 18 : 12;
+}</code></pre></div>
+      <span class="behind">The superclass is initialised first. Then the static field initializers and static blocks run in source order, in one compiler-generated method <code>&lt;clinit&gt;</code>. The JVM takes a lock while doing this, so even with many threads it runs exactly once.</span></li>
+  </ol>
+</section>
+
+<!-- ======================= PART 5: SEE IT HAPPEN ======================= -->
+<section class="part" id="animation">
+  <span class="part-label"><b>5</b> See it happen</span>
+  <h2>One class, every phase: both views</h2>
+  <p>Left: the code and the console. Right: the class loaders and the class's progress through the phases.</p>
+  <div class="anim" data-frames="6">
+    <div class="anim__title">The life of class <code>AppConfig</code> <span>6 steps</span></div>
+    <div class="anim__views">
+      <div class="view view--see">
+        <span class="view__tag">What you see</span>
+        <svg viewBox="0 0 360 250" role="img" aria-label="Code and console output at each phase">
+          <rect x="10" y="12" width="340" height="40" rx="8" class="s-board"/>
+          <g font-size="11" class="mono s-chalk">
+            <text x="22" y="37" data-on="1-2">AppConfig[] slots = new AppConfig[3];</text>
+            <text x="22" y="37" data-on="3">// still nothing printed by AppConfig</text>
+            <text x="22" y="37" data-on="4-5">System.out.println(AppConfig.env);</text>
+            <text x="22" y="37" data-on="6">// if load() had thrown …</text>
+          </g>
+          <rect x="10" y="62" width="340" height="130" rx="8" style="fill:#0F1512"/>
+          <g font-size="10" class="mono" style="fill:#B9F5D0">
+            <text x="22" y="84" data-on="1-3">[info][class,load]</text>
+            <text x="22" y="100" data-on="1-3">Main$AppConfig source: file:…</text>
+            <text x="22" y="122" data-on="2-3">array of 3 created</text>
+            <text x="22" y="144" data-on="3">// loaded, linked, not initialised</text>
+            <text x="22" y="84" data-on="4-5">  AppConfig.load() runs</text>
+            <text x="22" y="100" data-on="4-5">  AppConfig static block, env = prod</text>
+            <text x="22" y="116" data-on="5">env = prod</text>
+            <text x="22" y="138" data-on="5">// second read: nothing runs again</text>
+          </g>
+          <g font-size="10" class="mono" style="fill:#FF9B8A" data-on="6">
+            <text x="22" y="84">java.lang.ExceptionInInitializerError</text>
+            <text x="22" y="108" style="fill:#B9F5D0">// next use of AppConfig:</text>
+            <text x="22" y="126">java.lang.NoClassDefFoundError:</text>
+            <text x="22" y="142">Could not initialize class</text>
+            <text x="22" y="158">Main$AppConfig</text>
+          </g>
+          <g font-size="10.2" class="s-ink2" text-anchor="middle">
+            <text x="180" y="222" data-on="1">The array needs the class, so it is loaded.</text>
+            <text x="180" y="222" data-on="2">Linked: checked and statics set to defaults.</text>
+            <text x="180" y="222" data-on="3">No static block yet: not an active use.</text>
+            <text x="180" y="222" data-on="4">Reading env is an active use: initialise!</text>
+            <text x="180" y="222" data-on="5">Initialisation happens only once.</text>
+            <text x="180" y="222" data-on="6">A failed initializer breaks the class for good.</text>
+          </g>
+          <text x="354" y="246" text-anchor="end" class="s-wm">myphatshala.com</text>
+        </svg>
+        <ol class="caps" hidden>
+          <li><b>Load:</b> creating an <code>AppConfig[]</code> makes the JVM load the class; <code>-verbose:class</code> prints a line.</li>
+          <li><b>Link:</b> the class is verified and prepared. The program continues and prints the array line.</li>
+          <li><b>Not yet:</b> arrays and class literals don't count as active use, so the static block hasn't run.</li>
+          <li><b>Initialise:</b> reading the non-constant static field <code>env</code> runs the static initializer: <code>load()</code>, then the static block.</li>
+          <li><b>Once only:</b> the class is ready; later reads just return the value.</li>
+          <li><b>Failure:</b> if the initializer throws, you get <code>ExceptionInInitializerError</code> once, then <code>NoClassDefFoundError</code> on every later use.</li>
+        </ol>
+      </div>
+      <div class="view view--behind">
+        <span class="view__tag">Behind the screen</span>
+        <svg viewBox="0 0 360 250" role="img" aria-label="Three class loaders on the left; on the right the phases of class AppConfig and its static fields">
+          <text x="70" y="22" text-anchor="middle" font-size="10" font-weight="700" class="s-ink2">Class loaders</text>
+          <rect x="12" y="32" width="116" height="34" rx="6" class="s-soft-blue" style="stroke:var(--blue);stroke-width:1.2"/>
+          <text x="70" y="47" text-anchor="middle" font-size="9.4" class="s-ink" font-weight="700">Bootstrap</text><text x="70" y="60" text-anchor="middle" font-size="8.4" class="s-ink2">java.base</text>
+          <rect x="12" y="88" width="116" height="34" rx="6" class="s-soft-blue" style="stroke:var(--blue);stroke-width:1.2"/>
+          <text x="70" y="103" text-anchor="middle" font-size="9.4" class="s-ink" font-weight="700">Platform</text><text x="70" y="116" text-anchor="middle" font-size="8.4" class="s-ink2">java.sql, java.xml …</text>
+          <rect x="12" y="144" width="116" height="34" rx="6" class="s-soft-acc" style="stroke:var(--track);stroke-width:1.5"/>
+          <text x="70" y="159" text-anchor="middle" font-size="9.4" class="s-ink" font-weight="700">Application</text><text x="70" y="172" text-anchor="middle" font-size="8.4" class="s-ink2">class path</text>
+          <g data-on="1">
+            <path d="M40 142 V126" style="stroke:var(--blue);stroke-width:1.8"/><path d="M35 131l5-7 5 7" style="stroke:var(--blue);stroke-width:1.8;fill:none"/>
+            <path d="M40 86 V70" style="stroke:var(--blue);stroke-width:1.8"/><path d="M35 75l5-7 5 7" style="stroke:var(--blue);stroke-width:1.8;fill:none"/>
+            <text x="48" y="137" font-size="8.4" class="s-blue">ask parent</text>
+            <text x="48" y="81" font-size="8.4" class="s-blue">ask parent</text>
+            <path d="M135 50 V160" style="stroke:var(--green);stroke-width:1.8;stroke-dasharray:4 3"/><path d="M130 155l5 7 5-7" style="stroke:var(--green);stroke-width:1.8;fill:none"/>
+            <text x="104" y="190" font-size="8.4" class="s-green" text-anchor="middle">not found above: app loads it</text>
+          </g>
+          <text x="248" y="22" text-anchor="middle" font-size="10" font-weight="700" class="s-ink2">class Main$AppConfig</text>
+          <g font-size="9.4">
+            <rect x="142" y="32" width="206" height="18" rx="4" class="s-soft-green" style="stroke:var(--green)"/>
+            <text x="150" y="45" class="s-ink">1 Load</text>
+            <rect x="142" y="54" width="206" height="18" rx="4" class="s-card2" style="stroke:var(--line)" data-on="1"/>
+            <rect x="142" y="54" width="206" height="18" rx="4" class="s-soft-green" style="stroke:var(--green)" data-on="2-"/>
+            <text x="150" y="67" class="s-ink">2 Verify</text>
+            <rect x="142" y="76" width="206" height="18" rx="4" class="s-card2" style="stroke:var(--line)" data-on="1"/>
+            <rect x="142" y="76" width="206" height="18" rx="4" class="s-soft-green" style="stroke:var(--green)" data-on="2-"/>
+            <text x="150" y="89" class="s-ink">3 Prepare (statics = defaults)</text>
+            <rect x="142" y="98" width="206" height="18" rx="4" class="s-card2" style="stroke:var(--line)" data-on="1-3"/>
+            <rect x="142" y="98" width="206" height="18" rx="4" class="s-soft-green" style="stroke:var(--green)" data-on="4-"/>
+            <text x="150" y="111" class="s-ink">4 Resolve (lazily, as used)</text>
+            <rect x="142" y="120" width="206" height="18" rx="4" class="s-card2" style="stroke:var(--line)" data-on="1-3"/>
+            <rect x="142" y="120" width="206" height="18" rx="4" class="s-soft-acc" style="stroke:var(--track);stroke-width:1.6" data-on="4-5"/>
+            <rect x="142" y="120" width="206" height="18" rx="4" style="fill:none;stroke:#D64545;stroke-width:2" data-on="6"/>
+            <text x="150" y="133" class="s-ink">5 Initialise: &lt;clinit&gt;</text>
+            <text x="340" y="133" text-anchor="end" class="s-red" font-weight="700" data-on="6">failed</text>
+            <text x="340" y="133" text-anchor="end" class="s-acc" font-weight="700" data-on="4">running</text>
+            <text x="340" y="133" text-anchor="end" class="s-green" font-weight="700" data-on="5">done</text>
+          </g>
+          <rect x="142" y="146" width="206" height="46" rx="6" class="s-card" style="stroke:var(--blue);stroke-width:1.2" data-on="2-"/>
+          <g font-size="9.4" class="mono s-ink">
+            <text x="150" y="162" data-on="2-3">MAX_USERS = 100 (constant)</text>
+            <text x="150" y="180" data-on="2-3">env = null</text>
+            <text x="150" y="162" data-on="4-5">MAX_USERS = 100</text>
+            <text x="150" y="180" data-on="4-5">env = "prod"</text>
+            <text x="150" y="162" data-on="6">env = null (never set)</text>
+            <text x="150" y="180" data-on="6" class="s-red">class marked erroneous</text>
+          </g>
+          <g font-size="9.6" class="s-ink2" text-anchor="middle">
+            <text x="180" y="210" data-on="1">Delegation: parents first, then the app loader.</text>
+            <text x="180" y="210" data-on="2">Bytecode checked; static fields get defaults.</text>
+            <text x="180" y="210" data-on="3">Prepared, but no Java code of the class has run.</text>
+            <text x="180" y="210" data-on="4">getstatic env → first active use → &lt;clinit&gt; runs.</text>
+            <text x="180" y="210" data-on="5">Initialised once; all code shares these statics.</text>
+            <text x="180" y="210" data-on="6">The JVM never retries a failed initialisation.</text>
+          </g>
+          <text x="354" y="246" text-anchor="end" class="s-wm">myphatshala.com</text>
+        </svg>
+        <ol class="caps" hidden>
+          <li>The application loader delegates to platform, which delegates to bootstrap. Neither knows <code>Main$AppConfig</code>, so the application loader reads it from the class path.</li>
+          <li>Verification passes. Preparation creates the static fields: the constant gets 100 straight away; <code>env</code> gets null.</li>
+          <li>The class is loaded and linked but <b>not initialised</b>. Its static block hasn't run.</li>
+          <li>The <code>getstatic</code> for <code>env</code> is the first active use. References are resolved as they are used, and <code>&lt;clinit&gt;</code> runs: <code>load()</code> then the static block.</li>
+          <li><code>env</code> now holds "prod". The class is marked initialised; this never happens again for this class loader.</li>
+          <li>If <code>&lt;clinit&gt;</code> throws, the class is marked erroneous. The first caller sees <code>ExceptionInInitializerError</code>; every later caller sees <code>NoClassDefFoundError</code>.</li>
+        </ol>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ======================= PART 6: REAL-WORLD USE ======================= -->
+<section class="part" id="real-world">
+  <span class="part-label"><b>6</b> Real-world use</span>
+  <h2>Class loading in real systems</h2>
+  <p>You rarely write a class loader yourself, but every framework you use depends on these rules.</p>
+  <!--ANIM2-->
+  <h3 id="animated-example">Watch it with an example: a shop loading its UPI payment plug-in</h3>
+  <p class="anim-intro">The checkout loads payment providers by name from a plug-in JAR. Watch delegation find the class, linking prepare it, and the static block run only when the first payment arrives.</p>
+  <div class="anim anim--one" data-frames="6" data-delay="4600">
+    <div class="anim__title">Loaded on first payment, initialised once <span>6 steps</span></div>
+    <div class="anim__views">
+      <div class="view view--story">
+        <span class="view__tag">Animated example</span>
+        <svg viewBox="0 0 360 236" role="img" aria-label="class loading of a payment plug-in">
+          <rect x="6" y="8" width="348" height="28" rx="8" class="s-board" style="stroke:board;stroke-width:1.5"/>
+          <text data-on="1" x="14" y="27" font-size="10" class="s-chalk mono">java -cp shop.jar:upi.jar Shop</text>
+          <text data-on="2" x="14" y="27" font-size="10" class="s-chalk mono">Class.forName("pay.UpiProvider")</text>
+          <text data-on="3" x="14" y="27" font-size="10" class="s-chalk mono">// app loader reads upi.jar</text>
+          <text data-on="4" x="14" y="27" font-size="10" class="s-chalk mono">// link: verify, prepare</text>
+          <text data-on="5" x="14" y="27" font-size="10" class="s-chalk mono">// initialise: static block</text>
+          <text data-on="6" x="14" y="27" font-size="10" class="s-chalk mono">Class.forName("pay.UpiProvider")  // 2nd</text>
+          <rect x="10" y="46" width="120" height="28" rx="8" class="s-soft-blue" style="stroke:var(--blue);stroke-width:1.5"/><text x="70" y="63.6" font-size="10" text-anchor="middle" font-weight="700" class="s-ink">Bootstrap</text>
+          <rect x="10" y="96" width="120" height="28" rx="8" class="s-soft-blue" style="stroke:var(--blue);stroke-width:1.5"/><text x="70" y="113.6" font-size="10" text-anchor="middle" font-weight="700" class="s-ink">Platform</text>
+          <rect x="10" y="146" width="120" height="28" rx="8" class="s-soft-acc" style="stroke:var(--track);stroke-width:1.5"/><text x="70" y="163.6" font-size="10" text-anchor="middle" font-weight="700" class="s-ink">Application</text>
+          <g data-on="2"><path d="M40 144 L40 127" style="stroke:var(--blue);stroke-width:2;fill:none"/><path d="M35.5 135.0 L40 127 L44.5 135.0" style="stroke:var(--blue);stroke-width:2;fill:none;stroke-linecap:round;stroke-linejoin:round"/></g>
+          <g data-on="2"><path d="M40 94 L40 77" style="stroke:var(--blue);stroke-width:2;fill:none"/><path d="M35.5 85.0 L40 77 L44.5 85.0" style="stroke:var(--blue);stroke-width:2;fill:none;stroke-linecap:round;stroke-linejoin:round"/></g>
+          <text data-on="2" x="50" y="139" font-size="9" class="s-blue">ask parent</text>
+          <text data-on="2" x="50" y="89" font-size="9" class="s-blue">ask parent</text>
+          <g data-on="3-"><rect x="10" y="196" width="120" height="24" rx="8" class="s-card2" style="stroke:var(--track);stroke-width:1.5"/><text x="70" y="211.42" font-size="9.5" text-anchor="middle" class="s-ink mono">upi.jar</text></g>
+          <g data-on="3"><path d="M70 194 L70 177" style="stroke:var(--green);stroke-width:2;fill:none"/><path d="M65.5 185.0 L70 177 L74.5 185.0" style="stroke:var(--green);stroke-width:2;fill:none;stroke-linecap:round;stroke-linejoin:round"/></g>
+          <rect x="144" y="46" width="210" height="176" rx="8" class="s-card" style="stroke:var(--line);stroke-width:1.5"/>
+          <text x="154" y="64" font-size="10" font-weight="700" class="s-ink mono">pay.UpiProvider</text>
+          <text data-on="1-2" x="154" y="84" font-size="10" class="s-ink2">not loaded yet</text>
+          <text data-on="2" x="154" y="104" font-size="10" class="s-ink2">parents: not found</text>
+          <text data-on="3-" x="154" y="84" font-size="10" font-weight="700" class="s-green">loaded by: app</text>
+          <text data-on="4-" x="154" y="104" font-size="10" class="s-green">verify ✓  prepare ✓</text>
+          <text data-on="4-" x="154" y="124" font-size="9.5" class="s-ink mono">static int feePaise =</text>
+          <text data-on="4" x="344" y="124" font-size="10" text-anchor="end" font-weight="700" class="s-ink mono">0</text>
+          <text data-on="5-" x="344" y="124" font-size="10" text-anchor="end" font-weight="700" class="s-green mono">200</text>
+          <text data-on="5" x="154" y="146" font-size="9.5" font-weight="700" class="s-acc">static block runs:</text>
+          <text data-on="5" x="154" y="164" font-size="9.5" class="s-ink mono">prints "UPI ready"</text>
+          <text data-on="6" x="154" y="146" font-size="9.5" font-weight="700" class="s-green">already initialised:</text>
+          <text data-on="6" x="154" y="164" font-size="9.5" class="s-ink">nothing runs again</text>
+          <text data-on="6" x="154" y="192" font-size="9.5" font-weight="700" class="s-red">CardProvider (no JAR):</text>
+          <text data-on="6" x="154" y="208" font-size="9.5" class="s-red mono">ClassNotFoundException</text>
+          <text x="354" y="231" text-anchor="end" class="s-wm">myphatshala.com</text>
+        </svg>
+        <ol class="caps" hidden>
+          <li><b>Start-up:</b> the shop starts with both JARs on the class path, but <code>UpiProvider</code> isn't loaded: no one has needed it yet.</li>
+          <li><b>First payment:</b> the checkout loads the provider by name. The application loader first asks platform, which asks bootstrap. Neither knows a class called <code>pay.UpiProvider</code>.</li>
+          <li><b>Found:</b> the application loader reads the class from <code>upi.jar</code> and defines it.</li>
+          <li><b>Linked:</b> the bytecode is verified and the static field <code>feePaise</code> is prepared with its default, 0.</li>
+          <li><b>Initialised:</b> <code>Class.forName</code> also initialises the class, so the static initializer runs once: the fee becomes 200 paise and “UPI ready” is printed.</li>
+          <li><b>Next payments:</b> the class is already loaded and initialised, so nothing runs again. A provider whose JAR is missing fails with <code>ClassNotFoundException</code>, which the checkout can catch and report.</li>
+        </ol>
+      </div>
+    </div>
+  </div>
+  <!--/ANIM2-->
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="14" y="16" width="40" height="58" rx="4" class="s-soft-blue" style="stroke:var(--blue)"/><rect x="66" y="16" width="40" height="58" rx="4" class="s-soft-acc" style="stroke:var(--track)"/><text x="34" y="50" text-anchor="middle" font-size="8" class="mono s-ink">app A</text><text x="86" y="50" text-anchor="middle" font-size="8" class="mono s-ink">app B</text></svg></div>
+    <div><h4>1. Application servers</h4><p>A server such as Tomcat gives each deployed web app its own class loader, so two apps can use different versions of the same library. Undeploying an app should make its loader (and all its classes) unreachable; if something still references it, metaspace leaks.</p>
+      <div class="uc-flow"><span>WAR deployed</span><i>→</i><span class="java">its own ClassLoader</span><i>→</i><span>Isolated classes</span></div></div>
+  </div>
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="16" y="20" width="88" height="50" rx="6" class="s-board"/><g font-size="7.6" class="mono" style="fill:#9FD3B8"><text x="22" y="38">Class.forName(</text><text x="26" y="52">"org.postgresql.</text><text x="30" y="64">Driver")</text></g></svg></div>
+    <div><h4>2. Database drivers and plug-ins</h4><p>Old JDBC code loaded drivers with <code>Class.forName("…Driver")</code>, whose static block registered the driver. Modern drivers are found automatically through <code>ServiceLoader</code>, which also loads classes by name from JARs.</p>
+      <div class="uc-flow"><span>Driver JAR</span><i>→</i><span class="java">ServiceLoader / forName</span><i>→</i><span>Registered driver</span></div></div>
+  </div>
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><circle cx="60" cy="45" r="26" class="s-soft-green" style="stroke:var(--green)"/><text x="60" y="49" text-anchor="middle" font-size="9" class="mono s-ink">1 instance</text></svg></div>
+    <div><h4>3. Lazy, thread-safe singletons</h4><p>The holder-class idiom puts a singleton in a static field of a nested class. Because a class is initialised once, under a JVM lock, on first use, you get lazy creation and thread safety without <code>synchronized</code>.</p>
+      <div class="uc-flow"><span>getInstance()</span><i>→</i><span class="java">Holder.INSTANCE</span><i>→</i><span>Created once</span></div></div>
+  </div>
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><path d="M14 70 L40 60 L66 40 L92 30 L108 26" style="stroke:var(--blue);stroke-width:2;fill:none"/><text x="60" y="84" text-anchor="middle" font-size="8" class="mono s-ink2">start-up time</text></svg></div>
+    <div><h4>4. Faster start-up</h4><p>Loading and verifying thousands of classes takes time, which matters for serverless functions and command-line tools. CDS archives (on by default for JDK classes) and application CDS (<code>-XX:SharedArchiveFile</code>) store pre-parsed classes to cut it down.</p>
+      <div class="uc-flow"><span>Cold start</span><i>→</i><span class="java">CDS archive</span><i>→</i><span>Fewer ms to ready</span></div></div>
+  </div>
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="14" y="14" width="92" height="62" rx="6" class="s-board"/><g font-size="7.4" class="mono" style="fill:#FF9B8A"><text x="20" y="34">NoClassDefFound</text><text x="20" y="48">Error: com/acme/</text><text x="20" y="62">util/JsonHelper</text></g></svg></div>
+    <div><h4>5. Dependency problems at deploy time</h4><p>A library compiled against version 2 of a JAR but deployed with version 1 fails with <code>NoClassDefFoundError</code> or <code>NoSuchMethodError</code>. Build tools (Maven, Gradle) can show the dependency tree to find the conflict.</p>
+      <div class="uc-flow"><span>Runtime error</span><i>→</i><span class="java">mvn dependency:tree</span><i>→</i><span>Align versions</span></div></div>
+  </div>
+  <p class="muted">Examples are simplified. Frameworks such as Spring and Hibernate also generate classes at run time (proxies), which are loaded by the same rules.</p>
+</section>
+
+<div class="ad-slot" data-slot="mid"></div>
+
+<!-- ======================= PART 7: RUN THE CODE ======================= -->
+<section class="part" id="run">
+  <span class="part-label"><b>7</b> Run the code</span>
+  <h2>Who loads what, and when</h2>
+  <div class="code" data-lang="java" data-file="Main.java"><pre><code>public class Main {
+    static class Account {
+        static int accounts = 0;
+        static {
+            System.out.println("Account class initialised");
+        }
+        Account() { accounts++; }
+    }
+
+    static class Savings extends Account {
+        static double rate = 3.5;
+        static {
+            System.out.println("Savings class initialised");
+        }
+    }
+
+    public static void main(String[] args) {
+        System.out.println("main starts");
+        Savings s = new Savings();
+        Savings t = new Savings();
+        System.out.println(Account.accounts + " accounts at " + Savings.rate + "%");
+        System.out.println("Savings loaded by: " + Savings.class.getClassLoader().getName());
+        System.out.println("String loaded by:  " + String.class.getClassLoader());
+    }
+}</code></pre><div class="output">main starts
+Account class initialised
+Savings class initialised
+2 accounts at 3.5%
+Savings loaded by: app
+String loaded by:  null</div></div>
+  <ul class="anno">
+    <li><code>new Savings()</code><span>First active use of Savings. Its superclass Account is initialised first.</span></li>
+    <li><code>Savings t = new Savings();</code><span>No static block runs the second time; only constructors.</span></li>
+    <li><code>getClassLoader().getName()</code><span>Your classes come from the application loader, named "app".</span></li>
+    <li><code>String.class.getClassLoader()</code><span><code>null</code> means the bootstrap loader, which is part of the JVM itself.</span></li>
+  </ul>
+  <div class="runner">
+    <script type="application/json">{"lang": "java", "file": "Main.java", "tasks": [
+{"label": "1 · When does a class initialise?", "hint": "Press <b>Run</b>. Only the line that reads <code>AppConfig.env</code> triggers initialisation. Then remove <code>final</code> from MAX_USERS and run again: which line triggers it now?", "code": "public class Main {\n    static class AppConfig {\n        static final int MAX_USERS = 100;          // compile-time constant\n        static String env = load();\n\n        static {\n            System.out.println(\"  AppConfig static block, env = \" + env);\n        }\n\n        static String load() {\n            System.out.println(\"  AppConfig.load() runs\");\n            return \"prod\";\n        }\n    }\n\n    static {\n        System.out.println(\"Main initialised\");\n    }\n\n    public static void main(String[] args) {\n        System.out.println(\"main starts\");\n        System.out.println(\"MAX_USERS = \" + AppConfig.MAX_USERS);\n        AppConfig[] slots = new AppConfig[3];\n        System.out.println(\"array of \" + slots.length + \" created\");\n        Class<?> c = AppConfig.class;\n        System.out.println(\"class literal: \" + c.getSimpleName());\n        System.out.println(\"env = \" + AppConfig.env);\n        System.out.println(\"env again = \" + AppConfig.env);\n    }\n}\n"},
+{"label": "2 · Predict: static vs instance", "hint": "<b>Predict first:</b> two objects are created. How many times does each block run? Static blocks run once per class; instance blocks once per object.", "code": "public class Main {\n    static class Ticket {\n        static int sold;\n\n        static {\n            System.out.println(\"static block: Ticket class ready\");\n        }\n\n        {\n            sold++;\n            System.out.println(\"instance block: ticket #\" + sold);\n        }\n\n        Ticket() {\n            System.out.println(\"constructor\");\n        }\n    }\n\n    public static void main(String[] args) {\n        new Ticket();\n        new Ticket();\n        System.out.println(\"sold = \" + Ticket.sold);\n    }\n}\n"},
+{"label": "3 · The class loader family", "hint": "The bootstrap loader is written in native code inside the JVM, so Java shows it as <code>null</code>. Try other classes, for example <code>java.net.http.HttpClient.class</code> or <code>java.util.logging.Logger.class</code>.", "code": "public class Main {\n    static String nameOf(ClassLoader loader) {\n        return loader == null ? \"bootstrap\" : loader.getName();\n    }\n\n    public static void main(String[] args) {\n        System.out.println(\"String     : \" + nameOf(String.class.getClassLoader()));\n        System.out.println(\"ArrayList  : \" + nameOf(java.util.ArrayList.class.getClassLoader()));\n        System.out.println(\"sql.Date   : \" + nameOf(java.sql.Date.class.getClassLoader()));\n        System.out.println(\"Main       : \" + nameOf(Main.class.getClassLoader()));\n\n        ClassLoader l = Main.class.getClassLoader();\n        System.out.print(\"Delegation : \");\n        while (l != null) {\n            System.out.print(l.getName() + \" -> \");\n            l = l.getParent();\n        }\n        System.out.println(\"bootstrap\");\n    }\n}\n"},
+{"label": "4 · How many classes are loaded?", "hint": "Your numbers will differ by JDK version and machine. Even a tiny program loads hundreds of JDK classes (many come pre-parsed from the CDS archive). Locally, run <code>java -verbose:class Main</code> to see each one.", "code": "import java.lang.management.ManagementFactory;\n\npublic class Main {\n    public static void main(String[] args) {\n        var bean = ManagementFactory.getClassLoadingMXBean();\n        System.out.println(\"Loaded right now: \" + bean.getLoadedClassCount());\n        java.time.LocalDate today = java.time.LocalDate.of(2026, 1, 26);\n        System.out.println(\"Using java.time: \" + today.getDayOfWeek());\n        System.out.println(\"Loaded now:       \" + bean.getLoadedClassCount());\n    }\n}\n"},
+{"label": "5 · Predict the crash", "hint": "<b>Predict first:</b> the static initializer divides by zero. Which error does the JVM throw, and what is its cause? Fix it by checking <code>branches</code> before dividing.", "code": "public class Main {\n    static class BranchStats {\n        static int branches = 0;\n        static int avgStaff = 120 / branches;\n    }\n\n    public static void main(String[] args) {\n        System.out.println(\"Loading stats...\");\n        System.out.println(\"Average staff: \" + BranchStats.avgStaff);\n    }\n}\n", "_expect": "exception"},
+{"label": "6 · Spot the error", "hint": "A static block runs once for the class, when no object exists yet, so it can't use an instance field. Make <code>rate</code> static, or set it in the constructor.", "code": "public class Main {\n    static class LoanConfig {\n        double rate;\n\n        static {\n            rate = 8.5;\n        }\n    }\n\n    public static void main(String[] args) {\n        System.out.println(new LoanConfig().rate);\n    }\n}\n", "_expect": "compile-error"}]}</script>
+  </div>
+</section>
+
+<!-- ======================= PART 8: LINE BY LINE ======================= -->
+<section class="part" id="tracer">
+  <span class="part-label"><b>8</b> Line by line</span>
+  <h2>Parent class first, then child, then objects</h2>
+  <p>Recorded from the real JVM. The <b>static</b> entries appear with default values as soon as the classes are prepared; watch the static initializer frames fill them in, once.</p>
+  <div class="tracer">
+    <script type="application/json">{"lang": "java", "code": ["public class Main {", "    static class Account {", "        static int accounts = 0;", "        static {", "            System.out.println(\"Account class initialised\");", "        }", "        Account() { accounts++; }", "    }", "", "    static class Savings extends Account {", "        static double rate = 3.5;", "        static {", "            System.out.println(\"Savings class initialised\");", "        }", "    }", "", "    public static void main(String[] args) {", "        System.out.println(\"main starts\");", "        Savings s = new Savings();", "        Savings t = new Savings();", "        System.out.println(Account.accounts + \" accounts at \" + Savings.rate + \"%\");", "    }", "}"], "steps": [
+{"line": 18, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}], "heap": ["<b>#1</b> String[0] (args, empty)"], "out": "main starts\n", "phase": "main starts", "note": "Main was initialised before main ran. Account and Savings haven't been used yet, so neither has been initialised."},
+{"line": 19, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "Main.Account static initializer", "vars": []}], "heap": ["<b>static</b> Main.Account.accounts = 0", "<b>static</b> Main.Savings.rate = 0.0", "<b>#1</b> String[0] (args, empty)"], "phase": "First active use", "note": "<code>new Savings()</code> is the first active use of Savings. Before initialising a class, the JVM initialises its superclass, so Account's static initializer frame is pushed first. Both classes are already <b>prepared</b>: their <b>static</b> entries show default values (accounts = 0, rate = 0.0)."},
+{"line": 3, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "Main.Account static initializer", "vars": []}], "heap": ["<b>static</b> Main.Account.accounts = 0", "<b>static</b> Main.Savings.rate = 0.0", "<b>#1</b> String[0] (args, empty)"], "phase": "Static field", "note": "<code>accounts = 0</code> runs (it was already 0 from preparation, so nothing visibly changes)."},
+{"line": 5, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "Main.Account static initializer", "vars": []}], "heap": ["<b>static</b> Main.Account.accounts = 0", "<b>static</b> Main.Savings.rate = 0.0", "<b>#1</b> String[0] (args, empty)"], "out": "Account class initialised\n", "phase": "Static block", "note": "Account's static block prints its message. This happens exactly once in the program's life."},
+{"line": 6, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "Main.Savings static initializer", "vars": []}], "heap": ["<b>static</b> Main.Account.accounts = 0", "<b>static</b> Main.Savings.rate = 0.0", "<b>#1</b> String[0] (args, empty)"], "phase": "Now Savings", "note": "Account is done. Savings' static initializer frame is pushed; <code>rate</code> is still the default 0.0."},
+{"line": 11, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "Main.Savings static initializer", "vars": []}], "heap": ["<b>static</b> Main.Account.accounts = 0", "<b>static</b> Main.Savings.rate = 3.5", "<b>#1</b> String[0] (args, empty)"], "phase": "Static field", "note": "rate = 3.5. Static initializers run top to bottom: field initializers and static blocks in source order."},
+{"line": 13, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "Main.Savings static initializer", "vars": []}], "heap": ["<b>static</b> Main.Account.accounts = 0", "<b>static</b> Main.Savings.rate = 3.5", "<b>#1</b> String[0] (args, empty)"], "out": "Savings class initialised\n", "phase": "Static block", "note": "Savings prints its message."},
+{"line": 14, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}], "heap": ["<b>static</b> Main.Account.accounts = 0", "<b>static</b> Main.Savings.rate = 3.5", "<b>#1</b> String[0] (args, empty)"], "phase": "Classes ready", "note": "Both static initializers have finished and their frames are gone. Only now can the object be created."},
+{"line": 19, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "new Main.Savings()", "vars": [["this", "→ #2 Main.Savings"]]}], "heap": ["<b>static</b> Main.Account.accounts = 0", "<b>static</b> Main.Savings.rate = 3.5", "<b>#1</b> String[0] (args, empty)", "<b>#2</b> Main.Savings {}"], "newVar": "this", "phase": "Allocate", "note": "Object #2 (a Savings) is allocated, and the Savings constructor frame is pushed."},
+{"line": 10, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "new Main.Savings()", "vars": [["this", "→ #2 Main.Savings"]]}, {"frame": "new Main.Account()", "vars": [["this", "→ #2 Main.Savings"]]}], "heap": ["<b>static</b> Main.Account.accounts = 0", "<b>static</b> Main.Savings.rate = 3.5", "<b>#1</b> String[0] (args, empty)", "<b>#2</b> Main.Savings {}"], "newVar": "this", "phase": "super()", "note": "The compiler-written Savings constructor first calls Account's constructor: a second frame for the same object #2."},
+{"line": 7, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "new Main.Savings()", "vars": [["this", "→ #2 Main.Savings"]]}], "heap": ["<b>static</b> Main.Account.accounts = 1", "<b>static</b> Main.Savings.rate = 3.5", "<b>#1</b> String[0] (args, empty)", "<b>#2</b> Main.Savings {}"], "phase": "Account()", "note": "<code>accounts++</code> updates the static field (shared by every account): 1. Account's constructor frame is popped."},
+{"line": 10, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}], "heap": ["<b>static</b> Main.Account.accounts = 1", "<b>static</b> Main.Savings.rate = 3.5", "<b>#1</b> String[0] (args, empty)"], "phase": "Constructor done", "note": "Savings' constructor returns; for a moment the reference is only on main's operand stack."},
+{"line": 19, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["s", "→ #2 Main.Savings"]]}], "heap": ["<b>static</b> Main.Account.accounts = 1", "<b>static</b> Main.Savings.rate = 3.5", "<b>#1</b> String[0] (args, empty)", "<b>#2</b> Main.Savings {}"], "newVar": "s", "phase": "Store s", "note": "<code>s</code> → #2."},
+{"line": 20, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["s", "→ #2 Main.Savings"]]}, {"frame": "new Main.Savings()", "vars": [["this", "→ #3 Main.Savings"]]}], "heap": ["<b>static</b> Main.Account.accounts = 1", "<b>static</b> Main.Savings.rate = 3.5", "<b>#1</b> String[0] (args, empty)", "<b>#2</b> Main.Savings {}", "<b>#3</b> Main.Savings {}"], "newVar": "this", "phase": "Second object", "note": "<code>new Savings()</code> again. This time <b>no</b> static initializer runs: the classes are already initialised. Only the constructor frames appear."},
+{"line": 10, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["s", "→ #2 Main.Savings"]]}, {"frame": "new Main.Savings()", "vars": [["this", "→ #3 Main.Savings"]]}, {"frame": "new Main.Account()", "vars": [["this", "→ #3 Main.Savings"]]}], "heap": ["<b>static</b> Main.Account.accounts = 1", "<b>static</b> Main.Savings.rate = 3.5", "<b>#1</b> String[0] (args, empty)", "<b>#2</b> Main.Savings {}", "<b>#3</b> Main.Savings {}"], "newVar": "this", "phase": "super()", "note": "Account's constructor frame for #3."},
+{"line": 7, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["s", "→ #2 Main.Savings"]]}, {"frame": "new Main.Savings()", "vars": [["this", "→ #3 Main.Savings"]]}], "heap": ["<b>static</b> Main.Account.accounts = 2", "<b>static</b> Main.Savings.rate = 3.5", "<b>#1</b> String[0] (args, empty)", "<b>#2</b> Main.Savings {}", "<b>#3</b> Main.Savings {}"], "phase": "Account()", "note": "accounts becomes 2; frame popped."},
+{"line": 10, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["s", "→ #2 Main.Savings"]]}], "heap": ["<b>static</b> Main.Account.accounts = 2", "<b>static</b> Main.Savings.rate = 3.5", "<b>#1</b> String[0] (args, empty)", "<b>#2</b> Main.Savings {}"], "phase": "Constructor done", "note": "Reference on the operand stack."},
+{"line": 20, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["s", "→ #2 Main.Savings"], ["t", "→ #3 Main.Savings"]]}], "heap": ["<b>static</b> Main.Account.accounts = 2", "<b>static</b> Main.Savings.rate = 3.5", "<b>#1</b> String[0] (args, empty)", "<b>#2</b> Main.Savings {}", "<b>#3</b> Main.Savings {}"], "newVar": "t", "phase": "Store t", "note": "<code>t</code> → #3."},
+{"line": 21, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["s", "→ #2 Main.Savings"], ["t", "→ #3 Main.Savings"]]}], "heap": ["<b>static</b> Main.Account.accounts = 2", "<b>static</b> Main.Savings.rate = 3.5", "<b>#1</b> String[0] (args, empty)", "<b>#2</b> Main.Savings {}", "<b>#3</b> Main.Savings {}"], "out": "2 accounts at 3.5%\n", "phase": "Print", "note": "Reads two static fields. 2 objects were created, but each class was initialised only once."},
+{"line": 22, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["s", "→ #2 Main.Savings"], ["t", "→ #3 Main.Savings"]]}], "heap": ["<b>static</b> Main.Account.accounts = 2", "<b>static</b> Main.Savings.rate = 3.5", "<b>#1</b> String[0] (args, empty)", "<b>#2</b> Main.Savings {}", "<b>#3</b> Main.Savings {}"], "phase": "main ends", "note": "main reaches its closing brace."},
+{"line": 22, "phase": "Program ends", "note": "main returns and the program ends. Classes stay loaded until their class loader becomes unreachable, which for the application class loader means until the JVM exits.", "stack": [], "heap": []}]}</script>
+  </div>
+
+<h3 id="worked">Worked examples: real problems, solved and traced in memory</h3>
+  <p class="wx-intro">Three business programs where the order of class initialisation matters. Watch the <b>static</b> entries: a class's static fields appear with default values when it is prepared, get their real values when its static initializer runs, and that happens only once.</p>
+  <article class="wx">
+    <div class="wx__head"><span class="wx__num">Example 1</span><span class="wx__tag">Billing · tax configuration</span></div>
+    <h4>A config class that loads itself on first use</h4>
+    <div class="wx__problem"><p class="wx__label">Problem statement</p><p>A billing service keeps tax settings in a <code>TaxConfig</code> class whose static fields are filled by a static initializer (here the state code is hard-coded; in real life it would come from a file). Show exactly when the configuration is loaded, and compute the GST on a Rs 2,000 bill.</p></div>
+    <div class="prob__io"><div><small>Input</small><pre>state = MH, GST 18% for MH, bill = Rs 2000</pre></div><div><small>Expected output</small><pre>Billing starts
+TaxConfig loaded for MH
+Tax: Rs 360</pre></div></div>
+    <div class="wx__approach"><p class="wx__label">Approach</p><ol><li>Put the settings in static fields and compute them in a static block, so they are prepared once for the whole program.</li><li>The static initializer runs on the <b>first active use</b> of the class, here <code>new TaxConfig()</code>, not when the program starts.</li><li>After that, every object and method reads the same already-initialised static fields.</li></ol></div>
+    <p class="wx__label">Solution: run it live</p>
+    <div class="runner">
+    <script type="application/json">{"lang": "java", "file": "Main.java", "tasks": [{"label": "Run · A config class that loads itself on first use", "hint": "Press <b>Run</b>. Then move the line <code>System.out.println(\"Billing starts\");</code> after <code>new TaxConfig()</code>. Which message prints first now?", "code": "public class Main {\n    static class TaxConfig {\n        static String state = loadState();\n        static int gstPercent;\n\n        static {\n            gstPercent = state.equals(\"MH\") ? 18 : 12;\n            System.out.println(\"TaxConfig loaded for \" + state);\n        }\n\n        static String loadState() {\n            return \"MH\";\n        }\n\n        int taxOn(int amount) {\n            return amount * gstPercent / 100;\n        }\n    }\n\n    public static void main(String[] args) {\n        System.out.println(\"Billing starts\");\n        TaxConfig cfg = new TaxConfig();\n        int tax = cfg.taxOn(2000);\n        System.out.println(\"Tax: Rs \" + tax);\n    }\n}\n"}]}</script>
+    </div>
+    <p class="wx__label">What happens in memory, step by step</p>
+    <p class="wx__how">Recorded from the real JVM: press <b>Next</b> to execute one line at a time. Watch method calls push and pop frames on the stack, and objects (numbered #1, #2 …) appear on the heap.</p>
+    <div class="tracer">
+    <script type="application/json">{"lang": "java", "code": ["public class Main {", "    static class TaxConfig {", "        static String state = loadState();", "        static int gstPercent;", "", "        static {", "            gstPercent = state.equals(\"MH\") ? 18 : 12;", "            System.out.println(\"TaxConfig loaded for \" + state);", "        }", "", "        static String loadState() {", "            return \"MH\";", "        }", "", "        int taxOn(int amount) {", "            return amount * gstPercent / 100;", "        }", "    }", "", "    public static void main(String[] args) {", "        System.out.println(\"Billing starts\");", "        TaxConfig cfg = new TaxConfig();", "        int tax = cfg.taxOn(2000);", "        System.out.println(\"Tax: Rs \" + tax);", "    }", "}"], "steps": [{"line": 21, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}], "heap": ["<b>#1</b> String[0] (args, empty)"], "out": "Billing starts\n", "phase": "Start", "note": "main prints its first line. TaxConfig has not been used, so it is not initialised (and the view has no static entries for it yet)."}, {"line": 22, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "Main.TaxConfig static initializer", "vars": []}], "heap": ["<b>static</b> Main.TaxConfig.gstPercent = 0", "<b>static</b> Main.TaxConfig.state = null", "<b>#1</b> String[0] (args, empty)"], "phase": "First active use", "note": "<code>new TaxConfig()</code> needs the class initialised first. TaxConfig was just loaded and <b>prepared</b>: its static fields exist with defaults (state = null, gstPercent = 0). Now its static initializer frame is pushed."}, {"line": 3, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "Main.TaxConfig static initializer", "vars": []}, {"frame": "Main.TaxConfig.loadState()", "vars": []}], "heap": ["<b>static</b> Main.TaxConfig.gstPercent = 0", "<b>static</b> Main.TaxConfig.state = null", "<b>#1</b> String[0] (args, empty)"], "phase": "Static field initializer", "note": "<code>state = loadState()</code> calls a static method, which gets its own frame on top of the initializer."}, {"line": 12, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "Main.TaxConfig static initializer", "vars": []}], "heap": ["<b>static</b> Main.TaxConfig.gstPercent = 0", "<b>static</b> Main.TaxConfig.state = null", "<b>#1</b> String[0] (args, empty)"], "phase": "Return", "note": "loadState returns \"MH\" and its frame is popped."}, {"line": 3, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "Main.TaxConfig static initializer", "vars": []}], "heap": ["<b>static</b> Main.TaxConfig.gstPercent = 0", "<b>static</b> Main.TaxConfig.state = → #2 &quot;MH&quot;", "<b>#1</b> String[0] (args, empty)", "<b>#2</b> String &quot;MH&quot;"], "phase": "Assigned", "note": "state = \"MH\" in its static entry."}, {"line": 7, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "Main.TaxConfig static initializer", "vars": []}], "heap": ["<b>static</b> Main.TaxConfig.gstPercent = 18", "<b>static</b> Main.TaxConfig.state = → #2 &quot;MH&quot;", "<b>#1</b> String[0] (args, empty)", "<b>#2</b> String &quot;MH&quot;"], "phase": "Static block", "note": "gstPercent = 18, because the state is MH. Static field initializers and static blocks run in the order they are written."}, {"line": 8, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "Main.TaxConfig static initializer", "vars": []}], "heap": ["<b>static</b> Main.TaxConfig.gstPercent = 18", "<b>static</b> Main.TaxConfig.state = → #2 &quot;MH&quot;", "<b>#1</b> String[0] (args, empty)", "<b>#2</b> String &quot;MH&quot;"], "out": "TaxConfig loaded for MH\n", "phase": "Message", "note": "The static block prints once. Everything before this was preparation; this is <b>initialisation</b>."}, {"line": 9, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}], "heap": ["<b>static</b> Main.TaxConfig.gstPercent = 18", "<b>static</b> Main.TaxConfig.state = → #2 &quot;MH&quot;", "<b>#1</b> String[0] (args, empty)", "<b>#2</b> String &quot;MH&quot;"], "phase": "Initialiser done", "note": "The static initializer frame is popped. TaxConfig is now fully initialised."}, {"line": 22, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "new Main.TaxConfig()", "vars": [["this", "→ #3 Main.TaxConfig"]]}], "heap": ["<b>static</b> Main.TaxConfig.gstPercent = 18", "<b>static</b> Main.TaxConfig.state = → #2 &quot;MH&quot;", "<b>#1</b> String[0] (args, empty)", "<b>#2</b> String &quot;MH&quot;", "<b>#3</b> Main.TaxConfig {}"], "newVar": "this", "phase": "Allocate", "note": "Only now is object #3 created and its (compiler-written) constructor frame pushed."}, {"line": 2, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}], "heap": ["<b>static</b> Main.TaxConfig.gstPercent = 18", "<b>static</b> Main.TaxConfig.state = → #2 &quot;MH&quot;", "<b>#1</b> String[0] (args, empty)", "<b>#2</b> String &quot;MH&quot;"], "phase": "Constructor done", "note": "The default constructor returns; the reference is briefly on the operand stack."}, {"line": 22, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["cfg", "→ #3 Main.TaxConfig"]]}], "heap": ["<b>static</b> Main.TaxConfig.gstPercent = 18", "<b>static</b> Main.TaxConfig.state = → #2 &quot;MH&quot;", "<b>#1</b> String[0] (args, empty)", "<b>#2</b> String &quot;MH&quot;", "<b>#3</b> Main.TaxConfig {}"], "newVar": "cfg", "phase": "Store cfg", "note": "<code>cfg</code> → #3. The object has no instance fields; the settings live in the class."}, {"line": 23, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["cfg", "→ #3 Main.TaxConfig"]]}, {"frame": "Main.TaxConfig.taxOn(int amount)", "vars": [["this", "→ #3 Main.TaxConfig"], ["amount", "2000"]]}], "heap": ["<b>static</b> Main.TaxConfig.gstPercent = 18", "<b>static</b> Main.TaxConfig.state = → #2 &quot;MH&quot;", "<b>#1</b> String[0] (args, empty)", "<b>#2</b> String &quot;MH&quot;", "<b>#3</b> Main.TaxConfig {}"], "newVar": "this", "phase": "Call taxOn", "note": "A frame for taxOn with this → #3 and amount = 2000."}, {"line": 16, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["cfg", "→ #3 Main.TaxConfig"]]}], "heap": ["<b>static</b> Main.TaxConfig.gstPercent = 18", "<b>static</b> Main.TaxConfig.state = → #2 &quot;MH&quot;", "<b>#1</b> String[0] (args, empty)", "<b>#2</b> String &quot;MH&quot;", "<b>#3</b> Main.TaxConfig {}"], "phase": "Return", "note": "2000 × 18 / 100 = 360. The method read the static field gstPercent. Frame popped."}, {"line": 23, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["cfg", "→ #3 Main.TaxConfig"], ["tax", "360"]]}], "heap": ["<b>static</b> Main.TaxConfig.gstPercent = 18", "<b>static</b> Main.TaxConfig.state = → #2 &quot;MH&quot;", "<b>#1</b> String[0] (args, empty)", "<b>#2</b> String &quot;MH&quot;", "<b>#3</b> Main.TaxConfig {}"], "newVar": "tax", "phase": "Store tax", "note": "tax = 360."}, {"line": 24, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["cfg", "→ #3 Main.TaxConfig"], ["tax", "360"]]}], "heap": ["<b>static</b> Main.TaxConfig.gstPercent = 18", "<b>static</b> Main.TaxConfig.state = → #2 &quot;MH&quot;", "<b>#1</b> String[0] (args, empty)", "<b>#2</b> String &quot;MH&quot;", "<b>#3</b> Main.TaxConfig {}"], "out": "Tax: Rs 360\n", "phase": "Print", "note": "Prints the tax."}, {"line": 25, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["cfg", "→ #3 Main.TaxConfig"], ["tax", "360"]]}], "heap": ["<b>static</b> Main.TaxConfig.gstPercent = 18", "<b>static</b> Main.TaxConfig.state = → #2 &quot;MH&quot;", "<b>#1</b> String[0] (args, empty)", "<b>#2</b> String &quot;MH&quot;", "<b>#3</b> Main.TaxConfig {}"], "phase": "main finishes", "note": "main reaches its closing brace."}, {"line": 25, "phase": "Program ends", "note": "main returns, its frame is popped and the program ends.", "stack": [], "heap": []}]}</script>
+    </div>
+  </article>
+  <article class="wx">
+    <div class="wx__head"><span class="wx__num">Example 2</span><span class="wx__tag">Payments · gateway client</span></div>
+    <h4>Lazy singleton with a holder class</h4>
+    <div class="wx__problem"><p class="wx__label">Problem statement</p><p>Creating a payment-gateway client is expensive, so the app wants exactly one, created only when the first payment happens. Use the <b>initialization-on-demand holder</b> idiom and show that two calls return the same object.</p></div>
+    <div class="prob__io"><div><small>Input</small><pre>getInstance() called twice</pre></div><div><small>Expected output</small><pre>App up, no client yet
+Same client? true, created 1</pre></div></div>
+    <div class="wx__approach"><p class="wx__label">Approach</p><ol><li>Put the single instance in a static field of a private nested class <code>Holder</code>.</li><li><code>getInstance()</code> reads <code>Holder.INSTANCE</code>. The first read is Holder's first active use, so the JVM initialises Holder then, creating the client.</li><li>The JVM guarantees a class is initialised only once, even with many threads, so there is no need for <code>synchronized</code>.</li></ol></div>
+    <p class="wx__label">Solution: run it live</p>
+    <div class="runner">
+    <script type="application/json">{"lang": "java", "file": "Main.java", "tasks": [{"label": "Run · Lazy singleton with a holder class", "hint": "Press <b>Run</b>. Then add a print inside the GatewayClient constructor. How many times does it print?", "code": "public class Main {\n    static class GatewayClient {\n        static int created = 0;\n        GatewayClient() { created++; }\n\n        private static class Holder {\n            static final GatewayClient INSTANCE = new GatewayClient();\n        }\n\n        static GatewayClient getInstance() {\n            return Holder.INSTANCE;\n        }\n    }\n\n    public static void main(String[] args) {\n        System.out.println(\"App up, no client yet\");\n        GatewayClient a = GatewayClient.getInstance();\n        GatewayClient b = GatewayClient.getInstance();\n        System.out.println(\"Same client? \" + (a == b) + \", created \" + GatewayClient.created);\n    }\n}\n"}]}</script>
+    </div>
+    <p class="wx__label">What happens in memory, step by step</p>
+    <p class="wx__how">Recorded from the real JVM: press <b>Next</b> to execute one line at a time. Watch method calls push and pop frames on the stack, and objects (numbered #1, #2 …) appear on the heap.</p>
+    <div class="tracer">
+    <script type="application/json">{"lang": "java", "code": ["public class Main {", "    static class GatewayClient {", "        static int created = 0;", "        GatewayClient() { created++; }", "", "        private static class Holder {", "            static final GatewayClient INSTANCE = new GatewayClient();", "        }", "", "        static GatewayClient getInstance() {", "            return Holder.INSTANCE;", "        }", "    }", "", "    public static void main(String[] args) {", "        System.out.println(\"App up, no client yet\");", "        GatewayClient a = GatewayClient.getInstance();", "        GatewayClient b = GatewayClient.getInstance();", "        System.out.println(\"Same client? \" + (a == b) + \", created \" + GatewayClient.created);", "    }", "}"], "steps": [{"line": 16, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}], "heap": ["<b>#1</b> String[0] (args, empty)"], "out": "App up, no client yet\n", "phase": "Start", "note": "Neither GatewayClient nor Holder has been initialised. No client exists."}, {"line": 17, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "Main.GatewayClient.getInstance()", "vars": []}], "heap": ["<b>static</b> Main.GatewayClient.created = 0", "<b>#1</b> String[0] (args, empty)"], "phase": "Call getInstance", "note": "Invoking a static method is an active use of GatewayClient, so it is initialised: its static entry shows created = 0. A frame for getInstance is pushed."}, {"line": 11, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}], "heap": ["<b>static</b> Main.GatewayClient.created = 1", "<b>#1</b> String[0] (args, empty)"], "phase": "Read Holder.INSTANCE", "note": "The first read of Holder's static field initialises <b>Holder</b>. Inside this one step the JVM ran Holder's static initializer, which called <code>new GatewayClient()</code>: the static entry now shows created = 1. (The trace can't step into an initializer triggered this way, and it doesn't list <code>final</code> statics such as INSTANCE, so the new client only appears once main stores it.) getInstance returns it and its frame is popped."}, {"line": 17, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["a", "→ #2 Main.GatewayClient"]]}], "heap": ["<b>static</b> Main.GatewayClient.created = 1", "<b>#1</b> String[0] (args, empty)", "<b>#2</b> Main.GatewayClient {}"], "newVar": "a", "phase": "Store a", "note": "<code>a</code> → #2, the client created inside the previous step."}, {"line": 18, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["a", "→ #2 Main.GatewayClient"]]}, {"frame": "Main.GatewayClient.getInstance()", "vars": []}], "heap": ["<b>static</b> Main.GatewayClient.created = 1", "<b>#1</b> String[0] (args, empty)", "<b>#2</b> Main.GatewayClient {}"], "phase": "Second call", "note": "A new frame for getInstance."}, {"line": 11, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["a", "→ #2 Main.GatewayClient"]]}], "heap": ["<b>static</b> Main.GatewayClient.created = 1", "<b>#1</b> String[0] (args, empty)", "<b>#2</b> Main.GatewayClient {}"], "phase": "Read again", "note": "Holder is already initialised, so nothing runs: the same reference #2 is returned. created stays 1."}, {"line": 18, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["a", "→ #2 Main.GatewayClient"], ["b", "→ #2 Main.GatewayClient"]]}], "heap": ["<b>static</b> Main.GatewayClient.created = 1", "<b>#1</b> String[0] (args, empty)", "<b>#2</b> Main.GatewayClient {}"], "newVar": "b", "phase": "Store b", "note": "<code>b</code> → #2. Two variables, one object."}, {"line": 19, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["a", "→ #2 Main.GatewayClient"], ["b", "→ #2 Main.GatewayClient"]]}], "heap": ["<b>static</b> Main.GatewayClient.created = 1", "<b>#1</b> String[0] (args, empty)", "<b>#2</b> Main.GatewayClient {}"], "out": "Same client? true, created 1\n", "phase": "Print", "note": "a == b is true and only one client was ever created."}, {"line": 20, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["a", "→ #2 Main.GatewayClient"], ["b", "→ #2 Main.GatewayClient"]]}], "heap": ["<b>static</b> Main.GatewayClient.created = 1", "<b>#1</b> String[0] (args, empty)", "<b>#2</b> Main.GatewayClient {}"], "phase": "main finishes", "note": "main reaches its closing brace."}, {"line": 20, "phase": "Program ends", "note": "main returns, its frame is popped and the program ends.", "stack": [], "heap": []}]}</script>
+    </div>
+  </article>
+  <article class="wx">
+    <div class="wx__head"><span class="wx__num">Example 3</span><span class="wx__tag">Billing · invoice numbers</span></div>
+    <h4>Constants are not fields: what triggers initialisation</h4>
+    <div class="wx__problem"><p class="wx__label">Problem statement</p><p>Invoices are numbered from 1001 using a static counter, and GST is a constant 18%. Print the GST rate first, then create two invoices. Trace when class <code>Invoice</code> is initialised.</p></div>
+    <div class="prob__io"><div><small>Input</small><pre>amounts: Rs 500, Rs 1200</pre></div><div><small>Expected output</small><pre>GST is 18%
+1001: Rs 590
+1002: Rs 1416</pre></div></div>
+    <div class="wx__approach"><p class="wx__label">Approach</p><ol><li><code>static final int GST_PERCENT = 18</code> is a <b>compile-time constant</b>: javac copies 18 into the code that uses it, so reading it does not initialise Invoice.</li><li><code>static int nextNumber = 1001</code> is an ordinary static field. The first <code>new Invoice</code> triggers initialisation and sets it.</li><li>Each constructor takes the next number with <code>nextNumber++</code>: one counter shared by all invoices.</li></ol></div>
+    <p class="wx__label">Solution: run it live</p>
+    <div class="runner">
+    <script type="application/json">{"lang": "java", "file": "Main.java", "tasks": [{"label": "Run · Constants are not fields: what triggers initialisation", "hint": "Press <b>Run</b>. Then remove the word <code>final</code> from GST_PERCENT and add a static block that prints \"Invoice ready\". When does it print now?", "code": "public class Main {\n    static class Invoice {\n        static final int GST_PERCENT = 18;\n        static int nextNumber = 1001;\n        final int number;\n        final int total;\n\n        Invoice(int amount) {\n            number = nextNumber++;\n            total = amount + amount * GST_PERCENT / 100;\n        }\n    }\n\n    public static void main(String[] args) {\n        System.out.println(\"GST is \" + Invoice.GST_PERCENT + \"%\");\n        Invoice first = new Invoice(500);\n        Invoice second = new Invoice(1200);\n        System.out.println(first.number + \": Rs \" + first.total);\n        System.out.println(second.number + \": Rs \" + second.total);\n    }\n}\n"}]}</script>
+    </div>
+    <p class="wx__label">What happens in memory, step by step</p>
+    <p class="wx__how">Recorded from the real JVM: press <b>Next</b> to execute one line at a time. Watch method calls push and pop frames on the stack, and objects (numbered #1, #2 …) appear on the heap.</p>
+    <div class="tracer">
+    <script type="application/json">{"lang": "java", "code": ["public class Main {", "    static class Invoice {", "        static final int GST_PERCENT = 18;", "        static int nextNumber = 1001;", "        final int number;", "        final int total;", "", "        Invoice(int amount) {", "            number = nextNumber++;", "            total = amount + amount * GST_PERCENT / 100;", "        }", "    }", "", "    public static void main(String[] args) {", "        System.out.println(\"GST is \" + Invoice.GST_PERCENT + \"%\");", "        Invoice first = new Invoice(500);", "        Invoice second = new Invoice(1200);", "        System.out.println(first.number + \": Rs \" + first.total);", "        System.out.println(second.number + \": Rs \" + second.total);", "    }", "}"], "steps": [{"line": 15, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}], "heap": ["<b>#1</b> String[0] (args, empty)"], "out": "GST is 18%\n", "phase": "Read the constant", "note": "GST_PERCENT is a compile-time constant, so javac put the value 18 straight into main's bytecode. Invoice is not initialised; it doesn't even appear yet."}, {"line": 16, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "Main.Invoice static initializer", "vars": []}], "heap": ["<b>static</b> Main.Invoice.nextNumber = 0", "<b>#1</b> String[0] (args, empty)"], "phase": "First new", "note": "<code>new Invoice(500)</code> is an active use. Invoice is prepared: its static entry shows nextNumber = 0, the default. (The constant GST_PERCENT already holds 18 from preparation; the view doesn't list <code>final</code> statics.) Its static initializer frame is pushed."}, {"line": 4, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}], "heap": ["<b>static</b> Main.Invoice.nextNumber = 1001", "<b>#1</b> String[0] (args, empty)"], "phase": "Static initializer", "note": "nextNumber = 1001. Initialisation done; the frame is popped."}, {"line": 16, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "new Main.Invoice(int amount)", "vars": [["this", "→ #2 Main.Invoice"], ["amount", "500"]]}], "heap": ["<b>static</b> Main.Invoice.nextNumber = 1001", "<b>#1</b> String[0] (args, empty)", "<b>#2</b> Main.Invoice {number=0, total=0}"], "newVar": "this", "phase": "Allocate", "note": "Invoice #2 is created with number = 0 and total = 0, and its constructor frame is pushed with amount = 500."}, {"line": 8, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "new Main.Invoice(int amount)", "vars": [["this", "→ #2 Main.Invoice"], ["amount", "500"]]}], "heap": ["<b>static</b> Main.Invoice.nextNumber = 1001", "<b>#1</b> String[0] (args, empty)", "<b>#2</b> Main.Invoice {number=0, total=0}"], "phase": "super()", "note": "The constructor first calls Object()."}, {"line": 9, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "new Main.Invoice(int amount)", "vars": [["this", "→ #2 Main.Invoice"], ["amount", "500"]]}], "heap": ["<b>static</b> Main.Invoice.nextNumber = 1002", "<b>#1</b> String[0] (args, empty)", "<b>#2</b> Main.Invoice {number=1001, total=0}"], "phase": "Next number", "note": "number = 1001, then the static counter moves to 1002."}, {"line": 10, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "new Main.Invoice(int amount)", "vars": [["this", "→ #2 Main.Invoice"], ["amount", "500"]]}], "heap": ["<b>static</b> Main.Invoice.nextNumber = 1002", "<b>#1</b> String[0] (args, empty)", "<b>#2</b> Main.Invoice {number=1001, total=590}"], "phase": "Total", "note": "500 + 500 × 18 / 100 = 590."}, {"line": 11, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}], "heap": ["<b>static</b> Main.Invoice.nextNumber = 1002", "<b>#1</b> String[0] (args, empty)"], "phase": "Constructor done", "note": "Frame popped; the reference waits on the operand stack."}, {"line": 16, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["first", "→ #2 Main.Invoice"]]}], "heap": ["<b>static</b> Main.Invoice.nextNumber = 1002", "<b>#1</b> String[0] (args, empty)", "<b>#2</b> Main.Invoice {number=1001, total=590}"], "newVar": "first", "phase": "Store first", "note": "<code>first</code> → #2."}, {"line": 17, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["first", "→ #2 Main.Invoice"]]}, {"frame": "new Main.Invoice(int amount)", "vars": [["this", "→ #3 Main.Invoice"], ["amount", "1200"]]}], "heap": ["<b>static</b> Main.Invoice.nextNumber = 1002", "<b>#1</b> String[0] (args, empty)", "<b>#2</b> Main.Invoice {number=1001, total=590}", "<b>#3</b> Main.Invoice {number=0, total=0}"], "newVar": "this", "phase": "Second new", "note": "No static initializer this time: Invoice is already initialised. Invoice #3 is allocated and its constructor frame is pushed."}, {"line": 8, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["first", "→ #2 Main.Invoice"]]}, {"frame": "new Main.Invoice(int amount)", "vars": [["this", "→ #3 Main.Invoice"], ["amount", "1200"]]}], "heap": ["<b>static</b> Main.Invoice.nextNumber = 1002", "<b>#1</b> String[0] (args, empty)", "<b>#2</b> Main.Invoice {number=1001, total=590}", "<b>#3</b> Main.Invoice {number=0, total=0}"], "phase": "super()", "note": "Object() again."}, {"line": 9, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["first", "→ #2 Main.Invoice"]]}, {"frame": "new Main.Invoice(int amount)", "vars": [["this", "→ #3 Main.Invoice"], ["amount", "1200"]]}], "heap": ["<b>static</b> Main.Invoice.nextNumber = 1003", "<b>#1</b> String[0] (args, empty)", "<b>#2</b> Main.Invoice {number=1001, total=590}", "<b>#3</b> Main.Invoice {number=1002, total=0}"], "phase": "Next number", "note": "number = 1002, nextNumber = 1003. Both objects share the one static counter."}, {"line": 10, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["first", "→ #2 Main.Invoice"]]}, {"frame": "new Main.Invoice(int amount)", "vars": [["this", "→ #3 Main.Invoice"], ["amount", "1200"]]}], "heap": ["<b>static</b> Main.Invoice.nextNumber = 1003", "<b>#1</b> String[0] (args, empty)", "<b>#2</b> Main.Invoice {number=1001, total=590}", "<b>#3</b> Main.Invoice {number=1002, total=1416}"], "phase": "Total", "note": "1200 + 216 = 1416."}, {"line": 11, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["first", "→ #2 Main.Invoice"]]}], "heap": ["<b>static</b> Main.Invoice.nextNumber = 1003", "<b>#1</b> String[0] (args, empty)", "<b>#2</b> Main.Invoice {number=1001, total=590}"], "phase": "Constructor done", "note": "Frame popped."}, {"line": 17, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["first", "→ #2 Main.Invoice"], ["second", "→ #3 Main.Invoice"]]}], "heap": ["<b>static</b> Main.Invoice.nextNumber = 1003", "<b>#1</b> String[0] (args, empty)", "<b>#2</b> Main.Invoice {number=1001, total=590}", "<b>#3</b> Main.Invoice {number=1002, total=1416}"], "newVar": "second", "phase": "Store second", "note": "<code>second</code> → #3."}, {"line": 18, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["first", "→ #2 Main.Invoice"], ["second", "→ #3 Main.Invoice"]]}], "heap": ["<b>static</b> Main.Invoice.nextNumber = 1003", "<b>#1</b> String[0] (args, empty)", "<b>#2</b> Main.Invoice {number=1001, total=590}", "<b>#3</b> Main.Invoice {number=1002, total=1416}"], "out": "1001: Rs 590\n", "phase": "Print", "note": "Invoice 1001."}, {"line": 19, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["first", "→ #2 Main.Invoice"], ["second", "→ #3 Main.Invoice"]]}], "heap": ["<b>static</b> Main.Invoice.nextNumber = 1003", "<b>#1</b> String[0] (args, empty)", "<b>#2</b> Main.Invoice {number=1001, total=590}", "<b>#3</b> Main.Invoice {number=1002, total=1416}"], "out": "1002: Rs 1416\n", "phase": "Print", "note": "Invoice 1002."}, {"line": 20, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["first", "→ #2 Main.Invoice"], ["second", "→ #3 Main.Invoice"]]}], "heap": ["<b>static</b> Main.Invoice.nextNumber = 1003", "<b>#1</b> String[0] (args, empty)", "<b>#2</b> Main.Invoice {number=1001, total=590}", "<b>#3</b> Main.Invoice {number=1002, total=1416}"], "phase": "main finishes", "note": "main reaches its closing brace."}, {"line": 20, "phase": "Program ends", "note": "main returns, its frame is popped and the program ends.", "stack": [], "heap": []}]}</script>
+    </div>
+  </article>
+
+</section>
+
+<!-- ======================= PART 9: QUIZ AND REVISION ======================= -->
+<section class="part" id="quiz">
+  <span class="part-label"><b>9</b> Quiz and revision</span>
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <script type="application/json">[
+      { "q": "What is the correct order of class loading phases?", "options": ["Initialise, load, link", "Load, link (verify, prepare, resolve), initialise", "Link, load, initialise", "Verify, load, initialise, prepare"], "answer": 1, "why": "The class is loaded, then linked (verified, prepared, resolved), and finally initialised." },
+      { "q": "During preparation, static int count = 5; holds…", "options": ["5", "0", "null", "Garbage"], "answer": 1, "why": "Preparation only sets defaults. The value 5 is assigned later, during initialisation (unless the field is a static final constant)." },
+      { "q": "Which of these initialises class Config?", "options": ["Config[] arr = new Config[5];", "Class<?> c = Config.class;", "Config.reload(); (a static method)", "Reading static final int MAX = 10;"], "answer": 2, "why": "Calling a static method is an active use. Arrays, class literals and compile-time constants don't initialise the class." },
+      { "q": "String.class.getClassLoader() returns…", "options": ["The application class loader", "The platform class loader", "null, meaning the bootstrap loader", "It throws an exception"], "answer": 2, "why": "Core classes are loaded by the bootstrap loader, which is native and represented by null." },
+      { "q": "What does parent delegation mean?", "options": ["A child class inherits its parent's loader", "A loader asks its parent to load a class before trying itself", "Classes are loaded in parallel", "The parent class is loaded after the child"], "answer": 1, "why": "Application → platform → bootstrap are asked first; only if they can't find the class does the requesting loader load it." },
+      { "q": "Class.forName(\"com.x.Missing\") with no such class throws…", "options": ["NoClassDefFoundError", "ClassNotFoundException", "NullPointerException", "ExceptionInInitializerError"], "answer": 1, "why": "Loading by name throws the checked ClassNotFoundException." },
+      { "q": "A static initializer throws. What happens on the SECOND use of the class?", "options": ["The initializer runs again", "ExceptionInInitializerError again", "NoClassDefFoundError: Could not initialize class …", "It works with default values"], "answer": 2, "why": "The class is marked erroneous after the first failure; later uses throw NoClassDefFoundError." },
+      { "q": "Child extends Parent; x is declared in Parent. Reading Child.x initialises…", "options": ["Only Child", "Only Parent", "Both", "Neither"], "answer": 1, "why": "Only the class that declares the static field is initialised." }
+    ]</script>
+  </div>
+  <h3>Quick revision</h3>
+  <div class="revision">
+    <h3>Lesson 8.4 in one screen</h3>
+    <ul>
+      <li>Phases: load → link (verify, prepare, resolve) → initialise. Classes are loaded lazily, when first needed.</li>
+      <li>Prepare = static fields get defaults; initialise = static initializers and blocks run, in source order, once.</li>
+      <li>Initialised on first active use: <code>new</code>, static method, non-constant static field, <code>Class.forName</code>, subclass init, main class.</li>
+      <li>Not on: compile-time constants, arrays of the type, class literals, parent field via child.</li>
+      <li>Loaders: bootstrap (null) → platform (Java 9+) → application; parent delegation.</li>
+      <li><code>ClassNotFoundException</code> = loading by name failed; <code>NoClassDefFoundError</code> = was there at compile time, missing or broken now.</li>
+      <li>See it: <code>java -verbose:class</code>; a failed static block gives <code>ExceptionInInitializerError</code> then NCDFE.</li>
+    </ul>
+  </div>
+  <h3>Interview and viva questions</h3>
+  <div class="faq">
+    <details><summary>Explain the class loading process in Java.</summary><p>A class loader finds the class's bytes and defines the class (loading). The JVM then links it: verifies the bytecode, prepares static fields with default values, and resolves symbolic references (often lazily). Finally it initialises the class by running its static field initializers and static blocks, once, on the first active use, after initialising its superclass.</p></details>
+    <details><summary>What are the built-in class loaders and what is delegation?</summary><p>Bootstrap (native, loads core <code>java.base</code> classes), platform (Java 9+, other JDK modules; the extension loader in Java 8) and application or system (the class path). Each loader first delegates to its parent; only if the parent can't find the class does it load it itself. This keeps core classes from being replaced and avoids loading the same class twice.</p></details>
+    <details><summary>ClassNotFoundException vs NoClassDefFoundError?</summary><p><code>ClassNotFoundException</code> is a checked exception thrown when code explicitly loads a class by name and it isn't found. <code>NoClassDefFoundError</code> is an error thrown when a class that was available at compile time can't be found or initialised at run time, for example a missing JAR or a static initializer that failed earlier.</p></details>
+    <details><summary>When exactly does a static block run?</summary><p>Once, when the class is initialised: on its first active use, such as creating an instance, calling a static method, accessing a non-constant static field, calling <code>Class.forName</code>, initialising a subclass, or when it is the main class. Not when merely declaring a variable of the type, creating an array of it or reading a compile-time constant.</p></details>
+    <details><summary>Can two classes with the same name exist in one JVM?</summary><p>Yes, if different class loaders load them. A class's identity is its name plus its defining loader, so they are different types; casting one to the other throws <code>ClassCastException</code>. Application servers use this to isolate web applications.</p></details>
+  </div>
+
+  <h3 id="practice">Practice problems</h3>
+  <p class="prob-intro">Class loading questions are mostly about order: what is initialised, when, and by whom. Predict every line of output before running. The last three are business tasks.</p>
+  <div class="probs">
+    <article class="prob"><div class="prob__head"><span class="prob__num">P1</span><span class="prob__tag prob__tag--easy">Easy</span><h4>Static block vs main</h4></div>
+      <p>Put a static block in <code>Main</code> and a print as the first line of <code>main</code>. Which prints first?</p>
+      <div class="prob__io"><div><small>Input</small><pre>(no input)</pre></div><div><small>Expected output</small><pre>Main initialised, visits = 10
+main starts
+visits = 11</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="java" data-file="Main.java"><pre><code>public class Main {
+    static int visits;
+
+    static {
+        visits = 10;
+        System.out.println(&quot;Main initialised, visits = &quot; + visits);
+    }
+
+    public static void main(String[] args) {
+        System.out.println(&quot;main starts&quot;);
+        visits++;
+        System.out.println(&quot;visits = &quot; + visits);
+    }
+}</code></pre><div class="output">Main initialised, visits = 10
+main starts
+visits = 11</div></div>
+        <p><b>How it works:</b> before calling <code>main</code>, the JVM must initialise class <code>Main</code>, because invoking a static method is an active use. So the static block always runs first, exactly once.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P2</span><span class="prob__tag prob__tag--easy">Easy</span><h4>Which loader loaded it?</h4></div>
+      <p>Print the class loader of <code>String</code>, <code>java.sql.Date</code> and your own <code>Main</code> class.</p>
+      <div class="prob__io"><div><small>Input</small><pre>String, java.sql.Date, Main</pre></div><div><small>Expected output</small><pre>String       -&gt; bootstrap (shown as null)
+java.sql.Date -&gt; platform
+Main         -&gt; app
+Parent of app -&gt; platform</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="java" data-file="Main.java"><pre><code>public class Main {
+    public static void main(String[] args) {
+        ClassLoader forString = String.class.getClassLoader();
+        ClassLoader forSqlDate = java.sql.Date.class.getClassLoader();
+        ClassLoader forMain = Main.class.getClassLoader();
+
+        System.out.println(&quot;String       -&gt; &quot; + (forString == null ? &quot;bootstrap (shown as null)&quot; : forString.getName()));
+        System.out.println(&quot;java.sql.Date -&gt; &quot; + forSqlDate.getName());
+        System.out.println(&quot;Main         -&gt; &quot; + forMain.getName());
+        System.out.println(&quot;Parent of app -&gt; &quot; + forMain.getParent().getName());
+    }
+}</code></pre><div class="output">String       -&gt; bootstrap (shown as null)
+java.sql.Date -&gt; platform
+Main         -&gt; app
+Parent of app -&gt; platform</div></div>
+        <p><b>How it works:</b> core classes in <code>java.base</code> are loaded by the <b>bootstrap</b> loader, which is part of the JVM itself and is represented by <code>null</code>. Other platform modules such as <code>java.sql</code> use the <b>platform</b> loader (Java 9+). Your classes on the class path use the <b>application</b> ("app") loader, whose parent is the platform loader.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P3</span><span class="prob__tag prob__tag--easy">Easy</span><h4>Reading a constant doesn&#x27;t initialise</h4></div>
+      <p>A class has a <code>static final</code> constant and a static block. Show that reading the constant does not run the block, but reading a normal static field does.</p>
+      <div class="prob__io"><div><small>Input</small><pre>Limits.MAX_ITEMS, then Limits.discount</pre></div><div><small>Expected output</small><pre>Max items: 20
+Limits initialised
+Discount: 5%</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="java" data-file="Main.java"><pre><code>public class Main {
+    static class Limits {
+        static final int MAX_ITEMS = 20;     // compile-time constant
+        static int discount = 5;             // ordinary static field
+        static {
+            System.out.println(&quot;Limits initialised&quot;);
+        }
+    }
+
+    public static void main(String[] args) {
+        System.out.println(&quot;Max items: &quot; + Limits.MAX_ITEMS);
+        System.out.println(&quot;Discount: &quot; + Limits.discount + &quot;%&quot;);
+    }
+}</code></pre><div class="output">Max items: 20
+Limits initialised
+Discount: 5%</div></div>
+        <p><b>How it works:</b> a <code>static final</code> primitive or String initialised with a constant expression is a <b>compile-time constant</b>: javac copies its value into the code that reads it, so the class isn't touched. <code>discount</code> is a real field read with <code>getstatic</code>, which is an active use and triggers initialisation.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P4</span><span class="prob__tag prob__tag--medium">Medium</span><h4>Child.field initialises only the parent</h4></div>
+      <p>A static field is declared in <code>Parent</code> and read through <code>Child</code>. Which static blocks run?</p>
+      <div class="prob__io"><div><small>Input</small><pre>Child.appName</pre></div><div><small>Expected output</small><pre>Parent initialised
+Name: ShopEasy
+---
+Child initialised
+Version: 2</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="java" data-file="Main.java"><pre><code>public class Main {
+    static class Parent {
+        static String appName = &quot;ShopEasy&quot;;
+        static { System.out.println(&quot;Parent initialised&quot;); }
+    }
+
+    static class Child extends Parent {
+        static { System.out.println(&quot;Child initialised&quot;); }
+        static int version = 2;
+    }
+
+    public static void main(String[] args) {
+        System.out.println(&quot;Name: &quot; + Child.appName);
+        System.out.println(&quot;---&quot;);
+        System.out.println(&quot;Version: &quot; + Child.version);
+    }
+}</code></pre><div class="output">Parent initialised
+Name: ShopEasy
+---
+Child initialised
+Version: 2</div></div>
+        <p><b>How it works:</b> only the class that <b>declares</b> a static field is initialised when it is accessed, even if you write <code>Child.appName</code>. Child is initialised later, when its own field <code>version</code> is read. A favourite interview trick question.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P5</span><span class="prob__tag prob__tag--medium">Medium</span><h4>Load a class by name, safely</h4></div>
+      <p>Load classes by their names at run time with <code>Class.forName</code>. Report which exist instead of crashing.</p>
+      <div class="prob__io"><div><small>Input</small><pre>&quot;java.util.ArrayList&quot;, &quot;com.shop.PaymentGateway&quot;, &quot;java.time.LocalDate&quot;</pre></div><div><small>Expected output</small><pre>found:   ArrayList
+missing: com.shop.PaymentGateway
+found:   LocalDate</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="java" data-file="Main.java"><pre><code>public class Main {
+    public static void main(String[] args) {
+        String[] names = {&quot;java.util.ArrayList&quot;, &quot;com.shop.PaymentGateway&quot;, &quot;java.time.LocalDate&quot;};
+        for (String name : names) {
+            try {
+                Class&lt;?&gt; c = Class.forName(name);
+                System.out.println(&quot;found:   &quot; + c.getSimpleName());
+            } catch (ClassNotFoundException e) {
+                System.out.println(&quot;missing: &quot; + e.getMessage());
+            }
+        }
+    }
+}</code></pre><div class="output">found:   ArrayList
+missing: com.shop.PaymentGateway
+found:   LocalDate</div></div>
+        <p><b>How it works:</b> <code>Class.forName</code> asks the class loaders to find a class by its fully qualified name. If no loader can find it, you get the <b>checked</b> exception <code>ClassNotFoundException</code>, which you are expected to handle. That differs from <code>NoClassDefFoundError</code>, which happens when a class that existed at compile time is missing or broken at run time.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P6</span><span class="prob__tag prob__tag--business">Business problem</span><h4>A bad config value breaks the class for good</h4></div>
+      <p>A tax table reads its GST rate from a config string in a static initializer. The config contains <code>"18%"</code>, which isn't a number. Show what happens on the first and second attempts to use the class.</p>
+      <div class="prob__io"><div><small>Input</small><pre>config value = &quot;18%&quot;</pre></div><div><small>Expected output</small><pre>attempt 1: java.lang.ExceptionInInitializerError
+  cause: java.lang.NumberFormatException: For input string: &quot;18%&quot;
+attempt 2: java.lang.NoClassDefFoundError: Could not initialize class Main$TaxTable</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="java" data-file="Main.java"><pre><code>public class Main {
+    static class TaxTable {
+        static int gstPercent = Integer.parseInt(&quot;18%&quot;);
+    }
+
+    public static void main(String[] args) {
+        for (int attempt = 1; attempt &lt;= 2; attempt++) {
+            try {
+                System.out.println(&quot;GST: &quot; + TaxTable.gstPercent);
+            } catch (Throwable e) {
+                System.out.println(&quot;attempt &quot; + attempt + &quot;: &quot; + e);
+                if (e instanceof ExceptionInInitializerError) {
+                    System.out.println(&quot;  cause: &quot; + e.getCause());
+                }
+            }
+        }
+    }
+}</code></pre><div class="output">attempt 1: java.lang.ExceptionInInitializerError
+  cause: java.lang.NumberFormatException: For input string: &quot;18%&quot;
+attempt 2: java.lang.NoClassDefFoundError: Could not initialize class Main$TaxTable</div></div>
+        <p><b>How it works:</b></p><ol><li>The first use runs the static initializer, which throws <code>NumberFormatException</code>. The JVM wraps it in <code>ExceptionInInitializerError</code>.</li><li>The class is now marked as failed. Every later use throws <code>NoClassDefFoundError: Could not initialize class …</code>, without retrying. In a server, this means one bad config value breaks the feature until a restart.</li><li>Validate configuration with clear errors before it reaches static initializers, or load it in a normal method that can be retried.</li></ol>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P7</span><span class="prob__tag prob__tag--business">Business problem</span><h4>The discount that came out as zero</h4></div>
+      <p>A shop's pricing class computes <code>FESTIVE_PRICE</code> from <code>BASE_PRICE</code>, but declares them in the wrong order. Show the bug, then the fixed order.</p>
+      <div class="prob__io"><div><small>Input</small><pre>base price Rs 1000, festive discount 20%</pre></div><div><small>Expected output</small><pre>Buggy festive price: Rs 0
+Fixed festive price: Rs 800</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="java" data-file="Main.java"><pre><code>public class Main {
+    static class BuggyPricing {
+        static int festivePrice = discounted();   // runs first
+        static int basePrice = 1000;              // not set yet!
+        static int discounted() {
+            return basePrice * 80 / 100;
+        }
+    }
+
+    static class FixedPricing {
+        static int basePrice = 1000;              // declared first
+        static int festivePrice = discounted();
+        static int discounted() {
+            return basePrice * 80 / 100;
+        }
+    }
+
+    public static void main(String[] args) {
+        System.out.println(&quot;Buggy festive price: Rs &quot; + BuggyPricing.festivePrice);
+        System.out.println(&quot;Fixed festive price: Rs &quot; + FixedPricing.festivePrice);
+    }
+}</code></pre><div class="output">Buggy festive price: Rs 0
+Fixed festive price: Rs 800</div></div>
+        <p><b>How it works:</b></p><ol><li>During <b>preparation</b>, every static field gets its default value (0). During <b>initialisation</b>, the initializers run top to bottom.</li><li>In BuggyPricing, <code>discounted()</code> runs while <code>basePrice</code> is still 0, so the festive price becomes 0, and stays 0 because it is computed only once.</li><li>Declaring <code>basePrice</code> first fixes it. Making it <code>static final int BASE_PRICE = 1000</code> (a constant) would also fix it, since constants are set before any initializer runs.</li></ol>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P8</span><span class="prob__tag prob__tag--business">Business problem</span><h4>Payment providers as plug-ins</h4></div>
+      <p>A checkout reads the list of enabled payment providers (class names) from configuration and creates each one by name. Unknown providers must be skipped with a warning.</p>
+      <div class="prob__io"><div><small>Input</small><pre>enabled = &quot;Main$UpiProvider&quot;, &quot;Main$CardProvider&quot;, &quot;Main$CryptoProvider&quot;</pre></div><div><small>Expected output</small><pre>UPI paid Rs 499
+Card paid Rs 499
+skipped unknown provider Main$CryptoProvider</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="java" data-file="Main.java"><pre><code>public class Main {
+    public interface Provider {
+        String pay(int amount);
+    }
+
+    public static class UpiProvider implements Provider {
+        public String pay(int amount) { return &quot;UPI paid Rs &quot; + amount; }
+    }
+
+    public static class CardProvider implements Provider {
+        public String pay(int amount) { return &quot;Card paid Rs &quot; + amount; }
+    }
+
+    public static void main(String[] args) throws Exception {
+        String[] enabled = {&quot;Main$UpiProvider&quot;, &quot;Main$CardProvider&quot;, &quot;Main$CryptoProvider&quot;};
+        for (String className : enabled) {
+            try {
+                Class&lt;?&gt; c = Class.forName(className);
+                Provider p = (Provider) c.getDeclaredConstructor().newInstance();
+                System.out.println(p.pay(499));
+            } catch (ClassNotFoundException e) {
+                System.out.println(&quot;skipped unknown provider &quot; + e.getMessage());
+            }
+        }
+    }
+}</code></pre><div class="output">UPI paid Rs 499
+Card paid Rs 499
+skipped unknown provider Main$CryptoProvider</div></div>
+        <p><b>How it works:</b></p><ol><li>Nested classes have binary names with a <code>$</code>, such as <code>Main$UpiProvider</code>.</li><li><code>Class.forName</code> loads and initialises the class; <code>getDeclaredConstructor().newInstance()</code> creates an object without a <code>new</code> in the source. This is how JDBC drivers, logging back-ends and framework plug-ins were traditionally wired in.</li><li>A missing provider produces <code>ClassNotFoundException</code>, which we turn into a warning instead of a failed checkout.</li></ol>
+      </details>
+    </article>
+  </div>
+
+
+  <h3 id="scenarios">Real-world scenario questions (asked in company interviews)</h3>
+  <p class="scn-intro">Class loading problems usually appear at deploy time, under pressure. Decide your answer first, then open the model answer.</p>
+  <div class="scenarios">
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Banking · deployment</span><span class="scn__tag scn__tag--level">Fresher</span></div>
+      <h4>Works on my machine, NoClassDefFoundError on the server</h4>
+      <p class="scn__situation">A loan-calculator service runs fine in the IDE. On the test server, the first EMI request fails with <code>java.lang.NoClassDefFoundError: com/acme/util/MoneyFormatter</code>. Start-up was fine. What is the likely cause and how do you check?</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> do you know classes load lazily and what NCDFE means?</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>The code was compiled with <code>MoneyFormatter</code> available, but at run time the JAR containing it is missing from the class path. Because classes load lazily, the error appears only when the first EMI request needs the class, not at start-up.</li>
+          <li>Check the deployed package or class path (for example list the JAR's contents), and the build's dependency scope: a library marked “provided” or “test” is not packaged.</li>
+          <li>Also check the full stack trace: if it says “Could not initialize class”, the class exists but its static initializer failed earlier; look for the first <code>ExceptionInInitializerError</code> in the logs.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> catching the error and continuing.</p>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">E-commerce · configuration</span><span class="scn__tag scn__tag--level">1–3 years</span></div>
+      <h4>One bad property killed checkout until restart</h4>
+      <p class="scn__situation">A <code>PricingRules</code> class loads a properties file in a static block. After an ops change, a value became <code>"15 percent"</code>. The first checkout failed with <code>ExceptionInInitializerError</code>; every checkout after that failed with <code>NoClassDefFoundError</code>, even after the file was corrected. Why didn't fixing the file help, and how would you redesign it?</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> do you know a class is initialised only once, and that failure is permanent?</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>The static initializer threw <code>NumberFormatException</code>, so the JVM marked <code>PricingRules</code> as failed. It never re-runs a class's initializer, so the corrected file was never read; only a restart helps.</li>
+          <li>Redesign: load configuration in an ordinary method or a managed bean at start-up, validate every value with clear messages, and fail fast at start-up rather than on the first customer request.</li>
+          <li>For values that can change, support reloading with validation, keeping the last good configuration if the new one is invalid.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> putting I/O or parsing that can fail inside a static block.</p>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">SaaS · app server</span><span class="scn__tag scn__tag--level">3+ years</span></div>
+      <h4>Metaspace grows with every redeploy</h4>
+      <p class="scn__situation">An internal SaaS platform hot-redeploys a web app on Tomcat several times a day. After about 20 redeploys the server dies with <code>OutOfMemoryError: Metaspace</code>. Heap usage looks normal. Explain the mechanism and how you would find the cause.</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> do you understand that classes are unloaded only when their class loader becomes unreachable?</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>Each deployment gets a new class loader, which loads its own copies of all the app's classes into metaspace. The old classes can be unloaded only when the old loader, every class it loaded and every object of those classes are unreachable.</li>
+          <li>Something outside the app still references the old loader: a JDBC driver registered in <code>DriverManager</code>, a thread the app started and never stopped, a <code>ThreadLocal</code> value on a server thread, or a static cache in a shared library.</li>
+          <li>Take a heap dump after a few redeploys, look for multiple web-app class loader instances, and follow the path to GC roots. Fix by deregistering drivers, stopping threads and clearing thread-locals on shutdown. Cap metaspace with <code>-XX:MaxMetaspaceSize</code> to fail early and visibly.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> simply raising the metaspace limit.</p>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Payments · singleton design</span><span class="scn__tag scn__tag--level">1–3 years</span></div>
+      <h4>Lazy and thread-safe without locks</h4>
+      <p class="scn__situation">A payment SDK must create its expensive <code>GatewayClient</code> only when the first payment happens, and many threads may call <code>getInstance()</code> at the same moment. A colleague wrote a <code>synchronized</code> method with an <code>if (instance == null)</code> check. What alternative uses class loading rules, and why is it safe?</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> can you apply initialisation guarantees to a real design?</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>Use the holder idiom: <code>private static class Holder { static final GatewayClient INSTANCE = new GatewayClient(); }</code> and <code>getInstance()</code> returns <code>Holder.INSTANCE</code>.</li>
+          <li>Holder is initialised on its first active use, the first call to <code>getInstance()</code>, so creation is lazy.</li>
+          <li>The JVM initialises a class under a lock and only once; other threads wait and then see the fully built instance. No <code>synchronized</code> on every call, so no lock cost afterwards.</li>
+          <li>An <code>enum</code> with a single constant is another safe option.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> double-checked locking without <code>volatile</code>; it is broken.</p>
+      </div></details>
+    </article>
+  </div>
+</section>
+
+<nav class="lesson-nav" id="lesson-nav" aria-label="Lesson navigation"></nav>
+<div class="ad-slot" data-slot="bottom"></div>
+</article>
+
+<aside class="lesson-side">
+  <nav class="toc" aria-label="In this lesson">
+    <h4>In this lesson</h4>
+    <ol>
+      <li><a href="#story">The story</a></li>
+      <li><a href="#definition">Definition</a></li>
+      <li><a href="#types">Types and ways to use it</a></li>
+      <li><a href="#steps">Step by step</a></li>
+      <li><a href="#animation">See it happen</a></li>
+      <li><a href="#real-world">Real-world use</a></li>
+      <li><a href="#run">Run the code</a></li>
+      <li><a href="#tracer">Line by line</a></li>
+      <li><a href="#worked">Worked examples</a></li>
+      <li><a href="#quiz">Quiz and revision</a></li>
+      <li><a href="#practice">Practice problems</a></li>
+      <li><a href="#scenarios">Industry scenarios</a></li>
+    </ol>
+  </nav>
+  <div class="ad-slot" data-slot="side"></div>
+  <div class="outline" id="outline"></div>
+</aside>
+</div>
+</main>
+
+<footer class="site-footer">
+  <div class="wrap">
+    <div><h4>MyPhatshala</h4><p>Free programming and IT lessons that show what happens behind the screen.</p></div>
+    <div><h4>Learn</h4><a href="../../../../#tracks">All courses</a><a href="../../">Core Java syllabus</a></div>
+    <div><h4>Site</h4><a href="../../../../about.html">About</a><a href="../../../../contact.html">Contact</a><a href="../../../../privacy.html">Privacy policy</a><a href="../../../../disclaimer.html">Disclaimer</a></div>
+    <div class="copyright">© MyPhatshala. All lesson content, diagrams and animations are original. Please do not copy without permission.</div>
+  </div>
+</footer>
+
+<script src="../../../../data/courses/core-java.js"></script>
+<script src="../../../../assets/js/lesson.js"></script>
+<script src="../../../../assets/js/ads.js"></script>
+<script src="../../../../assets/js/site.js"></script>
+</body>
+</html>

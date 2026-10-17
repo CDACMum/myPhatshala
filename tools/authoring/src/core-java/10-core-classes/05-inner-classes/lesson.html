@@ -1,0 +1,438 @@
+<!--META {
+"course": "core-java", "module": "10-core-classes", "lesson": "05-inner-classes",
+"title": "Inner, static nested and anonymous classes", "courseTitle": "Core Java", "number": "10.5",
+"track": "#E8772E", "trackId": "programming", "trackTitle": "Programming Languages", "level": "Intermediate",
+"minutes": 24,
+"description": "Nested classes in Java: inner (member) classes, static nested classes, local classes and anonymous classes. How to create each, what they can access, the hidden this$0 link to the outer object, Outer.this, effectively final captured variables, the .class files javac produces, and when to use which. With animations, a JVM tracer, {{NPROB}} practice problems, quiz and interview scenarios.",
+"ogTitle": "Classes inside classes: inner, static nested and anonymous",
+"ogDescription": "See the hidden link from an inner object to its outer object, watch an anonymous class capture a variable, and solve {{NPROB}} problems.",
+"lead": "Sometimes a class only makes sense <i>inside</i> another one: a bill belongs to a shop, a seat belongs to a train, a one-off discount rule is needed in just one method. Java lets you declare <b>classes inside classes</b>: inner classes tied to an outer object, static nested classes that are just grouped, local classes inside a method, and anonymous classes written and used in one expression. You'll learn all four, what each can see, and what javac quietly adds to make them work.",
+"chips": ["Module 10 · Core Classes", "⏱ 24 min", "Intermediate", "{{NPROB}} practice problems"]
+} META-->
+<part n="1" id="story" label="The story">
+  <h2>A bill that knows its shop</h2>
+  <div class="story">
+    <p class="narration">Riya is writing billing software for a chain of chai stalls. Every <code>Bill</code> needs the stall's name and GST number on top. She has been passing the <code>Shop</code> object into every bill by hand, and twice she passed the wrong shop.</p>
+    <div class="scene">
+      <svg viewBox="0 0 640 170" role="img" aria-label="An outer Shop object with two inner Bill objects that each keep a hidden link back to their shop; a static nested Tax class is separate">
+        <g font-size="10.5">
+          <rect x="14" y="14" width="240" height="140" rx="12" class="s-soft-green" style="stroke:var(--green)"/>
+          <text x="28" y="36" font-weight="700" class="s-green">Shop object: "Chai Point, Kharghar"</text>
+          <rect x="30" y="50" width="96" height="88" rx="8" class="s-card" style="stroke:var(--track)"/>
+          <text x="40" y="70" font-weight="700" class="s-ink">Bill #101</text><text x="40" y="90" class="mono s-ink2">₹120</text><text x="40" y="124" class="mono s-acc">this$0 →</text>
+          <rect x="140" y="50" width="96" height="88" rx="8" class="s-card" style="stroke:var(--track)"/>
+          <text x="150" y="70" font-weight="700" class="s-ink">Bill #102</text><text x="150" y="90" class="mono s-ink2">₹45</text><text x="150" y="124" class="mono s-acc">this$0 →</text>
+          <rect x="290" y="30" width="150" height="70" rx="10" class="s-soft-blue" style="stroke:var(--blue)"/>
+          <text x="302" y="52" font-weight="700" class="s-blue">static class Tax</text><text x="302" y="72" class="mono s-ink2">gst(amount)</text><text x="302" y="90" class="s-ink2">needs no shop object</text>
+          <rect x="470" y="30" width="156" height="100" rx="10" class="s-board"/>
+          <text x="482" y="52" class="mono s-chalk">new Discount() {</text>
+          <text x="482" y="72" class="mono s-chalk">  apply(p) {…}</text>
+          <text x="482" y="92" class="mono s-chalk">}</text>
+          <text x="482" y="118" class="s-chalk">a one-off rule, no name</text>
+        </g>
+        <text x="632" y="166" text-anchor="end" class="s-wm">myphatshala.com</text>
+      </svg>
+    </div>
+    <riya>Sir, every bill needs its shop's name. I keep passing the shop in, and sometimes it's the wrong shop.</riya>
+    <arjun>Then make <code>Bill</code> an <b>inner class</b> of <code>Shop</code>. You create a bill <i>from</i> a shop: <code>shop.new Bill(120)</code>. Each bill then remembers its shop automatically and can read the shop's fields, even private ones.</arjun>
+    <riya>And the GST calculation? It doesn't need any particular shop.</riya>
+    <arjun>That's a <b>static nested class</b>: grouped inside <code>Shop</code> for neatness, but with no link to a shop object. And for the festival discount used in just one place, you don't even need a name: an <b>anonymous class</b>, written right where you use it.</arjun>
+  </div>
+</part>
+
+<part n="2" id="definition" label="Definition">
+  <h2>What are nested classes?</h2>
+  <div class="def">
+    <div class="def__formal"><small>Formal definition (write this in exams)</small>
+      <p>A <b>nested class</b> is a class declared inside another class or interface. A <b>static nested class</b> is declared with <code>static</code> and is not tied to an instance of the outer class. A non-static nested class is an <b>inner class</b>; there are three kinds: a <b>member inner class</b> (declared at class level), a <b>local class</b> (declared inside a block such as a method) and an <b>anonymous class</b> (declared and instantiated in a single expression, without a name). Every inner class instance holds an implicit reference to an instance of its enclosing class, and inner classes can access the enclosing class's members, including private ones. Local and anonymous classes may use local variables of the enclosing block only if they are <b>final or effectively final</b>.</p></div>
+    <div class="def__simple"><small>In simple words</small>
+      <p>A class written inside another class. If it's <code>static</code>, it's just stored there. If it isn't, each of its objects belongs to an outer object and can use that object's data. Anonymous classes are quick, nameless classes for one-time use.</p></div>
+  </div>
+  <h3>Words you'll meet in this lesson</h3>
+  <div class="terms">
+    <div class="term"><b>Outer (enclosing) class</b><span>The class that contains the nested class.</span></div>
+    <div class="term"><b>Enclosing instance</b><span>The outer object an inner object belongs to.</span></div>
+    <div class="term"><b>this$0</b><span>The hidden field javac adds to an inner class to hold the enclosing instance.</span></div>
+    <div class="term"><b>Outer.this</b><span>How code in an inner class names its outer object explicitly.</span></div>
+    <div class="term"><b>Effectively final</b><span>A local variable never changed after it's set, even without the word <code>final</code>.</span></div>
+    <div class="term"><b>Capture</b><span>When a local or anonymous class copies a local variable's value to use later.</span></div>
+  </div>
+  <h3>The four kinds at a glance</h3>
+  <div class="table-wrap">
+  <table class="compare" style="min-width:620px">
+    <thead><tr><th>Kind</th><th>Declared</th><th>Create with</th><th>Outer object?</th><th>Class file</th></tr></thead>
+    <tbody>
+      <tr><td>Member inner</td><td>in the class body</td><td><code>shop.new Bill()</code></td><td>Yes, required</td><td><code>Shop$Bill.class</code></td></tr>
+      <tr><td>Static nested</td><td>in the class body, <code>static</code></td><td><code>new Shop.Tax()</code></td><td>No</td><td><code>Shop$Tax.class</code></td></tr>
+      <tr><td>Local</td><td>inside a method/block</td><td><code>new Receipt()</code> in that block</td><td>Yes, if the method isn't static</td><td><code>Shop$1Receipt.class</code></td></tr>
+      <tr><td>Anonymous</td><td>in an expression</td><td><code>new Discount() { … }</code></td><td>Yes, if in instance code</td><td><code>Shop$1.class</code></td></tr>
+    </tbody>
+  </table>
+  </div>
+  <exam><b>Exam tip:</b> a <b>static nested</b> class is <i>not</i> an inner class. It can't use the outer class's instance fields directly (<i>non-static variable cannot be referenced from a static context</i>). An <b>inner</b> class object can't exist without an outer object, so <code>new Inner()</code> inside a static method fails; write <code>outer.new Inner()</code>.</exam>
+</part>
+
+{{AD}}
+
+<part n="3" id="types" label="Types and ways to use it">
+  <h2>The four kinds, with code</h2>
+  <div class="cards">
+    <div class="card"><svg class="ic" viewBox="0 0 40 40" fill="none" stroke="var(--track)" stroke-width="2"><rect x="4" y="6" width="32" height="28" rx="4"/><rect x="12" y="14" width="16" height="14" rx="3"/><path d="M20 28v6"/></svg><h4>Member inner</h4><p>Belongs to an outer object; reads its fields. A bill of a shop, a seat of a train.</p><span class="tag">has this$0</span></div>
+    <div class="card"><svg class="ic" viewBox="0 0 40 40" fill="none" stroke="var(--blue)" stroke-width="2"><rect x="4" y="6" width="32" height="28" rx="4"/><rect x="12" y="14" width="16" height="14" rx="3" stroke-dasharray="3 2"/></svg><h4>Static nested</h4><p>Just grouped inside the outer class. Helpers, builders, map entries.</p><span class="tag">no outer object</span></div>
+    <div class="card"><svg class="ic" viewBox="0 0 40 40" fill="none" stroke="var(--green)" stroke-width="2"><path d="M8 8h24v24H8z"/><path d="M14 16h12M14 22h8"/></svg><h4>Local</h4><p>Declared inside a method, visible only there.</p><span class="tag">rare</span></div>
+    <div class="card"><svg class="ic" viewBox="0 0 40 40" fill="none" stroke="var(--blue)" stroke-width="2"><path d="M12 10c-6 4-6 16 0 20M28 10c6 4 6 16 0 20"/><path d="M17 20h6"/></svg><h4>Anonymous</h4><p>No name; implements an interface or extends a class in one expression.</p><span class="tag">one-off behaviour</span></div>
+  </div>
+
+  <h3>1. Member inner class</h3>
+  <div class="code" data-lang="java" data-file="Main.java"><pre><code>class Shop {
+    private final String name;
+
+    Shop(String name) { this.name = name; }
+
+    class Bill {                                // inner: no 'static'
+        int amount;
+        Bill(int amount) { this.amount = amount; }
+
+        String print() {
+            return name + ": ₹" + amount;       // reads the outer object's private field
+        }
+    }
+}
+
+public class Main {
+    public static void main(String[] args) {
+        Shop kharghar = new Shop("Chai Point, Kharghar");
+        Shop vashi = new Shop("Chai Point, Vashi");
+
+        Shop.Bill b1 = kharghar.new Bill(120);  // a bill OF the Kharghar shop
+        Shop.Bill b2 = vashi.new Bill(45);
+        System.out.println(b1.print());
+        System.out.println(b2.print());
+    }
+}</code></pre><div class="output">Chai Point, Kharghar: ₹120
+Chai Point, Vashi: ₹45</div></div>
+  <p>Behind the scenes javac gives <code>Bill</code> a hidden field <code>final Shop this$0</code> and passes the outer object into its constructor. Here is <code>javap -p</code> on a similar class (JDK 21):</p>
+  <div class="code" data-lang="bash" data-file="javap -p 'Bank$Account'"><pre><code>class Bank$Account {
+  int bal;
+  final Bank this$0;          ← the link to the outer object
+  Bank$Account(Bank);         ← the constructor receives it
+  int interest();
+  java.lang.String bank();
+}</code></pre></div>
+
+  <h3>2. Static nested class</h3>
+  <div class="code" data-lang="java" data-file="Main.java"><pre><code>class Shop {
+    static class Tax {                         // static: no Shop object needed
+        static int gst(int amount) {
+            return amount * 5 / 100;
+        }
+    }
+
+    static class Address {
+        final String city, pin;
+        Address(String city, String pin) { this.city = city; this.pin = pin; }
+    }
+}
+
+public class Main {
+    public static void main(String[] args) {
+        System.out.println(Shop.Tax.gst(120));
+        Shop.Address a = new Shop.Address("Navi Mumbai", "410210");   // no shop object
+        System.out.println(a.city + " " + a.pin);
+    }
+}</code></pre><div class="output">6
+Navi Mumbai 410210</div></div>
+
+  <h3>3. Local class</h3>
+  <div class="code" data-lang="java" data-file="Main.java"><pre><code>public class Main {
+    static void printReceipt(String customer, int amount) {
+        class Line {                               // visible only inside this method
+            String text(String label, int value) {
+                return label + " for " + customer + ": ₹" + value;   // uses a captured local
+            }
+        }
+        Line l = new Line();
+        System.out.println(l.text("Amount", amount));
+        System.out.println(l.text("GST", amount * 5 / 100));
+    }
+
+    public static void main(String[] args) {
+        printReceipt("Riya", 200);
+    }
+}</code></pre><div class="output">Amount for Riya: ₹200
+GST for Riya: ₹10</div></div>
+
+  <h3>4. Anonymous class</h3>
+  <div class="code" data-lang="java" data-file="Main.java"><pre><code>import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.List;
+
+interface Discount {
+    int apply(int price);
+}
+
+public class Main {
+    public static void main(String[] args) {
+        Discount festive = new Discount() {        // class with no name, created at once
+            public int apply(int price) {
+                return price - price / 10;         // 10% off
+            }
+        };
+        System.out.println(festive.apply(500));
+
+        List&lt;String&gt; names = new ArrayList&lt;&gt;(List.of("Riya", "Kabir", "Om"));
+        names.sort(new Comparator&lt;String&gt;() {     // a one-off sort rule
+            public int compare(String a, String b) {
+                return a.length() - b.length();
+            }
+        });
+        System.out.println(names);
+    }
+}</code></pre><div class="output">450
+[Om, Riya, Kabir]</div></div>
+  <p>Since Java 8, an anonymous class implementing an interface with a single abstract method is usually written as a <b>lambda</b>: <code>p -&gt; p - p / 10</code> (Lesson 14.1). Anonymous classes are still needed when you extend a class, implement several methods, or need fields.</p>
+
+  <h3>Captured variables must be effectively final</h3>
+  <div class="code" data-lang="java" data-file="Main.java" data-run="skip"><pre><code>int off = 50;
+off = 60;                                          // now 'off' changes...
+Discount d = new Discount() {
+    public int apply(int p) { return p - off; }    // error
+};</code></pre></div>
+  <div class="code" data-lang="bash" data-file="javac"><pre><code>error: local variables referenced from an inner class must be final or effectively final</code></pre></div>
+  <p>The anonymous object <b>copies</b> the value of <code>off</code> into a hidden field (<code>val$off</code>) when it's created. If the local could change later, the copy and the original would disagree, so Java forbids it.</p>
+  <tip><b>Which one?</b> Start with a <b>static nested</b> class: it's simpler and holds no hidden reference. Make it an <b>inner</b> class only if each object truly needs its outer object. Use <b>anonymous</b> classes (or lambdas) for short, one-place behaviour, and a normal top-level class when other files need it.</tip>
+</part>
+
+<part n="4" id="steps" label="Step by step">
+  <h2>What happens on <code>shop.new Bill(120)</code></h2>
+  <ol class="stepper">
+    <li><h4>javac compiles two classes</h4>
+      <span class="behind">From one <code>Shop.java</code>, javac writes <code>Shop.class</code> and <code>Shop$Bill.class</code>. To the JVM, an inner class is an ordinary class with a <code>$</code> in its name; Java 11+ records them as “nestmates” so they can share private members.</span></li>
+    <li><h4>The constructor gets an extra argument</h4>
+      <div class="code" data-lang="java" data-file="Main.java"><pre><code>Shop.Bill b = kharghar.new Bill(120);
+// compiled roughly as: new Shop$Bill(kharghar, 120)</code></pre></div>
+      <span class="behind">javac passes the outer object as a hidden first argument. If <code>kharghar</code> were null, this line would throw <code>NullPointerException</code>.</span></li>
+    <li><h4>The link is stored in this$0</h4>
+      <span class="behind">The constructor saves it in the synthetic field <code>final Shop this$0</code>. The Bill object on the heap now points to its Shop object.</span></li>
+    <li><h4>Reading an outer field goes through the link</h4>
+      <div class="code" data-lang="java" data-file="Shop.java"><pre><code>return name + ": ₹" + amount;   // really: this$0.name + ": ₹" + this.amount</code></pre></div>
+      <span class="behind">Each use of an outer field compiles to a read through <code>this$0</code>. If both classes have a field with the same name, write <code>Shop.this.name</code> to mean the outer one.</span></li>
+    <li><h4>The link keeps the outer object alive</h4>
+      <span class="behind">As long as any Bill is reachable, its Shop can't be garbage-collected (Lesson 8.3). A long-lived inner object (for example a listener stored in a static list) can therefore leak a large outer object. Static nested classes don't have this problem.</span></li>
+  </ol>
+</part>
+
+<part n="5" id="animation" label="See it happen">
+  <h2>Inner vs static nested: both views</h2>
+  <p>Left: the code. Right: the objects on the heap, including the hidden link an inner object keeps to its outer object.</p>
+  {{ANIM}}
+</part>
+
+<part n="6" id="real-world" label="Real-world use">
+  <h2>Nested classes in real systems</h2>
+  <p>You use nested classes every day in the JDK and in frameworks, often without noticing the <code>$</code> in their names.</p>
+  {{ANIM2}}
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="14" y="16" width="92" height="58" rx="6" class="s-card" style="stroke:var(--line)"/><text x="22" y="36" font-size="8.5" class="mono s-ink">HashMap</text><rect x="30" y="44" width="68" height="22" rx="4" class="s-soft-blue" style="stroke:var(--blue)"/><text x="64" y="59" text-anchor="middle" font-size="8" class="mono s-ink">static Node</text></svg></div>
+    <div><h4>1. Data structure internals</h4><p><code>HashMap</code> keeps its entries in a static nested class <code>HashMap.Node</code>; <code>LinkedList</code> has <code>LinkedList.Node</code>; <code>ArrayList</code>'s iterator is the inner class <code>ArrayList.Itr</code>, which reads the list's private array through its outer link.</p>
+      <div class="uc-flow"><span>list.iterator()</span><i>→</i><span class="java">new Itr() (inner)</span><i>→</i><span>reads the outer list</span></div></div>
+  </div>
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="18" y="20" width="84" height="50" rx="6" class="s-board"/><text x="26" y="40" font-size="8" class="mono s-chalk">Order.builder()</text><text x="26" y="56" font-size="8" class="mono s-chalk">  .item(..).build()</text></svg></div>
+    <div><h4>2. Builders</h4><p>Classes with many optional fields often expose a <code>static class Builder</code> nested inside them: <code>new Pizza.Builder().size(LARGE).cheese().build()</code>. The builder is grouped with the class it builds but needs no existing object.</p>
+      <div class="uc-flow"><span>new Order.Builder()</span><i>→</i><span class="java">static nested</span><i>→</i><span>build() → Order</span></div></div>
+  </div>
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="30" y="22" width="60" height="30" rx="15" class="s-soft-acc" style="stroke:var(--track)"/><text x="60" y="41" text-anchor="middle" font-size="9" class="s-ink" font-weight="700">Pay</text><path d="M60 52v14" style="stroke:var(--ink-3)"/><text x="60" y="80" text-anchor="middle" font-size="8.5" class="mono s-ink2">onClick(…)</text></svg></div>
+    <div><h4>3. Event handlers and callbacks</h4><p>Desktop and Android apps attach click listeners as anonymous classes (now usually lambdas). Thread code passes a <code>new Runnable() { … }</code>. Each is a small piece of behaviour written exactly where it's used.</p>
+      <div class="uc-flow"><span>button</span><i>→</i><span class="java">new OnClickListener() { … }</span><i>→</i><span>runs on tap</span></div></div>
+  </div>
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="16" y="20" width="40" height="50" rx="5" class="s-soft-green" style="stroke:var(--green)"/><rect x="64" y="20" width="40" height="50" rx="5" class="s-card" style="stroke:var(--red)"/><path d="M56 45h8" style="stroke:var(--red);stroke-width:2"/><text x="84" y="49" text-anchor="middle" font-size="8" class="s-red">leak</text></svg></div>
+    <div><h4>4. Memory leaks to watch for</h4><p>An inner-class listener registered with a long-lived service keeps its outer object (say a whole screen with images) in memory through <code>this$0</code>. Android guidelines recommend static nested classes for such cases.</p>
+      <div class="uc-flow"><span>static registry</span><i>→</i><span class="java">inner listener → this$0</span><i>→</i><span>outer object can't be freed</span></div></div>
+  </div>
+  <p class="muted">Examples are simplified. JDK class names and internals vary between versions.</p>
+</part>
+
+{{AD}}
+
+<part n="7" id="run" label="Run the code">
+  <h2>A chai stall with bills, tax and a festival offer</h2>
+  <div class="code" data-lang="java" data-file="Main.java"><pre><code>interface Offer {
+    int apply(int amount);
+}
+
+class Stall {
+    private final String name;
+    private int billCount = 0;
+
+    Stall(String name) { this.name = name; }
+
+    class Bill {                                    // inner: belongs to one stall
+        final int no;
+        final int amount;
+
+        Bill(int amount) {
+            this.amount = amount;
+            billCount++;                            // updates the OUTER object's field
+            this.no = billCount;
+        }
+
+        String print(Offer offer) {
+            int pay = offer.apply(amount);
+            return name + " #" + no + ": ₹" + pay + " + GST ₹" + Tax.gst(pay);
+        }
+    }
+
+    static class Tax {                              // static nested: no stall needed
+        static int gst(int amount) { return amount * 5 / 100; }
+    }
+}
+
+public class Main {
+    public static void main(String[] args) {
+        Stall s = new Stall("Chai Point");
+        Offer diwali = new Offer() {                // anonymous class
+            public int apply(int amount) { return amount &gt;= 100 ? amount - 20 : amount; }
+        };
+        Stall.Bill b1 = s.new Bill(120);
+        Stall.Bill b2 = s.new Bill(60);
+        System.out.println(b1.print(diwali));
+        System.out.println(b2.print(diwali));
+    }
+}</code></pre><div class="output">Chai Point #1: ₹100 + GST ₹5
+Chai Point #2: ₹60 + GST ₹3</div></div>
+  <ul class="anno">
+    <li><code>class Bill</code><span>Inner class: every bill is created from a stall and reads its <code>name</code>.</span></li>
+    <li><code>billCount++</code><span>An inner object can change the outer object's private field: both bills share one counter.</span></li>
+    <li><code>static class Tax</code><span>Static nested: called as <code>Tax.gst(…)</code>, no stall object required.</span></li>
+    <li><code>new Offer() { … }</code><span>Anonymous class implementing <code>Offer</code>, written where it's used.</span></li>
+  </ul>
+  <div class="runner">
+    <script type="application/json">{
+      "lang": "java", "file": "Main.java",
+      "tasks": [
+        { "label": "1 · Chai stall", "hint": "Press <b>Run</b>. Then create a second stall <code>\"Chai Point Vashi\"</code> and a bill from it. Does its bill number start at 1 again? Why?",
+          "code": "interface Offer {\n    int apply(int amount);\n}\n\nclass Stall {\n    private final String name;\n    private int billCount = 0;\n\n    Stall(String name) { this.name = name; }\n\n    class Bill {\n        final int no;\n        final int amount;\n\n        Bill(int amount) {\n            this.amount = amount;\n            billCount++;\n            this.no = billCount;\n        }\n\n        String print(Offer offer) {\n            int pay = offer.apply(amount);\n            return name + \" #\" + no + \": ₹\" + pay + \" + GST ₹\" + Tax.gst(pay);\n        }\n    }\n\n    static class Tax {\n        static int gst(int amount) { return amount * 5 / 100; }\n    }\n}\n\npublic class Main {\n    public static void main(String[] args) {\n        Stall s = new Stall(\"Chai Point\");\n        Offer diwali = new Offer() {\n            public int apply(int amount) { return amount >= 100 ? amount - 20 : amount; }\n        };\n        Stall.Bill b1 = s.new Bill(120);\n        Stall.Bill b2 = s.new Bill(60);\n        System.out.println(b1.print(diwali));\n        System.out.println(b2.print(diwali));\n    }\n}\n" },
+        { "label": "2 · Spot the error: inner without outer", "hint": "An inner object needs an outer object. Create a <code>Train</code> first and use <code>train.new Seat(32)</code>.",
+          "code": "class Train {\n    String no = \"12123\";\n\n    class Seat {\n        int num;\n        Seat(int num) { this.num = num; }\n        String label() { return no + \"/\" + num; }\n    }\n}\n\npublic class Main {\n    public static void main(String[] args) {\n        Train.Seat s = new Train.Seat(32);\n        System.out.println(s.label());\n    }\n}\n", "_expect": "compile-error" },
+        { "label": "3 · Spot the error: changing a captured local", "hint": "Read the error. The anonymous class captures <code>off</code>, so it must not change. Remove <code>off = 60;</code> or copy it into a new final variable.",
+          "code": "interface Discount {\n    int apply(int price);\n}\n\npublic class Main {\n    public static void main(String[] args) {\n        int off = 50;\n        off = 60;\n        Discount d = new Discount() {\n            public int apply(int price) { return price - off; }\n        };\n        System.out.println(d.apply(300));\n    }\n}\n", "_expect": "compile-error" },
+        { "label": "4 · Predict: three variables named count", "hint": "<b>Predict first:</b> which value does each of <code>count</code>, <code>this.count</code> and <code>Main.this.count</code> print?",
+          "code": "public class Main {\n    private int count = 0;\n\n    class Counter {\n        int count = 10;\n\n        void show() {\n            int count = 99;\n            System.out.println(count + \" \" + this.count + \" \" + Main.this.count);\n        }\n    }\n\n    public static void main(String[] args) {\n        Main outer = new Main();\n        Main.Counter c = outer.new Counter();\n        c.show();\n    }\n}\n" },
+        { "label": "5 · Static nested builder", "hint": "Run it, then add an <code>extraCheese()</code> step to the builder that adds ₹40.",
+          "code": "class Pizza {\n    final String size;\n    final int price;\n\n    private Pizza(Builder b) {\n        this.size = b.size;\n        this.price = b.price;\n    }\n\n    static class Builder {\n        private String size = \"Medium\";\n        private int price = 249;\n\n        Builder large() { size = \"Large\"; price = 399; return this; }\n        Pizza build() { return new Pizza(this); }\n    }\n}\n\npublic class Main {\n    public static void main(String[] args) {\n        Pizza p = new Pizza.Builder().large().build();\n        System.out.println(p.size + \" ₹\" + p.price);\n    }\n}\n" }
+      ]
+    }</script>
+  </div>
+</part>
+
+<part n="8" id="tracer" label="Line by line">
+  <h2>The hidden link, recorded from the JVM</h2>
+  <p>This trace is recorded from the real JVM. Look at the inner <code>Bill</code> object on the heap: besides <code>amount</code> it has a field <b><code>this$0</code></b> pointing to the outer object. The static nested <code>Tax</code> call needs no object at all.</p>
+  {{TRACER}}
+
+{{WORKED}}
+</part>
+
+<part n="9" id="quiz" label="Quiz and revision">
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <script type="application/json">[
+      { "q": "How do you create an object of member inner class Inner of class Outer from main?", "options": ["new Outer.Inner()", "Outer.new Inner()", "outerObj.new Inner()", "Inner.new()"], "answer": 2, "why": "An inner object needs an enclosing instance: outerObj.new Inner()." },
+      { "q": "How do you create an object of a static nested class Outer.Nested?", "options": ["outerObj.new Nested()", "new Outer.Nested()", "Outer.Nested.create()", "It's not possible"], "answer": 1, "why": "Static nested classes don't need an outer object." },
+      { "q": "Which field does javac add to a member inner class?", "options": ["outer$", "this$0, a reference to the enclosing instance", "super$1", "None"], "answer": 1, "why": "this$0 holds the enclosing object; javap -p shows it as final Outer this$0." },
+      { "q": "A static nested class tries to read an instance field of its outer class directly. Result?", "options": ["Works", "Compile error: non-static variable cannot be referenced from a static context", "Runtime exception", "Reads 0"], "answer": 1, "why": "There is no outer object to read from." },
+      { "q": "What name does javac give the first anonymous class inside Main?", "options": ["Main$Anonymous", "Main$1", "Anonymous1", "Main.anon"], "answer": 1, "why": "Anonymous classes are numbered: Main$1.class, Main$2.class …" },
+      { "q": "Why must captured local variables be effectively final?", "options": ["For speed", "The inner object keeps a copy; a later change would make them disagree", "Because locals are on the heap", "They don't have to be"], "answer": 1, "why": "The value is copied into a hidden field (val$x) when the object is created." },
+      { "q": "Inside an inner class, how do you refer to the outer object's field x when the inner class also has x?", "options": ["super.x", "outer.x", "Outer.this.x", "this.this.x"], "answer": 2, "why": "Outer.this names the enclosing instance." },
+      { "q": "Which can lead to the outer object being kept in memory longer than expected?", "options": ["Static nested class", "Inner class object stored somewhere long-lived", "Enum", "Local variable"], "answer": 1, "why": "Its this$0 keeps the outer object reachable." }
+    ]</script>
+  </div>
+  <h3>Quick revision</h3>
+  <div class="revision">
+    <h3>Lesson 10.5 in one screen</h3>
+    <ul>
+      <li>Nested = class inside a class. <b>Static nested</b> (no outer object) vs <b>inner</b> (member, local, anonymous).</li>
+      <li>Member inner: <code>outer.new Inner()</code>; holds hidden <code>this$0</code>; can read outer private members; <code>Outer.this.x</code> for name clashes.</li>
+      <li>Static nested: <code>new Outer.Nested()</code>; can't use outer instance fields; preferred when no outer object is needed.</li>
+      <li>Local class: inside a method, visible only there.</li>
+      <li>Anonymous: <code>new Interface() { … }</code>; one use; files <code>Outer$1.class</code>. Often replaced by lambdas.</li>
+      <li>Captured locals must be final or effectively final (copied into <code>val$x</code>).</li>
+      <li>Class files: <code>Outer$Inner</code>, <code>Outer$1</code>, <code>Outer$1Local</code>. Inner objects keep outer objects alive.</li>
+    </ul>
+  </div>
+  <h3>Interview and viva questions</h3>
+  <div class="faq">
+    <details><summary>What is the difference between a static nested class and an inner class?</summary><p>A static nested class is like a top-level class placed inside another for grouping; it has no reference to an outer object and is created with <code>new Outer.Nested()</code>. An inner class instance is tied to an outer instance (hidden <code>this$0</code>), can use its instance members directly, and is created with <code>outer.new Inner()</code>.</p></details>
+    <details><summary>Can an inner class access private members of the outer class?</summary><p>Yes, and the outer class can access the inner class's private members too. Before Java 11, javac generated hidden accessor methods (<code>access$000</code>) for this; since Java 11 the JVM knows they are nestmates and allows it directly.</p></details>
+    <details><summary>Anonymous class vs lambda?</summary><p>A lambda can only implement a functional interface (one abstract method) and has no state of its own; <code>this</code> inside a lambda means the enclosing object. An anonymous class can extend a class, implement several methods, have fields, and its <code>this</code> is the anonymous object itself. Lambdas don't create a <code>$1.class</code> file per use; they're linked at run time (<code>invokedynamic</code>).</p></details>
+    <details><summary>Why are captured variables required to be effectively final?</summary><p>Local variables live on the stack and disappear when the method returns, but the inner object may live longer. So Java copies the value into the object. If the local could change afterwards, the copy would be stale and confusing, so the language forbids changing it.</p></details>
+    <details><summary>Can a nested class be private or static? Can a top-level class?</summary><p>Nested classes can use any access modifier (<code>private</code>, <code>protected</code>, …) and <code>static</code>. Top-level classes can only be <code>public</code> or package-private and can't be <code>static</code> (Lesson 6.5).</p></details>
+  </div>
+
+{{PRACTICE}}
+
+  <h3 id="scenarios">Real-world scenario questions (asked in company interviews)</h3>
+  <p class="scn-intro">Nested-class questions test design judgement: should this class know about its outer object, and what does that link cost?</p>
+  <div class="scenarios">
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Mobile app · memory</span><span class="scn__tag scn__tag--level">Junior</span></div>
+      <h4>A screen that never leaves memory</h4>
+      <p class="scn__situation">After users open and close the “Order history” screen many times, the app runs out of memory. A heap dump shows dozens of screen objects kept alive by a listener list in a singleton service. The listeners are inner classes of the screen. Explain and fix.</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> the hidden this$0 reference and its effect on GC.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>Each inner listener holds <code>this$0</code> → the screen. The singleton's list is reachable forever, so every screen (with its views and images) stays reachable.</li>
+          <li>Unregister listeners when the screen closes.</li>
+          <li>Make the listener a <b>static nested</b> class that holds only what it needs (or a weak reference to the screen).</li>
+          <li>Verify with a heap dump before and after.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> calling <code>System.gc()</code>. The objects are still reachable, so GC can't free them.</p>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Library design</span><span class="scn__tag scn__tag--level">Fresher</span></div>
+      <h4>Where should Node live?</h4>
+      <p class="scn__situation">You're writing your own <code>LinkedList</code> with a <code>Node</code> class. Should <code>Node</code> be a top-level class, an inner class, or a static nested class?</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> choosing the right nesting.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li><b>Private static nested</b>: Node is an implementation detail (so nested and private) and doesn't need the list object (so static).</li>
+          <li>An inner Node would waste a <code>this$0</code> reference per node: memory multiplied by every element.</li>
+          <li>The JDK does exactly this: <code>private static class Node&lt;E&gt;</code> in <code>java.util.LinkedList</code>.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> making it public top-level “in case someone needs it”. That freezes your internals into your API.</p>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Backend · refactoring</span><span class="scn__tag scn__tag--level">Junior</span></div>
+      <h4>Twenty anonymous comparators</h4>
+      <p class="scn__situation">A reporting module sorts lists with 20 copies of <code>new Comparator&lt;Order&gt;() { … }</code>, many identical. How would you clean this up?</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> when anonymous classes stop being a good idea.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>Replace each with a lambda or <code>Comparator.comparing(Order::getAmount)</code> (Lessons 11.8 and 14.1); one line instead of five.</li>
+          <li>Put reusable rules in one place: <code>static final Comparator&lt;Order&gt; BY_AMOUNT</code> in the <code>Order</code> class.</li>
+          <li>Each anonymous class also generates a separate <code>.class</code> file; fewer, shared comparators are easier to test.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> leaving duplicated logic because “it works”. Duplicates drift apart over time.</p>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Fintech · API</span><span class="scn__tag scn__tag--level">Mid</span></div>
+      <h4>A payment request with eleven optional fields</h4>
+      <p class="scn__situation">The <code>PaymentRequest</code> constructor has 11 parameters, and callers keep mixing up the order of <code>amount</code> and <code>fee</code>. What pattern would you use, and how does nesting help?</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> the builder pattern with a static nested class.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>A <b>static nested <code>Builder</code></b>: <code>PaymentRequest.builder().amount(500).fee(5).upi("riya@okbank").build()</code>. Named methods make each value obvious.</li>
+          <li>The builder is nested so it can call the private constructor and stays grouped with the class it builds; it's static because no request exists yet.</li>
+          <li><code>build()</code> validates required fields, and the resulting object can be immutable.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> setters on the request itself. A half-filled, mutable payment object is a bug waiting to happen.</p>
+      </div></details>
+    </article>
+  </div>
+</part>

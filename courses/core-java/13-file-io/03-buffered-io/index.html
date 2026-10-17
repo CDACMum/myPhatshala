@@ -1,0 +1,959 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BufferedReader and BufferedWriter | MyPhatshala</title>
+<meta name="description" content="Buffered I/O in Java: why buffering is fast (fewer system calls), BufferedReader.readLine(), BufferedWriter.newLine(), flush() vs close(), the decorator pattern, BufferedInputStream/BufferedOutputStream and Files.newBufferedReader/Writer, plus processing large files line by line. With animations, a JVM tracer, 9 practice problems, quiz and interview scenarios.">
+<meta name="mp:minutes" content="22">
+<link rel="canonical" href="https://myphatshala.com/courses/core-java/13-file-io/03-buffered-io/">
+<meta property="og:title" content="BufferedReader and BufferedWriter in Java · MyPhatshala">
+<meta property="og:description" content="Count the OS calls a buffer saves, watch readLine() serve lines from memory, and solve 9 problems.">
+<link rel="icon" href="../../../../assets/img/logo.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Fraunces:ital,opsz,wght@0,9..144,600;0,9..144,700;1,9..144,600&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../../../../assets/css/style.css">
+<link rel="stylesheet" href="../../../../assets/css/lesson.css">
+<script src="../../../../assets/js/config.js"></script>
+<script>try { const t = localStorage.getItem("mp-theme"); if (t) document.documentElement.dataset.theme = t; } catch (e) {}</script>
+<script type="application/ld+json">{"@context": "https://schema.org", "@type": "LearningResource", "name": "BufferedReader and BufferedWriter", "learningResourceType": "Lesson", "educationalLevel": "Intermediate", "isAccessibleForFree": true, "inLanguage": "en", "isPartOf": {"@type": "Course", "name": "Core Java", "provider": {"@type": "Organization", "name": "MyPhatshala"}}}</script>
+</head>
+<body style="--track:#E8772E" data-lesson="13-file-io/03-buffered-io" data-course-root="../../">
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="site-header">
+  <div class="wrap">
+    <a class="brand" href="../../../../" aria-label="MyPhatshala home"><img src="../../../../assets/img/logo.svg" width="34" height="34" alt=""><span>My<b>Phatshala</b></span></a>
+    <nav class="nav" aria-label="Main">
+      <a href="../../../../#tracks">All courses</a>
+      <a href="../../">Core Java syllabus</a>
+      <button class="theme-btn" id="theme-btn" aria-label="Toggle dark mode"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg></button>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+<section class="lesson-hero">
+  <div class="wrap">
+    <nav class="crumbs" aria-label="Breadcrumb"><a href="../../../../">Home</a><span>›</span><a href="../../../../#track-programming">Programming Languages</a><span>›</span><a href="../../">Core Java</a><span>›</span><b>Lesson 13.3</b></nav>
+    <h1>BufferedReader and BufferedWriter</h1>
+    <p class="lead">Reading or writing a file one character at a time works, but it's painfully slow, because every call goes all the way to the operating system. <b>Buffered streams</b> collect data in memory and move it in big blocks. You'll measure the difference, learn the <code>readLine()</code> loop you'll use for the rest of your career, and learn why forgetting <code>close()</code> silently loses data.</p>
+    <div class="lesson-meta"><span>Module 13 · File Handling and I/O</span><span>⏱ 22 min</span><span>Intermediate</span><span>9 practice problems</span></div>
+  </div>
+</section>
+
+<div class="wrap lesson-layout">
+<article class="lesson-main">
+<!-- ======================= PART 1: THE STORY ======================= -->
+<section class="part" id="story">
+  <span class="part-label"><b>1</b> The story</span>
+  <h2>The export that took four minutes</h2>
+  <div class="story">
+    <p class="narration">The canteen now has a year of orders: about 2 lakh lines. Riya's export writes them straight to a <code>FileOutputStream</code>, a few bytes at a time. It takes minutes. Worse, one night the last few hundred orders are simply missing from the file.</p>
+    <div class="scene">
+      <svg viewBox="0 0 640 170" role="img" aria-label="Left: one person carrying letters to the post office one at a time. Right: letters collected in a bag and carried in one trip">
+        <g font-size="10.5">
+          <text x="14" y="24" font-weight="700" class="s-red">one letter per trip</text>
+          <rect x="14" y="40" width="60" height="80" rx="6" class="s-card2" style="stroke:var(--line)"/><text x="44" y="84" text-anchor="middle" class="s-ink" font-weight="700">app</text>
+          <rect x="230" y="40" width="70" height="80" rx="6" class="s-card" style="stroke:var(--line)"/><text x="265" y="84" text-anchor="middle" class="s-ink" font-weight="700">disk</text>
+          <g style="stroke:var(--red);stroke-width:1.3"><path d="M78 52h148M78 66h148M78 80h148M78 94h148M78 108h148"/></g>
+          <text x="14" y="146" class="s-red">2,00,000 trips</text>
+          <path d="M318 20v130" style="stroke:var(--line);stroke-width:1;stroke-dasharray:4 4"/>
+          <text x="340" y="24" font-weight="700" class="s-green">collect, then one trip</text>
+          <rect x="340" y="40" width="60" height="80" rx="6" class="s-card2" style="stroke:var(--line)"/><text x="370" y="84" text-anchor="middle" class="s-ink" font-weight="700">app</text>
+          <rect x="420" y="56" width="90" height="48" rx="8" class="s-soft-acc" style="stroke:var(--track)"/><text x="465" y="84" text-anchor="middle" class="s-acc" font-weight="700">buffer</text>
+          <path d="M512 80h40" style="stroke:var(--green);stroke-width:3"/><path d="M546 72l9 8-9 8" style="fill:none;stroke:var(--green);stroke-width:2.5"/>
+          <rect x="560" y="40" width="66" height="80" rx="6" class="s-card" style="stroke:var(--line)"/><text x="593" y="84" text-anchor="middle" class="s-ink" font-weight="700">disk</text>
+          <text x="340" y="146" class="s-green">a few hundred trips</text>
+        </g>
+        <text x="632" y="166" text-anchor="end" class="s-wm">myphatshala.com</text>
+      </svg>
+    </div>
+    <div class="panel">
+      <div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#FCE6D6"/><path d="M14 64c2-12 9-18 18-18s16 6 18 18z" fill="#2E5AAC"/><circle cx="32" cy="29" r="12" fill="#C68B5E"/><path d="M19 29c0-10 6-15 13-15s13 5 13 15c-3-5-7-8-13-8s-10 3-13 8z" fill="#2A1B14"/><path d="M43 27c3 6 3 14 0 20" stroke="#2A1B14" stroke-width="4" fill="none" stroke-linecap="round"/><circle cx="27.5" cy="30" r="1.5" fill="#2A1B14"/><circle cx="36.5" cy="30" r="1.5" fill="#2A1B14"/><path d="M28 35q4 3 8 0" stroke="#2A1B14" stroke-width="1.6" fill="none" stroke-linecap="round"/><circle cx="32" cy="24" r="1.2" fill="#D64545"/></svg></div>
+      <div class="bubble"><b class="who">Riya</b><p>Sir, why is writing a file so slow? My laptop has an SSD!</p></div>
+    </div>
+    <div class="panel panel--right">
+      <div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#DDEFE6"/><path d="M12 64c2-12 10-18 20-18s18 6 20 18z" fill="#F4F1EA"/><path d="M28 46l4 8 4-8" fill="#2F7D5B"/><circle cx="32" cy="28" r="12" fill="#B57A50"/><path d="M20 26c0-8 5-13 12-13s12 5 12 13c-2-3-6-5-12-5s-10 2-12 5z" fill="#5A5A5A"/><path d="M22 32c1 8 5 11 10 11s9-3 10-11c-2 3-6 4-10 4s-8-1-10-4z" fill="#5A5A5A"/><circle cx="27" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><circle cx="37" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><path d="M30.4 29h3.2" stroke="#1B2433" stroke-width="1.4"/><circle cx="27" cy="29" r="1.1" fill="#1B2433"/><circle cx="37" cy="29" r="1.1" fill="#1B2433"/></svg></div>
+      <div class="bubble"><b class="who">Arjun Sir</b><p>The disk isn't the slow part. Every little write is a request to the operating system, and you're making two lakh of them. Put a <b>buffer</b> in between: collect 8 KB in memory, then send it in one go.</p></div>
+    </div>
+    <div class="panel">
+      <div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#FCE6D6"/><path d="M14 64c2-12 9-18 18-18s16 6 18 18z" fill="#2E5AAC"/><circle cx="32" cy="29" r="12" fill="#C68B5E"/><path d="M19 29c0-10 6-15 13-15s13 5 13 15c-3-5-7-8-13-8s-10 3-13 8z" fill="#2A1B14"/><path d="M43 27c3 6 3 14 0 20" stroke="#2A1B14" stroke-width="4" fill="none" stroke-linecap="round"/><circle cx="27.5" cy="30" r="1.5" fill="#2A1B14"/><circle cx="36.5" cy="30" r="1.5" fill="#2A1B14"/><path d="M28 35q4 3 8 0" stroke="#2A1B14" stroke-width="1.6" fill="none" stroke-linecap="round"/><circle cx="32" cy="24" r="1.2" fill="#D64545"/></svg></div>
+      <div class="bubble"><b class="who">Riya</b><p>And the missing orders at the end?</p></div>
+    </div>
+    <div class="panel panel--right">
+      <div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#DDEFE6"/><path d="M12 64c2-12 10-18 20-18s18 6 20 18z" fill="#F4F1EA"/><path d="M28 46l4 8 4-8" fill="#2F7D5B"/><circle cx="32" cy="28" r="12" fill="#B57A50"/><path d="M20 26c0-8 5-13 12-13s12 5 12 13c-2-3-6-5-12-5s-10 2-12 5z" fill="#5A5A5A"/><path d="M22 32c1 8 5 11 10 11s9-3 10-11c-2 3-6 4-10 4s-8-1-10-4z" fill="#5A5A5A"/><circle cx="27" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><circle cx="37" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><path d="M30.4 29h3.2" stroke="#1B2433" stroke-width="1.4"/><circle cx="27" cy="29" r="1.1" fill="#1B2433"/><circle cx="37" cy="29" r="1.1" fill="#1B2433"/></svg></div>
+      <div class="bubble"><b class="who">Arjun Sir</b><p>Those were still sitting in a buffer when your program stopped. A buffer must be <b>flushed</b>, and <code>close()</code> does that. Let's see both.</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- ======================= PART 2: DEFINITION ======================= -->
+<section class="part" id="definition">
+  <span class="part-label"><b>2</b> Definition</span>
+  <h2>What is buffered I/O?</h2>
+  <div class="def">
+    <div class="def__formal"><small>Formal definition (write this in exams)</small>
+      <p><b>Buffered I/O</b> places an in-memory array (a <b>buffer</b>) between a program and an underlying stream, so that many small read or write operations are served from or collected in memory and transferred to the underlying stream in large blocks, reducing costly system calls. In Java, <code>BufferedReader</code> and <code>BufferedWriter</code> wrap any <code>Reader</code> or <code>Writer</code> (default buffer 8,192 characters), and <code>BufferedInputStream</code> and <code>BufferedOutputStream</code> wrap byte streams. <code>BufferedReader.readLine()</code> returns the next line without its terminator, or <code>null</code> at end of stream. Output buffers are written when full, on <code>flush()</code>, or on <code>close()</code>.</p></div>
+    <div class="def__simple"><small>In simple words</small>
+      <p>Don't run to the post office with every letter. Fill a bag, then go once. But remember to actually take the bag before you leave.</p></div>
+  </div>
+  <h3>Words you'll meet in this lesson</h3>
+  <div class="terms">
+    <div class="term"><b>Buffer</b><span>An array in memory where data waits before moving on.</span></div>
+    <div class="term"><b>System call</b><span>A request from your program to the OS (read, write). Relatively expensive.</span></div>
+    <div class="term"><b>flush()</b><span>Send whatever is in the buffer now, without closing.</span></div>
+    <div class="term"><b>close()</b><span>Flush, then release the file. Closing the outer stream closes the inner ones.</span></div>
+    <div class="term"><b>readLine()</b><span>Next line of text without the line break; <code>null</code> at the end.</span></div>
+    <div class="term"><b>Decorator</b><span>An object that wraps another of the same type to add a feature.</span></div>
+  </div>
+  <h3>Plain vs buffered</h3>
+  <div class="table-wrap">
+  <table class="compare" style="min-width:560px">
+    <thead><tr><th></th><th>Plain file streams</th><th>Buffered wrappers</th></tr></thead>
+    <tbody>
+      <tr><td>Read a line</td><td>No such method</td><td><code>readLine()</code></td></tr>
+      <tr><td>Write a line break</td><td><code>write("\n")</code></td><td><code>newLine()</code> (platform separator)</td></tr>
+      <tr><td>OS calls for many small writes</td><td><code>FileOutputStream</code>: one per call. (<code>FileWriter</code> has a small byte buffer inside its encoder, but every call still goes through it.)</td><td>One per full buffer</td></tr>
+      <tr><td>Data waits in memory?</td><td>Little</td><td>Yes, until flush/close</td></tr>
+      <tr><td>Create the modern way</td><td>—</td><td><code>Files.newBufferedReader/Writer(path)</code></td></tr>
+    </tbody>
+  </table>
+  </div>
+  <div class="callout callout--exam"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19V5a2 2 0 0 1 2-2h12v18H6a2 2 0 0 1-2-2zm0 0a2 2 0 0 1 2-2h12"/></svg><p><b>Exam tip:</b> “Buffered streams improve performance by reducing the number of I/O operations. <code>readLine()</code> returns <code>null</code> at end of file. Always <code>close()</code> (or <code>flush()</code>) a buffered writer, or buffered data may be lost.” Also name the pattern: wrapping streams is the <b>decorator</b> design pattern.</p></div>
+</section>
+
+<div class="ad-slot" data-slot="mid"></div>
+
+<!-- ======================= PART 3: TYPES AND WAYS TO USE IT ======================= -->
+<section class="part" id="types">
+  <span class="part-label"><b>3</b> Types and ways to use it</span>
+  <h2>The buffered family</h2>
+  <div class="code" data-lang="java" data-file="Main.java"><pre><code>// classic: wrap a file stream in a buffer
+BufferedReader br = new BufferedReader(new FileReader("in.txt", StandardCharsets.UTF_8));
+BufferedWriter bw = new BufferedWriter(new FileWriter("out.txt", StandardCharsets.UTF_8));
+// for bytes
+InputStream in = new BufferedInputStream(new FileInputStream("photo.jpg"));
+// modern shortcut (UTF-8, already buffered)
+BufferedReader r = Files.newBufferedReader(Path.of("in.txt"));
+BufferedWriter w = Files.newBufferedWriter(Path.of("out.txt"));</code></pre></div>
+  <div class="cards">
+    <div class="card"><svg class="ic" viewBox="0 0 40 40" fill="none" stroke="var(--green)" stroke-width="2"><path d="M10 12h20M10 20h20M10 28h14"/></svg><h4>BufferedReader</h4><p>Reads text in blocks; <code>readLine()</code> and <code>lines()</code> for line-by-line processing.</p><span class="tag">text in</span></div>
+    <div class="card"><svg class="ic" viewBox="0 0 40 40" fill="none" stroke="var(--blue)" stroke-width="2"><path d="M10 12h20M10 20h20M10 28h14"/><path d="M30 26l4 4-4 4"/></svg><h4>BufferedWriter</h4><p>Collects text; <code>newLine()</code> writes the platform line separator.</p><span class="tag">text out</span></div>
+    <div class="card"><svg class="ic" viewBox="0 0 40 40" fill="none" stroke="var(--track)" stroke-width="2"><rect x="8" y="12" width="24" height="16" rx="3"/><path d="M14 20h12"/></svg><h4>Buffered byte streams</h4><p><code>BufferedInputStream</code>, <code>BufferedOutputStream</code> for images, PDFs, binary data.</p><span class="tag">bytes</span></div>
+    <div class="card"><svg class="ic" viewBox="0 0 40 40" fill="none" stroke="var(--ink-3)" stroke-width="2"><rect x="8" y="8" width="24" height="24" rx="4"/><path d="M14 20h12M20 14v12"/></svg><h4>Files helpers</h4><p><code>Files.newBufferedReader</code>/<code>Writer</code>: buffered and UTF-8 in one call.</p><span class="tag">recommended</span></div>
+  </div>
+  <h3>The data that wasn't there</h3>
+  <div class="code" data-lang="java" data-file="Main.java"><pre><code>import java.io.*;
+import java.nio.file.*;
+
+public class Main {
+    public static void main(String[] args) throws IOException {
+        BufferedWriter w = new BufferedWriter(new FileWriter("invoice.txt"));
+        w.write("INV-501 Rs 2360");
+        System.out.println("on disk now: " + Files.size(Path.of("invoice.txt")) + " bytes");
+        w.close();
+        System.out.println("after close: " + Files.size(Path.of("invoice.txt")) + " bytes");
+    }
+}</code></pre><div class="output">on disk now: 0 bytes
+after close: 15 bytes</div></div>
+  <div class="callout callout--warn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3 2 21h20L12 3z"/><path d="M12 10v5M12 18v.5"/></svg><p><b>Unclosed buffered writers lose data.</b> Nothing is wrong with the code until the very end: the text sits in memory and the file stays empty. If the program crashes or exits first, it's gone. Use try-with-resources every time, and call <code>flush()</code> if another program must see the data before you close.</p></div>
+</section>
+
+<!-- ======================= PART 4: STEP BY STEP ======================= -->
+<section class="part" id="steps">
+  <span class="part-label"><b>4</b> Step by step</span>
+  <h2>Inside the readLine() loop</h2>
+  <ol class="stepper">
+    <li><h4>Wrap the reader</h4>
+      <div class="code" data-lang="java" data-file="Main.java"><pre><code>try (BufferedReader br = Files.newBufferedReader(Path.of("orders.txt"))) {</code></pre></div>
+      <span class="behind">A decoder reader on the file, wrapped by a BufferedReader with an empty <code>char[8192]</code>.</span></li>
+    <li><h4>First readLine(): fill</h4>
+      <div class="code" data-lang="java" data-file="Main.java"><pre><code>    String line;
+    while ((line = br.readLine()) != null) {</code></pre></div>
+      <span class="behind">The buffer is empty, so the reader asks the file for up to 8,192 characters in one call.</span></li>
+    <li><h4>Cut out one line</h4>
+      <span class="behind">It scans forward from <code>pos</code> to the next <code>\n</code> (or <code>\r\n</code>), creates a String from those characters, and moves <code>pos</code> past the line break.</span></li>
+    <li><h4>Next calls: from memory</h4>
+      <span class="behind">Following lines come straight from the array until it runs out; then one more big read refills it.</span></li>
+    <li><h4>End</h4>
+      <span class="behind">When the file has no more data, <code>readLine()</code> returns <code>null</code>, the loop ends, and try-with-resources closes the reader and the file.</span></li>
+  </ol>
+</section>
+
+<!-- ======================= PART 5: SEE IT HAPPEN ======================= -->
+<section class="part" id="animation">
+  <span class="part-label"><b>5</b> See it happen</span>
+  <h2>Buffers on the way out and on the way in</h2>
+  <p>Left: writing with and without a buffer. Right: a BufferedReader on the heap, filling its array once and serving lines from it.</p>
+  <div class="anim" data-frames="6">
+    <div class="anim__title">Why buffering is fast, both views <span>6 steps</span></div>
+    <div class="anim__views">
+      <div class="view view--see">
+        <span class="view__tag">What you see</span>
+        <svg viewBox="0 0 360 250" role="img" aria-label="Without a buffer every small write goes to the disk; with a buffer writes collect in memory and go to disk in one large chunk">
+          <rect x="8" y="8" width="344" height="36" rx="8" class="s-board" style="stroke:board;stroke-width:1.5"/>
+          <text data-on="1" x="16" y="31" font-size="9.4" class="s-chalk mono">out.write(b);  // FileOutputStream, x5</text>
+          <text data-on="2" x="16" y="31" font-size="9.4" class="s-chalk mono">out.write(b);  // FileOutputStream, x5</text>
+          <text data-on="3" x="16" y="31" font-size="9.4" class="s-chalk mono">bw.write(line); // BufferedWriter</text>
+          <text data-on="4" x="16" y="31" font-size="9.4" class="s-chalk mono">bw.write(line); // more lines</text>
+          <text data-on="5" x="16" y="31" font-size="9.4" class="s-chalk mono">// buffer full, or flush()/close()</text>
+          <text data-on="6" x="16" y="31" font-size="9.4" class="s-chalk mono">bw.close();     // flushes, then closes</text>
+          <rect x="10" y="60" width="90" height="120" rx="8" class="s-card2" style="stroke:var(--line);stroke-width:1.5"/>
+          <text x="55" y="78" font-size="9.5" text-anchor="middle" font-weight="700" class="s-ink">program</text>
+          <rect x="262" y="60" width="90" height="120" rx="8" class="s-card" style="stroke:var(--line);stroke-width:1.5"/>
+          <text x="307" y="78" font-size="9.5" text-anchor="middle" font-weight="700" class="s-ink">disk</text>
+          <g data-on="1-2"><path d="M100 92 L260 92" style="stroke:#D64545;stroke-width:1.4;fill:none"/><path d="M252.0 87.5 L260 92 L252.0 96.5" style="stroke:#D64545;stroke-width:1.4;fill:none;stroke-linecap:round;stroke-linejoin:round"/></g>
+          <g data-on="1-2"><path d="M100 108 L260 108" style="stroke:#D64545;stroke-width:1.4;fill:none"/><path d="M252.0 103.5 L260 108 L252.0 112.5" style="stroke:#D64545;stroke-width:1.4;fill:none;stroke-linecap:round;stroke-linejoin:round"/></g>
+          <g data-on="1-2"><path d="M100 124 L260 124" style="stroke:#D64545;stroke-width:1.4;fill:none"/><path d="M252.0 119.5 L260 124 L252.0 128.5" style="stroke:#D64545;stroke-width:1.4;fill:none;stroke-linecap:round;stroke-linejoin:round"/></g>
+          <g data-on="1-2"><path d="M100 140 L260 140" style="stroke:#D64545;stroke-width:1.4;fill:none"/><path d="M252.0 135.5 L260 140 L252.0 144.5" style="stroke:#D64545;stroke-width:1.4;fill:none;stroke-linecap:round;stroke-linejoin:round"/></g>
+          <g data-on="1-2"><path d="M100 156 L260 156" style="stroke:#D64545;stroke-width:1.4;fill:none"/><path d="M252.0 151.5 L260 156 L252.0 160.5" style="stroke:#D64545;stroke-width:1.4;fill:none;stroke-linecap:round;stroke-linejoin:round"/></g>
+          <text data-on="2" x="180" y="196" font-size="10.5" text-anchor="middle" font-weight="700" class="s-red">5 trips to the disk</text>
+          <g data-on="3-"><rect x="120" y="70" width="122" height="96" rx="8" class="s-soft-acc" style="stroke:var(--track);stroke-width:1.5"/></g>
+          <text data-on="3-" x="181" y="88" font-size="9" text-anchor="middle" font-weight="700" class="s-acc">buffer (8 KB)</text>
+          <g data-on="3"><rect x="128" y="104" width="14" height="40" rx="2" class="s-soft-blue" style="stroke:var(--blue);stroke-width:1.5"/></g>
+          <g data-on="4"><rect x="128" y="104" width="14" height="40" rx="2" class="s-soft-blue" style="stroke:var(--blue);stroke-width:1.5"/></g>
+          <g data-on="4"><rect x="146" y="104" width="14" height="40" rx="2" class="s-soft-blue" style="stroke:var(--blue);stroke-width:1.5"/></g>
+          <g data-on="4"><rect x="164" y="104" width="14" height="40" rx="2" class="s-soft-blue" style="stroke:var(--blue);stroke-width:1.5"/></g>
+          <g data-on="4"><rect x="182" y="104" width="14" height="40" rx="2" class="s-soft-blue" style="stroke:var(--blue);stroke-width:1.5"/></g>
+          <g data-on="5"><rect x="128" y="104" width="14" height="40" rx="2" class="s-soft-blue" style="stroke:var(--blue);stroke-width:1.5"/></g>
+          <g data-on="5"><rect x="146" y="104" width="14" height="40" rx="2" class="s-soft-blue" style="stroke:var(--blue);stroke-width:1.5"/></g>
+          <g data-on="5"><rect x="164" y="104" width="14" height="40" rx="2" class="s-soft-blue" style="stroke:var(--blue);stroke-width:1.5"/></g>
+          <g data-on="5"><rect x="182" y="104" width="14" height="40" rx="2" class="s-soft-blue" style="stroke:var(--blue);stroke-width:1.5"/></g>
+          <g data-on="5"><rect x="200" y="104" width="14" height="40" rx="2" class="s-soft-blue" style="stroke:var(--blue);stroke-width:1.5"/></g>
+          <g data-on="5"><rect x="218" y="104" width="14" height="40" rx="2" class="s-soft-blue" style="stroke:var(--blue);stroke-width:1.5"/></g>
+          <g data-on="3-4"><path d="M100 116 L120 116" style="stroke:var(--ink-3);stroke-width:2;fill:none"/><path d="M112.0 111.5 L120 116 L112.0 120.5" style="stroke:var(--ink-3);stroke-width:2;fill:none;stroke-linecap:round;stroke-linejoin:round"/></g>
+          <g data-on="5-6"><path d="M242 124 L260 124" style="stroke:var(--green);stroke-width:2.4;fill:none"/><path d="M252.0 119.5 L260 124 L252.0 128.5" style="stroke:var(--green);stroke-width:2.4;fill:none;stroke-linecap:round;stroke-linejoin:round"/></g>
+          <text data-on="5" x="180" y="196" font-size="10.5" text-anchor="middle" font-weight="700" class="s-green">1 trip carries everything</text>
+          <text data-on="6" x="180" y="196" font-size="10.5" text-anchor="middle" font-weight="700" class="s-ink2">close() = flush + release the file</text>
+          <text data-on="6" x="181" y="158" font-size="9" text-anchor="middle" class="s-ink3">empty again</text>
+          <text data-on="1" x="180" y="234" font-size="10.5" text-anchor="middle" class="s-ink2">No buffer: each write hits the disk.</text>
+          <text data-on="2" x="180" y="234" font-size="10.5" text-anchor="middle" class="s-ink2">Many small trips: slow.</text>
+          <text data-on="3" x="180" y="234" font-size="10.5" text-anchor="middle" class="s-ink2">With a buffer: writes go to memory.</text>
+          <text data-on="4" x="180" y="234" font-size="10.5" text-anchor="middle" class="s-ink2">The buffer fills up.</text>
+          <text data-on="5" x="180" y="234" font-size="10.5" text-anchor="middle" class="s-ink2">One big write to disk.</text>
+          <text data-on="6" x="180" y="234" font-size="10.5" text-anchor="middle" class="s-ink2">close() flushes the rest.</text>
+          <text x="354" y="245" text-anchor="end" class="s-wm">myphatshala.com</text>
+        </svg>
+        <ol class="caps" hidden>
+          <li>A plain <code>FileOutputStream</code> passes every <code>write</code> straight to the operating system.</li>
+          <li>Each call is a <b>system call</b>: the program switches to the OS kernel and back. Doing that thousands of times for tiny pieces is slow.</li>
+          <li>A <code>BufferedWriter</code> keeps an array (8,192 characters) in memory. <code>write</code> just copies into it: no OS call.</li>
+          <li>More writes, still in memory. This is extremely fast.</li>
+          <li>When the buffer is full, or when you call <code>flush()</code>, the whole chunk goes down in <b>one</b> call.</li>
+          <li><code>close()</code> flushes whatever is left, then closes the file. Forget it and the last part of your data never reaches the disk.</li>
+        </ol>
+      </div>
+      <div class="view view--behind">
+        <span class="view__tag">Behind the screen</span>
+        <svg viewBox="0 0 360 250" role="img" aria-label="A BufferedReader wraps a FileReader: it reads a big block into its char array once and then serves lines from memory">
+          <rect x="6" y="6" width="348" height="120" rx="8" class="s-soft-blue" style="stroke:var(--blue);stroke-width:1.5"/>
+          <text x="16" y="24" font-size="10" font-weight="700" class="s-blue">HEAP</text>
+          <rect x="16" y="34" width="150" height="82" rx="8" class="s-card" style="stroke:var(--line);stroke-width:1.5"/>
+          <text x="24" y="52" font-size="9.2" font-weight="700" class="s-ink mono">#1 BufferedReader</text>
+          <text x="24" y="70" font-size="9" class="s-ink2 mono">in  → #2</text>
+          <text x="24" y="88" font-size="9" class="s-ink2 mono">cb  → char[8192]</text>
+          <text x="24" y="106" font-size="9" class="s-ink2 mono">pos</text>
+          <text data-on="1" x="56" y="106" font-size="9" font-weight="700" class="s-acc mono">0</text>
+          <text data-on="2" x="56" y="106" font-size="9" font-weight="700" class="s-acc mono">0</text>
+          <text data-on="3" x="56" y="106" font-size="9" font-weight="700" class="s-acc mono">12</text>
+          <text data-on="4" x="56" y="106" font-size="9" font-weight="700" class="s-acc mono">24</text>
+          <text data-on="5" x="56" y="106" font-size="9" font-weight="700" class="s-acc mono">36</text>
+          <text data-on="6" x="56" y="106" font-size="9" font-weight="700" class="s-acc mono">—</text>
+          <rect x="186" y="34" width="160" height="34" rx="8" class="s-card" style="stroke:var(--line);stroke-width:1.5"/>
+          <text x="194" y="55" font-size="8.8" font-weight="700" class="s-ink mono">#2 FileReader (orders.txt)</text>
+          <g data-on="2-5"><rect x="186" y="76" width="160" height="40" rx="8" class="s-soft-acc" style="stroke:var(--track);stroke-width:1.5"/></g>
+          <text data-on="2-5" x="194" y="92" font-size="8.8" class="s-acc mono">char[] holds lines 1–3</text>
+          <text data-on="2-5" x="194" y="108" font-size="8.4" class="s-ink3">(whole small file)</text>
+          <rect x="6" y="136" width="348" height="72" rx="8" class="s-card2" style="stroke:var(--line);stroke-width:1.5"/>
+          <text x="16" y="154" font-size="9.5" font-weight="700" class="s-ink2">main stack</text>
+          <text data-on="3" x="16" y="178" font-size="10" class="s-ink mono">line = "101,dosa,80"</text>
+          <text data-on="4" x="16" y="178" font-size="10" class="s-ink mono">line = "102,idli,40"</text>
+          <text data-on="5" x="16" y="178" font-size="10" class="s-ink mono">line = "103,vada,30"</text>
+          <text data-on="6" x="16" y="178" font-size="10" class="s-red mono">line = null  (end)</text>
+          <text data-on="5" x="16" y="200" font-size="9.2" class="s-green">1 read from the file, 3 lines served</text>
+          <text data-on="6" x="16" y="200" font-size="9.2" class="s-red">readLine() returns null at the end</text>
+          <g data-on="1-"><path d="M186 51 L168 51" style="stroke:var(--ink-3);stroke-width:2;fill:none"/><path d="M176.0 55.5 L168 51 L176.0 46.5" style="stroke:var(--ink-3);stroke-width:2;fill:none;stroke-linecap:round;stroke-linejoin:round"/></g>
+          <g data-on="2"><path d="M266 68 L266 76" style="stroke:var(--track);stroke-width:2;fill:none"/><path d="M270.5 68.0 L266 76 L261.5 68.0" style="stroke:var(--track);stroke-width:2;fill:none;stroke-linecap:round;stroke-linejoin:round"/></g>
+          <text data-on="1" x="180" y="236" font-size="10.5" text-anchor="middle" class="s-ink2">A reader wrapped in a buffered reader.</text>
+          <text data-on="2" x="180" y="236" font-size="10.5" text-anchor="middle" class="s-ink2">First readLine: one big read.</text>
+          <text data-on="3" x="180" y="236" font-size="10.5" text-anchor="middle" class="s-ink2">Line 1 from memory.</text>
+          <text data-on="4" x="180" y="236" font-size="10.5" text-anchor="middle" class="s-ink2">Line 2 from memory.</text>
+          <text data-on="5" x="180" y="236" font-size="10.5" text-anchor="middle" class="s-ink2">Line 3 from memory.</text>
+          <text data-on="6" x="180" y="236" font-size="10.5" text-anchor="middle" class="s-ink2">No more lines: null.</text>
+          <text x="354" y="245" text-anchor="end" class="s-wm">myphatshala.com</text>
+        </svg>
+        <ol class="caps" hidden>
+          <li><code>new BufferedReader(new FileReader("orders.txt"))</code>: two objects. The BufferedReader holds a reference to the FileReader and an empty <code>char[8192]</code>.</li>
+          <li>The first <code>readLine()</code> asks the FileReader for up to 8,192 characters at once. This small file fits completely.</li>
+          <li><code>readLine()</code> finds the first line break in the array, returns the characters before it as a new String, and moves <code>pos</code> forward.</li>
+          <li>The second line comes from the same array: no disk access at all.</li>
+          <li>Same for the third. One read from the file served three lines.</li>
+          <li>At the end of the data, <code>readLine()</code> returns <code>null</code>. That's the loop condition: <code>while ((line = br.readLine()) != null)</code>.</li>
+        </ol>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ======================= PART 6: REAL-WORLD USE ======================= -->
+<section class="part" id="real-world">
+  <span class="part-label"><b>6</b> Real-world use</span>
+  <h2>Buffered I/O in real systems</h2>
+  <p>Practically every file and network stream in production Java code is buffered.</p>
+  <!--ANIM2-->
+  <h3 id="animated-example">Watch it with an example: a bank's nightly statement file</h3>
+  <p class="anim-intro">A bank writes 2 lakh transaction lines every night. Without a buffer, each line is a separate trip to the disk; with one, lines are sent in big blocks.</p>
+  <div class="anim anim--one" data-frames="5" data-delay="4600">
+    <div class="anim__title">2,00,000 lines, buffered vs unbuffered <span>5 steps</span></div>
+    <div class="anim__views">
+      <div class="view view--story">
+        <span class="view__tag">Animated example</span>
+        <svg viewBox="0 0 360 230" role="img" aria-label="Comparing the number of disk writes for a large statement file with and without a buffer">
+          <rect x="10" y="14" width="160" height="120" rx="8" class="s-card" style="stroke:#D64545;stroke-width:1.5"/>
+          <text x="20" y="34" font-size="10" font-weight="700" class="s-red">unbuffered</text>
+          <rect x="190" y="14" width="160" height="120" rx="8" class="s-card" style="stroke:var(--green);stroke-width:1.5"/>
+          <text x="200" y="34" font-size="10" font-weight="700" class="s-green">BufferedWriter</text>
+          <text data-on="2-" x="20" y="60" font-size="9" class="s-ink2">writes to OS:</text>
+          <text data-on="2-" x="200" y="60" font-size="9" class="s-ink2">writes to OS:</text>
+          <text data-on="2" x="20" y="88" font-size="16" font-weight="700" class="s-red mono">50,000</text>
+          <text data-on="3" x="20" y="88" font-size="16" font-weight="700" class="s-red mono">1,20,000</text>
+          <text data-on="4" x="20" y="88" font-size="16" font-weight="700" class="s-red mono">2,00,000</text>
+          <text data-on="5" x="20" y="88" font-size="16" font-weight="700" class="s-red mono">2,00,000</text>
+          <text data-on="2" x="200" y="88" font-size="16" font-weight="700" class="s-green mono">~150</text>
+          <text data-on="3" x="200" y="88" font-size="16" font-weight="700" class="s-green mono">~350</text>
+          <text data-on="4" x="200" y="88" font-size="16" font-weight="700" class="s-green mono">~600</text>
+          <text data-on="5" x="200" y="88" font-size="16" font-weight="700" class="s-green mono">~600</text>
+          <text data-on="2-" x="20" y="118" font-size="9" class="s-ink3">one per line</text>
+          <text data-on="2-" x="200" y="118" font-size="9" class="s-ink3">one per 8 KB block</text>
+          <g data-on="5"><rect x="10" y="146" width="340" height="40" rx="8" class="s-board" style="stroke:board;stroke-width:1.5"/></g>
+          <text data-on="5" x="20" y="170" font-size="9.8" font-weight="700" class="s-chalk">Same file, far fewer OS calls: the job finishes much sooner</text>
+          <text data-on="1-4" x="10" y="160" font-size="9.5" class="s-ink2">writing 2,00,000 lines of about 25 characters…</text>
+          <text data-on="1" x="180" y="206" font-size="10.5" text-anchor="middle" class="s-ink2">The nightly job starts.</text>
+          <text data-on="2" x="180" y="206" font-size="10.5" text-anchor="middle" class="s-ink2">A quarter of the way.</text>
+          <text data-on="3" x="180" y="206" font-size="10.5" text-anchor="middle" class="s-ink2">Over half done.</text>
+          <text data-on="4" x="180" y="206" font-size="10.5" text-anchor="middle" class="s-ink2">Finished.</text>
+          <text data-on="5" x="180" y="206" font-size="10.5" text-anchor="middle" class="s-ink2">Why buffering wins.</text>
+          <text x="354" y="225" text-anchor="end" class="s-wm">myphatshala.com</text>
+        </svg>
+        <ol class="caps" hidden>
+          <li>Each night the bank writes one line per transaction: date, account, amount. About 2 lakh lines, 5 MB.</li>
+          <li>Written straight to a <code>FileOutputStream</code> with no buffer, every line is its own write call to the OS. Buffered, lines collect in an 8 KB array, so one call carries about 300 lines.</li>
+          <li>The unbuffered job keeps switching into the OS kernel; the buffered one is mostly copying characters in memory.</li>
+          <li>The file contents are identical. Only the number of trips differs: 2 lakh vs about 600. (Counts are approximate; the exact number depends on line lengths.)</li>
+          <li>That's why production code always wraps file streams in buffers, or uses <code>Files.newBufferedWriter</code>, which does it for you.</li>
+        </ol>
+      </div>
+    </div>
+  </div>
+  <!--/ANIM2-->
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="20" y="16" width="80" height="58" rx="6" class="s-board"/><path d="M30 30h52M30 42h60M30 54h40" style="stroke:var(--chalk);stroke-width:2"/></svg></div>
+    <div><h4>1. Log processing</h4><p>Support teams scan gigabytes of logs for errors, reading line by line so memory stays tiny.</p>
+      <div class="uc-flow"><span>app.log (5 GB)</span><i>→</i><span class="java">readLine() loop</span><i>→</i><span>errors.txt</span></div></div>
+  </div>
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="22" y="18" width="76" height="54" rx="6" class="s-card" style="stroke:var(--line)"/><path d="M22 34h76M48 18v54M74 18v54" style="stroke:var(--line);stroke-width:1.5"/></svg></div>
+    <div><h4>2. Bulk exports</h4><p>Statements, GST returns and data dumps with lakhs of lines are written through BufferedWriter.</p>
+      <div class="uc-flow"><span>2 lakh rows</span><i>→</i><span class="java">BufferedWriter</span><i>→</i><span>statement.csv</span></div></div>
+  </div>
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><circle cx="34" cy="45" r="14" class="s-soft-green" style="stroke:var(--green)"/><circle cx="86" cy="45" r="14" class="s-soft-blue" style="stroke:var(--blue)"/><path d="M48 45h24" style="stroke:var(--ink-3);stroke-width:2"/></svg></div>
+    <div><h4>3. Network sockets</h4><p>Reading an HTTP response or a chat protocol line by line uses a BufferedReader on the socket's InputStream.</p>
+      <div class="uc-flow"><span>socket</span><i>→</i><span class="java">BufferedReader(InputStreamReader)</span><i>→</i><span>lines</span></div></div>
+  </div>
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="38" y="16" width="44" height="58" rx="6" class="s-soft-acc" style="stroke:var(--track)"/><path d="M48 30h24M48 42h24M48 54h16" style="stroke:var(--track);stroke-width:2"/></svg></div>
+    <div><h4>4. Competitive programming and input</h4><p>Fast solutions read huge inputs with BufferedReader instead of Scanner, which does more work per token.</p>
+      <div class="uc-flow"><span>10 lakh numbers</span><i>→</i><span class="java">BufferedReader(System.in)</span><i>→</i><span>accepted in time</span></div></div>
+  </div>
+  <p class="muted">Counts and sizes are illustrative; exact numbers depend on line lengths and buffer sizes.</p>
+</section>
+
+<div class="ad-slot" data-slot="mid"></div>
+
+<!-- ======================= PART 7: RUN THE CODE ======================= -->
+<section class="part" id="run">
+  <span class="part-label"><b>7</b> Run the code</span>
+  <h2>Write a menu, read it line by line</h2>
+  <div class="code" data-lang="java" data-file="Main.java"><pre><code>import java.io.*;
+import java.nio.file.*;
+
+public class Main {
+    public static void main(String[] args) throws IOException {
+        try (BufferedWriter w = Files.newBufferedWriter(Path.of("menu.txt"))) {
+            w.write("Masala Dosa,80");
+            w.newLine();
+            w.write("Idli Sambar,50");
+            w.newLine();
+            w.write("Filter Coffee,25");
+            w.newLine();
+        }
+        try (BufferedReader r = Files.newBufferedReader(Path.of("menu.txt"))) {
+            String line;
+            while ((line = r.readLine()) != null) {
+                String[] f = line.split(",");
+                System.out.printf("%-14s Rs %3s%n", f[0], f[1]);
+            }
+        }
+    }
+}</code></pre><div class="output">Masala Dosa    Rs  80
+Idli Sambar    Rs  50
+Filter Coffee  Rs  25</div></div>
+  <ul class="anno">
+    <li><code>Files.newBufferedWriter(Path.of("menu.txt"))</code><span>Buffered, UTF-8, creates or replaces the file.</span></li>
+    <li><code>w.newLine()</code><span>Writes the line separator for the current OS.</span></li>
+    <li><code>(line = r.readLine()) != null</code><span>Read and test in one step; stops at end of file.</span></li>
+    <li><code>printf("%-14s Rs %3s%n", …)</code><span>Aligned columns: name left-aligned in 14 characters, price right-aligned in 3.</span></li>
+  </ul>
+  <div class="runner">
+    <script type="application/json">{
+ "lang": "java",
+ "file": "Main.java",
+ "tasks": [
+  {
+   "label": "1 · Write a menu, read it back",
+   "hint": "Press <b>Run</b>. Then add a dish. Notice there's no <code>flush()</code>: try-with-resources closes, and closing flushes.",
+   "code": "import java.io.*;\nimport java.nio.file.*;\n\npublic class Main {\n    public static void main(String[] args) throws IOException {\n        try (BufferedWriter w = Files.newBufferedWriter(Path.of(\"menu.txt\"))) {\n            w.write(\"Masala Dosa,80\");\n            w.newLine();\n            w.write(\"Idli Sambar,50\");\n            w.newLine();\n        }\n        try (BufferedReader r = Files.newBufferedReader(Path.of(\"menu.txt\"))) {\n            String line;\n            while ((line = r.readLine()) != null) {\n                System.out.println(line.replace(\",\", \"  Rs \"));\n            }\n        }\n    }\n}\n"
+  },
+  {
+   "label": "2 · Predict: the forgotten close",
+   "hint": "<b>Predict first:</b> how many lines does the reader find? Then add <code>w.close();</code> before reading.",
+   "code": "import java.io.*;\nimport java.nio.file.*;\n\npublic class Main {\n    public static void main(String[] args) throws IOException {\n        BufferedWriter w = new BufferedWriter(new FileWriter(\"orders.txt\"));\n        for (int i = 1; i <= 3; i++) {\n            w.write(\"order \" + i);\n            w.newLine();\n        }\n        System.out.println(\"lines on disk: \" + Files.readAllLines(Path.of(\"orders.txt\")).size());\n    }\n}\n"
+  },
+  {
+   "label": "3 · Predict: how much time?",
+   "hint": "<b>Predict first:</b> which loop is faster? Run it a few times (timings vary). Each unbuffered <code>write</code> is a call into the operating system.",
+   "code": "import java.io.*;\n\npublic class Main {\n    public static void main(String[] args) throws IOException {\n        long t0 = System.nanoTime();\n        try (OutputStream out = new FileOutputStream(\"slow.dat\")) {\n            for (int i = 0; i < 200_000; i++) out.write('x');\n        }\n        long t1 = System.nanoTime();\n        try (OutputStream out = new BufferedOutputStream(new FileOutputStream(\"fast.dat\"))) {\n            for (int i = 0; i < 200_000; i++) out.write('x');\n        }\n        long t2 = System.nanoTime();\n        System.out.println(\"unbuffered: \" + (t1 - t0) / 1_000_000 + \" ms\");\n        System.out.println(\"buffered:   \" + (t2 - t1) / 1_000_000 + \" ms\");\n    }\n}\n"
+  },
+  {
+   "label": "4 · Crash: reading after close",
+   "hint": "A closed reader can't be used. Do all the reading inside the try block.",
+   "code": "import java.io.*;\nimport java.nio.file.*;\n\npublic class Main {\n    public static void main(String[] args) throws IOException {\n        Files.writeString(Path.of(\"a.txt\"), \"line 1\\nline 2\\n\");\n        BufferedReader br = new BufferedReader(new FileReader(\"a.txt\"));\n        System.out.println(br.readLine());\n        br.close();\n        System.out.println(br.readLine());\n    }\n}\n",
+   "_expect": "exception"
+  },
+  {
+   "label": "5 · Spot the error",
+   "hint": "<code>readLine()</code> belongs to <code>BufferedReader</code>, not <code>FileReader</code>. Wrap it: <code>new BufferedReader(new FileReader(...))</code>.",
+   "code": "import java.io.*;\n\npublic class Main {\n    public static void main(String[] args) throws IOException {\n        try (FileReader r = new FileReader(\"a.txt\")) {\n            String first = r.readLine();\n            System.out.println(first);\n        }\n    }\n}\n",
+   "_expect": "compile-error"
+  }
+ ]
+}</script>
+  </div>
+</section>
+
+<!-- ======================= PART 8: LINE BY LINE ======================= -->
+<section class="part" id="tracer">
+  <span class="part-label"><b>8</b> Line by line</span>
+  <h2>Reading orders with readLine()</h2>
+  <p>Recorded from the real JVM. Watch <code>line</code> on the stack take each value, and <code>total</code> grow; on the heap, the BufferedReader holds the FileReader it wraps.</p>
+  <div class="tracer">
+    <script type="application/json">{"lang": "java", "code": ["import java.io.*;", "import java.nio.file.*;", "", "public class Main {", "    public static void main(String[] args) throws IOException {", "        Files.writeString(Path.of(\"orders.txt\"), \"101,dosa,80\\n102,idli,40\\n103,vada,30\\n\");", "        int total = 0, count = 0;", "        try (BufferedReader br = new BufferedReader(new FileReader(\"orders.txt\"))) {", "            String line;", "            while ((line = br.readLine()) != null) {", "                total += Integer.parseInt(line.substring(line.lastIndexOf(',') + 1));", "                count++;", "            }", "        }", "        System.out.println(count + \" orders, Rs \" + total);", "    }", "}"], "steps": [{"line": 6, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}], "heap": ["<b>#1</b> String[0] (args, empty)"], "phase": "Test file", "note": "Three order lines are written so the program has something to read."}, {"line": 7, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["total", "0"], ["count", "0"]]}], "heap": ["<b>#1</b> String[0] (args, empty)"], "newVar": "total", "phase": "Counters", "note": "Two running values on main's stack. Now <code>total</code> = 0, <code>count</code> = 0."}, {"line": 8, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["total", "0"], ["count", "0"], ["br", "→ #2 BufferedReader"]]}], "heap": ["<b>#1</b> String[0] (args, empty)", "<b>#2</b> BufferedReader"], "newVar": "br", "phase": "Wrap", "note": "A FileReader opens the file; a BufferedReader wraps it with an 8 KB char buffer. try-with-resources will close both."}, {"line": 10, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["total", "0"], ["count", "0"], ["br", "→ #2 BufferedReader"], ["line", "→ #3 \"101,dosa,80\""]]}], "heap": ["<b>#1</b> String[0] (args, empty)", "<b>#2</b> BufferedReader", "<b>#3</b> String &quot;101,dosa,80&quot;"], "newVar": "line", "phase": "First line", "note": "The first <code>readLine()</code> fills the buffer from the file (one read), then returns \"101,dosa,80\"."}, {"line": 11, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["total", "80"], ["count", "0"], ["br", "→ #2 BufferedReader"], ["line", "→ #3 \"101,dosa,80\""]]}], "heap": ["<b>#1</b> String[0] (args, empty)", "<b>#2</b> BufferedReader", "<b>#3</b> String &quot;101,dosa,80&quot;"], "newVar": "total", "phase": "Amount", "note": "The text after the last comma is parsed: 80."}, {"line": 12, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["total", "80"], ["count", "1"], ["br", "→ #2 BufferedReader"]]}], "heap": ["<b>#1</b> String[0] (args, empty)", "<b>#2</b> BufferedReader"], "newVar": "count", "phase": "Assign", "note": "Now <code>count</code> = 1."}, {"line": 10, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["total", "80"], ["count", "1"], ["br", "→ #2 BufferedReader"], ["line", "→ #4 \"102,idli,40\""]]}], "heap": ["<b>#1</b> String[0] (args, empty)", "<b>#2</b> BufferedReader", "<b>#4</b> String &quot;102,idli,40&quot;"], "newVar": "line", "phase": "From memory", "note": "The second line comes from the buffer: no file access."}, {"line": 11, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["total", "120"], ["count", "1"], ["br", "→ #2 BufferedReader"], ["line", "→ #4 \"102,idli,40\""]]}], "heap": ["<b>#1</b> String[0] (args, empty)", "<b>#2</b> BufferedReader", "<b>#4</b> String &quot;102,idli,40&quot;"], "newVar": "total", "phase": "Assign", "note": "Now <code>total</code> = 120."}, {"line": 12, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["total", "120"], ["count", "2"], ["br", "→ #2 BufferedReader"]]}], "heap": ["<b>#1</b> String[0] (args, empty)", "<b>#2</b> BufferedReader"], "newVar": "count", "phase": "Assign", "note": "Now <code>count</code> = 2."}, {"line": 10, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["total", "120"], ["count", "2"], ["br", "→ #2 BufferedReader"], ["line", "→ #5 \"103,vada,30\""]]}], "heap": ["<b>#1</b> String[0] (args, empty)", "<b>#2</b> BufferedReader", "<b>#5</b> String &quot;103,vada,30&quot;"], "newVar": "line", "phase": "Assign", "note": "Now <code>line</code> = → #5 &quot;103,vada,30&quot;. New object <b>#5</b> on the heap: String &quot;103,vada,30&quot;."}, {"line": 11, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["total", "150"], ["count", "2"], ["br", "→ #2 BufferedReader"], ["line", "→ #5 \"103,vada,30\""]]}], "heap": ["<b>#1</b> String[0] (args, empty)", "<b>#2</b> BufferedReader", "<b>#5</b> String &quot;103,vada,30&quot;"], "newVar": "total", "phase": "Assign", "note": "Now <code>total</code> = 150."}, {"line": 12, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["total", "150"], ["count", "3"], ["br", "→ #2 BufferedReader"]]}], "heap": ["<b>#1</b> String[0] (args, empty)", "<b>#2</b> BufferedReader"], "newVar": "count", "phase": "Assign", "note": "Now <code>count</code> = 3."}, {"line": 10, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["total", "150"], ["count", "3"], ["br", "→ #2 BufferedReader"]]}], "heap": ["<b>#1</b> String[0] (args, empty)", "<b>#2</b> BufferedReader"], "phase": "End", "note": "<code>readLine()</code> returns null: the loop stops."}, {"line": 14, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["total", "150"], ["count", "3"]]}], "heap": ["<b>#1</b> String[0] (args, empty)"], "phase": "Step", "note": "End of the block."}, {"line": 15, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["total", "150"], ["count", "3"]]}], "heap": ["<b>#1</b> String[0] (args, empty)"], "out": "3 orders, Rs 150\n", "phase": "Result", "note": "3 orders, Rs 150. The reader was closed when the try block ended. Prints <code>3 orders, Rs 150</code>."}, {"line": 16, "phase": "Program ends", "note": "<code>main</code> returns, its frame is popped and the program ends.", "stack": [], "heap": []}]}</script>
+  </div>
+
+<h3 id="worked">Worked examples: real problems, solved and traced in memory</h3>
+  <p class="wx-intro">Three real uses: proving how many OS calls a buffer saves, writing a report with <code>BufferedWriter</code>, and filtering a large log line by line. Watch the stack: only one line is held at a time.</p>
+  <article class="wx">
+    <div class="wx__head"><span class="wx__num">Example 1</span><span class="wx__tag">Performance · proof</span></div>
+    <h4>Count the trips to the OS</h4>
+    <div class="wx__problem"><p class="wx__label">Problem statement</p><p>Prove that buffering reduces system calls. Write 20 bytes one at a time, first straight to a <code>FileOutputStream</code>, then through a <code>BufferedOutputStream</code> with a tiny 8-byte buffer (so the trace stays short; the real default is 8,192). Count the calls that reach the file stream with a small counting wrapper.</p></div>
+    <div class="prob__io"><div><small>Input</small><pre>20 single-byte writes, buffer of 8 bytes</pre></div><div><small>Expected output</small><pre>unbuffered: 20 calls to the file
+buffered:   3 calls to the file</pre></div></div>
+    <div class="wx__approach"><p class="wx__label">Approach</p><ol><li>A <code>Counting</code> class extends <code>FilterOutputStream</code> and counts every write that reaches it.</li><li>Put it directly under the loop, then under a BufferedOutputStream.</li><li>Compare the counts. Each call into a FileOutputStream is one OS call.</li></ol></div>
+    <p class="wx__label">Solution: run it live</p>
+    <div class="runner">
+    <script type="application/json">{"lang": "java", "file": "Main.java", "tasks": [{"label": "Run · Count the trips to the OS", "hint": "Press <b>Run</b>. Then change the buffer size from 8 to 4, then to 64. How many calls now?", "code": "import java.io.*;\n\npublic class Main {\n    static class Counting extends FilterOutputStream {\n        int calls = 0;\n        Counting(OutputStream out) { super(out); }\n        @Override public void write(int b) throws IOException { calls++; out.write(b); }\n        @Override public void write(byte[] b, int off, int len) throws IOException { calls++; out.write(b, off, len); }\n    }\n\n    public static void main(String[] args) throws IOException {\n        Counting direct = new Counting(new FileOutputStream(\"a.dat\"));\n        try (direct) {\n            for (int i = 0; i < 20; i++) direct.write('x');\n        }\n        Counting under = new Counting(new FileOutputStream(\"b.dat\"));\n        try (OutputStream out = new BufferedOutputStream(under, 8)) {\n            for (int i = 0; i < 20; i++) out.write('x');\n        }\n        System.out.println(\"unbuffered: \" + direct.calls + \" calls to the file\");\n        System.out.println(\"buffered:   \" + under.calls + \" calls to the file\");\n    }\n}\n"}]}</script>
+    </div>
+    <p class="wx__label">What happens in memory, step by step</p>
+    <p class="wx__how">Recorded from the real JVM: press <b>Next</b> to execute one line at a time. Watch method calls push and pop frames on the stack, and objects (numbered #1, #2 …) appear on the heap.</p>
+    <div class="tracer">
+    <script type="application/json">{"lang": "java", "code": ["import java.io.*;", "", "public class Main {", "    static class Counting extends FilterOutputStream {", "        int calls = 0;", "        Counting(OutputStream out) { super(out); }", "        @Override public void write(int b) throws IOException { calls++; out.write(b); }", "        @Override public void write(byte[] b, int off, int len) throws IOException { calls++; out.write(b, off, len); }", "    }", "", "    public static void main(String[] args) throws IOException {", "        Counting direct = new Counting(new FileOutputStream(\"a.dat\"));", "        try (direct) {", "            for (int i = 0; i < 20; i++) direct.write('x');", "        }", "        Counting under = new Counting(new FileOutputStream(\"b.dat\"));", "        try (OutputStream out = new BufferedOutputStream(under, 8)) {", "            for (int i = 0; i < 20; i++) out.write('x');", "        }", "        System.out.println(\"unbuffered: \" + direct.calls + \" calls to the file\");", "        System.out.println(\"buffered:   \" + under.calls + \" calls to the file\");", "    }", "}"], "steps": [{"line": 12, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "new Main.Counting(OutputStream out)", "vars": [["this", "→ #1 Main.Counting"], ["out", "→ #2 FileOutputStream"]]}], "heap": ["<b>#1</b> Main.Counting {calls=0, out=null, closed=false, closeLock=null}", "<b>#2</b> FileOutputStream", "<b>#3</b> String[0] (args, empty)"], "newVar": "this", "phase": "Direct", "note": "The counting wrapper sits right on the FileOutputStream."}, {"line": 6, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "new Main.Counting(OutputStream out)", "vars": [["this", "→ #1 Main.Counting"], ["out", "→ #2 FileOutputStream"]]}], "heap": ["<b>#1</b> Main.Counting {calls=0, out=→#2, closed=false, closeLock=→#4}", "<b>#2</b> FileOutputStream", "<b>#3</b> String[0] (args, empty)", "<b>#4</b> Object"], "phase": "Update", "note": "Object <b>#1</b> changes: Main.Counting {calls=0, out=→#2, closed=false, closeLock=→#4}. New object <b>#4</b> on the heap: Object."}, {"line": 5, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "new Main.Counting(OutputStream out)", "vars": [["this", "→ #1 Main.Counting"], ["out", "→ #2 FileOutputStream"]]}], "heap": ["<b>#1</b> Main.Counting {calls=0, out=→#2, closed=false, closeLock=→#4}", "<b>#2</b> FileOutputStream", "<b>#3</b> String[0] (args, empty)", "<b>#4</b> Object"], "phase": "Step", "note": "This line runs; nothing visible changes."}, {"line": 6, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}], "heap": ["<b>#3</b> String[0] (args, empty)"], "phase": "Return", "note": "<code>new Main.Counting()</code> returns and its frame is popped."}, {"line": 12, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["direct", "→ #1 Main.Counting"]]}], "heap": ["<b>#1</b> Main.Counting {calls=0, out=→#2, closed=false, closeLock=→#4}", "<b>#2</b> FileOutputStream", "<b>#3</b> String[0] (args, empty)", "<b>#4</b> Object"], "newVar": "direct", "phase": "Direct", "note": "The counting wrapper sits right on the FileOutputStream."}, {"line": 13, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["direct", "→ #1 Main.Counting"]]}], "heap": ["<b>#1</b> Main.Counting {calls=0, out=→#2, closed=false, closeLock=→#4}", "<b>#2</b> FileOutputStream", "<b>#3</b> String[0] (args, empty)", "<b>#4</b> Object"], "phase": "try (direct)", "note": "An existing variable can be used in try-with-resources (Java 9+)."}, {"line": 14, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["direct", "→ #1 Main.Counting"], ["i", "0"]]}, {"frame": "Main.Counting.write(int b)", "vars": [["this", "→ #1 Main.Counting"], ["b", "120"]]}], "heap": ["<b>#1</b> Main.Counting {calls=0, out=→#2, closed=false, closeLock=→#4}", "<b>#2</b> FileOutputStream", "<b>#3</b> String[0] (args, empty)", "<b>#4</b> Object"], "newVar": "this", "phase": "20 writes", "note": "Every single byte goes straight to the file stream: 20 OS calls."}, {"line": 7, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["direct", "→ #1 Main.Counting"], ["i", "0"]]}], "heap": ["<b>#1</b> Main.Counting {calls=1, out=→#2, closed=false, closeLock=→#4}", "<b>#2</b> FileOutputStream", "<b>#3</b> String[0] (args, empty)", "<b>#4</b> Object"], "phase": "Return", "note": "<code>Main.Counting.write()</code> returns and its frame is popped. Object <b>#1</b> changes: Main.Counting {calls=1, out=→#2, closed=false, closeLock=→#4}."}, {"line": 14, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["direct", "→ #1 Main.Counting"], ["i", "1"]]}, {"frame": "Main.Counting.write(int b)", "vars": [["this", "→ #1 Main.Counting"], ["b", "120"]]}], "heap": ["<b>#1</b> Main.Counting {calls=1, out=→#2, closed=false, closeLock=→#4}", "<b>#2</b> FileOutputStream", "<b>#3</b> String[0] (args, empty)", "<b>#4</b> Object"], "newVar": "this", "phase": "20 writes", "note": "Every single byte goes straight to the file stream: 20 OS calls."}, {"line": 7, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["direct", "→ #1 Main.Counting"], ["i", "1"]]}], "heap": ["<b>#1</b> Main.Counting {calls=2, out=→#2, closed=false, closeLock=→#4}", "<b>#2</b> FileOutputStream", "<b>#3</b> String[0] (args, empty)", "<b>#4</b> Object"], "phase": "Return", "note": "<code>Main.Counting.write()</code> returns and its frame is popped. Object <b>#1</b> changes: Main.Counting {calls=2, out=→#2, closed=false, closeLock=→#4}."}, {"line": 14, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["direct", "→ #1 Main.Counting"], ["i", "2"]]}, {"frame": "Main.Counting.write(int b)", "vars": [["this", "→ #1 Main.Counting"], ["b", "120"]]}], "heap": ["<b>#1</b> Main.Counting {calls=2, out=→#2, closed=false, closeLock=→#4}", "<b>#2</b> FileOutputStream", "<b>#3</b> String[0] (args, empty)", "<b>#4</b> Object"], "newVar": "this", "phase": "20 writes", "note": "Every single byte goes straight to the file stream: 20 OS calls."}, {"line": 7, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["direct", "→ #1 Main.Counting"], ["i", "2"]]}], "heap": ["<b>#1</b> Main.Counting {calls=3, out=→#2, closed=false, closeLock=→#4}", "<b>#2</b> FileOutputStream", "<b>#3</b> String[0] (args, empty)", "<b>#4</b> Object"], "phase": "Return", "note": "<code>Main.Counting.write()</code> returns and its frame is popped. Object <b>#1</b> changes: Main.Counting {calls=3, out=→#2, closed=false, closeLock=→#4}."}, {"line": 14, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["direct", "→ #1 Main.Counting"], ["i", "3"]]}, {"frame": "Main.Counting.write(int b)", "vars": [["this", "→ #1 Main.Counting"], ["b", "120"]]}], "heap": ["<b>#1</b> Main.Counting {calls=3, out=→#2, closed=false, closeLock=→#4}", "<b>#2</b> FileOutputStream", "<b>#3</b> String[0] (args, empty)", "<b>#4</b> Object"], "newVar": "this", "phase": "20 writes", "note": "Every single byte goes straight to the file stream: 20 OS calls."}, {"line": 7, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["direct", "→ #1 Main.Counting"], ["i", "3"]]}], "heap": ["<b>#1</b> Main.Counting {calls=4, out=→#2, closed=false, closeLock=→#4}", "<b>#2</b> FileOutputStream", "<b>#3</b> String[0] (args, empty)", "<b>#4</b> Object"], "phase": "Return", "note": "<code>Main.Counting.write()</code> returns and its frame is popped. Object <b>#1</b> changes: Main.Counting {calls=4, out=→#2, closed=false, closeLock=→#4}."}, {"line": 14, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["direct", "→ #1 Main.Counting"], ["i", "4"]]}, {"frame": "Main.Counting.write(int b)", "vars": [["this", "→ #1 Main.Counting"], ["b", "120"]]}], "heap": ["<b>#1</b> Main.Counting {calls=4, out=→#2, closed=false, closeLock=→#4}", "<b>#2</b> FileOutputStream", "<b>#3</b> String[0] (args, empty)", "<b>#4</b> Object"], "newVar": "this", "phase": "20 writes", "note": "Every single byte goes straight to the file stream: 20 OS calls."}, {"line": 7, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["direct", "→ #1 Main.Counting"], ["i", "4"]]}], "heap": ["<b>#1</b> Main.Counting {calls=5, out=→#2, closed=false, closeLock=→#4}", "<b>#2</b> FileOutputStream", "<b>#3</b> String[0] (args, empty)", "<b>#4</b> Object"], "phase": "Return", "note": "<code>Main.Counting.write()</code> returns and its frame is popped. Object <b>#1</b> changes: Main.Counting {calls=5, out=→#2, closed=false, closeLock=→#4}."}, {"line": 14, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["direct", "→ #1 Main.Counting"], ["i", "5"]]}, {"frame": "Main.Counting.write(int b)", "vars": [["this", "→ #1 Main.Counting"], ["b", "120"]]}], "heap": ["<b>#1</b> Main.Counting {calls=5, out=→#2, closed=false, closeLock=→#4}", "<b>#2</b> FileOutputStream", "<b>#3</b> String[0] (args, empty)", "<b>#4</b> Object"], "newVar": "this", "phase": "20 writes", "note": "Every single byte goes straight to the file stream: 20 OS calls."}, {"line": 7, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["direct", "→ #1 Main.Counting"], ["i", "5"]]}], "heap": ["<b>#1</b> Main.Counting {calls=6, out=→#2, closed=false, closeLock=→#4}", "<b>#2</b> FileOutputStream", "<b>#3</b> String[0] (args, empty)", "<b>#4</b> Object"], "phase": "Return", "note": "<code>Main.Counting.write()</code> returns and its frame is popped. Object <b>#1</b> changes: Main.Counting {calls=6, out=→#2, closed=false, closeLock=→#4}."}, {"line": 14, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["direct", "→ #1 Main.Counting"], ["i", "6"]]}, {"frame": "Main.Counting.write(int b)", "vars": [["this", "→ #1 Main.Counting"], ["b", "120"]]}], "heap": ["<b>#1</b> Main.Counting {calls=6, out=→#2, closed=false, closeLock=→#4}", "<b>#2</b> FileOutputStream", "<b>#3</b> String[0] (args, empty)", "<b>#4</b> Object"], "newVar": "this", "phase": "20 writes", "note": "Every single byte goes straight to the file stream: 20 OS calls."}, {"line": 7, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["direct", "→ #1 Main.Counting"], ["i", "6"]]}], "heap": ["<b>#1</b> Main.Counting {calls=7, out=→#2, closed=false, closeLock=→#4}", "<b>#2</b> FileOutputStream", "<b>#3</b> String[0] (args, empty)", "<b>#4</b> Object"], "phase": "Return", "note": "<code>Main.Counting.write()</code> returns and its frame is popped. Object <b>#1</b> changes: Main.Counting {calls=7, out=→#2, closed=false, closeLock=→#4}."}, {"line": 14, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["direct", "→ #1 Main.Counting"], ["i", "7"]]}, {"frame": "Main.Counting.write(int b)", "vars": [["this", "→ #1 Main.Counting"], ["b", "120"]]}], "heap": ["<b>#1</b> Main.Counting {calls=7, out=→#2, closed=false, closeLock=→#4}", "<b>#2</b> FileOutputStream", "<b>#3</b> String[0] (args, empty)", "<b>#4</b> Object"], "newVar": "this", "phase": "20 writes", "note": "Every single byte goes straight to the file stream: 20 OS calls."}, {"line": 7, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["direct", "→ #1 Main.Counting"], ["i", "7"]]}], "heap": ["<b>#1</b> Main.Counting {calls=8, out=→#2, closed=false, closeLock=→#4}", "<b>#2</b> FileOutputStream", "<b>#3</b> String[0] (args, empty)", "<b>#4</b> Object"], "phase": "Return", "note": "<code>Main.Counting.write()</code> returns and its frame is popped. Object <b>#1</b> changes: Main.Counting {calls=8, out=→#2, closed=false, closeLock=→#4}."}, {"line": 14, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["direct", "→ #1 Main.Counting"], ["i", "8"]]}, {"frame": "Main.Counting.write(int b)", "vars": [["this", "→ #1 Main.Counting"], ["b", "120"]]}], "heap": ["<b>#1</b> Main.Counting {calls=8, out=→#2, closed=false, closeLock=→#4}", "<b>#2</b> FileOutputStream", "<b>#3</b> String[0] (args, empty)", "<b>#4</b> Object"], "newVar": "this", "phase": "20 writes", "note": "Every single byte goes straight to the file stream: 20 OS calls."}, {"line": 7, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["direct", "→ #1 Main.Counting"], ["i", "8"]]}], "heap": ["<b>#1</b> Main.Counting {calls=9, out=→#2, closed=false, closeLock=→#4}", "<b>#2</b> FileOutputStream", "<b>#3</b> String[0] (args, empty)", "<b>#4</b> Object"], "phase": "Return", "note": "<code>Main.Counting.write()</code> returns and its frame is popped. Object <b>#1</b> changes: Main.Counting {calls=9, out=→#2, closed=false, closeLock=→#4}."}, {"line": 14, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["direct", "→ #1 Main.Counting"], ["i", "9"]]}, {"frame": "Main.Counting.write(int b)", "vars": [["this", "→ #1 Main.Counting"], ["b", "120"]]}], "heap": ["<b>#1</b> Main.Counting {calls=9, out=→#2, closed=false, closeLock=→#4}", "<b>#2</b> FileOutputStream", "<b>#3</b> String[0] (args, empty)", "<b>#4</b> Object"], "newVar": "this", "phase": "20 writes", "note": "Every single byte goes straight to the file stream: 20 OS calls."}, {"line": 7, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["direct", "→ #1 Main.Counting"], ["i", "9"]]}], "heap": ["<b>#1</b> Main.Counting {calls=10, out=→#2, closed=false, closeLock=→#4}", "<b>#2</b> FileOutputStream", "<b>#3</b> String[0] (args, empty)", "<b>#4</b> Object"], "phase": "Return", "note": "<code>Main.Counting.write()</code> returns and its frame is popped. Object <b>#1</b> changes: Main.Counting {calls=10, out=→#2, closed=false, closeLock=→#4}."}, {"line": 14, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["direct", "→ #1 Main.Counting"], ["i", "10"]]}, {"frame": "Main.Counting.write(int b)", "vars": [["this", "→ #1 Main.Counting"], ["b", "120"]]}], "heap": ["<b>#1</b> Main.Counting {calls=10, out=→#2, closed=false, closeLock=→#4}", "<b>#2</b> FileOutputStream", "<b>#3</b> String[0] (args, empty)", "<b>#4</b> Object"], "newVar": "this", "phase": "20 writes", "note": "Every single byte goes straight to the file stream: 20 OS calls."}, {"line": 7, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["direct", "→ #1 Main.Counting"], ["i", "10"]]}], "heap": ["<b>#1</b> Main.Counting {calls=11, out=→#2, closed=false, closeLock=→#4}", "<b>#2</b> FileOutputStream", "<b>#3</b> String[0] (args, empty)", "<b>#4</b> Object"], "phase": "Return", "note": "<code>Main.Counting.write()</code> returns and its frame is popped. Object <b>#1</b> changes: Main.Counting {calls=11, out=→#2, closed=false, closeLock=→#4}."}, {"line": 14, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["direct", "→ #1 Main.Counting"], ["i", "11"]]}, {"frame": "Main.Counting.write(int b)", "vars": [["this", "→ #1 Main.Counting"], ["b", "120"]]}], "heap": ["<b>#1</b> Main.Counting {calls=11, out=→#2, closed=false, closeLock=→#4}", "<b>#2</b> FileOutputStream", "<b>#3</b> String[0] (args, empty)", "<b>#4</b> Object"], "newVar": "this", "phase": "20 writes", "note": "Every single byte goes straight to the file stream: 20 OS calls."}, {"line": 7, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["direct", "→ #1 Main.Counting"], ["i", "11"]]}], "heap": ["<b>#1</b> Main.Counting {calls=12, out=→#2, closed=false, closeLock=→#4}", "<b>#2</b> FileOutputStream", "<b>#3</b> String[0] (args, empty)", "<b>#4</b> Object"], "phase": "Return", "note": "<code>Main.Counting.write()</code> returns and its frame is popped. Object <b>#1</b> changes: Main.Counting {calls=12, out=→#2, closed=false, closeLock=→#4}."}, {"line": 14, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["direct", "→ #1 Main.Counting"], ["i", "12"]]}, {"frame": "Main.Counting.write(int b)", "vars": [["this", "→ #1 Main.Counting"], ["b", "120"]]}], "heap": ["<b>#1</b> Main.Counting {calls=12, out=→#2, closed=false, closeLock=→#4}", "<b>#2</b> FileOutputStream", "<b>#3</b> String[0] (args, empty)", "<b>#4</b> Object"], "newVar": "this", "phase": "20 writes", "note": "Every single byte goes straight to the file stream: 20 OS calls."}, {"line": 7, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["direct", "→ #1 Main.Counting"], ["i", "12"]]}], "heap": ["<b>#1</b> Main.Counting {calls=13, out=→#2, closed=false, closeLock=→#4}", "<b>#2</b> FileOutputStream", "<b>#3</b> String[0] (args, empty)", "<b>#4</b> Object"], "phase": "Return", "note": "<code>Main.Counting.write()</code> returns and its frame is popped. Object <b>#1</b> changes: Main.Counting {calls=13, out=→#2, closed=false, closeLock=→#4}."}, {"line": 14, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["direct", "→ #1 Main.Counting"], ["i", "13"]]}, {"frame": "Main.Counting.write(int b)", "vars": [["this", "→ #1 Main.Counting"], ["b", "120"]]}], "heap": ["<b>#1</b> Main.Counting {calls=13, out=→#2, closed=false, closeLock=→#4}", "<b>#2</b> FileOutputStream", "<b>#3</b> String[0] (args, empty)", "<b>#4</b> Object"], "newVar": "this", "phase": "20 writes", "note": "Every single byte goes straight to the file stream: 20 OS calls."}, {"line": 7, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["direct", "→ #1 Main.Counting"], ["i", "13"]]}], "heap": ["<b>#1</b> Main.Counting {calls=14, out=→#2, closed=false, closeLock=→#4}", "<b>#2</b> FileOutputStream", "<b>#3</b> String[0] (args, empty)", "<b>#4</b> Object"], "phase": "Return", "note": "<code>Main.Counting.write()</code> returns and its frame is popped. Object <b>#1</b> changes: Main.Counting {calls=14, out=→#2, closed=false, closeLock=→#4}."}, {"line": 14, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["direct", "→ #1 Main.Counting"], ["i", "14"]]}, {"frame": "Main.Counting.write(int b)", "vars": [["this", "→ #1 Main.Counting"], ["b", "120"]]}], "heap": ["<b>#1</b> Main.Counting {calls=14, out=→#2, closed=false, closeLock=→#4}", "<b>#2</b> FileOutputStream", "<b>#3</b> String[0] (args, empty)", "<b>#4</b> Object"], "newVar": "this", "phase": "20 writes", "note": "Every single byte goes straight to the file stream: 20 OS calls."}, {"line": 7, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["direct", "→ #1 Main.Counting"], ["i", "14"]]}], "heap": ["<b>#1</b> Main.Counting {calls=15, out=→#2, closed=false, closeLock=→#4}", "<b>#2</b> FileOutputStream", "<b>#3</b> String[0] (args, empty)", "<b>#4</b> Object"], "phase": "Return", "note": "<code>Main.Counting.write()</code> returns and its frame is popped. Object <b>#1</b> changes: Main.Counting {calls=15, out=→#2, closed=false, closeLock=→#4}."}, {"line": 14, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["direct", "→ #1 Main.Counting"], ["i", "15"]]}, {"frame": "Main.Counting.write(int b)", "vars": [["this", "→ #1 Main.Counting"], ["b", "120"]]}], "heap": ["<b>#1</b> Main.Counting {calls=15, out=→#2, closed=false, closeLock=→#4}", "<b>#2</b> FileOutputStream", "<b>#3</b> String[0] (args, empty)", "<b>#4</b> Object"], "newVar": "this", "phase": "20 writes", "note": "Every single byte goes straight to the file stream: 20 OS calls."}, {"line": 7, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["direct", "→ #1 Main.Counting"], ["i", "15"]]}], "heap": ["<b>#1</b> Main.Counting {calls=16, out=→#2, closed=false, closeLock=→#4}", "<b>#2</b> FileOutputStream", "<b>#3</b> String[0] (args, empty)", "<b>#4</b> Object"], "phase": "Return", "note": "<code>Main.Counting.write()</code> returns and its frame is popped. Object <b>#1</b> changes: Main.Counting {calls=16, out=→#2, closed=false, closeLock=→#4}."}, {"line": 14, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["direct", "→ #1 Main.Counting"], ["i", "16"]]}, {"frame": "Main.Counting.write(int b)", "vars": [["this", "→ #1 Main.Counting"], ["b", "120"]]}], "heap": ["<b>#1</b> Main.Counting {calls=16, out=→#2, closed=false, closeLock=→#4}", "<b>#2</b> FileOutputStream", "<b>#3</b> String[0] (args, empty)", "<b>#4</b> Object"], "newVar": "this", "phase": "20 writes", "note": "Every single byte goes straight to the file stream: 20 OS calls."}, {"line": 7, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["direct", "→ #1 Main.Counting"], ["i", "16"]]}], "heap": ["<b>#1</b> Main.Counting {calls=17, out=→#2, closed=false, closeLock=→#4}", "<b>#2</b> FileOutputStream", "<b>#3</b> String[0] (args, empty)", "<b>#4</b> Object"], "phase": "Return", "note": "<code>Main.Counting.write()</code> returns and its frame is popped. Object <b>#1</b> changes: Main.Counting {calls=17, out=→#2, closed=false, closeLock=→#4}."}, {"line": 14, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["direct", "→ #1 Main.Counting"], ["i", "17"]]}, {"frame": "Main.Counting.write(int b)", "vars": [["this", "→ #1 Main.Counting"], ["b", "120"]]}], "heap": ["<b>#1</b> Main.Counting {calls=17, out=→#2, closed=false, closeLock=→#4}", "<b>#2</b> FileOutputStream", "<b>#3</b> String[0] (args, empty)", "<b>#4</b> Object"], "newVar": "this", "phase": "20 writes", "note": "Every single byte goes straight to the file stream: 20 OS calls."}, {"line": 7, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["direct", "→ #1 Main.Counting"], ["i", "17"]]}], "heap": ["<b>#1</b> Main.Counting {calls=18, out=→#2, closed=false, closeLock=→#4}", "<b>#2</b> FileOutputStream", "<b>#3</b> String[0] (args, empty)", "<b>#4</b> Object"], "phase": "Return", "note": "<code>Main.Counting.write()</code> returns and its frame is popped. Object <b>#1</b> changes: Main.Counting {calls=18, out=→#2, closed=false, closeLock=→#4}."}, {"line": 14, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["direct", "→ #1 Main.Counting"], ["i", "18"]]}, {"frame": "Main.Counting.write(int b)", "vars": [["this", "→ #1 Main.Counting"], ["b", "120"]]}], "heap": ["<b>#1</b> Main.Counting {calls=18, out=→#2, closed=false, closeLock=→#4}", "<b>#2</b> FileOutputStream", "<b>#3</b> String[0] (args, empty)", "<b>#4</b> Object"], "newVar": "this", "phase": "20 writes", "note": "Every single byte goes straight to the file stream: 20 OS calls."}, {"line": 7, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["direct", "→ #1 Main.Counting"], ["i", "18"]]}], "heap": ["<b>#1</b> Main.Counting {calls=19, out=→#2, closed=false, closeLock=→#4}", "<b>#2</b> FileOutputStream", "<b>#3</b> String[0] (args, empty)", "<b>#4</b> Object"], "phase": "Return", "note": "<code>Main.Counting.write()</code> returns and its frame is popped. Object <b>#1</b> changes: Main.Counting {calls=19, out=→#2, closed=false, closeLock=→#4}."}, {"line": 14, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["direct", "→ #1 Main.Counting"], ["i", "19"]]}, {"frame": "Main.Counting.write(int b)", "vars": [["this", "→ #1 Main.Counting"], ["b", "120"]]}], "heap": ["<b>#1</b> Main.Counting {calls=19, out=→#2, closed=false, closeLock=→#4}", "<b>#2</b> FileOutputStream", "<b>#3</b> String[0] (args, empty)", "<b>#4</b> Object"], "newVar": "this", "phase": "20 writes", "note": "Every single byte goes straight to the file stream: 20 OS calls."}, {"line": 7, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["direct", "→ #1 Main.Counting"], ["i", "19"]]}], "heap": ["<b>#1</b> Main.Counting {calls=20, out=→#2, closed=false, closeLock=→#4}", "<b>#2</b> FileOutputStream", "<b>#3</b> String[0] (args, empty)", "<b>#4</b> Object"], "phase": "Return", "note": "<code>Main.Counting.write()</code> returns and its frame is popped. Object <b>#1</b> changes: Main.Counting {calls=20, out=→#2, closed=false, closeLock=→#4}."}, {"line": 14, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["direct", "→ #1 Main.Counting"]]}], "heap": ["<b>#1</b> Main.Counting {calls=20, out=→#2, closed=false, closeLock=→#4}", "<b>#2</b> FileOutputStream", "<b>#3</b> String[0] (args, empty)", "<b>#4</b> Object"], "phase": "20 writes", "note": "Every single byte goes straight to the file stream: 20 OS calls."}, {"line": 15, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["direct", "→ #1 Main.Counting"]]}], "heap": ["<b>#1</b> Main.Counting {calls=20, out=→#2, closed=true, closeLock=→#4}", "<b>#2</b> FileOutputStream", "<b>#3</b> String[0] (args, empty)", "<b>#4</b> Object"], "phase": "Update", "note": "Object <b>#1</b> changes: Main.Counting {calls=20, out=→#2, closed=true, closeLock=→#4}."}, {"line": 16, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["direct", "→ #1 Main.Counting"]]}, {"frame": "new Main.Counting(OutputStream out)", "vars": [["this", "→ #5 Main.Counting"], ["out", "→ #6 FileOutputStream"]]}], "heap": ["<b>#1</b> Main.Counting {calls=20, out=→#2, closed=true, closeLock=→#4}", "<b>#2</b> FileOutputStream", "<b>#3</b> String[0] (args, empty)", "<b>#4</b> Object", "<b>#5</b> Main.Counting {calls=0, out=null, closed=false, closeLock=null}", "<b>#6</b> FileOutputStream"], "newVar": "this", "phase": "Buffered", "note": "This time a BufferedOutputStream with an 8-byte buffer sits above the counter."}, {"line": 6, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["direct", "→ #1 Main.Counting"]]}, {"frame": "new Main.Counting(OutputStream out)", "vars": [["this", "→ #5 Main.Counting"], ["out", "→ #6 FileOutputStream"]]}], "heap": ["<b>#1</b> Main.Counting {calls=20, out=→#2, closed=true, closeLock=→#4}", "<b>#2</b> FileOutputStream", "<b>#3</b> String[0] (args, empty)", "<b>#4</b> Object", "<b>#5</b> Main.Counting {calls=0, out=→#6, closed=false, closeLock=→#7}", "<b>#6</b> FileOutputStream", "<b>#7</b> Object"], "phase": "Update", "note": "Object <b>#5</b> changes: Main.Counting {calls=0, out=→#6, closed=false, closeLock=→#7}. New object <b>#7</b> on the heap: Object."}, {"line": 5, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["direct", "→ #1 Main.Counting"]]}, {"frame": "new Main.Counting(OutputStream out)", "vars": [["this", "→ #5 Main.Counting"], ["out", "→ #6 FileOutputStream"]]}], "heap": ["<b>#1</b> Main.Counting {calls=20, out=→#2, closed=true, closeLock=→#4}", "<b>#2</b> FileOutputStream", "<b>#3</b> String[0] (args, empty)", "<b>#4</b> Object", "<b>#5</b> Main.Counting {calls=0, out=→#6, closed=false, closeLock=→#7}", "<b>#6</b> FileOutputStream", "<b>#7</b> Object"], "phase": "Step", "note": "This line runs; nothing visible changes."}, {"line": 6, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["direct", "→ #1 Main.Counting"]]}], "heap": ["<b>#1</b> Main.Counting {calls=20, out=→#2, closed=true, closeLock=→#4}", "<b>#2</b> FileOutputStream", "<b>#3</b> String[0] (args, empty)", "<b>#4</b> Object"], "phase": "Return", "note": "<code>new Main.Counting()</code> returns and its frame is popped."}, {"line": 16, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["direct", "→ #1 Main.Counting"], ["under", "→ #5 Main.Counting"]]}], "heap": ["<b>#1</b> Main.Counting {calls=20, out=→#2, closed=true, closeLock=→#4}", "<b>#2</b> FileOutputStream", "<b>#3</b> String[0] (args, empty)", "<b>#4</b> Object", "<b>#5</b> Main.Counting {calls=0, out=→#6, closed=false, closeLock=→#7}", "<b>#6</b> FileOutputStream", "<b>#7</b> Object"], "newVar": "under", "phase": "Buffered", "note": "This time a BufferedOutputStream with an 8-byte buffer sits above the counter."}, {"line": 17, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["direct", "→ #1 Main.Counting"], ["under", "→ #5 Main.Counting"], ["out", "→ #8 BufferedOutputStream"]]}], "heap": ["<b>#1</b> Main.Counting {calls=20, out=→#2, closed=true, closeLock=→#4}", "<b>#2</b> FileOutputStream", "<b>#3</b> String[0] (args, empty)", "<b>#4</b> Object", "<b>#5</b> Main.Counting {calls=0, out=→#6, closed=false, closeLock=→#7}", "<b>#6</b> FileOutputStream", "<b>#7</b> Object", "<b>#8</b> BufferedOutputStream"], "newVar": "out", "phase": "Assign", "note": "Now <code>out</code> = → #8 BufferedOutputStream. New object <b>#8</b> on the heap: BufferedOutputStream."}, {"line": 18, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["direct", "→ #1 Main.Counting"], ["under", "→ #5 Main.Counting"], ["out", "→ #8 BufferedOutputStream"], ["i", "8"]]}, {"frame": "Main.Counting.write(byte[] b, int off, int len)", "vars": [["this", "→ #5 Main.Counting"], ["b", "→ #9 byte[8]"], ["off", "0"], ["len", "8"]]}], "heap": ["<b>#1</b> Main.Counting {calls=20, out=→#2, closed=true, closeLock=→#4}", "<b>#2</b> FileOutputStream", "<b>#3</b> String[0] (args, empty)", "<b>#4</b> Object", "<b>#5</b> Main.Counting {calls=0, out=→#6, closed=false, closeLock=→#7}", "<b>#6</b> FileOutputStream", "<b>#7</b> Object", "<b>#8</b> BufferedOutputStream", "<b>#9</b> byte[8] {120, 120, 120, 120, 120, 120, 120, 120}"], "newVar": "this", "phase": "Buffered writes", "note": "Bytes collect in memory; the counter sees one call each time 8 bytes are full (twice), and one more at close for the last 4."}, {"line": 8, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["direct", "→ #1 Main.Counting"], ["under", "→ #5 Main.Counting"], ["out", "→ #8 BufferedOutputStream"], ["i", "8"]]}], "heap": ["<b>#1</b> Main.Counting {calls=20, out=→#2, closed=true, closeLock=→#4}", "<b>#2</b> FileOutputStream", "<b>#3</b> String[0] (args, empty)", "<b>#4</b> Object", "<b>#5</b> Main.Counting {calls=1, out=→#6, closed=false, closeLock=→#7}", "<b>#6</b> FileOutputStream", "<b>#7</b> Object", "<b>#8</b> BufferedOutputStream"], "phase": "Return", "note": "<code>Main.Counting.write()</code> returns and its frame is popped. Object <b>#5</b> changes: Main.Counting {calls=1, out=→#6, closed=false, closeLock=→#7}."}, {"line": 18, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["direct", "→ #1 Main.Counting"], ["under", "→ #5 Main.Counting"], ["out", "→ #8 BufferedOutputStream"], ["i", "16"]]}, {"frame": "Main.Counting.write(byte[] b, int off, int len)", "vars": [["this", "→ #5 Main.Counting"], ["b", "→ #9 byte[8]"], ["off", "0"], ["len", "8"]]}], "heap": ["<b>#1</b> Main.Counting {calls=20, out=→#2, closed=true, closeLock=→#4}", "<b>#2</b> FileOutputStream", "<b>#3</b> String[0] (args, empty)", "<b>#4</b> Object", "<b>#5</b> Main.Counting {calls=1, out=→#6, closed=false, closeLock=→#7}", "<b>#6</b> FileOutputStream", "<b>#7</b> Object", "<b>#8</b> BufferedOutputStream", "<b>#9</b> byte[8] {120, 120, 120, 120, 120, 120, 120, 120}"], "newVar": "this", "phase": "Buffered writes", "note": "Bytes collect in memory; the counter sees one call each time 8 bytes are full (twice), and one more at close for the last 4."}, {"line": 8, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["direct", "→ #1 Main.Counting"], ["under", "→ #5 Main.Counting"], ["out", "→ #8 BufferedOutputStream"], ["i", "16"]]}], "heap": ["<b>#1</b> Main.Counting {calls=20, out=→#2, closed=true, closeLock=→#4}", "<b>#2</b> FileOutputStream", "<b>#3</b> String[0] (args, empty)", "<b>#4</b> Object", "<b>#5</b> Main.Counting {calls=2, out=→#6, closed=false, closeLock=→#7}", "<b>#6</b> FileOutputStream", "<b>#7</b> Object", "<b>#8</b> BufferedOutputStream"], "phase": "Return", "note": "<code>Main.Counting.write()</code> returns and its frame is popped. Object <b>#5</b> changes: Main.Counting {calls=2, out=→#6, closed=false, closeLock=→#7}."}, {"line": 18, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["direct", "→ #1 Main.Counting"], ["under", "→ #5 Main.Counting"], ["out", "→ #8 BufferedOutputStream"]]}], "heap": ["<b>#1</b> Main.Counting {calls=20, out=→#2, closed=true, closeLock=→#4}", "<b>#2</b> FileOutputStream", "<b>#3</b> String[0] (args, empty)", "<b>#4</b> Object", "<b>#5</b> Main.Counting {calls=2, out=→#6, closed=false, closeLock=→#7}", "<b>#6</b> FileOutputStream", "<b>#7</b> Object", "<b>#8</b> BufferedOutputStream"], "phase": "Buffered writes", "note": "Bytes collect in memory; the counter sees one call each time 8 bytes are full (twice), and one more at close for the last 4."}, {"line": 19, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["direct", "→ #1 Main.Counting"], ["under", "→ #5 Main.Counting"], ["out", "→ #8 BufferedOutputStream"]]}, {"frame": "Main.Counting.write(byte[] b, int off, int len)", "vars": [["this", "→ #5 Main.Counting"], ["b", "→ #9 byte[8]"], ["off", "0"], ["len", "4"]]}], "heap": ["<b>#1</b> Main.Counting {calls=20, out=→#2, closed=true, closeLock=→#4}", "<b>#2</b> FileOutputStream", "<b>#3</b> String[0] (args, empty)", "<b>#4</b> Object", "<b>#5</b> Main.Counting {calls=2, out=→#6, closed=false, closeLock=→#7}", "<b>#6</b> FileOutputStream", "<b>#7</b> Object", "<b>#8</b> BufferedOutputStream", "<b>#9</b> byte[8] {120, 120, 120, 120, 120, 120, 120, 120}"], "newVar": "this", "phase": "Call", "note": "<code>Main.Counting.write()</code> is called: a new frame is pushed with <code>this</code> = → #5 Main.Counting, <code>b</code> = → #9 byte[8], <code>off</code> = 0, <code>len</code> = 4."}, {"line": 8, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["direct", "→ #1 Main.Counting"], ["under", "→ #5 Main.Counting"], ["out", "→ #8 BufferedOutputStream"]]}], "heap": ["<b>#1</b> Main.Counting {calls=20, out=→#2, closed=true, closeLock=→#4}", "<b>#2</b> FileOutputStream", "<b>#3</b> String[0] (args, empty)", "<b>#4</b> Object", "<b>#5</b> Main.Counting {calls=3, out=→#6, closed=true, closeLock=→#7}", "<b>#6</b> FileOutputStream", "<b>#7</b> Object", "<b>#8</b> BufferedOutputStream"], "phase": "Return", "note": "<code>Main.Counting.write()</code> returns and its frame is popped. Object <b>#5</b> changes: Main.Counting {calls=3, out=→#6, closed=true, closeLock=→#7}."}, {"line": 19, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["direct", "→ #1 Main.Counting"], ["under", "→ #5 Main.Counting"]]}], "heap": ["<b>#1</b> Main.Counting {calls=20, out=→#2, closed=true, closeLock=→#4}", "<b>#2</b> FileOutputStream", "<b>#3</b> String[0] (args, empty)", "<b>#4</b> Object", "<b>#5</b> Main.Counting {calls=3, out=→#6, closed=true, closeLock=→#7}", "<b>#6</b> FileOutputStream", "<b>#7</b> Object"], "phase": "Step", "note": "End of the block."}, {"line": 20, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["direct", "→ #1 Main.Counting"], ["under", "→ #5 Main.Counting"]]}], "heap": ["<b>#1</b> Main.Counting {calls=20, out=→#2, closed=true, closeLock=→#4}", "<b>#2</b> FileOutputStream", "<b>#3</b> String[0] (args, empty)", "<b>#4</b> Object", "<b>#5</b> Main.Counting {calls=3, out=→#6, closed=true, closeLock=→#7}", "<b>#6</b> FileOutputStream", "<b>#7</b> Object"], "out": "unbuffered: 20 calls to the file\n", "phase": "Result", "note": "20 calls vs 3. With real sizes the gap is huge: 10,000 single-byte writes need 10,000 calls unbuffered, but only 2 with the default 8 KB buffer. Prints <code>unbuffered: 20 calls to the file</code>."}, {"line": 21, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["direct", "→ #1 Main.Counting"], ["under", "→ #5 Main.Counting"]]}], "heap": ["<b>#1</b> Main.Counting {calls=20, out=→#2, closed=true, closeLock=→#4}", "<b>#2</b> FileOutputStream", "<b>#3</b> String[0] (args, empty)", "<b>#4</b> Object", "<b>#5</b> Main.Counting {calls=3, out=→#6, closed=true, closeLock=→#7}", "<b>#6</b> FileOutputStream", "<b>#7</b> Object"], "out": "buffered:   3 calls to the file\n", "phase": "Print", "note": "Prints <code>buffered:   3 calls to the file</code>."}, {"line": 22, "phase": "Program ends", "note": "<code>main</code> returns, its frame is popped and the program ends.", "stack": [], "heap": []}]}</script>
+  </div>
+  </article>
+  <article class="wx">
+    <div class="wx__head"><span class="wx__num">Example 2</span><span class="wx__tag">Payroll · reports</span></div>
+    <h4>Write a salary-slip summary with BufferedWriter</h4>
+    <div class="wx__problem"><p class="wx__label">Problem statement</p><p>Payroll must write one summary line per employee to payroll.txt, then read the file back with <code>BufferedReader</code> to confirm the line count and the total payout.</p></div>
+    <div class="prob__io"><div><small>Input</small><pre>Asha 52000, Ravi 47500, Meena 61000, Imran 39000</pre></div><div><small>Expected output</small><pre>4 slips, total payout Rs 199500</pre></div></div>
+    <div class="wx__approach"><p class="wx__label">Approach</p><ol><li><code>Files.newBufferedWriter</code> gives a BufferedWriter with UTF-8.</li><li>Write each line with <code>write</code> + <code>newLine()</code>.</li><li>Read back with <code>Files.newBufferedReader</code> and <code>readLine()</code>.</li></ol></div>
+    <p class="wx__label">Solution: run it live</p>
+    <div class="runner">
+    <script type="application/json">{"lang": "java", "file": "Main.java", "tasks": [{"label": "Run · Write a salary-slip summary with BufferedWriter", "hint": "Press <b>Run</b>. Then move the reading code <i>inside</i> the first try block (before it closes): the reader finds an empty file, because nothing was flushed yet.", "code": "import java.io.*;\nimport java.nio.file.*;\n\npublic class Main {\n    public static void main(String[] args) throws IOException {\n        String[] names = {\"Asha\", \"Ravi\", \"Meena\", \"Imran\"};\n        int[] pay = {52000, 47500, 61000, 39000};\n        Path file = Path.of(\"payroll.txt\");\n        try (BufferedWriter w = Files.newBufferedWriter(file)) {\n            for (int i = 0; i < names.length; i++) {\n                w.write(names[i] + \",\" + pay[i]);\n                w.newLine();\n            }\n        }\n        int lines = 0;\n        long total = 0;\n        try (BufferedReader r = Files.newBufferedReader(file)) {\n            String line;\n            while ((line = r.readLine()) != null) {\n                lines++;\n                total += Long.parseLong(line.split(\",\")[1]);\n            }\n        }\n        System.out.println(lines + \" slips, total payout Rs \" + total);\n    }\n}\n"}]}</script>
+    </div>
+    <p class="wx__label">What happens in memory, step by step</p>
+    <p class="wx__how">Recorded from the real JVM: press <b>Next</b> to execute one line at a time. Watch method calls push and pop frames on the stack, and objects (numbered #1, #2 …) appear on the heap.</p>
+    <div class="tracer">
+    <script type="application/json">{"lang": "java", "code": ["import java.io.*;", "import java.nio.file.*;", "", "public class Main {", "    public static void main(String[] args) throws IOException {", "        String[] names = {\"Asha\", \"Ravi\", \"Meena\", \"Imran\"};", "        int[] pay = {52000, 47500, 61000, 39000};", "        Path file = Path.of(\"payroll.txt\");", "        try (BufferedWriter w = Files.newBufferedWriter(file)) {", "            for (int i = 0; i < names.length; i++) {", "                w.write(names[i] + \",\" + pay[i]);", "                w.newLine();", "            }", "        }", "        int lines = 0;", "        long total = 0;", "        try (BufferedReader r = Files.newBufferedReader(file)) {", "            String line;", "            while ((line = r.readLine()) != null) {", "                lines++;", "                total += Long.parseLong(line.split(\",\")[1]);", "            }", "        }", "        System.out.println(lines + \" slips, total payout Rs \" + total);", "    }", "}"], "steps": [{"line": 6, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["names", "→ #1 String[4]"]]}], "heap": ["<b>#1</b> String[4] {&quot;Asha&quot;, &quot;Ravi&quot;, &quot;Meena&quot;, &quot;Imran&quot;}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> String &quot;Asha&quot;", "<b>#4</b> String &quot;Ravi&quot;", "<b>#5</b> String &quot;Meena&quot;", "<b>#6</b> String &quot;Imran&quot;"], "newVar": "names", "phase": "Assign", "note": "Now <code>names</code> = → #1 String[4]. New object <b>#1</b> on the heap: String[4] {&quot;Asha&quot;, &quot;Ravi&quot;, &quot;Meena&quot;, &quot;Imran&quot;}. New object <b>#3</b> on the heap: String &quot;Asha&quot;. New object <b>#4</b> on the heap: String &quot;Ravi&quot;."}, {"line": 7, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["names", "→ #1 String[4]"], ["pay", "→ #7 int[4]"]]}], "heap": ["<b>#1</b> String[4] {&quot;Asha&quot;, &quot;Ravi&quot;, &quot;Meena&quot;, &quot;Imran&quot;}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> String &quot;Asha&quot;", "<b>#4</b> String &quot;Ravi&quot;", "<b>#5</b> String &quot;Meena&quot;", "<b>#6</b> String &quot;Imran&quot;", "<b>#7</b> int[4] {52000, 47500, 61000, 39000}"], "newVar": "pay", "phase": "Assign", "note": "Now <code>pay</code> = → #7 int[4]. New object <b>#7</b> on the heap: int[4] {52000, 47500, 61000, 39000}."}, {"line": 8, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["names", "→ #1 String[4]"], ["pay", "→ #7 int[4]"], ["file", "→ #8 UnixPath"]]}], "heap": ["<b>#1</b> String[4] {&quot;Asha&quot;, &quot;Ravi&quot;, &quot;Meena&quot;, &quot;Imran&quot;}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> String &quot;Asha&quot;", "<b>#4</b> String &quot;Ravi&quot;", "<b>#5</b> String &quot;Meena&quot;", "<b>#6</b> String &quot;Imran&quot;", "<b>#7</b> int[4] {52000, 47500, 61000, 39000}", "<b>#8</b> UnixPath"], "newVar": "file", "phase": "Assign", "note": "Now <code>file</code> = → #8 UnixPath. New object <b>#8</b> on the heap: UnixPath."}, {"line": 9, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["names", "→ #1 String[4]"], ["pay", "→ #7 int[4]"], ["file", "→ #8 UnixPath"], ["w", "→ #9 BufferedWriter"]]}], "heap": ["<b>#1</b> String[4] {&quot;Asha&quot;, &quot;Ravi&quot;, &quot;Meena&quot;, &quot;Imran&quot;}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> String &quot;Asha&quot;", "<b>#4</b> String &quot;Ravi&quot;", "<b>#5</b> String &quot;Meena&quot;", "<b>#6</b> String &quot;Imran&quot;", "<b>#7</b> int[4] {52000, 47500, 61000, 39000}", "<b>#8</b> UnixPath", "<b>#9</b> BufferedWriter"], "newVar": "w", "phase": "Writer", "note": "A BufferedWriter over the file, UTF-8, created or replaced."}, {"line": 10, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["names", "→ #1 String[4]"], ["pay", "→ #7 int[4]"], ["file", "→ #8 UnixPath"], ["w", "→ #9 BufferedWriter"], ["i", "0"]]}], "heap": ["<b>#1</b> String[4] {&quot;Asha&quot;, &quot;Ravi&quot;, &quot;Meena&quot;, &quot;Imran&quot;}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> String &quot;Asha&quot;", "<b>#4</b> String &quot;Ravi&quot;", "<b>#5</b> String &quot;Meena&quot;", "<b>#6</b> String &quot;Imran&quot;", "<b>#7</b> int[4] {52000, 47500, 61000, 39000}", "<b>#8</b> UnixPath", "<b>#9</b> BufferedWriter"], "newVar": "i", "phase": "Assign", "note": "Now <code>i</code> = 0."}, {"line": 11, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["names", "→ #1 String[4]"], ["pay", "→ #7 int[4]"], ["file", "→ #8 UnixPath"], ["w", "→ #9 BufferedWriter"], ["i", "0"]]}], "heap": ["<b>#1</b> String[4] {&quot;Asha&quot;, &quot;Ravi&quot;, &quot;Meena&quot;, &quot;Imran&quot;}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> String &quot;Asha&quot;", "<b>#4</b> String &quot;Ravi&quot;", "<b>#5</b> String &quot;Meena&quot;", "<b>#6</b> String &quot;Imran&quot;", "<b>#7</b> int[4] {52000, 47500, 61000, 39000}", "<b>#8</b> UnixPath", "<b>#9</b> BufferedWriter"], "phase": "Into the buffer", "note": "\"Asha,52000\" is copied into memory, not yet written to disk."}, {"line": 12, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["names", "→ #1 String[4]"], ["pay", "→ #7 int[4]"], ["file", "→ #8 UnixPath"], ["w", "→ #9 BufferedWriter"], ["i", "0"]]}], "heap": ["<b>#1</b> String[4] {&quot;Asha&quot;, &quot;Ravi&quot;, &quot;Meena&quot;, &quot;Imran&quot;}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> String &quot;Asha&quot;", "<b>#4</b> String &quot;Ravi&quot;", "<b>#5</b> String &quot;Meena&quot;", "<b>#6</b> String &quot;Imran&quot;", "<b>#7</b> int[4] {52000, 47500, 61000, 39000}", "<b>#8</b> UnixPath", "<b>#9</b> BufferedWriter"], "phase": "Step", "note": "This line runs; nothing visible changes."}, {"line": 10, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["names", "→ #1 String[4]"], ["pay", "→ #7 int[4]"], ["file", "→ #8 UnixPath"], ["w", "→ #9 BufferedWriter"], ["i", "1"]]}], "heap": ["<b>#1</b> String[4] {&quot;Asha&quot;, &quot;Ravi&quot;, &quot;Meena&quot;, &quot;Imran&quot;}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> String &quot;Asha&quot;", "<b>#4</b> String &quot;Ravi&quot;", "<b>#5</b> String &quot;Meena&quot;", "<b>#6</b> String &quot;Imran&quot;", "<b>#7</b> int[4] {52000, 47500, 61000, 39000}", "<b>#8</b> UnixPath", "<b>#9</b> BufferedWriter"], "newVar": "i", "phase": "Assign", "note": "Now <code>i</code> = 1."}, {"line": 11, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["names", "→ #1 String[4]"], ["pay", "→ #7 int[4]"], ["file", "→ #8 UnixPath"], ["w", "→ #9 BufferedWriter"], ["i", "1"]]}], "heap": ["<b>#1</b> String[4] {&quot;Asha&quot;, &quot;Ravi&quot;, &quot;Meena&quot;, &quot;Imran&quot;}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> String &quot;Asha&quot;", "<b>#4</b> String &quot;Ravi&quot;", "<b>#5</b> String &quot;Meena&quot;", "<b>#6</b> String &quot;Imran&quot;", "<b>#7</b> int[4] {52000, 47500, 61000, 39000}", "<b>#8</b> UnixPath", "<b>#9</b> BufferedWriter"], "phase": "Step", "note": "This line runs; nothing visible changes."}, {"line": 12, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["names", "→ #1 String[4]"], ["pay", "→ #7 int[4]"], ["file", "→ #8 UnixPath"], ["w", "→ #9 BufferedWriter"], ["i", "1"]]}], "heap": ["<b>#1</b> String[4] {&quot;Asha&quot;, &quot;Ravi&quot;, &quot;Meena&quot;, &quot;Imran&quot;}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> String &quot;Asha&quot;", "<b>#4</b> String &quot;Ravi&quot;", "<b>#5</b> String &quot;Meena&quot;", "<b>#6</b> String &quot;Imran&quot;", "<b>#7</b> int[4] {52000, 47500, 61000, 39000}", "<b>#8</b> UnixPath", "<b>#9</b> BufferedWriter"], "phase": "Step", "note": "This line runs; nothing visible changes."}, {"line": 10, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["names", "→ #1 String[4]"], ["pay", "→ #7 int[4]"], ["file", "→ #8 UnixPath"], ["w", "→ #9 BufferedWriter"], ["i", "2"]]}], "heap": ["<b>#1</b> String[4] {&quot;Asha&quot;, &quot;Ravi&quot;, &quot;Meena&quot;, &quot;Imran&quot;}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> String &quot;Asha&quot;", "<b>#4</b> String &quot;Ravi&quot;", "<b>#5</b> String &quot;Meena&quot;", "<b>#6</b> String &quot;Imran&quot;", "<b>#7</b> int[4] {52000, 47500, 61000, 39000}", "<b>#8</b> UnixPath", "<b>#9</b> BufferedWriter"], "newVar": "i", "phase": "Assign", "note": "Now <code>i</code> = 2."}, {"line": 11, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["names", "→ #1 String[4]"], ["pay", "→ #7 int[4]"], ["file", "→ #8 UnixPath"], ["w", "→ #9 BufferedWriter"], ["i", "2"]]}], "heap": ["<b>#1</b> String[4] {&quot;Asha&quot;, &quot;Ravi&quot;, &quot;Meena&quot;, &quot;Imran&quot;}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> String &quot;Asha&quot;", "<b>#4</b> String &quot;Ravi&quot;", "<b>#5</b> String &quot;Meena&quot;", "<b>#6</b> String &quot;Imran&quot;", "<b>#7</b> int[4] {52000, 47500, 61000, 39000}", "<b>#8</b> UnixPath", "<b>#9</b> BufferedWriter"], "phase": "Step", "note": "This line runs; nothing visible changes."}, {"line": 12, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["names", "→ #1 String[4]"], ["pay", "→ #7 int[4]"], ["file", "→ #8 UnixPath"], ["w", "→ #9 BufferedWriter"], ["i", "2"]]}], "heap": ["<b>#1</b> String[4] {&quot;Asha&quot;, &quot;Ravi&quot;, &quot;Meena&quot;, &quot;Imran&quot;}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> String &quot;Asha&quot;", "<b>#4</b> String &quot;Ravi&quot;", "<b>#5</b> String &quot;Meena&quot;", "<b>#6</b> String &quot;Imran&quot;", "<b>#7</b> int[4] {52000, 47500, 61000, 39000}", "<b>#8</b> UnixPath", "<b>#9</b> BufferedWriter"], "phase": "Step", "note": "This line runs; nothing visible changes."}, {"line": 10, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["names", "→ #1 String[4]"], ["pay", "→ #7 int[4]"], ["file", "→ #8 UnixPath"], ["w", "→ #9 BufferedWriter"], ["i", "3"]]}], "heap": ["<b>#1</b> String[4] {&quot;Asha&quot;, &quot;Ravi&quot;, &quot;Meena&quot;, &quot;Imran&quot;}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> String &quot;Asha&quot;", "<b>#4</b> String &quot;Ravi&quot;", "<b>#5</b> String &quot;Meena&quot;", "<b>#6</b> String &quot;Imran&quot;", "<b>#7</b> int[4] {52000, 47500, 61000, 39000}", "<b>#8</b> UnixPath", "<b>#9</b> BufferedWriter"], "newVar": "i", "phase": "Assign", "note": "Now <code>i</code> = 3."}, {"line": 11, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["names", "→ #1 String[4]"], ["pay", "→ #7 int[4]"], ["file", "→ #8 UnixPath"], ["w", "→ #9 BufferedWriter"], ["i", "3"]]}], "heap": ["<b>#1</b> String[4] {&quot;Asha&quot;, &quot;Ravi&quot;, &quot;Meena&quot;, &quot;Imran&quot;}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> String &quot;Asha&quot;", "<b>#4</b> String &quot;Ravi&quot;", "<b>#5</b> String &quot;Meena&quot;", "<b>#6</b> String &quot;Imran&quot;", "<b>#7</b> int[4] {52000, 47500, 61000, 39000}", "<b>#8</b> UnixPath", "<b>#9</b> BufferedWriter"], "phase": "Step", "note": "This line runs; nothing visible changes."}, {"line": 12, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["names", "→ #1 String[4]"], ["pay", "→ #7 int[4]"], ["file", "→ #8 UnixPath"], ["w", "→ #9 BufferedWriter"], ["i", "3"]]}], "heap": ["<b>#1</b> String[4] {&quot;Asha&quot;, &quot;Ravi&quot;, &quot;Meena&quot;, &quot;Imran&quot;}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> String &quot;Asha&quot;", "<b>#4</b> String &quot;Ravi&quot;", "<b>#5</b> String &quot;Meena&quot;", "<b>#6</b> String &quot;Imran&quot;", "<b>#7</b> int[4] {52000, 47500, 61000, 39000}", "<b>#8</b> UnixPath", "<b>#9</b> BufferedWriter"], "phase": "Last line", "note": "All four lines are in the buffer."}, {"line": 10, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["names", "→ #1 String[4]"], ["pay", "→ #7 int[4]"], ["file", "→ #8 UnixPath"], ["w", "→ #9 BufferedWriter"]]}], "heap": ["<b>#1</b> String[4] {&quot;Asha&quot;, &quot;Ravi&quot;, &quot;Meena&quot;, &quot;Imran&quot;}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> String &quot;Asha&quot;", "<b>#4</b> String &quot;Ravi&quot;", "<b>#5</b> String &quot;Meena&quot;", "<b>#6</b> String &quot;Imran&quot;", "<b>#7</b> int[4] {52000, 47500, 61000, 39000}", "<b>#8</b> UnixPath", "<b>#9</b> BufferedWriter"], "phase": "Check", "note": "The loop condition is checked."}, {"line": 14, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["names", "→ #1 String[4]"], ["pay", "→ #7 int[4]"], ["file", "→ #8 UnixPath"]]}], "heap": ["<b>#1</b> String[4] {&quot;Asha&quot;, &quot;Ravi&quot;, &quot;Meena&quot;, &quot;Imran&quot;}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> String &quot;Asha&quot;", "<b>#4</b> String &quot;Ravi&quot;", "<b>#5</b> String &quot;Meena&quot;", "<b>#6</b> String &quot;Imran&quot;", "<b>#7</b> int[4] {52000, 47500, 61000, 39000}", "<b>#8</b> UnixPath"], "phase": "Closed", "note": "Leaving the try block flushes the buffer to the file in one write and closes it."}, {"line": 15, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["names", "→ #1 String[4]"], ["pay", "→ #7 int[4]"], ["file", "→ #8 UnixPath"], ["lines", "0"]]}], "heap": ["<b>#1</b> String[4] {&quot;Asha&quot;, &quot;Ravi&quot;, &quot;Meena&quot;, &quot;Imran&quot;}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> String &quot;Asha&quot;", "<b>#4</b> String &quot;Ravi&quot;", "<b>#5</b> String &quot;Meena&quot;", "<b>#6</b> String &quot;Imran&quot;", "<b>#7</b> int[4] {52000, 47500, 61000, 39000}", "<b>#8</b> UnixPath"], "newVar": "lines", "phase": "Assign", "note": "Now <code>lines</code> = 0."}, {"line": 16, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["names", "→ #1 String[4]"], ["pay", "→ #7 int[4]"], ["file", "→ #8 UnixPath"], ["lines", "0"], ["total", "0"]]}], "heap": ["<b>#1</b> String[4] {&quot;Asha&quot;, &quot;Ravi&quot;, &quot;Meena&quot;, &quot;Imran&quot;}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> String &quot;Asha&quot;", "<b>#4</b> String &quot;Ravi&quot;", "<b>#5</b> String &quot;Meena&quot;", "<b>#6</b> String &quot;Imran&quot;", "<b>#7</b> int[4] {52000, 47500, 61000, 39000}", "<b>#8</b> UnixPath"], "newVar": "total", "phase": "Assign", "note": "Now <code>total</code> = 0."}, {"line": 17, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["names", "→ #1 String[4]"], ["pay", "→ #7 int[4]"], ["file", "→ #8 UnixPath"], ["lines", "0"], ["total", "0"], ["r", "→ #10 BufferedReader"]]}], "heap": ["<b>#1</b> String[4] {&quot;Asha&quot;, &quot;Ravi&quot;, &quot;Meena&quot;, &quot;Imran&quot;}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> String &quot;Asha&quot;", "<b>#4</b> String &quot;Ravi&quot;", "<b>#5</b> String &quot;Meena&quot;", "<b>#6</b> String &quot;Imran&quot;", "<b>#7</b> int[4] {52000, 47500, 61000, 39000}", "<b>#8</b> UnixPath", "<b>#10</b> BufferedReader"], "newVar": "r", "phase": "Reader", "note": "A BufferedReader over the same file."}, {"line": 19, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["names", "→ #1 String[4]"], ["pay", "→ #7 int[4]"], ["file", "→ #8 UnixPath"], ["lines", "0"], ["total", "0"], ["r", "→ #10 BufferedReader"], ["line", "→ #11 \"Asha,52000\""]]}], "heap": ["<b>#1</b> String[4] {&quot;Asha&quot;, &quot;Ravi&quot;, &quot;Meena&quot;, &quot;Imran&quot;}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> String &quot;Asha&quot;", "<b>#4</b> String &quot;Ravi&quot;", "<b>#5</b> String &quot;Meena&quot;", "<b>#6</b> String &quot;Imran&quot;", "<b>#7</b> int[4] {52000, 47500, 61000, 39000}", "<b>#8</b> UnixPath", "<b>#10</b> BufferedReader", "<b>#11</b> String &quot;Asha,52000&quot;"], "newVar": "line", "phase": "Line 1", "note": "\"Asha,52000\"."}, {"line": 20, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["names", "→ #1 String[4]"], ["pay", "→ #7 int[4]"], ["file", "→ #8 UnixPath"], ["lines", "1"], ["total", "0"], ["r", "→ #10 BufferedReader"], ["line", "→ #11 \"Asha,52000\""]]}], "heap": ["<b>#1</b> String[4] {&quot;Asha&quot;, &quot;Ravi&quot;, &quot;Meena&quot;, &quot;Imran&quot;}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> String &quot;Asha&quot;", "<b>#4</b> String &quot;Ravi&quot;", "<b>#5</b> String &quot;Meena&quot;", "<b>#6</b> String &quot;Imran&quot;", "<b>#7</b> int[4] {52000, 47500, 61000, 39000}", "<b>#8</b> UnixPath", "<b>#10</b> BufferedReader", "<b>#11</b> String &quot;Asha,52000&quot;"], "newVar": "lines", "phase": "Assign", "note": "Now <code>lines</code> = 1."}, {"line": 21, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["names", "→ #1 String[4]"], ["pay", "→ #7 int[4]"], ["file", "→ #8 UnixPath"], ["lines", "1"], ["total", "52000"], ["r", "→ #10 BufferedReader"]]}], "heap": ["<b>#1</b> String[4] {&quot;Asha&quot;, &quot;Ravi&quot;, &quot;Meena&quot;, &quot;Imran&quot;}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> String &quot;Asha&quot;", "<b>#4</b> String &quot;Ravi&quot;", "<b>#5</b> String &quot;Meena&quot;", "<b>#6</b> String &quot;Imran&quot;", "<b>#7</b> int[4] {52000, 47500, 61000, 39000}", "<b>#8</b> UnixPath", "<b>#10</b> BufferedReader"], "newVar": "total", "phase": "Assign", "note": "Now <code>total</code> = 52000."}, {"line": 19, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["names", "→ #1 String[4]"], ["pay", "→ #7 int[4]"], ["file", "→ #8 UnixPath"], ["lines", "1"], ["total", "52000"], ["r", "→ #10 BufferedReader"], ["line", "→ #12 \"Ravi,47500\""]]}], "heap": ["<b>#1</b> String[4] {&quot;Asha&quot;, &quot;Ravi&quot;, &quot;Meena&quot;, &quot;Imran&quot;}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> String &quot;Asha&quot;", "<b>#4</b> String &quot;Ravi&quot;", "<b>#5</b> String &quot;Meena&quot;", "<b>#6</b> String &quot;Imran&quot;", "<b>#7</b> int[4] {52000, 47500, 61000, 39000}", "<b>#8</b> UnixPath", "<b>#10</b> BufferedReader", "<b>#12</b> String &quot;Ravi,47500&quot;"], "newVar": "line", "phase": "Assign", "note": "Now <code>line</code> = → #12 &quot;Ravi,47500&quot;. New object <b>#12</b> on the heap: String &quot;Ravi,47500&quot;."}, {"line": 20, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["names", "→ #1 String[4]"], ["pay", "→ #7 int[4]"], ["file", "→ #8 UnixPath"], ["lines", "2"], ["total", "52000"], ["r", "→ #10 BufferedReader"], ["line", "→ #12 \"Ravi,47500\""]]}], "heap": ["<b>#1</b> String[4] {&quot;Asha&quot;, &quot;Ravi&quot;, &quot;Meena&quot;, &quot;Imran&quot;}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> String &quot;Asha&quot;", "<b>#4</b> String &quot;Ravi&quot;", "<b>#5</b> String &quot;Meena&quot;", "<b>#6</b> String &quot;Imran&quot;", "<b>#7</b> int[4] {52000, 47500, 61000, 39000}", "<b>#8</b> UnixPath", "<b>#10</b> BufferedReader", "<b>#12</b> String &quot;Ravi,47500&quot;"], "newVar": "lines", "phase": "Assign", "note": "Now <code>lines</code> = 2."}, {"line": 21, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["names", "→ #1 String[4]"], ["pay", "→ #7 int[4]"], ["file", "→ #8 UnixPath"], ["lines", "2"], ["total", "99500"], ["r", "→ #10 BufferedReader"]]}], "heap": ["<b>#1</b> String[4] {&quot;Asha&quot;, &quot;Ravi&quot;, &quot;Meena&quot;, &quot;Imran&quot;}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> String &quot;Asha&quot;", "<b>#4</b> String &quot;Ravi&quot;", "<b>#5</b> String &quot;Meena&quot;", "<b>#6</b> String &quot;Imran&quot;", "<b>#7</b> int[4] {52000, 47500, 61000, 39000}", "<b>#8</b> UnixPath", "<b>#10</b> BufferedReader"], "newVar": "total", "phase": "Assign", "note": "Now <code>total</code> = 99500."}, {"line": 19, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["names", "→ #1 String[4]"], ["pay", "→ #7 int[4]"], ["file", "→ #8 UnixPath"], ["lines", "2"], ["total", "99500"], ["r", "→ #10 BufferedReader"], ["line", "→ #13 \"Meena,61000\""]]}], "heap": ["<b>#1</b> String[4] {&quot;Asha&quot;, &quot;Ravi&quot;, &quot;Meena&quot;, &quot;Imran&quot;}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> String &quot;Asha&quot;", "<b>#4</b> String &quot;Ravi&quot;", "<b>#5</b> String &quot;Meena&quot;", "<b>#6</b> String &quot;Imran&quot;", "<b>#7</b> int[4] {52000, 47500, 61000, 39000}", "<b>#8</b> UnixPath", "<b>#10</b> BufferedReader", "<b>#13</b> String &quot;Meena,61000&quot;"], "newVar": "line", "phase": "Assign", "note": "Now <code>line</code> = → #13 &quot;Meena,61000&quot;. New object <b>#13</b> on the heap: String &quot;Meena,61000&quot;."}, {"line": 20, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["names", "→ #1 String[4]"], ["pay", "→ #7 int[4]"], ["file", "→ #8 UnixPath"], ["lines", "3"], ["total", "99500"], ["r", "→ #10 BufferedReader"], ["line", "→ #13 \"Meena,61000\""]]}], "heap": ["<b>#1</b> String[4] {&quot;Asha&quot;, &quot;Ravi&quot;, &quot;Meena&quot;, &quot;Imran&quot;}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> String &quot;Asha&quot;", "<b>#4</b> String &quot;Ravi&quot;", "<b>#5</b> String &quot;Meena&quot;", "<b>#6</b> String &quot;Imran&quot;", "<b>#7</b> int[4] {52000, 47500, 61000, 39000}", "<b>#8</b> UnixPath", "<b>#10</b> BufferedReader", "<b>#13</b> String &quot;Meena,61000&quot;"], "newVar": "lines", "phase": "Assign", "note": "Now <code>lines</code> = 3."}, {"line": 21, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["names", "→ #1 String[4]"], ["pay", "→ #7 int[4]"], ["file", "→ #8 UnixPath"], ["lines", "3"], ["total", "160500"], ["r", "→ #10 BufferedReader"]]}], "heap": ["<b>#1</b> String[4] {&quot;Asha&quot;, &quot;Ravi&quot;, &quot;Meena&quot;, &quot;Imran&quot;}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> String &quot;Asha&quot;", "<b>#4</b> String &quot;Ravi&quot;", "<b>#5</b> String &quot;Meena&quot;", "<b>#6</b> String &quot;Imran&quot;", "<b>#7</b> int[4] {52000, 47500, 61000, 39000}", "<b>#8</b> UnixPath", "<b>#10</b> BufferedReader"], "newVar": "total", "phase": "Assign", "note": "Now <code>total</code> = 160500."}, {"line": 19, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["names", "→ #1 String[4]"], ["pay", "→ #7 int[4]"], ["file", "→ #8 UnixPath"], ["lines", "3"], ["total", "160500"], ["r", "→ #10 BufferedReader"], ["line", "→ #14 \"Imran,39000\""]]}], "heap": ["<b>#1</b> String[4] {&quot;Asha&quot;, &quot;Ravi&quot;, &quot;Meena&quot;, &quot;Imran&quot;}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> String &quot;Asha&quot;", "<b>#4</b> String &quot;Ravi&quot;", "<b>#5</b> String &quot;Meena&quot;", "<b>#6</b> String &quot;Imran&quot;", "<b>#7</b> int[4] {52000, 47500, 61000, 39000}", "<b>#8</b> UnixPath", "<b>#10</b> BufferedReader", "<b>#14</b> String &quot;Imran,39000&quot;"], "newVar": "line", "phase": "Assign", "note": "Now <code>line</code> = → #14 &quot;Imran,39000&quot;. New object <b>#14</b> on the heap: String &quot;Imran,39000&quot;."}, {"line": 20, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["names", "→ #1 String[4]"], ["pay", "→ #7 int[4]"], ["file", "→ #8 UnixPath"], ["lines", "4"], ["total", "160500"], ["r", "→ #10 BufferedReader"], ["line", "→ #14 \"Imran,39000\""]]}], "heap": ["<b>#1</b> String[4] {&quot;Asha&quot;, &quot;Ravi&quot;, &quot;Meena&quot;, &quot;Imran&quot;}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> String &quot;Asha&quot;", "<b>#4</b> String &quot;Ravi&quot;", "<b>#5</b> String &quot;Meena&quot;", "<b>#6</b> String &quot;Imran&quot;", "<b>#7</b> int[4] {52000, 47500, 61000, 39000}", "<b>#8</b> UnixPath", "<b>#10</b> BufferedReader", "<b>#14</b> String &quot;Imran,39000&quot;"], "newVar": "lines", "phase": "Assign", "note": "Now <code>lines</code> = 4."}, {"line": 21, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["names", "→ #1 String[4]"], ["pay", "→ #7 int[4]"], ["file", "→ #8 UnixPath"], ["lines", "4"], ["total", "199500"], ["r", "→ #10 BufferedReader"]]}], "heap": ["<b>#1</b> String[4] {&quot;Asha&quot;, &quot;Ravi&quot;, &quot;Meena&quot;, &quot;Imran&quot;}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> String &quot;Asha&quot;", "<b>#4</b> String &quot;Ravi&quot;", "<b>#5</b> String &quot;Meena&quot;", "<b>#6</b> String &quot;Imran&quot;", "<b>#7</b> int[4] {52000, 47500, 61000, 39000}", "<b>#8</b> UnixPath", "<b>#10</b> BufferedReader"], "newVar": "total", "phase": "Assign", "note": "Now <code>total</code> = 199500."}, {"line": 19, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["names", "→ #1 String[4]"], ["pay", "→ #7 int[4]"], ["file", "→ #8 UnixPath"], ["lines", "4"], ["total", "199500"], ["r", "→ #10 BufferedReader"]]}], "heap": ["<b>#1</b> String[4] {&quot;Asha&quot;, &quot;Ravi&quot;, &quot;Meena&quot;, &quot;Imran&quot;}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> String &quot;Asha&quot;", "<b>#4</b> String &quot;Ravi&quot;", "<b>#5</b> String &quot;Meena&quot;", "<b>#6</b> String &quot;Imran&quot;", "<b>#7</b> int[4] {52000, 47500, 61000, 39000}", "<b>#8</b> UnixPath", "<b>#10</b> BufferedReader"], "phase": "Check", "note": "The condition <code>(line = r.readLine()) != null</code> is checked: <b>false</b>, so the loop ends."}, {"line": 23, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["names", "→ #1 String[4]"], ["pay", "→ #7 int[4]"], ["file", "→ #8 UnixPath"], ["lines", "4"], ["total", "199500"]]}], "heap": ["<b>#1</b> String[4] {&quot;Asha&quot;, &quot;Ravi&quot;, &quot;Meena&quot;, &quot;Imran&quot;}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> String &quot;Asha&quot;", "<b>#4</b> String &quot;Ravi&quot;", "<b>#5</b> String &quot;Meena&quot;", "<b>#6</b> String &quot;Imran&quot;", "<b>#7</b> int[4] {52000, 47500, 61000, 39000}", "<b>#8</b> UnixPath"], "phase": "Step", "note": "End of the block."}, {"line": 24, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["names", "→ #1 String[4]"], ["pay", "→ #7 int[4]"], ["file", "→ #8 UnixPath"], ["lines", "4"], ["total", "199500"]]}], "heap": ["<b>#1</b> String[4] {&quot;Asha&quot;, &quot;Ravi&quot;, &quot;Meena&quot;, &quot;Imran&quot;}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> String &quot;Asha&quot;", "<b>#4</b> String &quot;Ravi&quot;", "<b>#5</b> String &quot;Meena&quot;", "<b>#6</b> String &quot;Imran&quot;", "<b>#7</b> int[4] {52000, 47500, 61000, 39000}", "<b>#8</b> UnixPath"], "out": "4 slips, total payout Rs 199500\n", "phase": "Report", "note": "4 slips, Rs 1,99,500. Prints <code>4 slips, total payout Rs 199500</code>."}, {"line": 25, "phase": "Program ends", "note": "<code>main</code> returns, its frame is popped and the program ends.", "stack": [], "heap": []}]}</script>
+  </div>
+  </article>
+  <article class="wx">
+    <div class="wx__head"><span class="wx__num">Example 3</span><span class="wx__tag">Operations · logs</span></div>
+    <h4>Pull the errors out of a big log</h4>
+    <div class="wx__problem"><p class="wx__label">Problem statement</p><p>A server log has thousands of lines. Support needs only the ERROR lines, saved to errors.txt. Read line by line (never the whole file at once), write matching lines, and report counts.</p></div>
+    <div class="prob__io"><div><small>Input</small><pre>a generated log of 12 lines, every 4th an ERROR (real logs have millions)</pre></div><div><small>Expected output</small><pre>read 12 lines, saved 3 errors
+first error: ERROR payment timeout #4</pre></div></div>
+    <div class="wx__approach"><p class="wx__label">Approach</p><ol><li>Generate a test log with a BufferedWriter.</li><li>Open a BufferedReader on the log and a BufferedWriter on errors.txt in one try.</li><li>For each line containing "ERROR", write it out. Only one line is in memory at a time.</li></ol></div>
+    <p class="wx__label">Solution: run it live</p>
+    <div class="runner">
+    <script type="application/json">{"lang": "java", "file": "Main.java", "tasks": [{"label": "Run · Pull the errors out of a big log", "hint": "Press <b>Run</b>. Then change the filter to keep lines that end with \"#6\".", "code": "import java.io.*;\nimport java.nio.file.*;\n\npublic class Main {\n    public static void main(String[] args) throws IOException {\n        try (BufferedWriter w = Files.newBufferedWriter(Path.of(\"server.log\"))) {\n            for (int i = 1; i <= 12; i++) {\n                w.write(i % 4 == 0 ? \"ERROR payment timeout #\" + i : \"INFO request ok #\" + i);\n                w.newLine();\n            }\n        }\n        int read = 0, errors = 0;\n        try (BufferedReader in = Files.newBufferedReader(Path.of(\"server.log\"));\n             BufferedWriter out = Files.newBufferedWriter(Path.of(\"errors.txt\"))) {\n            String line;\n            while ((line = in.readLine()) != null) {\n                read++;\n                if (line.startsWith(\"ERROR\")) {\n                    out.write(line);\n                    out.newLine();\n                    errors++;\n                }\n            }\n        }\n        System.out.println(\"read \" + read + \" lines, saved \" + errors + \" errors\");\n        System.out.println(\"first error: \" + Files.readAllLines(Path.of(\"errors.txt\")).get(0));\n    }\n}\n"}]}</script>
+    </div>
+    <p class="wx__label">What happens in memory, step by step</p>
+    <p class="wx__how">Recorded from the real JVM: press <b>Next</b> to execute one line at a time. Watch method calls push and pop frames on the stack, and objects (numbered #1, #2 …) appear on the heap.</p>
+    <div class="tracer">
+    <script type="application/json">{"lang": "java", "code": ["import java.io.*;", "import java.nio.file.*;", "", "public class Main {", "    public static void main(String[] args) throws IOException {", "        try (BufferedWriter w = Files.newBufferedWriter(Path.of(\"server.log\"))) {", "            for (int i = 1; i <= 12; i++) {", "                w.write(i % 4 == 0 ? \"ERROR payment timeout #\" + i : \"INFO request ok #\" + i);", "                w.newLine();", "            }", "        }", "        int read = 0, errors = 0;", "        try (BufferedReader in = Files.newBufferedReader(Path.of(\"server.log\"));", "             BufferedWriter out = Files.newBufferedWriter(Path.of(\"errors.txt\"))) {", "            String line;", "            while ((line = in.readLine()) != null) {", "                read++;", "                if (line.startsWith(\"ERROR\")) {", "                    out.write(line);", "                    out.newLine();", "                    errors++;", "                }", "            }", "        }", "        System.out.println(\"read \" + read + \" lines, saved \" + errors + \" errors\");", "        System.out.println(\"first error: \" + Files.readAllLines(Path.of(\"errors.txt\")).get(0));", "    }", "}"], "steps": [{"line": 6, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["w", "→ #1 BufferedWriter"]]}], "heap": ["<b>#1</b> BufferedWriter", "<b>#2</b> String[0] (args, empty)"], "newVar": "w", "phase": "Make a log", "note": "The test log is written through a buffer."}, {"line": 7, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["w", "→ #1 BufferedWriter"], ["i", "1"]]}], "heap": ["<b>#1</b> BufferedWriter", "<b>#2</b> String[0] (args, empty)"], "newVar": "i", "phase": "12 lines", "note": "The loop runs 12 times; every 4th line is an ERROR."}, {"line": 8, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["w", "→ #1 BufferedWriter"], ["i", "1"]]}], "heap": ["<b>#1</b> BufferedWriter", "<b>#2</b> String[0] (args, empty)"], "phase": "Step", "note": "This line runs; nothing visible changes."}, {"line": 9, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["w", "→ #1 BufferedWriter"], ["i", "1"]]}], "heap": ["<b>#1</b> BufferedWriter", "<b>#2</b> String[0] (args, empty)"], "phase": "Step", "note": "This line runs; nothing visible changes."}, {"line": 7, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["w", "→ #1 BufferedWriter"], ["i", "2"]]}], "heap": ["<b>#1</b> BufferedWriter", "<b>#2</b> String[0] (args, empty)"], "newVar": "i", "phase": "12 lines", "note": "The loop runs 12 times; every 4th line is an ERROR."}, {"line": 8, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["w", "→ #1 BufferedWriter"], ["i", "2"]]}], "heap": ["<b>#1</b> BufferedWriter", "<b>#2</b> String[0] (args, empty)"], "phase": "Step", "note": "This line runs; nothing visible changes."}, {"line": 9, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["w", "→ #1 BufferedWriter"], ["i", "2"]]}], "heap": ["<b>#1</b> BufferedWriter", "<b>#2</b> String[0] (args, empty)"], "phase": "Step", "note": "This line runs; nothing visible changes."}, {"line": 7, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["w", "→ #1 BufferedWriter"], ["i", "3"]]}], "heap": ["<b>#1</b> BufferedWriter", "<b>#2</b> String[0] (args, empty)"], "newVar": "i", "phase": "12 lines", "note": "The loop runs 12 times; every 4th line is an ERROR."}, {"line": 8, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["w", "→ #1 BufferedWriter"], ["i", "3"]]}], "heap": ["<b>#1</b> BufferedWriter", "<b>#2</b> String[0] (args, empty)"], "phase": "Step", "note": "This line runs; nothing visible changes."}, {"line": 9, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["w", "→ #1 BufferedWriter"], ["i", "3"]]}], "heap": ["<b>#1</b> BufferedWriter", "<b>#2</b> String[0] (args, empty)"], "phase": "Step", "note": "This line runs; nothing visible changes."}, {"line": 7, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["w", "→ #1 BufferedWriter"], ["i", "4"]]}], "heap": ["<b>#1</b> BufferedWriter", "<b>#2</b> String[0] (args, empty)"], "newVar": "i", "phase": "12 lines", "note": "The loop runs 12 times; every 4th line is an ERROR."}, {"line": 8, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["w", "→ #1 BufferedWriter"], ["i", "4"]]}], "heap": ["<b>#1</b> BufferedWriter", "<b>#2</b> String[0] (args, empty)"], "phase": "Step", "note": "This line runs; nothing visible changes."}, {"line": 9, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["w", "→ #1 BufferedWriter"], ["i", "4"]]}], "heap": ["<b>#1</b> BufferedWriter", "<b>#2</b> String[0] (args, empty)"], "phase": "Step", "note": "This line runs; nothing visible changes."}, {"line": 7, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["w", "→ #1 BufferedWriter"], ["i", "5"]]}], "heap": ["<b>#1</b> BufferedWriter", "<b>#2</b> String[0] (args, empty)"], "newVar": "i", "phase": "12 lines", "note": "The loop runs 12 times; every 4th line is an ERROR."}, {"line": 8, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["w", "→ #1 BufferedWriter"], ["i", "5"]]}], "heap": ["<b>#1</b> BufferedWriter", "<b>#2</b> String[0] (args, empty)"], "phase": "Step", "note": "This line runs; nothing visible changes."}, {"line": 9, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["w", "→ #1 BufferedWriter"], ["i", "5"]]}], "heap": ["<b>#1</b> BufferedWriter", "<b>#2</b> String[0] (args, empty)"], "phase": "Step", "note": "This line runs; nothing visible changes."}, {"line": 7, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["w", "→ #1 BufferedWriter"], ["i", "6"]]}], "heap": ["<b>#1</b> BufferedWriter", "<b>#2</b> String[0] (args, empty)"], "newVar": "i", "phase": "12 lines", "note": "The loop runs 12 times; every 4th line is an ERROR."}, {"line": 8, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["w", "→ #1 BufferedWriter"], ["i", "6"]]}], "heap": ["<b>#1</b> BufferedWriter", "<b>#2</b> String[0] (args, empty)"], "phase": "Step", "note": "This line runs; nothing visible changes."}, {"line": 9, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["w", "→ #1 BufferedWriter"], ["i", "6"]]}], "heap": ["<b>#1</b> BufferedWriter", "<b>#2</b> String[0] (args, empty)"], "phase": "Step", "note": "This line runs; nothing visible changes."}, {"line": 7, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["w", "→ #1 BufferedWriter"], ["i", "7"]]}], "heap": ["<b>#1</b> BufferedWriter", "<b>#2</b> String[0] (args, empty)"], "newVar": "i", "phase": "12 lines", "note": "The loop runs 12 times; every 4th line is an ERROR."}, {"line": 8, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["w", "→ #1 BufferedWriter"], ["i", "7"]]}], "heap": ["<b>#1</b> BufferedWriter", "<b>#2</b> String[0] (args, empty)"], "phase": "Step", "note": "This line runs; nothing visible changes."}, {"line": 9, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["w", "→ #1 BufferedWriter"], ["i", "7"]]}], "heap": ["<b>#1</b> BufferedWriter", "<b>#2</b> String[0] (args, empty)"], "phase": "Step", "note": "This line runs; nothing visible changes."}, {"line": 7, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["w", "→ #1 BufferedWriter"], ["i", "8"]]}], "heap": ["<b>#1</b> BufferedWriter", "<b>#2</b> String[0] (args, empty)"], "newVar": "i", "phase": "12 lines", "note": "The loop runs 12 times; every 4th line is an ERROR."}, {"line": 8, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["w", "→ #1 BufferedWriter"], ["i", "8"]]}], "heap": ["<b>#1</b> BufferedWriter", "<b>#2</b> String[0] (args, empty)"], "phase": "Step", "note": "This line runs; nothing visible changes."}, {"line": 9, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["w", "→ #1 BufferedWriter"], ["i", "8"]]}], "heap": ["<b>#1</b> BufferedWriter", "<b>#2</b> String[0] (args, empty)"], "phase": "Step", "note": "This line runs; nothing visible changes."}, {"line": 7, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["w", "→ #1 BufferedWriter"], ["i", "9"]]}], "heap": ["<b>#1</b> BufferedWriter", "<b>#2</b> String[0] (args, empty)"], "newVar": "i", "phase": "12 lines", "note": "The loop runs 12 times; every 4th line is an ERROR."}, {"line": 8, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["w", "→ #1 BufferedWriter"], ["i", "9"]]}], "heap": ["<b>#1</b> BufferedWriter", "<b>#2</b> String[0] (args, empty)"], "phase": "Step", "note": "This line runs; nothing visible changes."}, {"line": 9, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["w", "→ #1 BufferedWriter"], ["i", "9"]]}], "heap": ["<b>#1</b> BufferedWriter", "<b>#2</b> String[0] (args, empty)"], "phase": "Step", "note": "This line runs; nothing visible changes."}, {"line": 7, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["w", "→ #1 BufferedWriter"], ["i", "10"]]}], "heap": ["<b>#1</b> BufferedWriter", "<b>#2</b> String[0] (args, empty)"], "newVar": "i", "phase": "12 lines", "note": "The loop runs 12 times; every 4th line is an ERROR."}, {"line": 8, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["w", "→ #1 BufferedWriter"], ["i", "10"]]}], "heap": ["<b>#1</b> BufferedWriter", "<b>#2</b> String[0] (args, empty)"], "phase": "Step", "note": "This line runs; nothing visible changes."}, {"line": 9, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["w", "→ #1 BufferedWriter"], ["i", "10"]]}], "heap": ["<b>#1</b> BufferedWriter", "<b>#2</b> String[0] (args, empty)"], "phase": "Step", "note": "This line runs; nothing visible changes."}, {"line": 7, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["w", "→ #1 BufferedWriter"], ["i", "11"]]}], "heap": ["<b>#1</b> BufferedWriter", "<b>#2</b> String[0] (args, empty)"], "newVar": "i", "phase": "12 lines", "note": "The loop runs 12 times; every 4th line is an ERROR."}, {"line": 8, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["w", "→ #1 BufferedWriter"], ["i", "11"]]}], "heap": ["<b>#1</b> BufferedWriter", "<b>#2</b> String[0] (args, empty)"], "phase": "Step", "note": "This line runs; nothing visible changes."}, {"line": 9, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["w", "→ #1 BufferedWriter"], ["i", "11"]]}], "heap": ["<b>#1</b> BufferedWriter", "<b>#2</b> String[0] (args, empty)"], "phase": "Step", "note": "This line runs; nothing visible changes."}, {"line": 7, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["w", "→ #1 BufferedWriter"], ["i", "12"]]}], "heap": ["<b>#1</b> BufferedWriter", "<b>#2</b> String[0] (args, empty)"], "newVar": "i", "phase": "12 lines", "note": "The loop runs 12 times; every 4th line is an ERROR."}, {"line": 8, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["w", "→ #1 BufferedWriter"], ["i", "12"]]}], "heap": ["<b>#1</b> BufferedWriter", "<b>#2</b> String[0] (args, empty)"], "phase": "Step", "note": "This line runs; nothing visible changes."}, {"line": 9, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["w", "→ #1 BufferedWriter"], ["i", "12"]]}], "heap": ["<b>#1</b> BufferedWriter", "<b>#2</b> String[0] (args, empty)"], "phase": "Step", "note": "This line runs; nothing visible changes."}, {"line": 7, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["w", "→ #1 BufferedWriter"]]}], "heap": ["<b>#1</b> BufferedWriter", "<b>#2</b> String[0] (args, empty)"], "phase": "12 lines", "note": "The loop runs 12 times; every 4th line is an ERROR."}, {"line": 11, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}], "heap": ["<b>#2</b> String[0] (args, empty)"], "phase": "Step", "note": "End of the block."}, {"line": 12, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["read", "0"], ["errors", "0"]]}], "heap": ["<b>#2</b> String[0] (args, empty)"], "newVar": "read", "phase": "Counters", "note": "Lines read and errors found. Now <code>read</code> = 0, <code>errors</code> = 0."}, {"line": 13, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["read", "0"], ["errors", "0"], ["in", "→ #3 BufferedReader"]]}], "heap": ["<b>#2</b> String[0] (args, empty)", "<b>#3</b> BufferedReader"], "newVar": "in", "phase": "Two streams", "note": "A reader for the log and a writer for the errors, both buffered and both closed automatically."}, {"line": 14, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["read", "0"], ["errors", "0"], ["in", "→ #3 BufferedReader"], ["out", "→ #4 BufferedWriter"]]}], "heap": ["<b>#2</b> String[0] (args, empty)", "<b>#3</b> BufferedReader", "<b>#4</b> BufferedWriter"], "newVar": "out", "phase": "Assign", "note": "Now <code>out</code> = → #4 BufferedWriter. New object <b>#4</b> on the heap: BufferedWriter."}, {"line": 16, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["read", "0"], ["errors", "0"], ["in", "→ #3 BufferedReader"], ["out", "→ #4 BufferedWriter"], ["line", "→ #5 \"INFO request ok #1\""]]}], "heap": ["<b>#2</b> String[0] (args, empty)", "<b>#3</b> BufferedReader", "<b>#4</b> BufferedWriter", "<b>#5</b> String &quot;INFO request ok #1&quot;"], "newVar": "line", "phase": "Assign", "note": "Now <code>line</code> = → #5 &quot;INFO request ok #1&quot;. New object <b>#5</b> on the heap: String &quot;INFO request ok #1&quot;."}, {"line": 17, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["read", "1"], ["errors", "0"], ["in", "→ #3 BufferedReader"], ["out", "→ #4 BufferedWriter"], ["line", "→ #5 \"INFO request ok #1\""]]}], "heap": ["<b>#2</b> String[0] (args, empty)", "<b>#3</b> BufferedReader", "<b>#4</b> BufferedWriter", "<b>#5</b> String &quot;INFO request ok #1&quot;"], "newVar": "read", "phase": "Assign", "note": "Now <code>read</code> = 1."}, {"line": 18, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["read", "1"], ["errors", "0"], ["in", "→ #3 BufferedReader"], ["out", "→ #4 BufferedWriter"]]}], "heap": ["<b>#2</b> String[0] (args, empty)", "<b>#3</b> BufferedReader", "<b>#4</b> BufferedWriter"], "phase": "Check", "note": "The condition <code>line.startsWith(&quot;ERROR&quot;)</code> is checked: <b>false</b>, so the block is skipped."}, {"line": 16, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["read", "1"], ["errors", "0"], ["in", "→ #3 BufferedReader"], ["out", "→ #4 BufferedWriter"], ["line", "→ #6 \"INFO request ok #2\""]]}], "heap": ["<b>#2</b> String[0] (args, empty)", "<b>#3</b> BufferedReader", "<b>#4</b> BufferedWriter", "<b>#6</b> String &quot;INFO request ok #2&quot;"], "newVar": "line", "phase": "Assign", "note": "Now <code>line</code> = → #6 &quot;INFO request ok #2&quot;. New object <b>#6</b> on the heap: String &quot;INFO request ok #2&quot;."}, {"line": 17, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["read", "2"], ["errors", "0"], ["in", "→ #3 BufferedReader"], ["out", "→ #4 BufferedWriter"], ["line", "→ #6 \"INFO request ok #2\""]]}], "heap": ["<b>#2</b> String[0] (args, empty)", "<b>#3</b> BufferedReader", "<b>#4</b> BufferedWriter", "<b>#6</b> String &quot;INFO request ok #2&quot;"], "newVar": "read", "phase": "Assign", "note": "Now <code>read</code> = 2."}, {"line": 18, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["read", "2"], ["errors", "0"], ["in", "→ #3 BufferedReader"], ["out", "→ #4 BufferedWriter"]]}], "heap": ["<b>#2</b> String[0] (args, empty)", "<b>#3</b> BufferedReader", "<b>#4</b> BufferedWriter"], "phase": "Check", "note": "The condition <code>line.startsWith(&quot;ERROR&quot;)</code> is checked: <b>false</b>, so the block is skipped."}, {"line": 16, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["read", "2"], ["errors", "0"], ["in", "→ #3 BufferedReader"], ["out", "→ #4 BufferedWriter"], ["line", "→ #7 \"INFO request ok #3\""]]}], "heap": ["<b>#2</b> String[0] (args, empty)", "<b>#3</b> BufferedReader", "<b>#4</b> BufferedWriter", "<b>#7</b> String &quot;INFO request ok #3&quot;"], "newVar": "line", "phase": "Assign", "note": "Now <code>line</code> = → #7 &quot;INFO request ok #3&quot;. New object <b>#7</b> on the heap: String &quot;INFO request ok #3&quot;."}, {"line": 17, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["read", "3"], ["errors", "0"], ["in", "→ #3 BufferedReader"], ["out", "→ #4 BufferedWriter"], ["line", "→ #7 \"INFO request ok #3\""]]}], "heap": ["<b>#2</b> String[0] (args, empty)", "<b>#3</b> BufferedReader", "<b>#4</b> BufferedWriter", "<b>#7</b> String &quot;INFO request ok #3&quot;"], "newVar": "read", "phase": "Assign", "note": "Now <code>read</code> = 3."}, {"line": 18, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["read", "3"], ["errors", "0"], ["in", "→ #3 BufferedReader"], ["out", "→ #4 BufferedWriter"]]}], "heap": ["<b>#2</b> String[0] (args, empty)", "<b>#3</b> BufferedReader", "<b>#4</b> BufferedWriter"], "phase": "Check", "note": "The condition <code>line.startsWith(&quot;ERROR&quot;)</code> is checked: <b>false</b>, so the block is skipped."}, {"line": 16, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["read", "3"], ["errors", "0"], ["in", "→ #3 BufferedReader"], ["out", "→ #4 BufferedWriter"], ["line", "→ #8 \"ERROR payment timeout #4\""]]}], "heap": ["<b>#2</b> String[0] (args, empty)", "<b>#3</b> BufferedReader", "<b>#4</b> BufferedWriter", "<b>#8</b> String &quot;ERROR payment timeout #4&quot;"], "newVar": "line", "phase": "Assign", "note": "Now <code>line</code> = → #8 &quot;ERROR payment timeout #4&quot;. New object <b>#8</b> on the heap: String &quot;ERROR payment timeout #4&quot;."}, {"line": 17, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["read", "4"], ["errors", "0"], ["in", "→ #3 BufferedReader"], ["out", "→ #4 BufferedWriter"], ["line", "→ #8 \"ERROR payment timeout #4\""]]}], "heap": ["<b>#2</b> String[0] (args, empty)", "<b>#3</b> BufferedReader", "<b>#4</b> BufferedWriter", "<b>#8</b> String &quot;ERROR payment timeout #4&quot;"], "newVar": "read", "phase": "Assign", "note": "Now <code>read</code> = 4."}, {"line": 18, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["read", "4"], ["errors", "0"], ["in", "→ #3 BufferedReader"], ["out", "→ #4 BufferedWriter"], ["line", "→ #8 \"ERROR payment timeout #4\""]]}], "heap": ["<b>#2</b> String[0] (args, empty)", "<b>#3</b> BufferedReader", "<b>#4</b> BufferedWriter", "<b>#8</b> String &quot;ERROR payment timeout #4&quot;"], "phase": "Check", "note": "The condition <code>line.startsWith(&quot;ERROR&quot;)</code> is checked: <b>true</b>, so the block runs."}, {"line": 19, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["read", "4"], ["errors", "0"], ["in", "→ #3 BufferedReader"], ["out", "→ #4 BufferedWriter"], ["line", "→ #8 \"ERROR payment timeout #4\""]]}], "heap": ["<b>#2</b> String[0] (args, empty)", "<b>#3</b> BufferedReader", "<b>#4</b> BufferedWriter", "<b>#8</b> String &quot;ERROR payment timeout #4&quot;"], "phase": "Step", "note": "This line runs; nothing visible changes."}, {"line": 20, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["read", "4"], ["errors", "0"], ["in", "→ #3 BufferedReader"], ["out", "→ #4 BufferedWriter"], ["line", "→ #8 \"ERROR payment timeout #4\""]]}], "heap": ["<b>#2</b> String[0] (args, empty)", "<b>#3</b> BufferedReader", "<b>#4</b> BufferedWriter", "<b>#8</b> String &quot;ERROR payment timeout #4&quot;"], "phase": "Step", "note": "This line runs; nothing visible changes."}, {"line": 21, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["read", "4"], ["errors", "1"], ["in", "→ #3 BufferedReader"], ["out", "→ #4 BufferedWriter"]]}], "heap": ["<b>#2</b> String[0] (args, empty)", "<b>#3</b> BufferedReader", "<b>#4</b> BufferedWriter"], "newVar": "errors", "phase": "Assign", "note": "Now <code>errors</code> = 1."}, {"line": 16, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["read", "4"], ["errors", "1"], ["in", "→ #3 BufferedReader"], ["out", "→ #4 BufferedWriter"], ["line", "→ #9 \"INFO request ok #5\""]]}], "heap": ["<b>#2</b> String[0] (args, empty)", "<b>#3</b> BufferedReader", "<b>#4</b> BufferedWriter", "<b>#9</b> String &quot;INFO request ok #5&quot;"], "newVar": "line", "phase": "Assign", "note": "Now <code>line</code> = → #9 &quot;INFO request ok #5&quot;. New object <b>#9</b> on the heap: String &quot;INFO request ok #5&quot;."}, {"line": 17, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["read", "5"], ["errors", "1"], ["in", "→ #3 BufferedReader"], ["out", "→ #4 BufferedWriter"], ["line", "→ #9 \"INFO request ok #5\""]]}], "heap": ["<b>#2</b> String[0] (args, empty)", "<b>#3</b> BufferedReader", "<b>#4</b> BufferedWriter", "<b>#9</b> String &quot;INFO request ok #5&quot;"], "newVar": "read", "phase": "Assign", "note": "Now <code>read</code> = 5."}, {"line": 18, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["read", "5"], ["errors", "1"], ["in", "→ #3 BufferedReader"], ["out", "→ #4 BufferedWriter"]]}], "heap": ["<b>#2</b> String[0] (args, empty)", "<b>#3</b> BufferedReader", "<b>#4</b> BufferedWriter"], "phase": "Check", "note": "The condition <code>line.startsWith(&quot;ERROR&quot;)</code> is checked: <b>false</b>, so the block is skipped."}, {"line": 16, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["read", "5"], ["errors", "1"], ["in", "→ #3 BufferedReader"], ["out", "→ #4 BufferedWriter"], ["line", "→ #10 \"INFO request ok #6\""]]}], "heap": ["<b>#2</b> String[0] (args, empty)", "<b>#3</b> BufferedReader", "<b>#4</b> BufferedWriter", "<b>#10</b> String &quot;INFO request ok #6&quot;"], "newVar": "line", "phase": "Assign", "note": "Now <code>line</code> = → #10 &quot;INFO request ok #6&quot;. New object <b>#10</b> on the heap: String &quot;INFO request ok #6&quot;."}, {"line": 17, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["read", "6"], ["errors", "1"], ["in", "→ #3 BufferedReader"], ["out", "→ #4 BufferedWriter"], ["line", "→ #10 \"INFO request ok #6\""]]}], "heap": ["<b>#2</b> String[0] (args, empty)", "<b>#3</b> BufferedReader", "<b>#4</b> BufferedWriter", "<b>#10</b> String &quot;INFO request ok #6&quot;"], "newVar": "read", "phase": "Assign", "note": "Now <code>read</code> = 6."}, {"line": 18, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["read", "6"], ["errors", "1"], ["in", "→ #3 BufferedReader"], ["out", "→ #4 BufferedWriter"]]}], "heap": ["<b>#2</b> String[0] (args, empty)", "<b>#3</b> BufferedReader", "<b>#4</b> BufferedWriter"], "phase": "Check", "note": "The condition <code>line.startsWith(&quot;ERROR&quot;)</code> is checked: <b>false</b>, so the block is skipped."}, {"line": 16, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["read", "6"], ["errors", "1"], ["in", "→ #3 BufferedReader"], ["out", "→ #4 BufferedWriter"], ["line", "→ #11 \"INFO request ok #7\""]]}], "heap": ["<b>#2</b> String[0] (args, empty)", "<b>#3</b> BufferedReader", "<b>#4</b> BufferedWriter", "<b>#11</b> String &quot;INFO request ok #7&quot;"], "newVar": "line", "phase": "Assign", "note": "Now <code>line</code> = → #11 &quot;INFO request ok #7&quot;. New object <b>#11</b> on the heap: String &quot;INFO request ok #7&quot;."}, {"line": 17, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["read", "7"], ["errors", "1"], ["in", "→ #3 BufferedReader"], ["out", "→ #4 BufferedWriter"], ["line", "→ #11 \"INFO request ok #7\""]]}], "heap": ["<b>#2</b> String[0] (args, empty)", "<b>#3</b> BufferedReader", "<b>#4</b> BufferedWriter", "<b>#11</b> String &quot;INFO request ok #7&quot;"], "newVar": "read", "phase": "Assign", "note": "Now <code>read</code> = 7."}, {"line": 18, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["read", "7"], ["errors", "1"], ["in", "→ #3 BufferedReader"], ["out", "→ #4 BufferedWriter"]]}], "heap": ["<b>#2</b> String[0] (args, empty)", "<b>#3</b> BufferedReader", "<b>#4</b> BufferedWriter"], "phase": "Check", "note": "The condition <code>line.startsWith(&quot;ERROR&quot;)</code> is checked: <b>false</b>, so the block is skipped."}, {"line": 16, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["read", "7"], ["errors", "1"], ["in", "→ #3 BufferedReader"], ["out", "→ #4 BufferedWriter"], ["line", "→ #12 \"ERROR payment timeout #8\""]]}], "heap": ["<b>#2</b> String[0] (args, empty)", "<b>#3</b> BufferedReader", "<b>#4</b> BufferedWriter", "<b>#12</b> String &quot;ERROR payment timeout #8&quot;"], "newVar": "line", "phase": "Assign", "note": "Now <code>line</code> = → #12 &quot;ERROR payment timeout #8&quot;. New object <b>#12</b> on the heap: String &quot;ERROR payment timeout #8&quot;."}, {"line": 17, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["read", "8"], ["errors", "1"], ["in", "→ #3 BufferedReader"], ["out", "→ #4 BufferedWriter"], ["line", "→ #12 \"ERROR payment timeout #8\""]]}], "heap": ["<b>#2</b> String[0] (args, empty)", "<b>#3</b> BufferedReader", "<b>#4</b> BufferedWriter", "<b>#12</b> String &quot;ERROR payment timeout #8&quot;"], "newVar": "read", "phase": "Assign", "note": "Now <code>read</code> = 8."}, {"line": 18, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["read", "8"], ["errors", "1"], ["in", "→ #3 BufferedReader"], ["out", "→ #4 BufferedWriter"], ["line", "→ #12 \"ERROR payment timeout #8\""]]}], "heap": ["<b>#2</b> String[0] (args, empty)", "<b>#3</b> BufferedReader", "<b>#4</b> BufferedWriter", "<b>#12</b> String &quot;ERROR payment timeout #8&quot;"], "phase": "Check", "note": "The condition <code>line.startsWith(&quot;ERROR&quot;)</code> is checked: <b>true</b>, so the block runs."}, {"line": 19, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["read", "8"], ["errors", "1"], ["in", "→ #3 BufferedReader"], ["out", "→ #4 BufferedWriter"], ["line", "→ #12 \"ERROR payment timeout #8\""]]}], "heap": ["<b>#2</b> String[0] (args, empty)", "<b>#3</b> BufferedReader", "<b>#4</b> BufferedWriter", "<b>#12</b> String &quot;ERROR payment timeout #8&quot;"], "phase": "Step", "note": "This line runs; nothing visible changes."}, {"line": 20, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["read", "8"], ["errors", "1"], ["in", "→ #3 BufferedReader"], ["out", "→ #4 BufferedWriter"], ["line", "→ #12 \"ERROR payment timeout #8\""]]}], "heap": ["<b>#2</b> String[0] (args, empty)", "<b>#3</b> BufferedReader", "<b>#4</b> BufferedWriter", "<b>#12</b> String &quot;ERROR payment timeout #8&quot;"], "phase": "Step", "note": "This line runs; nothing visible changes."}, {"line": 21, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["read", "8"], ["errors", "2"], ["in", "→ #3 BufferedReader"], ["out", "→ #4 BufferedWriter"]]}], "heap": ["<b>#2</b> String[0] (args, empty)", "<b>#3</b> BufferedReader", "<b>#4</b> BufferedWriter"], "newVar": "errors", "phase": "Assign", "note": "Now <code>errors</code> = 2."}, {"line": 16, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["read", "8"], ["errors", "2"], ["in", "→ #3 BufferedReader"], ["out", "→ #4 BufferedWriter"], ["line", "→ #13 \"INFO request ok #9\""]]}], "heap": ["<b>#2</b> String[0] (args, empty)", "<b>#3</b> BufferedReader", "<b>#4</b> BufferedWriter", "<b>#13</b> String &quot;INFO request ok #9&quot;"], "newVar": "line", "phase": "Assign", "note": "Now <code>line</code> = → #13 &quot;INFO request ok #9&quot;. New object <b>#13</b> on the heap: String &quot;INFO request ok #9&quot;."}, {"line": 17, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["read", "9"], ["errors", "2"], ["in", "→ #3 BufferedReader"], ["out", "→ #4 BufferedWriter"], ["line", "→ #13 \"INFO request ok #9\""]]}], "heap": ["<b>#2</b> String[0] (args, empty)", "<b>#3</b> BufferedReader", "<b>#4</b> BufferedWriter", "<b>#13</b> String &quot;INFO request ok #9&quot;"], "newVar": "read", "phase": "Assign", "note": "Now <code>read</code> = 9."}, {"line": 18, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["read", "9"], ["errors", "2"], ["in", "→ #3 BufferedReader"], ["out", "→ #4 BufferedWriter"]]}], "heap": ["<b>#2</b> String[0] (args, empty)", "<b>#3</b> BufferedReader", "<b>#4</b> BufferedWriter"], "phase": "Check", "note": "The condition <code>line.startsWith(&quot;ERROR&quot;)</code> is checked: <b>false</b>, so the block is skipped."}, {"line": 16, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["read", "9"], ["errors", "2"], ["in", "→ #3 BufferedReader"], ["out", "→ #4 BufferedWriter"], ["line", "→ #14 \"INFO request ok #10\""]]}], "heap": ["<b>#2</b> String[0] (args, empty)", "<b>#3</b> BufferedReader", "<b>#4</b> BufferedWriter", "<b>#14</b> String &quot;INFO request ok #10&quot;"], "newVar": "line", "phase": "Assign", "note": "Now <code>line</code> = → #14 &quot;INFO request ok #10&quot;. New object <b>#14</b> on the heap: String &quot;INFO request ok #10&quot;."}, {"line": 17, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["read", "10"], ["errors", "2"], ["in", "→ #3 BufferedReader"], ["out", "→ #4 BufferedWriter"], ["line", "→ #14 \"INFO request ok #10\""]]}], "heap": ["<b>#2</b> String[0] (args, empty)", "<b>#3</b> BufferedReader", "<b>#4</b> BufferedWriter", "<b>#14</b> String &quot;INFO request ok #10&quot;"], "newVar": "read", "phase": "Assign", "note": "Now <code>read</code> = 10."}, {"line": 18, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["read", "10"], ["errors", "2"], ["in", "→ #3 BufferedReader"], ["out", "→ #4 BufferedWriter"]]}], "heap": ["<b>#2</b> String[0] (args, empty)", "<b>#3</b> BufferedReader", "<b>#4</b> BufferedWriter"], "phase": "Check", "note": "The condition <code>line.startsWith(&quot;ERROR&quot;)</code> is checked: <b>false</b>, so the block is skipped."}, {"line": 16, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["read", "10"], ["errors", "2"], ["in", "→ #3 BufferedReader"], ["out", "→ #4 BufferedWriter"], ["line", "→ #15 \"INFO request ok #11\""]]}], "heap": ["<b>#2</b> String[0] (args, empty)", "<b>#3</b> BufferedReader", "<b>#4</b> BufferedWriter", "<b>#15</b> String &quot;INFO request ok #11&quot;"], "newVar": "line", "phase": "Assign", "note": "Now <code>line</code> = → #15 &quot;INFO request ok #11&quot;. New object <b>#15</b> on the heap: String &quot;INFO request ok #11&quot;."}, {"line": 17, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["read", "11"], ["errors", "2"], ["in", "→ #3 BufferedReader"], ["out", "→ #4 BufferedWriter"], ["line", "→ #15 \"INFO request ok #11\""]]}], "heap": ["<b>#2</b> String[0] (args, empty)", "<b>#3</b> BufferedReader", "<b>#4</b> BufferedWriter", "<b>#15</b> String &quot;INFO request ok #11&quot;"], "newVar": "read", "phase": "Assign", "note": "Now <code>read</code> = 11."}, {"line": 18, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["read", "11"], ["errors", "2"], ["in", "→ #3 BufferedReader"], ["out", "→ #4 BufferedWriter"]]}], "heap": ["<b>#2</b> String[0] (args, empty)", "<b>#3</b> BufferedReader", "<b>#4</b> BufferedWriter"], "phase": "Check", "note": "The condition <code>line.startsWith(&quot;ERROR&quot;)</code> is checked: <b>false</b>, so the block is skipped."}, {"line": 16, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["read", "11"], ["errors", "2"], ["in", "→ #3 BufferedReader"], ["out", "→ #4 BufferedWriter"], ["line", "→ #16 \"ERROR payment timeout #12\""]]}], "heap": ["<b>#2</b> String[0] (args, empty)", "<b>#3</b> BufferedReader", "<b>#4</b> BufferedWriter", "<b>#16</b> String &quot;ERROR payment timeout #12&quot;"], "newVar": "line", "phase": "Assign", "note": "Now <code>line</code> = → #16 &quot;ERROR payment timeout #12&quot;. New object <b>#16</b> on the heap: String &quot;ERROR payment timeout #12&quot;."}, {"line": 17, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["read", "12"], ["errors", "2"], ["in", "→ #3 BufferedReader"], ["out", "→ #4 BufferedWriter"], ["line", "→ #16 \"ERROR payment timeout #12\""]]}], "heap": ["<b>#2</b> String[0] (args, empty)", "<b>#3</b> BufferedReader", "<b>#4</b> BufferedWriter", "<b>#16</b> String &quot;ERROR payment timeout #12&quot;"], "newVar": "read", "phase": "Assign", "note": "Now <code>read</code> = 12."}, {"line": 18, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["read", "12"], ["errors", "2"], ["in", "→ #3 BufferedReader"], ["out", "→ #4 BufferedWriter"], ["line", "→ #16 \"ERROR payment timeout #12\""]]}], "heap": ["<b>#2</b> String[0] (args, empty)", "<b>#3</b> BufferedReader", "<b>#4</b> BufferedWriter", "<b>#16</b> String &quot;ERROR payment timeout #12&quot;"], "phase": "Check", "note": "The condition <code>line.startsWith(&quot;ERROR&quot;)</code> is checked: <b>true</b>, so the block runs."}, {"line": 19, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["read", "12"], ["errors", "2"], ["in", "→ #3 BufferedReader"], ["out", "→ #4 BufferedWriter"], ["line", "→ #16 \"ERROR payment timeout #12\""]]}], "heap": ["<b>#2</b> String[0] (args, empty)", "<b>#3</b> BufferedReader", "<b>#4</b> BufferedWriter", "<b>#16</b> String &quot;ERROR payment timeout #12&quot;"], "phase": "Step", "note": "This line runs; nothing visible changes."}, {"line": 20, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["read", "12"], ["errors", "2"], ["in", "→ #3 BufferedReader"], ["out", "→ #4 BufferedWriter"], ["line", "→ #16 \"ERROR payment timeout #12\""]]}], "heap": ["<b>#2</b> String[0] (args, empty)", "<b>#3</b> BufferedReader", "<b>#4</b> BufferedWriter", "<b>#16</b> String &quot;ERROR payment timeout #12&quot;"], "phase": "Step", "note": "This line runs; nothing visible changes."}, {"line": 21, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["read", "12"], ["errors", "3"], ["in", "→ #3 BufferedReader"], ["out", "→ #4 BufferedWriter"]]}], "heap": ["<b>#2</b> String[0] (args, empty)", "<b>#3</b> BufferedReader", "<b>#4</b> BufferedWriter"], "newVar": "errors", "phase": "Assign", "note": "Now <code>errors</code> = 3."}, {"line": 16, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["read", "12"], ["errors", "3"], ["in", "→ #3 BufferedReader"], ["out", "→ #4 BufferedWriter"]]}], "heap": ["<b>#2</b> String[0] (args, empty)", "<b>#3</b> BufferedReader", "<b>#4</b> BufferedWriter"], "phase": "Check", "note": "The condition <code>(line = in.readLine()) != null</code> is checked: <b>false</b>, so the loop ends."}, {"line": 24, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["read", "12"], ["errors", "3"]]}], "heap": ["<b>#2</b> String[0] (args, empty)"], "phase": "Step", "note": "End of the block."}, {"line": 25, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["read", "12"], ["errors", "3"]]}], "heap": ["<b>#2</b> String[0] (args, empty)"], "out": "read 12 lines, saved 3 errors\n", "phase": "Report", "note": "Both files were closed at the end of the try, so errors.txt is complete: 12 read, 3 errors saved. The same code handles a 5 GB log, because it never holds more than one line. Prints <code>read 12 lines, saved 3 errors</code>."}, {"line": 26, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["read", "12"], ["errors", "3"]]}], "heap": ["<b>#2</b> String[0] (args, empty)"], "out": "first error: ERROR payment timeout #4\n", "phase": "Check", "note": "The first saved line. Prints <code>first error: ERROR payment timeout #4</code>."}, {"line": 27, "phase": "Program ends", "note": "<code>main</code> returns, its frame is popped and the program ends.", "stack": [], "heap": []}]}</script>
+  </div>
+  </article>
+
+</section>
+
+<!-- ======================= PART 9: QUIZ AND REVISION ======================= -->
+<section class="part" id="quiz">
+  <span class="part-label"><b>9</b> Quiz and revision</span>
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <script type="application/json">[
+ {
+  "q": "Why is buffered I/O faster?",
+  "options": [
+   "It compresses data",
+   "It groups many small reads/writes into few large OS calls",
+   "It uses more threads",
+   "It skips encoding"
+  ],
+  "answer": 1,
+  "why": "System calls are expensive; a buffer turns thousands of tiny ones into a few big ones."
+ },
+ {
+  "q": "What is the default buffer size of BufferedReader/BufferedWriter?",
+  "options": [
+   "512",
+   "1024",
+   "8192 characters",
+   "64 KB"
+  ],
+  "answer": 2,
+  "why": "8,192 chars by default; you can pass another size to the constructor."
+ },
+ {
+  "q": "What does readLine() return at the end of the file?",
+  "options": [
+   "\"\"",
+   "-1",
+   "null",
+   "\"EOF\""
+  ],
+  "answer": 2,
+  "why": "An empty line returns \"\"; only end of stream returns null."
+ },
+ {
+  "q": "Does readLine() include the line break?",
+  "options": [
+   "Yes, always",
+   "No",
+   "Only on Windows",
+   "Only the last line"
+  ],
+  "answer": 1,
+  "why": "It returns the text without \\n or \\r\\n."
+ },
+ {
+  "q": "You write with a BufferedWriter and the program ends without close() or flush(). The file…",
+  "options": [
+   "has all the data",
+   "may be missing the data still in the buffer",
+   "is deleted",
+   "is corrupted with random bytes"
+  ],
+  "answer": 1,
+  "why": "Buffered data only reaches the file on flush or close."
+ },
+ {
+  "q": "Which statement is true about close()?",
+  "options": [
+   "It does not flush",
+   "It flushes the buffer and closes the underlying stream",
+   "It only closes the outer wrapper",
+   "It deletes the file"
+  ],
+  "answer": 1,
+  "why": "Closing the outer stream closes the whole chain."
+ },
+ {
+  "q": "BufferedReader wrapping FileReader is an example of…",
+  "options": [
+   "inheritance",
+   "the decorator (wrapper) pattern",
+   "singleton",
+   "recursion"
+  ],
+  "answer": 1,
+  "why": "Each wrapper adds behaviour around another stream with the same interface."
+ },
+ {
+  "q": "Files.newBufferedWriter(path) gives you…",
+  "options": [
+   "an unbuffered writer",
+   "a BufferedWriter using UTF-8",
+   "a PrintStream",
+   "a byte stream"
+  ],
+  "answer": 1,
+  "why": "It's the modern shortcut for a buffered, UTF-8 writer."
+ }
+]</script>
+  </div>
+  <h3>Quick revision</h3>
+  <div class="revision">
+    <h3>Lesson 13.3 in one screen</h3>
+    <ul>
+      <li>A buffer collects data in memory so the OS is called once per block, not once per character.</li>
+      <li>Wrap: <code>new BufferedReader(reader)</code>, <code>new BufferedWriter(writer)</code>, or use <code>Files.newBufferedReader/Writer</code>.</li>
+      <li>Loop: <code>while ((line = br.readLine()) != null)</code>; lines come without the line break.</li>
+      <li><code>newLine()</code> writes the platform separator.</li>
+      <li>Buffered output is only on disk after <code>flush()</code> or <code>close()</code>; use try-with-resources.</li>
+      <li>Closing the outer wrapper closes the inner streams too.</li>
+      <li>Process big files line by line: memory stays constant.</li>
+    </ul>
+  </div>
+  <h3>Interview and viva questions</h3>
+  <div class="faq">
+    <details><summary>Why is BufferedReader faster than FileReader?</summary><p>Every <code>FileReader.read()</code> call goes through the charset decoder and its locking for a single character. BufferedReader pulls 8,192 characters at once into its own array and serves later reads with plain array access. With raw byte streams such as <code>FileInputStream</code>, where each <code>read()</code> is a system call, the difference is even larger. BufferedReader also adds <code>readLine()</code>.</p></details>
+    <details><summary>What is the difference between flush() and close()?</summary><p><code>flush()</code> writes out buffered data but keeps the stream open for more writes. <code>close()</code> flushes and then releases the stream and its underlying resources; the stream can't be used afterwards.</p></details>
+    <details><summary>BufferedReader vs Scanner?</summary><p>BufferedReader reads lines of text quickly with a large buffer and does no parsing. Scanner parses tokens (ints, words) with regular expressions, which is convenient but slower, and has a smaller buffer. For large inputs, read lines with BufferedReader and parse them yourself.</p></details>
+    <details><summary>What design pattern do Java I/O wrappers use?</summary><p>The decorator pattern: a BufferedReader <i>is</i> a Reader and <i>wraps</i> a Reader, adding buffering without changing the interface. You can stack decorators, e.g. a BufferedReader over an InputStreamReader over a FileInputStream.</p></details>
+    <details><summary>When must you call flush() explicitly?</summary><p>When someone else must see the data before you close: e.g. sending a message over a socket and waiting for a reply, or writing a progress file that another program monitors. Otherwise, closing (via try-with-resources) is enough.</p></details>
+  </div>
+
+  <h3 id="practice">Practice problems</h3>
+  <p class="prob-intro">Read with <code>BufferedReader.readLine()</code>, write with <code>BufferedWriter</code>, and never forget to flush or close. Each program creates its own files. The last three are business tasks.</p>
+  <div class="probs">
+    <article class="prob"><div class="prob__head"><span class="prob__num">P1</span><span class="prob__tag prob__tag--easy">Easy</span><h4>Read every line</h4></div>
+      <p>Write three city names to cities.txt, then print each line with its number using <code>BufferedReader</code>.</p>
+      <div class="prob__io"><div><small>Input</small><pre>Pune, Nagpur, Nashik</pre></div><div><small>Expected output</small><pre>1: Pune
+2: Nagpur
+3: Nashik</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="java" data-file="Main.java"><pre><code>import java.io.*;
+import java.nio.file.*;
+
+public class Main {
+    public static void main(String[] args) throws IOException {
+        Files.writeString(Path.of(&quot;cities.txt&quot;), &quot;Pune\nNagpur\nNashik\n&quot;);
+        try (BufferedReader br = new BufferedReader(new FileReader(&quot;cities.txt&quot;))) {
+            String line;
+            int n = 1;
+            while ((line = br.readLine()) != null) {
+                System.out.println(n++ + &quot;: &quot; + line);
+            }
+        }
+    }
+}</code></pre><div class="output">1: Pune
+2: Nagpur
+3: Nashik</div></div>
+        <p><b>How it works:</b> the assignment inside the condition reads a line and checks it for null in one go. This loop shape is worth memorising.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P2</span><span class="prob__tag prob__tag--easy">Easy</span><h4>Write lines with newLine()</h4></div>
+      <p>Write three lines with a <code>BufferedWriter</code> and <code>newLine()</code>, then print how many lines the file has.</p>
+      <div class="prob__io"><div><small>Input</small><pre>(none)</pre></div><div><small>Expected output</small><pre>3 tasks saved</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="java" data-file="Main.java"><pre><code>import java.io.*;
+import java.nio.file.*;
+
+public class Main {
+    public static void main(String[] args) throws IOException {
+        try (BufferedWriter bw = new BufferedWriter(new FileWriter(&quot;todo.txt&quot;))) {
+            bw.write(&quot;pay electricity bill&quot;);
+            bw.newLine();
+            bw.write(&quot;book train ticket&quot;);
+            bw.newLine();
+            bw.write(&quot;call bank&quot;);
+            bw.newLine();
+        }
+        System.out.println(Files.readAllLines(Path.of(&quot;todo.txt&quot;)).size() + &quot; tasks saved&quot;);
+    }
+}</code></pre><div class="output">3 tasks saved</div></div>
+        <p><b>How it works:</b> <code>newLine()</code> writes the platform's line separator (\n on Linux and macOS, \r\n on Windows).</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P3</span><span class="prob__tag prob__tag--easy">Easy</span><h4>flush() before reading</h4></div>
+      <p>Write <code>hello</code> with a BufferedWriter but don't close it. Print the file size, then call <code>flush()</code> and print it again.</p>
+      <div class="prob__io"><div><small>Input</small><pre>(none)</pre></div><div><small>Expected output</small><pre>before flush: 0 bytes
+after flush:  5 bytes</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="java" data-file="Main.java"><pre><code>import java.io.*;
+import java.nio.file.*;
+
+public class Main {
+    public static void main(String[] args) throws IOException {
+        BufferedWriter bw = new BufferedWriter(new FileWriter(&quot;draft.txt&quot;));
+        bw.write(&quot;hello&quot;);
+        System.out.println(&quot;before flush: &quot; + Files.size(Path.of(&quot;draft.txt&quot;)) + &quot; bytes&quot;);
+        bw.flush();
+        System.out.println(&quot;after flush:  &quot; + Files.size(Path.of(&quot;draft.txt&quot;)) + &quot; bytes&quot;);
+        bw.close();
+    }
+}</code></pre><div class="output">before flush: 0 bytes
+after flush:  5 bytes</div></div>
+        <p><b>How it works:</b> until the buffer is flushed, the data exists only in your program's memory. If the program crashed before <code>flush()</code> or <code>close()</code>, those 5 bytes would be lost.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P4</span><span class="prob__tag prob__tag--medium">Medium</span><h4>Longest line</h4></div>
+      <p>Find the longest line in a file of product names and print it with its length.</p>
+      <div class="prob__io"><div><small>Input</small><pre>4 product names</pre></div><div><small>Expected output</small><pre>Basmati Rice 5kg (16 chars)</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="java" data-file="Main.java"><pre><code>import java.io.*;
+import java.nio.file.*;
+import java.util.List;
+
+public class Main {
+    public static void main(String[] args) throws IOException {
+        Files.write(Path.of(&quot;products.txt&quot;), List.of(&quot;Tea&quot;, &quot;Basmati Rice 5kg&quot;, &quot;Sugar&quot;, &quot;Sunflower Oil 1L&quot;));
+        String longest = &quot;&quot;;
+        try (BufferedReader br = Files.newBufferedReader(Path.of(&quot;products.txt&quot;))) {
+            String line;
+            while ((line = br.readLine()) != null) {
+                if (line.length() &gt; longest.length()) longest = line;
+            }
+        }
+        System.out.println(longest + &quot; (&quot; + longest.length() + &quot; chars)&quot;);
+    }
+}</code></pre><div class="output">Basmati Rice 5kg (16 chars)</div></div>
+        <p><b>How it works:</b> only the current line and the best so far are kept, so this works for files of any size.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P5</span><span class="prob__tag prob__tag--medium">Medium</span><h4>Count lines with lines()</h4></div>
+      <p>Use <code>BufferedReader.lines()</code> to count non-empty lines in a file that has some blank lines.</p>
+      <div class="prob__io"><div><small>Input</small><pre>5 lines, 2 blank</pre></div><div><small>Expected output</small><pre>non-empty lines: 3</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="java" data-file="Main.java"><pre><code>import java.io.*;
+import java.nio.file.*;
+
+public class Main {
+    public static void main(String[] args) throws IOException {
+        Files.writeString(Path.of(&quot;notes.txt&quot;), &quot;buy milk\n\ncall Ravi\n\nsubmit GST\n&quot;);
+        try (BufferedReader br = Files.newBufferedReader(Path.of(&quot;notes.txt&quot;))) {
+            long filled = br.lines().filter(l -&gt; !l.isBlank()).count();
+            System.out.println(&quot;non-empty lines: &quot; + filled);
+        }
+    }
+}</code></pre><div class="output">non-empty lines: 3</div></div>
+        <p><b>How it works:</b> <code>lines()</code> turns the reader into a lazy Stream of lines (Lesson 14.3), reading as it goes.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P6</span><span class="prob__tag prob__tag--medium">Medium</span><h4>Copy a text file line by line</h4></div>
+      <p>Copy menu.txt to menu-copy.txt using a BufferedReader and BufferedWriter, converting each line to upper case.</p>
+      <div class="prob__io"><div><small>Input</small><pre>3 dishes</pre></div><div><small>Expected output</small><pre>[MASALA DOSA, IDLI SAMBAR, FILTER COFFEE]</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="java" data-file="Main.java"><pre><code>import java.io.*;
+import java.nio.file.*;
+import java.util.List;
+
+public class Main {
+    public static void main(String[] args) throws IOException {
+        Files.write(Path.of(&quot;menu.txt&quot;), List.of(&quot;masala dosa&quot;, &quot;idli sambar&quot;, &quot;filter coffee&quot;));
+        try (BufferedReader in = Files.newBufferedReader(Path.of(&quot;menu.txt&quot;));
+             BufferedWriter out = Files.newBufferedWriter(Path.of(&quot;menu-copy.txt&quot;))) {
+            String line;
+            while ((line = in.readLine()) != null) {
+                out.write(line.toUpperCase());
+                out.newLine();
+            }
+        }
+        System.out.println(Files.readAllLines(Path.of(&quot;menu-copy.txt&quot;)));
+    }
+}</code></pre><div class="output">[MASALA DOSA, IDLI SAMBAR, FILTER COFFEE]</div></div>
+        <p><b>How it works:</b> resources in one try are closed in reverse order: the writer first (flushing it), then the reader.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P7</span><span class="prob__tag prob__tag--business">Business problem</span><h4>Bank statement summary</h4></div>
+      <p>statement.csv has <code>date,type,amount</code> lines with type CR or DR. Read it with BufferedReader and print total credits, total debits and the closing balance from an opening balance of 10,000.</p>
+      <div class="prob__io"><div><small>Input</small><pre>5 transactions</pre></div><div><small>Expected output</small><pre>credits 28000, debits 10150, closing 27850</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="java" data-file="Main.java"><pre><code>import java.io.*;
+import java.nio.file.*;
+import java.util.List;
+
+public class Main {
+    public static void main(String[] args) throws IOException {
+        Files.write(Path.of(&quot;statement.csv&quot;), List.of(
+            &quot;01-10,CR,25000&quot;, &quot;03-10,DR,1200&quot;, &quot;07-10,DR,8500&quot;, &quot;15-10,CR,3000&quot;, &quot;20-10,DR,450&quot;));
+        long cr = 0, dr = 0;
+        try (BufferedReader br = Files.newBufferedReader(Path.of(&quot;statement.csv&quot;))) {
+            String line;
+            while ((line = br.readLine()) != null) {
+                String[] f = line.split(&quot;,&quot;);
+                long amt = Long.parseLong(f[2]);
+                if (f[1].equals(&quot;CR&quot;)) cr += amt; else dr += amt;
+            }
+        }
+        System.out.println(&quot;credits &quot; + cr + &quot;, debits &quot; + dr + &quot;, closing &quot; + (10000 + cr - dr));
+    }
+}</code></pre><div class="output">credits 28000, debits 10150, closing 27850</div></div>
+        <p><b>How it works:</b> streaming through the statement keeps memory use constant whether it has 5 lines or 5 million.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P8</span><span class="prob__tag prob__tag--business">Business problem</span><h4>Split a big order file by city</h4></div>
+      <p>orders.csv has <code>id,city,amount</code>. Write Pune orders to pune.csv and all others to others.csv, then print the line counts.</p>
+      <div class="prob__io"><div><small>Input</small><pre>6 orders</pre></div><div><small>Expected output</small><pre>pune.csv: 3, others.csv: 3</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="java" data-file="Main.java"><pre><code>import java.io.*;
+import java.nio.file.*;
+import java.util.List;
+
+public class Main {
+    public static void main(String[] args) throws IOException {
+        Files.write(Path.of(&quot;orders.csv&quot;), List.of(&quot;1,Pune,450&quot;, &quot;2,Mumbai,900&quot;, &quot;3,Pune,120&quot;, &quot;4,Nagpur,300&quot;, &quot;5,Pune,75&quot;, &quot;6,Mumbai,640&quot;));
+        try (BufferedReader in = Files.newBufferedReader(Path.of(&quot;orders.csv&quot;));
+             BufferedWriter pune = Files.newBufferedWriter(Path.of(&quot;pune.csv&quot;));
+             BufferedWriter rest = Files.newBufferedWriter(Path.of(&quot;others.csv&quot;))) {
+            String line;
+            while ((line = in.readLine()) != null) {
+                BufferedWriter target = line.split(&quot;,&quot;)[1].equals(&quot;Pune&quot;) ? pune : rest;
+                target.write(line);
+                target.newLine();
+            }
+        }
+        System.out.println(&quot;pune.csv: &quot; + Files.readAllLines(Path.of(&quot;pune.csv&quot;)).size()
+                + &quot;, others.csv: &quot; + Files.readAllLines(Path.of(&quot;others.csv&quot;)).size());
+    }
+}</code></pre><div class="output">pune.csv: 3, others.csv: 3</div></div>
+        <p><b>How it works:</b> one pass over the input feeds two buffered outputs. Each writer is flushed and closed when the try ends.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P9</span><span class="prob__tag prob__tag--business">Business problem</span><h4>Resume-safe batch: flush every 100 lines</h4></div>
+      <p>A job writes 250 receipt lines. To limit loss on a crash, it calls <code>flush()</code> every 100 lines. Count the flushes, including the final close.</p>
+      <div class="prob__io"><div><small>Input</small><pre>250 receipts</pre></div><div><small>Expected output</small><pre>250 receipts, 3 flushes</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="java" data-file="Main.java"><pre><code>import java.io.*;
+import java.nio.file.*;
+
+public class Main {
+    public static void main(String[] args) throws IOException {
+        int flushes = 0;
+        try (BufferedWriter w = Files.newBufferedWriter(Path.of(&quot;receipts.txt&quot;))) {
+            for (int i = 1; i &lt;= 250; i++) {
+                w.write(&quot;RCPT-&quot; + i);
+                w.newLine();
+                if (i % 100 == 0) {
+                    w.flush();
+                    flushes++;
+                }
+            }
+        }
+        flushes++;
+        System.out.println(Files.readAllLines(Path.of(&quot;receipts.txt&quot;)).size() + &quot; receipts, &quot; + flushes + &quot; flushes&quot;);
+    }
+}</code></pre><div class="output">250 receipts, 3 flushes</div></div>
+        <p><b>How it works:</b> flushing too often removes the benefit of buffering; never flushing risks losing everything since the start. Periodic flushes (or checkpoints) are the usual compromise in batch jobs.</p>
+      </details>
+    </article>
+  </div>
+
+
+
+  <h3 id="scenarios">Real-world scenario questions (asked in company interviews)</h3>
+  <p class="scn-intro">These come up whenever a role involves batch jobs, reports or integrations.</p>
+  <div class="scenarios">
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Batch · data loss</span><span class="scn__tag scn__tag--level">Fresher</span></div>
+      <h4>The last 300 rows are missing</h4>
+      <p class="scn__situation">An export writes 50,000 rows with a BufferedWriter. The file always ends a few hundred rows short, and the last row is cut in half. The code calls <code>System.exit(0)</code> right after the loop. Explain.</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> buffers and flushing.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>The writer is never closed, so the final partly-filled buffer (up to 8 KB) never reaches the file; <code>System.exit</code> doesn't flush it.</li>
+          <li>Wrap the writer in try-with-resources (or close it in finally) before exiting.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> adding <code>flush()</code> after every row; that removes the benefit of buffering.</p>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Performance · I/O</span><span class="scn__tag scn__tag--level">Junior</span></div>
+      <h4>A 10-minute report that should take seconds</h4>
+      <p class="scn__situation">Profiling shows a report spends 95% of its time inside <code>FileOutputStream.write</code>, called once per character. How do you fix it with minimal code change?</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> recognising unbuffered I/O.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>Each call is a system call. Wrap the stream: <code>new BufferedOutputStream(new FileOutputStream(f))</code>, or use <code>Files.newBufferedWriter</code> for text.</li>
+          <li>Optionally use a larger buffer (64 KB) for very large outputs, and write whole strings rather than single characters.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> rewriting the report in multiple threads first; the bottleneck is the call pattern.</p>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Integration · sockets</span><span class="scn__tag scn__tag--level">Junior</span></div>
+      <h4>The partner server never answers</h4>
+      <p class="scn__situation">A client sends a request line to a payment partner over a socket with a BufferedWriter, then waits for the reply with <code>readLine()</code>. It hangs forever, though the partner says it never received anything. Why?</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> when explicit flush is needed.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>The request is still in the client's buffer; it's never sent because the writer wasn't flushed. Both sides wait for each other.</li>
+          <li>Call <code>writer.flush()</code> after writing a complete request, before reading the reply.</li>
+          <li>Also set read timeouts so a missing reply can't hang the client forever.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> closing the writer to force sending; closing the socket stream closes the connection.</p>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Data · line endings</span><span class="scn__tag scn__tag--level">Mid</span></div>
+      <h4>Files from Windows have an extra character</h4>
+      <p class="scn__situation">A Linux job reads a CSV uploaded from a Windows machine with <code>Files.readString</code>, splits the text on <code>"\n"</code>, then parses the last column of each row. It fails with <code>NumberFormatException: For input string: "450\r"</code>. Why, and how should it read the file?</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> line terminators and defensive parsing.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>Windows ends lines with <code>\r\n</code>. Splitting on <code>"\n"</code> leaves the <code>\r</code> at the end of every row.</li>
+          <li><code>readLine()</code> (and <code>lines()</code>) treat <code>\n</code>, <code>\r</code> and <code>\r\n</code> all as line ends and strip them, so use those instead of splitting by hand.</li>
+          <li>Read with readLine (or <code>lines()</code>), <code>trim()</code> fields before parsing, and watch for a UTF-8 BOM at the start of files from Excel.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> assuming every file uses your OS's line endings.</p>
+      </div></details>
+    </article>
+  </div>
+</section>
+
+<nav class="lesson-nav" id="lesson-nav" aria-label="Lesson navigation"></nav>
+<div class="ad-slot" data-slot="bottom"></div>
+</article>
+
+<aside class="lesson-side">
+  <nav class="toc" aria-label="In this lesson">
+    <h4>In this lesson</h4>
+    <ol>
+      <li><a href="#story">The story</a></li>
+      <li><a href="#definition">Definition</a></li>
+      <li><a href="#types">Types and ways to use it</a></li>
+      <li><a href="#steps">Step by step</a></li>
+      <li><a href="#animation">See it happen</a></li>
+      <li><a href="#real-world">Real-world use</a></li>
+      <li><a href="#run">Run the code</a></li>
+      <li><a href="#tracer">Line by line</a></li>
+      <li><a href="#worked">Worked examples</a></li>
+      <li><a href="#quiz">Quiz and revision</a></li>
+      <li><a href="#practice">Practice problems</a></li>
+      <li><a href="#scenarios">Industry scenarios</a></li>
+    </ol>
+  </nav>
+  <div class="ad-slot" data-slot="side"></div>
+  <div class="outline" id="outline"></div>
+</aside>
+</div>
+</main>
+
+<footer class="site-footer">
+  <div class="wrap">
+    <div><h4>MyPhatshala</h4><p>Free programming and IT lessons that show what happens behind the screen.</p></div>
+    <div><h4>Learn</h4><a href="../../../../#tracks">All courses</a><a href="../../">Core Java syllabus</a></div>
+    <div><h4>Site</h4><a href="../../../../about.html">About</a><a href="../../../../contact.html">Contact</a><a href="../../../../privacy.html">Privacy policy</a><a href="../../../../disclaimer.html">Disclaimer</a></div>
+    <div class="copyright">© MyPhatshala. All lesson content, diagrams and animations are original. Please do not copy without permission.</div>
+  </div>
+</footer>
+
+<script src="../../../../data/courses/core-java.js"></script>
+<script src="../../../../assets/js/lesson.js"></script>
+<script src="../../../../assets/js/ads.js"></script>
+<script src="../../../../assets/js/site.js"></script>
+</body>
+</html>

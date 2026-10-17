@@ -1,0 +1,990 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Garbage collection | MyPhatshala</title>
+<meta name="description" content="Java garbage collection explained: the generational idea (Eden, survivor spaces, old generation), minor vs major and full GC, mark-sweep-compact, G1 as the default since Java 9, ZGC and Shenandoah, stop-the-world pauses, why System.gc() is only a request, memory leaks from static collections, unclosed resources and listeners, and how to read -Xlog:gc output. With animations, a JVM tracer, 8 practice problems, quiz and industry scenarios.">
+<meta name="mp:minutes" content="26">
+<link rel="canonical" href="https://myphatshala.com/courses/core-java/08-jvm-memory/03-garbage-collection/">
+<meta property="og:title" content="Java garbage collection: generations, G1, pauses and leaks · MyPhatshala">
+<meta property="og:description" content="Watch Eden fill, survivors get copied and old objects get promoted, read real GC logs, and solve 8 problems including business tasks.">
+<link rel="icon" href="../../../../assets/img/logo.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Fraunces:ital,opsz,wght@0,9..144,600;0,9..144,700;1,9..144,600&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../../../../assets/css/style.css">
+<link rel="stylesheet" href="../../../../assets/css/lesson.css">
+<script src="../../../../assets/js/config.js"></script>
+<script>try { const t = localStorage.getItem("mp-theme"); if (t) document.documentElement.dataset.theme = t; } catch (e) {}</script>
+<script type="application/ld+json">{"@context": "https://schema.org", "@type": "LearningResource", "name": "Garbage collection", "learningResourceType": "Lesson", "educationalLevel": "Beginner", "isAccessibleForFree": true, "inLanguage": "en", "isPartOf": {"@type": "Course", "name": "Core Java", "provider": {"@type": "Organization", "name": "MyPhatshala"}}}</script>
+</head>
+<body style="--track:#E8772E" data-lesson="08-jvm-memory/03-garbage-collection" data-course-root="../../">
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="site-header">
+  <div class="wrap">
+    <a class="brand" href="../../../../" aria-label="MyPhatshala home"><img src="../../../../assets/img/logo.svg" width="34" height="34" alt=""><span>My<b>Phatshala</b></span></a>
+    <nav class="nav" aria-label="Main">
+      <a href="../../../../#tracks">All courses</a>
+      <a href="../../">Core Java syllabus</a>
+      <button class="theme-btn" id="theme-btn" aria-label="Toggle dark mode"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg></button>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+<section class="lesson-hero">
+  <div class="wrap">
+    <nav class="crumbs" aria-label="Breadcrumb"><a href="../../../../">Home</a><span>›</span><a href="../../../../#track-programming">Programming Languages</a><span>›</span><a href="../../">Core Java</a><span>›</span><b>Lesson 8.3</b></nav>
+    <h1>Garbage collection</h1>
+    <p class="lead">The garbage collector is the part of the JVM that frees memory you stopped using. It works because most objects die young, so it splits the heap into generations and cleans the young one often and cheaply. You'll see minor and full collections step by step, read real G1 log lines, learn why System.gc() is only a polite request, find the three classic ways Java programs still leak memory, and then practise with 8 problems.</p>
+    <div class="lesson-meta"><span>Module 8 · JVM Memory</span><span>⏱ 26 min</span><span>Intermediate</span><span>8 practice problems</span></div>
+  </div>
+</section>
+
+<div class="wrap lesson-layout">
+<article class="lesson-main">
+<!-- ======================= PART 1: THE STORY ======================= -->
+<section class="part" id="story">
+  <span class="part-label"><b>1</b> The story</span>
+  <h2>The server that slows down every few seconds</h2>
+  <div class="story">
+    <p class="narration">Riya's internship team runs an order API for a grocery app. Most requests take 20 ms, but a dashboard shows small spikes every few seconds and, once a week, the service slows to a crawl and then dies with <code>OutOfMemoryError</code>. Her lead hands her a GC log and says, “Tell me what the collector is doing.”</p>
+    <div class="scene">
+      <svg viewBox="0 0 640 170" role="img" aria-label="The heap split into a young generation (Eden and two survivor spaces) and an old generation. Most objects in Eden are crossed out as garbage; a few survivors move right, and long-lived ones move into the old generation.">
+        <g font-size="10">
+          <text x="170" y="18" text-anchor="middle" font-weight="700" class="s-blue">Young generation: cleaned often, cheaply</text>
+          <rect x="14" y="28" width="210" height="96" rx="8" class="s-soft-acc" style="stroke:var(--track);stroke-width:1.5"/>
+          <text x="24" y="44" font-weight="700" class="s-acc">Eden</text>
+          <g class="s-card2" style="stroke:var(--line)">
+            <rect x="26" y="54" width="22" height="22" rx="3"/><rect x="54" y="54" width="22" height="22" rx="3"/><rect x="110" y="54" width="22" height="22" rx="3"/><rect x="138" y="54" width="22" height="22" rx="3"/><rect x="166" y="54" width="22" height="22" rx="3"/>
+            <rect x="26" y="86" width="22" height="22" rx="3"/><rect x="82" y="86" width="22" height="22" rx="3"/><rect x="110" y="86" width="22" height="22" rx="3"/><rect x="166" y="86" width="22" height="22" rx="3"/><rect x="194" y="86" width="22" height="22" rx="3"/>
+          </g>
+          <g><path style="stroke:#D64545;stroke-width:1.6;fill:none" d="M28 56l18 18M46 56l-18 18M56 56l18 18M74 56l-18 18M112 56l18 18M130 56l-18 18M140 56l18 18M158 56l-18 18M168 56l18 18M186 56l-18 18M28 88l18 18M46 88l-18 18M112 88l18 18M130 88l-18 18M168 88l18 18M186 88l-18 18M196 88l18 18M214 88l-18 18"/></g>
+          <g class="s-soft-green" style="stroke:var(--green);stroke-width:1.8"><rect x="82" y="54" width="22" height="22" rx="3"/><rect x="54" y="86" width="22" height="22" rx="3"/></g>
+          <rect x="236" y="28" width="56" height="96" rx="8" class="s-soft-green" style="stroke:var(--green);stroke-width:1.5"/>
+          <text x="264" y="44" text-anchor="middle" font-weight="700" class="s-green">Survivor</text>
+          <g class="s-soft-green" style="stroke:var(--green);stroke-width:1.8"><rect x="253" y="58" width="22" height="22" rx="3"/><rect x="253" y="88" width="22" height="22" rx="3"/></g>
+          <path d="M296 76 H340" style="stroke:var(--blue);stroke-width:2"/><path d="M334 70l8 6-8 6" style="stroke:var(--blue);stroke-width:2;fill:none"/>
+          <text x="318" y="66" text-anchor="middle" font-size="9" class="s-blue">survived</text><text x="318" y="96" text-anchor="middle" font-size="9" class="s-blue">many GCs</text>
+          <text x="490" y="18" text-anchor="middle" font-weight="700" class="s-ink">Old generation: cleaned rarely</text>
+          <rect x="350" y="28" width="276" height="96" rx="8" class="s-soft-blue" style="stroke:var(--blue);stroke-width:1.5"/>
+          <g class="s-card" style="stroke:var(--blue)"><rect x="364" y="46" width="60" height="26" rx="4"/><rect x="432" y="46" width="60" height="26" rx="4"/><rect x="500" y="46" width="60" height="26" rx="4"/><rect x="364" y="82" width="60" height="26" rx="4"/></g>
+          <g font-size="8.6" class="mono s-ink" text-anchor="middle"><text x="394" y="63">cache</text><text x="462" y="63">config</text><text x="530" y="63">pool</text><text x="394" y="99">sessions</text></g>
+          <text x="530" y="99" text-anchor="middle" font-size="9" class="s-ink2">room left</text>
+          <text x="120" y="146" text-anchor="middle" class="s-ink2">most new objects die here, young</text>
+          <text x="490" y="146" text-anchor="middle" class="s-ink2">long-lived data ends up here</text>
+        </g>
+        <text x="632" y="166" text-anchor="end" class="s-wm">myphatshala.com</text>
+      </svg>
+    </div>
+    <div class="panel">
+      <div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#FCE6D6"/><path d="M14 64c2-12 9-18 18-18s16 6 18 18z" fill="#2E5AAC"/><circle cx="32" cy="29" r="12" fill="#C68B5E"/><path d="M19 29c0-10 6-15 13-15s13 5 13 15c-3-5-7-8-13-8s-10 3-13 8z" fill="#2A1B14"/><path d="M43 27c3 6 3 14 0 20" stroke="#2A1B14" stroke-width="4" fill="none" stroke-linecap="round"/><circle cx="27.5" cy="30" r="1.5" fill="#2A1B14"/><circle cx="36.5" cy="30" r="1.5" fill="#2A1B14"/><path d="M28 35q4 3 8 0" stroke="#2A1B14" stroke-width="1.6" fill="none" stroke-linecap="round"/><circle cx="32" cy="24" r="1.2" fill="#D64545"/></svg></div>
+      <div class="bubble"><b class="who">Riya</b><p>Sir, the log says “Pause Young” hundreds of times. Is something broken?</p></div>
+    </div>
+    <div class="panel panel--right">
+      <div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#DDEFE6"/><path d="M12 64c2-12 10-18 20-18s18 6 20 18z" fill="#F4F1EA"/><path d="M28 46l4 8 4-8" fill="#2F7D5B"/><circle cx="32" cy="28" r="12" fill="#B57A50"/><path d="M20 26c0-8 5-13 12-13s12 5 12 13c-2-3-6-5-12-5s-10 2-12 5z" fill="#5A5A5A"/><path d="M22 32c1 8 5 11 10 11s9-3 10-11c-2 3-6 4-10 4s-8-1-10-4z" fill="#5A5A5A"/><circle cx="27" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><circle cx="37" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><path d="M30.4 29h3.2" stroke="#1B2433" stroke-width="1.4"/><circle cx="27" cy="29" r="1.1" fill="#1B2433"/><circle cx="37" cy="29" r="1.1" fill="#1B2433"/></svg></div>
+      <div class="bubble"><b class="who">Arjun Sir</b><p>No, that's healthy. Most objects a request creates are garbage a few milliseconds later. The collector cleans the <b>young</b> area often, keeps the few survivors, and pauses your program for about a millisecond each time.</p></div>
+    </div>
+    <div class="panel">
+      <div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#FCE6D6"/><path d="M14 64c2-12 9-18 18-18s16 6 18 18z" fill="#2E5AAC"/><circle cx="32" cy="29" r="12" fill="#C68B5E"/><path d="M19 29c0-10 6-15 13-15s13 5 13 15c-3-5-7-8-13-8s-10 3-13 8z" fill="#2A1B14"/><path d="M43 27c3 6 3 14 0 20" stroke="#2A1B14" stroke-width="4" fill="none" stroke-linecap="round"/><circle cx="27.5" cy="30" r="1.5" fill="#2A1B14"/><circle cx="36.5" cy="30" r="1.5" fill="#2A1B14"/><path d="M28 35q4 3 8 0" stroke="#2A1B14" stroke-width="1.6" fill="none" stroke-linecap="round"/><circle cx="32" cy="24" r="1.2" fill="#D64545"/></svg></div>
+      <div class="bubble"><b class="who">Riya</b><p>Then what about the weekly crash?</p></div>
+    </div>
+    <div class="panel panel--right">
+      <div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#DDEFE6"/><path d="M12 64c2-12 10-18 20-18s18 6 20 18z" fill="#F4F1EA"/><path d="M28 46l4 8 4-8" fill="#2F7D5B"/><circle cx="32" cy="28" r="12" fill="#B57A50"/><path d="M20 26c0-8 5-13 12-13s12 5 12 13c-2-3-6-5-12-5s-10 2-12 5z" fill="#5A5A5A"/><path d="M22 32c1 8 5 11 10 11s9-3 10-11c-2 3-6 4-10 4s-8-1-10-4z" fill="#5A5A5A"/><circle cx="27" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><circle cx="37" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><path d="M30.4 29h3.2" stroke="#1B2433" stroke-width="1.4"/><circle cx="27" cy="29" r="1.1" fill="#1B2433"/><circle cx="37" cy="29" r="1.1" fill="#1B2433"/></svg></div>
+      <div class="bubble"><b class="who">Arjun Sir</b><p>That's different: something keeps objects <b>reachable</b> that should have died, so they pile up in the <b>old</b> area until nothing can be freed. Let's learn to read both stories from the log.</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- ======================= PART 2: DEFINITION ======================= -->
+<section class="part" id="definition">
+  <span class="part-label"><b>2</b> Definition</span>
+  <h2>What is garbage collection?</h2>
+  <div class="def">
+    <div class="def__formal"><small>Formal definition (write this in exams)</small>
+      <p><b>Garbage collection</b> is the automatic process by which the JVM finds objects on the heap that are no longer reachable from any GC root and reclaims their memory. HotSpot collectors are <b>generational</b>: new objects are allocated in the <b>young generation</b> (Eden plus two survivor spaces), which is collected frequently in a <b>minor GC</b>; objects that survive several collections are <b>promoted</b> to the <b>old generation</b>, which is collected less often. Collection is based on <b>mark</b> (find live objects from the roots), <b>sweep</b> (reclaim the rest) and <b>compact</b> or copy (move live objects together). Since Java 9 the default collector is <b>G1</b>.</p></div>
+    <div class="def__simple"><small>In simple words</small>
+      <p>A cleaner who visits often. She doesn't ask what is rubbish; she asks what is still in use, by following every string tied to something important, and throws away everything else. Most new things are rubbish quickly, so she checks the “new arrivals” shelf most often.</p></div>
+  </div>
+  <h3>Words you'll meet in this lesson</h3>
+  <div class="terms">
+    <div class="term"><b>Eden</b><span>Where new objects are allocated. Emptied by every minor GC.</span></div>
+    <div class="term"><b>Survivor spaces</b><span>Two small areas that hold objects which survived a minor GC.</span></div>
+    <div class="term"><b>Promotion</b><span>Moving a long-lived object from young to old generation.</span></div>
+    <div class="term"><b>Stop-the-world (STW)</b><span>A pause in which all application threads wait for the GC.</span></div>
+    <div class="term"><b>Minor / Full GC</b><span>Collects only the young generation / the whole heap.</span></div>
+    <div class="term"><b>Memory leak</b><span>Objects you no longer need that are still reachable, so they can't be freed.</span></div>
+  </div>
+  <h3>GC facts at a glance</h3>
+  <table class="facts">
+    <tr><th>Generational idea</th><td>Most objects die young, so collect the young area often and cheaply</td></tr>
+    <tr><th>Minor GC</th><td>Young generation only. Live objects are copied to a survivor space (age + 1) or promoted to old</td></tr>
+    <tr><th>Major / Full GC</th><td>“Major” loosely means collecting the old generation; a <b>Full GC</b> collects the whole heap and is the slowest pause</td></tr>
+    <tr><th>Default collector</th><td>G1 since Java 9 (Parallel before). On a machine with 1 CPU or under about 2 GB RAM, the JVM picks Serial instead</td></tr>
+    <tr><th>Low-pause options</th><td>ZGC (production since Java 15, generational with <code>-XX:+ZGenerational</code> in Java 21) and Shenandoah (Java 15, in many OpenJDK builds)</td></tr>
+    <tr><th>See it</th><td><code>java -Xlog:gc Main</code> (Java 9+ unified logging). Java 8 used <code>-XX:+PrintGCDetails</code></td></tr>
+  </table>
+  <div class="callout callout--exam"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19V5a2 2 0 0 1 2-2h12v18H6a2 2 0 0 1-2-2zm0 0a2 2 0 0 1 2-2h12"/></svg><p><b>Exam tip:</b> <code>System.gc()</code> does not force a collection; it only <b>suggests</b> one, and the JVM may ignore it (for example with <code>-XX:+DisableExplicitGC</code>). Also, no collection can free an object that is still reachable, so <code>System.gc()</code> never fixes a memory leak.</p></div>
+</section>
+
+<div class="ad-slot" data-slot="mid"></div>
+
+<!-- ======================= PART 3: TYPES AND WAYS TO USE IT ======================= -->
+<section class="part" id="types">
+  <span class="part-label"><b>3</b> Types and ways to use it</span>
+  <h2>Collectors, and how to read what they did</h2>
+  <div class="cards">
+    <div class="card"><svg class="ic" viewBox="0 0 40 40" fill="none" stroke="var(--green)" stroke-width="2"><rect x="4" y="4" width="9" height="9"/><rect x="15" y="4" width="9" height="9"/><rect x="26" y="4" width="9" height="9"/><rect x="4" y="15" width="9" height="9"/><rect x="15" y="15" width="9" height="9"/><rect x="26" y="15" width="9" height="9"/><rect x="4" y="26" width="9" height="9"/><rect x="15" y="26" width="9" height="9"/><rect x="26" y="26" width="9" height="9"/></svg><h4>G1 (default)</h4><p>Splits the heap into equal regions, each acting as Eden, survivor or old. Short young pauses, concurrent marking of old regions, aims for 200 ms max pauses by default.</p><span class="tag">-XX:+UseG1GC</span></div>
+    <div class="card"><svg class="ic" viewBox="0 0 40 40" fill="none" stroke="var(--track)" stroke-width="2"><path d="M4 30h32"/><path d="M8 30V14M16 30V8M24 30V18M32 30V10"/></svg><h4>Parallel and Serial</h4><p>Parallel uses all CPUs for maximum throughput, accepting longer pauses: good for batch jobs. Serial uses one thread: small heaps and tiny containers.</p><span class="tag">-XX:+UseParallelGC</span></div>
+    <div class="card"><svg class="ic" viewBox="0 0 40 40" fill="none" stroke="var(--blue)" stroke-width="2"><circle cx="20" cy="20" r="14"/><path d="M20 10v10l6 4"/></svg><h4>ZGC and Shenandoah</h4><p>Do almost all work while your threads keep running. Pauses usually stay well under a few milliseconds, even on very large heaps. For latency-sensitive services.</p><span class="tag">-XX:+UseZGC</span></div>
+  </div>
+  <h3>A program that makes lots of garbage</h3>
+  <div class="code" data-lang="java" data-file="Main.java"><pre><code>import java.util.ArrayList;
+import java.util.List;
+
+public class Main {
+    public static void main(String[] args) {
+        List&lt;int[]&gt; live = new ArrayList&lt;&gt;();
+        for (int i = 0; i &lt; 2_000; i++) {
+            int[] temp = new int[25_000];        // about 100 KB, garbage after this iteration
+            temp[0] = i;
+            if (i % 100 == 0) {
+                live.add(new int[25_000]);       // every 100th one is kept
+            }
+        }
+        System.out.println("Live arrays kept: " + live.size());
+        System.gc();
+        System.out.println("Done");
+    }
+}</code></pre><div class="output">Live arrays kept: 20
+Done</div></div>
+  <p>Run it with GC logging and a 64 MB heap (your numbers will differ):</p>
+  <div class="code" data-lang="bash" data-file="Terminal"><pre><code>java -Xlog:gc -Xmx64m Main</code></pre><div class="output">[0.004s][info][gc] Using G1
+[0.032s][info][gc] GC(0) Pause Young (Normal) (G1 Evacuation Pause) 7M->1M(64M) 1.235ms
+[0.037s][info][gc] GC(1) Pause Young (Normal) (G1 Evacuation Pause) 16M->1M(64M) 0.518ms
+[0.048s][info][gc] GC(2) Pause Young (Normal) (G1 Evacuation Pause) 38M->1M(64M) 1.024ms
+[0.052s][info][gc] GC(3) Pause Young (Normal) (G1 Evacuation Pause) 38M->2M(64M) 0.790ms
+[0.054s][info][gc] GC(4) Pause Young (Normal) (G1 Evacuation Pause) 38M->2M(64M) 0.863ms
+[0.057s][info][gc] GC(5) Pause Young (Normal) (G1 Evacuation Pause) 38M->2M(64M) 1.113ms
+Live arrays kept: 20
+[0.078s][info][gc] GC(6) Pause Full (System.gc()) 38M->3M(17M) 5.790ms
+Done</div></div>
+  <h3>Reading one log line</h3>
+  <div class="table-wrap">
+  <table class="compare" style="min-width:560px">
+    <thead><tr><th>Part</th><th>Example</th><th>Meaning</th></tr></thead>
+    <tbody>
+      <tr><td>Uptime</td><td><code>[0.052s]</code></td><td>Seconds since the JVM started</td></tr>
+      <tr><td>Level and tag</td><td><code>[info][gc]</code></td><td>Unified logging (Java 9+): the <code>gc</code> tag at info level</td></tr>
+      <tr><td>GC number</td><td><code>GC(3)</code></td><td>The fourth collection of this run (counting from 0)</td></tr>
+      <tr><td>Type and cause</td><td><code>Pause Young (Normal) (G1 Evacuation Pause)</code></td><td>A stop-the-world young collection because Eden was full</td></tr>
+      <tr><td>Heap before → after (size)</td><td><code>38M->2M(64M)</code></td><td>Used heap went from 38 MB to 2 MB; the heap's current size is 64 MB</td></tr>
+      <tr><td>Pause time</td><td><code>0.790ms</code></td><td>How long application threads were stopped</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <div class="callout callout--warn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3 2 21h20L12 3z"/><path d="M12 10v5M12 18v.5"/></svg><p><b>Leaks still happen in Java.</b> The GC frees only <b>unreachable</b> objects. The classic leaks are: objects added to a <code>static</code> collection and never removed; resources (connections, streams) never closed; listeners and callbacks never unregistered; and caches without a size limit or expiry. In the log, a leak looks like the “after” number creeping up collection after collection.</p></div>
+</section>
+
+<!-- ======================= PART 4: STEP BY STEP ======================= -->
+<section class="part" id="steps">
+  <span class="part-label"><b>4</b> Step by step</span>
+  <h2>One minor GC in G1, step by step</h2>
+  <ol class="stepper">
+    <li><h4>Allocate in Eden</h4>
+      <div class="code" data-lang="java" data-file="Main.java"><pre><code>int[] temp = new int[25_000];</code></pre></div>
+      <span class="behind">Each thread has a private chunk of Eden (a TLAB, thread-local allocation buffer), so most allocations are just “bump a pointer”, with no locking. Very large objects (half a region or more) are allocated directly as “humongous” objects in old regions.</span></li>
+    <li><h4>Eden is full: stop the world</h4>
+      <p>The next allocation can't be satisfied, so G1 starts a young collection.</p>
+      <span class="behind">All application threads are paused at a safe point. In the log this is <code>Pause Young (Normal) (G1 Evacuation Pause)</code>. Pauses grow with the number of <b>live</b> objects, not with the amount of garbage.</span></li>
+    <li><h4>Mark what is live</h4>
+      <p>Start from the roots: locals in every thread's frames, static fields, and references from old objects into young ones.</p>
+      <span class="behind">G1 keeps a record (remembered sets, built from a card table) of which old regions point into young regions, so it doesn't have to scan the whole old generation to find those references.</span></li>
+    <li><h4>Copy survivors, promote the old-timers</h4>
+      <p>Live young objects are copied into a survivor region, and their age goes up by one.</p>
+      <span class="behind">An object whose age reaches the tenuring threshold (at most 15, set with <code>-XX:MaxTenuringThreshold</code>) is promoted to an old region. Copying also compacts: survivors end up side by side, with no gaps.</span></li>
+    <li><h4>Free Eden in one go, resume</h4>
+      <p>Everything left in Eden is garbage, so those regions are simply marked empty.</p>
+      <span class="behind">No object is visited to be deleted, which is why young collections are cheap. Old regions are cleaned differently: G1 marks them concurrently while your code runs, then includes the emptiest ones in later “mixed” collections. A Full GC (whole heap, mark-sweep-compact) is the fallback when that can't keep up.</span></li>
+  </ol>
+</section>
+
+<!-- ======================= PART 5: SEE IT HAPPEN ======================= -->
+<section class="part" id="animation">
+  <span class="part-label"><b>5</b> See it happen</span>
+  <h2>Generations at work: both views</h2>
+  <p>Left: what the program does and the real <code>-Xlog:gc</code> lines. Right: the heap's young and old generations.</p>
+  <div class="anim" data-frames="6">
+    <div class="anim__title">From Eden to old generation, and a leak <span>6 steps</span></div>
+    <div class="anim__views">
+      <div class="view view--see">
+        <span class="view__tag">What you see</span>
+        <svg viewBox="0 0 360 250" role="img" aria-label="Program line and GC log output for each step">
+          <rect x="10" y="12" width="340" height="40" rx="8" class="s-board"/>
+          <g font-size="11" class="mono s-chalk">
+            <text x="22" y="37" data-on="1-4">int[] temp = new int[25_000];</text>
+            <text x="22" y="37" data-on="5">System.gc();</text>
+            <text x="22" y="37" data-on="6">cache.add(new byte[100_000]);</text>
+          </g>
+          <rect x="10" y="62" width="340" height="130" rx="8" style="fill:#0F1512"/>
+          <g font-size="10.4" class="mono" style="fill:#B9F5D0;font-variant-ligatures:none">
+            <text x="22" y="86" data-on="1">[0.004s][info][gc] Using G1</text>
+            <text x="22" y="106" data-on="1">// new arrays land in Eden</text>
+            <text x="22" y="86" data-on="2-3">GC(0) Pause Young (Normal)</text>
+            <text x="22" y="104" data-on="2-3">(G1 Evacuation Pause)</text>
+            <text x="22" y="122" data-on="2-3">7M->1M(64M) 1.235ms</text>
+            <text x="22" y="148" data-on="3">// 6 MB was garbage, freed</text>
+            <text x="22" y="166" data-on="3">// in about 1 ms</text>
+            <text x="22" y="86" data-on="4">GC(3) Pause Young (Normal)</text>
+            <text x="22" y="104" data-on="4">(G1 Evacuation Pause)</text>
+            <text x="22" y="122" data-on="4">38M->2M(64M) 0.790ms</text>
+            <text x="22" y="148" data-on="4">// a few survivors keep aging</text>
+            <text x="22" y="86" data-on="5">GC(6) Pause Full (System.gc())</text>
+            <text x="22" y="104" data-on="5">38M->3M(17M) 5.790ms</text>
+            <text x="22" y="130" data-on="5">// whole heap, longest pause</text>
+          </g>
+          <g font-size="10.4" class="mono" data-on="6" style="font-variant-ligatures:none">
+            <text x="22" y="86" style="fill:#B9F5D0">GC(16) Pause Full</text>
+            <text x="22" y="104" style="fill:#B9F5D0">(G1 Compaction Pause)</text>
+            <text x="22" y="122" style="fill:#B9F5D0">60M->60M(64M) 3.235ms</text>
+            <text x="22" y="148" style="fill:#FF9B8A">java.lang.OutOfMemoryError:</text>
+            <text x="22" y="166" style="fill:#FF9B8A">Java heap space</text>
+          </g>
+          <g font-size="10.2" class="s-ink2" text-anchor="middle">
+            <text x="180" y="222" data-on="1">Allocating is fast: no GC yet.</text>
+            <text x="180" y="222" data-on="2">Eden full: a short young pause.</text>
+            <text x="180" y="222" data-on="3">Before 7 MB, after 1 MB: mostly garbage.</text>
+            <text x="180" y="222" data-on="4">Hundreds of these are normal.</text>
+            <text x="180" y="222" data-on="5">A full GC cleans everything, slowly.</text>
+            <text x="180" y="222" data-on="6">60M->60M: nothing could be freed.</text>
+          </g>
+          <text x="354" y="246" text-anchor="end" class="s-wm">myphatshala.com</text>
+        </svg>
+        <ol class="caps" hidden>
+          <li><b>Allocate:</b> the loop creates arrays. The log only says which collector is in use.</li>
+          <li><b>Young pause:</b> Eden filled up, so G1 paused the program for a young collection.</li>
+          <li><b>Read the numbers:</b> 7 MB in use before, 1 MB after, pause 1.235 ms. Most of Eden was garbage.</li>
+          <li><b>Steady state:</b> collection after collection, the “after” number stays tiny. This is a healthy log.</li>
+          <li><b>Full GC:</b> <code>System.gc()</code> requested a collection of the whole heap. It took several times longer than a young pause.</li>
+          <li><b>Leak:</b> a static list keeps every array. Full GCs free nothing (60M → 60M), and the JVM gives up with <code>OutOfMemoryError</code>.</li>
+        </ol>
+      </div>
+      <div class="view view--behind">
+        <span class="view__tag">Behind the screen</span>
+        <svg viewBox="0 0 360 250" role="img" aria-label="Eden, two survivor spaces and the old generation, with objects moving between them">
+          <text x="180" y="20" text-anchor="middle" font-size="10" font-weight="700" class="s-ink2">Young generation</text>
+          <rect x="12" y="28" width="190" height="86" rx="6" class="s-soft-acc" style="stroke:var(--track);stroke-width:1.4"/>
+          <text x="20" y="42" font-size="9.4" font-weight="700" class="s-acc">Eden</text>
+          <rect x="208" y="28" width="68" height="86" rx="6" class="s-soft-green" style="stroke:var(--green);stroke-width:1.2"/>
+          <rect x="282" y="28" width="66" height="86" rx="6" class="s-soft-green" style="stroke:var(--green);stroke-width:1.2"/>
+          <text x="242" y="42" text-anchor="middle" font-size="9.4" font-weight="700" class="s-green">S0</text>
+          <text x="315" y="42" text-anchor="middle" font-size="9.4" font-weight="700" class="s-green">S1</text>
+          <text x="180" y="134" text-anchor="middle" font-size="10" font-weight="700" class="s-ink2">Old generation</text>
+          <rect x="12" y="140" width="336" height="52" rx="6" class="s-soft-blue" style="stroke:var(--blue);stroke-width:1.4"/>
+          <g data-on="1-2" class="s-card" style="stroke:var(--track);stroke-width:1.2">
+            <rect x="22" y="50" width="26" height="24" rx="3"/><rect x="54" y="50" width="26" height="24" rx="3"/><rect x="86" y="50" width="26" height="24" rx="3"/><rect x="118" y="50" width="26" height="24" rx="3"/><rect x="150" y="50" width="26" height="24" rx="3"/>
+            <rect x="22" y="82" width="26" height="24" rx="3"/><rect x="54" y="82" width="26" height="24" rx="3"/><rect x="86" y="82" width="26" height="24" rx="3"/>
+          </g>
+          <g data-on="2">
+            <path style="stroke:#D64545;stroke-width:1.6;fill:none" d="M24 52l22 20M46 52l-22 20M88 52l22 20M110 52l-22 20M120 52l22 20M142 52l-22 20M152 52l22 20M174 52l-22 20M24 84l22 20M46 84l-22 20M88 84l22 20M110 84l-22 20"/>
+          </g>
+          <g data-on="2" style="fill:none;stroke:var(--green);stroke-width:2.4"><rect x="54" y="50" width="26" height="24" rx="3"/><rect x="54" y="82" width="26" height="24" rx="3"/></g>
+          <text x="196" y="108" text-anchor="end" font-size="9" class="s-red" font-weight="700" data-on="1">Eden full</text>
+          <g data-on="3" class="s-soft-green" style="stroke:var(--green);stroke-width:1.6">
+            <rect x="229" y="52" width="26" height="22" rx="3"/><rect x="229" y="82" width="26" height="22" rx="3"/>
+          </g>
+          <g data-on="3" font-size="8.4" class="mono s-ink" text-anchor="middle"><text x="242" y="67">a1</text><text x="242" y="97">a1</text></g>
+          <text x="107" y="80" text-anchor="middle" font-size="9.4" class="s-ink2" data-on="3">empty again</text>
+          <g data-on="4" class="s-card" style="stroke:var(--track);stroke-width:1.2"><rect x="22" y="50" width="26" height="24" rx="3"/><rect x="54" y="50" width="26" height="24" rx="3"/></g>
+          <g data-on="4-5" class="s-soft-green" style="stroke:var(--green);stroke-width:1.6"><rect x="302" y="52" width="26" height="22" rx="3"/></g>
+          <text x="315" y="67" text-anchor="middle" font-size="8.4" class="mono s-ink" data-on="4-5">a2</text>
+          <path d="M232 108 V119 H48 V146" style="stroke:var(--blue);stroke-width:1.6;fill:none;stroke-dasharray:4 3" data-on="4"/>
+          <g data-on="4-5" class="s-card" style="stroke:var(--blue);stroke-width:1.4"><rect x="22" y="150" width="40" height="32" rx="4"/></g>
+          <text x="42" y="170" text-anchor="middle" font-size="8.4" class="mono s-ink" data-on="4-5">a15</text>
+          <text x="242" y="102" text-anchor="middle" font-size="8.4" class="s-blue" data-on="4">promote</text>
+          <g data-on="5" class="s-card" style="stroke:var(--blue);stroke-width:1.4"><rect x="66" y="150" width="40" height="32" rx="4"/><rect x="110" y="150" width="40" height="32" rx="4"/></g>
+          <g data-on="5" font-size="8.4" class="mono s-ink" text-anchor="middle"><text x="86" y="170">live</text><text x="130" y="170">live</text></g>
+          <text x="240" y="170" text-anchor="middle" font-size="9" class="s-green" font-weight="700" data-on="5">compacted to the left</text>
+          <g data-on="6" class="s-soft-acc" style="stroke:#D64545;stroke-width:1.2">
+            <rect x="20" y="146" width="36" height="24" rx="3"/><rect x="60" y="146" width="36" height="24" rx="3"/><rect x="100" y="146" width="36" height="24" rx="3"/><rect x="140" y="146" width="36" height="24" rx="3"/><rect x="180" y="146" width="36" height="24" rx="3"/><rect x="220" y="146" width="36" height="24" rx="3"/><rect x="260" y="146" width="36" height="24" rx="3"/><rect x="300" y="146" width="40" height="24" rx="3"/>
+            <rect x="22" y="50" width="26" height="24" rx="3"/><rect x="54" y="50" width="26" height="24" rx="3"/><rect x="86" y="50" width="26" height="24" rx="3"/><rect x="118" y="50" width="26" height="24" rx="3"/><rect x="150" y="50" width="26" height="24" rx="3"/>
+            <rect x="22" y="82" width="26" height="24" rx="3"/><rect x="54" y="82" width="26" height="24" rx="3"/><rect x="86" y="82" width="26" height="24" rx="3"/><rect x="118" y="82" width="26" height="24" rx="3"/><rect x="150" y="82" width="26" height="24" rx="3"/>
+          </g>
+          <text x="180" y="186" text-anchor="middle" font-size="9.4" class="s-red" font-weight="700" data-on="6">all reachable from static cache</text>
+          <g font-size="9.6" class="s-ink2" text-anchor="middle">
+            <text x="180" y="210" data-on="1">New objects fill Eden, side by side.</text>
+            <text x="180" y="210" data-on="2">Pause. Mark from roots: only 2 objects are live.</text>
+            <text x="180" y="210" data-on="3">Live ones copied to S0 (age 1). Eden freed in bulk.</text>
+            <text x="180" y="210" data-on="4">Survivors bounce S0 ↔ S1; at age 15 they go old.</text>
+            <text x="180" y="210" data-on="5">Full GC: mark, sweep and compact the whole heap.</text>
+            <text x="180" y="210" data-on="6">Leak: everything is live, so nothing can be freed.</text>
+          </g>
+          <text x="354" y="246" text-anchor="end" class="s-wm">myphatshala.com</text>
+        </svg>
+        <ol class="caps" hidden>
+          <li>Every <code>new</code> takes the next free space in Eden. Allocation is just moving a pointer forward.</li>
+          <li>Eden is full, so threads stop. The collector follows references from the roots: only 2 of the 8 objects are reached. The crossed ones are garbage.</li>
+          <li>The 2 live objects are copied into survivor space S0 with age 1. Eden is now empty without visiting a single dead object.</li>
+          <li>On later minor GCs, survivors are copied between S0 and S1 and their age grows. An object that reaches the tenuring threshold (15 by default at most) is promoted to the old generation.</li>
+          <li>Old objects are cleaned rarely. A full GC marks live objects in the whole heap, sweeps the dead ones and compacts the survivors so free space is one block.</li>
+          <li>With a leak, every object is reachable from a static collection. Collections free nothing, old fills up, and allocation fails with <code>OutOfMemoryError</code>.</li>
+        </ol>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ======================= PART 6: REAL-WORLD USE ======================= -->
+<section class="part" id="real-world">
+  <span class="part-label"><b>6</b> Real-world use</span>
+  <h2>Garbage collection in real systems</h2>
+  <p>Developers rarely tune the GC on day one, but they read GC logs, pick collectors and chase leaks regularly.</p>
+  <!--ANIM2-->
+  <h3 id="animated-example">Watch it with an example: lunch-rush orders in a food-delivery server</h3>
+  <p class="anim-intro">Every order request creates a few short-lived objects; only the customer's cart session lives on. Watch a young collection throw away the rush and keep the few objects that matter.</p>
+  <div class="anim anim--one" data-frames="6" data-delay="4600">
+    <div class="anim__title">Most objects die young <span>6 steps</span></div>
+    <div class="anim__views">
+      <div class="view view--story">
+        <span class="view__tag">Animated example</span>
+        <svg viewBox="0 0 360 230" role="img" aria-label="young and old generation during a lunch rush">
+          <rect x="6" y="8" width="348" height="28" rx="8" class="s-board" style="stroke:board;stroke-width:1.5"/>
+          <text data-on="1" x="14" y="27" font-size="10" class="s-chalk mono">OrderRequest r = parse(json);   // per request</text>
+          <text data-on="2" x="14" y="27" font-size="10" class="s-chalk mono">sessions.put(userId, cart);     // kept</text>
+          <text data-on="3" x="14" y="27" font-size="10" class="s-chalk mono">// Eden full: Pause Young</text>
+          <text data-on="4" x="14" y="27" font-size="10" class="s-chalk mono">// survivors copied, Eden freed</text>
+          <text data-on="5" x="14" y="27" font-size="10" class="s-chalk mono">// many GCs later: cart is old</text>
+          <text data-on="6" x="14" y="27" font-size="10" class="s-chalk mono">// result: rush cleaned cheaply</text>
+          <rect x="8" y="46" width="206" height="104" rx="8" class="s-soft-acc" style="stroke:var(--track);stroke-width:1.5"/>
+          <text x="16" y="61" font-size="10" font-weight="700" class="s-acc">Eden</text>
+          <rect x="220" y="46" width="62" height="104" rx="8" class="s-soft-green" style="stroke:var(--green);stroke-width:1.5"/>
+          <text x="251" y="61" font-size="9.5" text-anchor="middle" font-weight="700" class="s-green">Survivor</text>
+          <rect x="288" y="46" width="66" height="104" rx="8" class="s-soft-blue" style="stroke:var(--blue);stroke-width:1.5"/>
+          <text x="321" y="61" font-size="10" text-anchor="middle" font-weight="700" class="s-blue">Old</text>
+          <g data-on="1-3"><rect x="18" y="70" width="34" height="28" rx="8" class="s-card2" style="stroke:var(--line);stroke-width:1.5"/><text x="35" y="87.24" font-size="9" text-anchor="middle" class="s-ink mono">req</text></g>
+          <g data-on="1-3"><rect x="56" y="70" width="34" height="28" rx="8" class="s-card2" style="stroke:var(--line);stroke-width:1.5"/><text x="73" y="87.24" font-size="9" text-anchor="middle" class="s-ink mono">json</text></g>
+          <g data-on="1-3"><rect x="94" y="70" width="34" height="28" rx="8" class="s-card2" style="stroke:var(--line);stroke-width:1.5"/><text x="111" y="87.24" font-size="9" text-anchor="middle" class="s-ink mono">dto</text></g>
+          <g data-on="1-3"><rect x="132" y="70" width="34" height="28" rx="8" class="s-card2" style="stroke:var(--line);stroke-width:1.5"/><text x="149" y="87.24" font-size="9" text-anchor="middle" class="s-ink mono">req</text></g>
+          <g data-on="2-3"><rect x="170" y="70" width="34" height="28" rx="8" class="s-card2" style="stroke:var(--line);stroke-width:1.5"/><text x="187" y="87.24" font-size="9" text-anchor="middle" class="s-ink mono">json</text></g>
+          <g data-on="2-3"><rect x="18" y="110" width="34" height="28" rx="8" class="s-card2" style="stroke:var(--line);stroke-width:1.5"/><text x="35" y="127.24" font-size="9" text-anchor="middle" class="s-ink mono">dto</text></g>
+          <g data-on="2-3"><rect x="56" y="110" width="34" height="28" rx="8" class="s-card2" style="stroke:var(--line);stroke-width:1.5"/><text x="73" y="127.24" font-size="9" text-anchor="middle" class="s-ink mono">req</text></g>
+          <g data-on="2-3"><rect x="94" y="110" width="34" height="28" rx="8" class="s-card2" style="stroke:var(--line);stroke-width:1.5"/><text x="111" y="127.24" font-size="9" text-anchor="middle" class="s-ink mono">json</text></g>
+          <g data-on="2-3"><rect x="132" y="110" width="34" height="28" rx="8" class="s-card2" style="stroke:var(--line);stroke-width:1.5"/><text x="149" y="127.24" font-size="9" text-anchor="middle" class="s-ink mono">dto</text></g>
+          <g data-on="2-3"><rect x="170" y="110" width="34" height="28" rx="8" class="s-card2" style="stroke:var(--line);stroke-width:1.5"/><text x="187" y="127.24" font-size="9" text-anchor="middle" class="s-ink mono">req</text></g>
+          <g data-on="2-3"><rect x="170" y="110" width="34" height="28" rx="8" class="s-soft-green" style="stroke:var(--green);stroke-width:1.5"/><text x="187" y="127.24" font-size="9" text-anchor="middle" font-weight="700" class="s-ink mono">cart</text></g>
+          <g data-on="3"><path d="M22 74 L48 94 M48 74 L22 94" style="stroke:#D64545;stroke-width:1.6"/></g>
+          <g data-on="3"><path d="M60 74 L86 94 M86 74 L60 94" style="stroke:#D64545;stroke-width:1.6"/></g>
+          <g data-on="3"><path d="M98 74 L124 94 M124 74 L98 94" style="stroke:#D64545;stroke-width:1.6"/></g>
+          <g data-on="3"><path d="M136 74 L162 94 M162 74 L136 94" style="stroke:#D64545;stroke-width:1.6"/></g>
+          <g data-on="3"><path d="M174 74 L200 94 M200 74 L174 94" style="stroke:#D64545;stroke-width:1.6"/></g>
+          <g data-on="3"><path d="M22 114 L48 134 M48 114 L22 134" style="stroke:#D64545;stroke-width:1.6"/></g>
+          <g data-on="3"><path d="M60 114 L86 134 M86 114 L60 134" style="stroke:#D64545;stroke-width:1.6"/></g>
+          <g data-on="3"><path d="M98 114 L124 134 M124 114 L98 134" style="stroke:#D64545;stroke-width:1.6"/></g>
+          <g data-on="3"><path d="M136 114 L162 134 M162 114 L136 134" style="stroke:#D64545;stroke-width:1.6"/></g>
+          <g data-on="4"><rect x="234" y="80" width="34" height="28" rx="8" class="s-soft-green" style="stroke:var(--green);stroke-width:1.5"/><text x="251" y="97.24" font-size="9" text-anchor="middle" font-weight="700" class="s-ink mono">cart</text></g>
+          <text data-on="4" x="251" y="124" font-size="9" text-anchor="middle" class="s-ink2">age 1</text>
+          <g data-on="5-6"><rect x="300" y="80" width="42" height="28" rx="8" class="s-soft-green" style="stroke:var(--blue);stroke-width:1.5"/><text x="321" y="97.24" font-size="9" text-anchor="middle" font-weight="700" class="s-ink mono">cart</text></g>
+          <text data-on="5-6" x="321" y="124" font-size="9" text-anchor="middle" class="s-ink2">age 15</text>
+          <text data-on="4-6" x="111" y="104" font-size="10" text-anchor="middle" class="s-ink2">empty again</text>
+          <text data-on="2" x="10" y="172" font-size="10" class="s-ink2">9 temporary objects, 1 cart</text>
+          <text data-on="3" x="10" y="172" font-size="10" font-weight="700" class="s-red">STW pause ≈ 1 ms: mark from roots</text>
+          <text data-on="4" x="10" y="172" font-size="10" font-weight="700" class="s-green">copied 1 object, freed 9 in one go</text>
+          <text data-on="5" x="10" y="172" font-size="10" font-weight="700" class="s-blue">promoted after surviving many minor GCs</text>
+          <text data-on="6" x="10" y="172" font-size="10" font-weight="700" class="s-green">cost depends on live objects, not garbage</text>
+          <text data-on="2-6" x="10" y="190" font-size="9.5" class="s-ink2 mono">sessions map (a root) → cart</text>
+          <text x="354" y="225" text-anchor="end" class="s-wm">myphatshala.com</text>
+        </svg>
+        <ol class="caps" hidden>
+          <li><b>Rush starts:</b> each order request creates temporary objects (the raw request, parsed JSON, a DTO) in Eden.</li>
+          <li><b>One keeper:</b> the customer's cart is stored in a sessions map, which is reachable from a root. Everything else is needed only until the response is sent.</li>
+          <li><b>Eden full:</b> G1 pauses the threads for a young collection. Marking from the roots reaches only the cart; the crossed objects are garbage.</li>
+          <li><b>Copy and free:</b> the cart is copied to a survivor space with age 1, and the whole of Eden is reused at once. No dead object was visited.</li>
+          <li><b>Promotion:</b> the cart keeps surviving because the customer is still shopping. After enough minor GCs (at most 15) it moves to the old generation.</li>
+          <li><b>Why it scales:</b> a young collection's cost depends on how much is <i>live</i>, so a burst of lakhs of short-lived request objects is cheap to clean.</li>
+        </ol>
+      </div>
+    </div>
+  </div>
+  <!--/ANIM2-->
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><path d="M10 70 L30 66 L50 68 L70 64 L90 67 L110 65" style="stroke:var(--green);stroke-width:2;fill:none"/><path d="M60 64 V20" style="stroke:#D64545;stroke-width:2"/><text x="64" y="26" font-size="8" class="s-red">pause</text></svg></div>
+    <div><h4>1. Low-latency APIs</h4><p>Payment and trading APIs care about the slowest requests. A 300 ms GC pause shows up as a timeout. Such teams measure pause times from GC logs and may switch to ZGC for very large heaps.</p>
+      <div class="uc-flow"><span>p99 latency spikes</span><i>→</i><span class="java">-Xlog:gc, -XX:+UseZGC</span><i>→</i><span>Short pauses</span></div></div>
+  </div>
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><g class="s-soft-acc" style="stroke:var(--track)"><rect x="14" y="30" width="18" height="40"/><rect x="36" y="20" width="18" height="50"/><rect x="58" y="26" width="18" height="44"/><rect x="80" y="14" width="18" height="56"/></g></svg></div>
+    <div><h4>2. Overnight batch jobs</h4><p>A job that recalculates interest for every account cares about total time, not pauses. The Parallel collector can finish it faster by using all CPUs during longer stop-the-world collections.</p>
+      <div class="uc-flow"><span>Batch job</span><i>→</i><span class="java">-XX:+UseParallelGC</span><i>→</i><span>Higher throughput</span></div></div>
+  </div>
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="14" y="14" width="92" height="62" rx="6" class="s-board"/><g font-size="7.4" class="mono" style="fill:#9FD3B8"><text x="20" y="32">GC(812) Pause Young</text><text x="20" y="46">GC(813) Pause Young</text><text x="20" y="60">GC(814) Pause Full</text></g></svg></div>
+    <div><h4>3. GC logs in production</h4><p>Services are started with a GC log written to a rotating file, for example <code>-Xlog:gc*:file=gc.log</code>. When an incident happens, the log shows whether pauses or a full heap were involved.</p>
+      <div class="uc-flow"><span>Incident</span><i>→</i><span class="java">gc.log</span><i>→</i><span>Pauses? Leak? Neither?</span></div></div>
+  </div>
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><path d="M10 74 L30 62 L50 56 L70 44 L90 34 L110 20" style="stroke:#D64545;stroke-width:2;fill:none"/><text x="14" y="20" font-size="8" class="mono s-ink2">heap after GC</text></svg></div>
+    <div><h4>4. Hunting a memory leak</h4><p>If the heap left after each full GC keeps rising, something is holding objects. A heap dump opened in a tool like Eclipse MAT shows the biggest objects and the reference chain (often a static map) that keeps them alive.</p>
+      <div class="uc-flow"><span>Rising baseline</span><i>→</i><span class="java">heap dump → path to root</span><i>→</i><span>Fix the reference</span></div></div>
+  </div>
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="20" y="20" width="80" height="50" rx="6" class="s-card2"/><text x="60" y="42" text-anchor="middle" font-size="9" class="mono s-ink">1 CPU</text><text x="60" y="58" text-anchor="middle" font-size="9" class="mono s-ink">512 MB</text></svg></div>
+    <div><h4>5. Small containers</h4><p>In a container with 1 CPU or less than about 2 GB of memory, the JVM chooses the Serial collector, not G1. Teams that expect G1 behaviour set the collector explicitly so it doesn't silently change between environments.</p>
+      <div class="uc-flow"><span>Tiny container</span><i>→</i><span class="java">-XX:+UseG1GC (explicit)</span><i>→</i><span>Same GC everywhere</span></div></div>
+  </div>
+  <p class="muted">Examples are simplified. GC tuning should always start from measurements (logs and metrics), not from flags copied from the internet.</p>
+</section>
+
+<div class="ad-slot" data-slot="mid"></div>
+
+<!-- ======================= PART 7: RUN THE CODE ======================= -->
+<section class="part" id="run">
+  <span class="part-label"><b>7</b> Run the code</span>
+  <h2>A leaky cache next to a bounded one</h2>
+  <div class="code" data-lang="java" data-file="Main.java"><pre><code>import java.util.ArrayList;
+import java.util.List;
+
+public class Main {
+    static List&lt;int[]&gt; leaky = new ArrayList&lt;&gt;();     // never cleaned
+    static List&lt;int[]&gt; bounded = new ArrayList&lt;&gt;();   // keeps the last 100
+
+    static void handleLeaky() {
+        leaky.add(new int[1000]);                     // about 4 KB per request
+    }
+
+    static void handleBounded() {
+        bounded.add(new int[1000]);
+        if (bounded.size() &gt; 100) {
+            bounded.remove(0);                        // oldest becomes unreachable
+        }
+    }
+
+    public static void main(String[] args) {
+        for (int request = 1; request &lt;= 10_000; request++) {
+            handleLeaky();
+            handleBounded();
+        }
+        System.out.println("Leaky cache:   " + leaky.size() + " entries, about " + leaky.size() * 4 + " KB kept alive");
+        System.out.println("Bounded cache: " + bounded.size() + " entries, about " + bounded.size() * 4 + " KB kept alive");
+    }
+}</code></pre><div class="output">Leaky cache:   10000 entries, about 40000 KB kept alive
+Bounded cache: 100 entries, about 400 KB kept alive</div></div>
+  <ul class="anno">
+    <li><code>static List&lt;int[]&gt; leaky</code><span>A static field is a GC root. Everything in this list stays reachable until the JVM exits.</span></li>
+    <li><code>leaky.add(new int[1000]);</code><span>Each request adds about 4 KB that can never be freed: memory grows with traffic.</span></li>
+    <li><code>bounded.remove(0);</code><span>Dropping the list's reference makes the oldest array garbage; the next minor GC can reclaim it.</span></li>
+    <li><code>40000 KB</code> vs <code>400 KB</code><span>Same work, 100 times less memory kept alive. With 10 times more requests, only the leaky number grows.</span></li>
+  </ul>
+  <div class="runner">
+    <script type="application/json">{"lang": "java", "file": "Main.java", "tasks": [
+{"label": "1 · Leaky vs bounded cache", "hint": "Press <b>Run</b>. Then change 10_000 to 1_00_000 requests (write <code>100_000</code>). One line grows ten times; the other doesn't change at all.", "code": "import java.util.ArrayList;\nimport java.util.List;\n\npublic class Main {\n    static List<int[]> leaky = new ArrayList<>();     // never cleaned\n    static List<int[]> bounded = new ArrayList<>();   // keeps the last 100\n\n    static void handleLeaky() {\n        leaky.add(new int[1000]);                     // about 4 KB per request\n    }\n\n    static void handleBounded() {\n        bounded.add(new int[1000]);\n        if (bounded.size() > 100) {\n            bounded.remove(0);                        // oldest becomes unreachable\n        }\n    }\n\n    public static void main(String[] args) {\n        for (int request = 1; request <= 10_000; request++) {\n            handleLeaky();\n            handleBounded();\n        }\n        System.out.println(\"Leaky cache:   \" + leaky.size() + \" entries, about \" + leaky.size() * 4 + \" KB kept alive\");\n        System.out.println(\"Bounded cache: \" + bounded.size() + \" entries, about \" + bounded.size() * 4 + \" KB kept alive\");\n    }\n}\n"},
+{"label": "2 · Predict: how many survive?", "hint": "<b>Predict first:</b> 1,000 orders are created. Which ones are still reachable at the end, and how many become garbage?", "code": "import java.util.ArrayList;\nimport java.util.List;\n\npublic class Main {\n    static class Order {\n        final int id;\n        final int amount;\n        Order(int id, int amount) { this.id = id; this.amount = amount; }\n    }\n\n    public static void main(String[] args) {\n        List<Order> bigOrders = new ArrayList<>();\n        int created = 0;\n        for (int id = 1; id <= 1000; id++) {\n            Order o = new Order(id, (id * 37) % 5000);\n            created++;\n            if (o.amount > 4900) {\n                bigOrders.add(o);\n            }\n        }\n        System.out.println(\"Created: \" + created);\n        System.out.println(\"Still reachable: \" + bigOrders.size());\n        System.out.println(\"Garbage: \" + (created - bigOrders.size()));\n    }\n}\n"},
+{"label": "3 · System.gc() is only a request", "hint": "Your numbers will differ from run to run and machine to machine. Used memory usually drops after the request, but the JVM is allowed to ignore it (it does with <code>-XX:+DisableExplicitGC</code>). Never put <code>System.gc()</code> in production code to “fix” memory.", "code": "public class Main {\n    static long usedMb() {\n        Runtime rt = Runtime.getRuntime();\n        return (rt.totalMemory() - rt.freeMemory()) / (1024 * 1024);\n    }\n\n    public static void main(String[] args) {\n        System.out.println(\"Used at start:        \" + usedMb() + \" MB\");\n        int[][] report = new int[200][];\n        for (int i = 0; i < report.length; i++) {\n            report[i] = new int[250_000];        // about 1 MB each\n        }\n        System.out.println(\"After building report: \" + usedMb() + \" MB\");\n        report = null;                            // now unreachable\n        System.out.println(\"After report = null:   \" + usedMb() + \" MB  (probably not collected yet)\");\n        System.gc();                              // a request, not a command\n        System.out.println(\"After System.gc():     \" + usedMb() + \" MB\");\n    }\n}\n"},
+{"label": "4 · Predict the crash", "hint": "<b>Predict first:</b> every photo stays in the list, so the GC can't free anything. Which error ends the program? It takes a moment: the JVM tries several full collections before giving up.", "code": "import java.util.ArrayList;\nimport java.util.List;\n\npublic class Main {\n    public static void main(String[] args) {\n        List<byte[]> uploads = new ArrayList<>();\n        for (int i = 1; ; i++) {\n            uploads.add(new byte[256 * 1024]);   // 256 KB per photo, never removed\n            if (i % 2000 == 0) System.out.println(i + \" photos kept\");\n        }\n    }\n}\n", "_expect": "exception"},
+{"label": "5 · Spot the error", "hint": "<code>gc()</code> in class <code>Runtime</code> is an instance method, so it needs the Runtime object: <code>Runtime.getRuntime().gc();</code> (or simply <code>System.gc();</code>). Remember: either way it is only a request.", "code": "public class Main {\n    public static void main(String[] args) {\n        int[] temp = new int[1_000_000];\n        temp = null;\n        Runtime.gc();\n        System.out.println(\"requested a collection\");\n    }\n}\n", "_expect": "compile-error"}]}</script>
+  </div>
+</section>
+
+<!-- ======================= PART 8: LINE BY LINE ======================= -->
+<section class="part" id="tracer">
+  <span class="part-label"><b>8</b> Line by line</span>
+  <h2>Three quotes in, one survivor out</h2>
+  <p>Recorded from the real JVM. Watch quotes #3 and #5 die young while #4 survives, and notice the static counter in the <b>static</b> entry: static fields are GC roots.</p>
+  <div class="tracer">
+    <script type="application/json">{"lang": "java", "code": ["public class Main {", "    static class Quote {", "        double price;", "        Quote(double price) { this.price = price; }", "    }", "", "    static int created = 0;", "", "    public static void main(String[] args) {", "        double[] offers = {520.0, 480.0, 505.0};", "        Quote best = null;", "        for (double p : offers) {", "            Quote q = new Quote(p);", "            created++;", "            if (best == null || q.price < best.price) {", "                best = q;", "            }", "        }", "        System.out.println(\"Best: Rs \" + best.price + \" of \" + created + \" quotes\");", "    }", "}"], "steps": [
+{"line": 10, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["offers", "→ #1 double[3]"]]}], "heap": ["<b>static</b> Main.created = 0", "<b>#1</b> double[3] {520.0, 480.0, 505.0}", "<b>#2</b> String[0] (args, empty)"], "newVar": "offers", "phase": "Offers", "note": "The price array #1 lives on the heap. The <b>static</b> entry shows the field <code>created</code>, a GC root that belongs to class Main, not to any frame."},
+{"line": 11, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["offers", "→ #1 double[3]"], ["best", "null"]]}], "heap": ["<b>static</b> Main.created = 0", "<b>#1</b> double[3] {520.0, 480.0, 505.0}", "<b>#2</b> String[0] (args, empty)"], "newVar": "best", "phase": "No best yet", "note": "<code>best</code> is null: it refers to nothing."},
+{"line": 12, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["offers", "→ #1 double[3]"], ["best", "null"], ["p", "520.0"]]}], "heap": ["<b>static</b> Main.created = 0", "<b>#1</b> double[3] {520.0, 480.0, 505.0}", "<b>#2</b> String[0] (args, empty)"], "newVar": "p", "phase": "First offer", "note": "p = 520.0."},
+{"line": 13, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["offers", "→ #1 double[3]"], ["best", "null"], ["p", "520.0"]]}, {"frame": "new Main.Quote(double price)", "vars": [["this", "→ #3 Main.Quote"], ["price", "520.0"]]}], "heap": ["<b>static</b> Main.created = 0", "<b>#1</b> double[3] {520.0, 480.0, 505.0}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Main.Quote {price=0.0}"], "newVar": "this", "phase": "new Quote", "note": "Quote #3 is allocated (price 0.0) and its constructor runs."},
+{"line": 4, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["offers", "→ #1 double[3]"], ["best", "null"], ["p", "520.0"]]}], "heap": ["<b>static</b> Main.created = 0", "<b>#1</b> double[3] {520.0, 480.0, 505.0}", "<b>#2</b> String[0] (args, empty)"], "phase": "Constructor done", "note": "The reference is briefly only on the operand stack."},
+{"line": 13, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["offers", "→ #1 double[3]"], ["best", "null"], ["p", "520.0"], ["q", "→ #3 Main.Quote"]]}], "heap": ["<b>static</b> Main.created = 0", "<b>#1</b> double[3] {520.0, 480.0, 505.0}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Main.Quote {price=520.0}"], "newVar": "q", "phase": "q", "note": "<code>q</code> → #3, price 520.0."},
+{"line": 14, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["offers", "→ #1 double[3]"], ["best", "null"], ["p", "520.0"], ["q", "→ #3 Main.Quote"]]}], "heap": ["<b>static</b> Main.created = 1", "<b>#1</b> double[3] {520.0, 480.0, 505.0}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Main.Quote {price=520.0}"], "phase": "Count", "note": "The static counter becomes 1."},
+{"line": 15, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["offers", "→ #1 double[3]"], ["best", "null"], ["p", "520.0"], ["q", "→ #3 Main.Quote"]]}], "heap": ["<b>static</b> Main.created = 1", "<b>#1</b> double[3] {520.0, 480.0, 505.0}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Main.Quote {price=520.0}"], "phase": "Compare", "note": "best is null, so the condition is true."},
+{"line": 16, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["offers", "→ #1 double[3]"], ["best", "→ #3 Main.Quote"]]}], "heap": ["<b>static</b> Main.created = 1", "<b>#1</b> double[3] {520.0, 480.0, 505.0}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Main.Quote {price=520.0}"], "newVar": "best", "phase": "Keep it", "note": "<code>best</code> → #3. Now two locals point to the same Quote."},
+{"line": 12, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["offers", "→ #1 double[3]"], ["best", "→ #3 Main.Quote"], ["p", "480.0"]]}], "heap": ["<b>static</b> Main.created = 1", "<b>#1</b> double[3] {520.0, 480.0, 505.0}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Main.Quote {price=520.0}"], "newVar": "p", "phase": "Next offer", "note": "p = 480.0. The loop body's <code>q</code> went out of scope, but #3 survives: <code>best</code> still refers to it."},
+{"line": 13, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["offers", "→ #1 double[3]"], ["best", "→ #3 Main.Quote"], ["p", "480.0"]]}, {"frame": "new Main.Quote(double price)", "vars": [["this", "→ #4 Main.Quote"], ["price", "480.0"]]}], "heap": ["<b>static</b> Main.created = 1", "<b>#1</b> double[3] {520.0, 480.0, 505.0}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Main.Quote {price=520.0}", "<b>#4</b> Main.Quote {price=0.0}"], "newVar": "this", "phase": "new Quote", "note": "Quote #4 is allocated."},
+{"line": 4, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["offers", "→ #1 double[3]"], ["best", "→ #3 Main.Quote"], ["p", "480.0"]]}], "heap": ["<b>static</b> Main.created = 1", "<b>#1</b> double[3] {520.0, 480.0, 505.0}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Main.Quote {price=520.0}"], "phase": "Constructor done", "note": "Reference on the operand stack."},
+{"line": 13, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["offers", "→ #1 double[3]"], ["best", "→ #3 Main.Quote"], ["p", "480.0"], ["q", "→ #4 Main.Quote"]]}], "heap": ["<b>static</b> Main.created = 1", "<b>#1</b> double[3] {520.0, 480.0, 505.0}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Main.Quote {price=520.0}", "<b>#4</b> Main.Quote {price=480.0}"], "newVar": "q", "phase": "q", "note": "<code>q</code> → #4, price 480.0."},
+{"line": 14, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["offers", "→ #1 double[3]"], ["best", "→ #3 Main.Quote"], ["p", "480.0"], ["q", "→ #4 Main.Quote"]]}], "heap": ["<b>static</b> Main.created = 2", "<b>#1</b> double[3] {520.0, 480.0, 505.0}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Main.Quote {price=520.0}", "<b>#4</b> Main.Quote {price=480.0}"], "phase": "Count", "note": "created = 2."},
+{"line": 15, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["offers", "→ #1 double[3]"], ["best", "→ #3 Main.Quote"], ["p", "480.0"], ["q", "→ #4 Main.Quote"]]}], "heap": ["<b>static</b> Main.created = 2", "<b>#1</b> double[3] {520.0, 480.0, 505.0}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Main.Quote {price=520.0}", "<b>#4</b> Main.Quote {price=480.0}"], "phase": "Compare", "note": "480.0 &lt; 520.0 is true."},
+{"line": 16, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["offers", "→ #1 double[3]"], ["best", "→ #4 Main.Quote"]]}], "heap": ["<b>static</b> Main.created = 2", "<b>#1</b> double[3] {520.0, 480.0, 505.0}", "<b>#2</b> String[0] (args, empty)", "<b>#4</b> Main.Quote {price=480.0}"], "newVar": "best", "phase": "New best", "note": "<code>best</code> → #4. Nothing refers to #3 any more, so it disappears from the view: <b>garbage</b>, created and abandoned in one iteration."},
+{"line": 12, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["offers", "→ #1 double[3]"], ["best", "→ #4 Main.Quote"], ["p", "505.0"]]}], "heap": ["<b>static</b> Main.created = 2", "<b>#1</b> double[3] {520.0, 480.0, 505.0}", "<b>#2</b> String[0] (args, empty)", "<b>#4</b> Main.Quote {price=480.0}"], "newVar": "p", "phase": "Next offer", "note": "p = 505.0."},
+{"line": 13, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["offers", "→ #1 double[3]"], ["best", "→ #4 Main.Quote"], ["p", "505.0"]]}, {"frame": "new Main.Quote(double price)", "vars": [["this", "→ #5 Main.Quote"], ["price", "505.0"]]}], "heap": ["<b>static</b> Main.created = 2", "<b>#1</b> double[3] {520.0, 480.0, 505.0}", "<b>#2</b> String[0] (args, empty)", "<b>#4</b> Main.Quote {price=480.0}", "<b>#5</b> Main.Quote {price=0.0}"], "newVar": "this", "phase": "new Quote", "note": "Quote #5 is allocated."},
+{"line": 4, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["offers", "→ #1 double[3]"], ["best", "→ #4 Main.Quote"], ["p", "505.0"]]}], "heap": ["<b>static</b> Main.created = 2", "<b>#1</b> double[3] {520.0, 480.0, 505.0}", "<b>#2</b> String[0] (args, empty)", "<b>#4</b> Main.Quote {price=480.0}"], "phase": "Constructor done", "note": "Reference on the operand stack."},
+{"line": 13, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["offers", "→ #1 double[3]"], ["best", "→ #4 Main.Quote"], ["p", "505.0"], ["q", "→ #5 Main.Quote"]]}], "heap": ["<b>static</b> Main.created = 2", "<b>#1</b> double[3] {520.0, 480.0, 505.0}", "<b>#2</b> String[0] (args, empty)", "<b>#4</b> Main.Quote {price=480.0}", "<b>#5</b> Main.Quote {price=505.0}"], "newVar": "q", "phase": "q", "note": "<code>q</code> → #5, price 505.0."},
+{"line": 14, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["offers", "→ #1 double[3]"], ["best", "→ #4 Main.Quote"], ["p", "505.0"], ["q", "→ #5 Main.Quote"]]}], "heap": ["<b>static</b> Main.created = 3", "<b>#1</b> double[3] {520.0, 480.0, 505.0}", "<b>#2</b> String[0] (args, empty)", "<b>#4</b> Main.Quote {price=480.0}", "<b>#5</b> Main.Quote {price=505.0}"], "phase": "Count", "note": "created = 3."},
+{"line": 15, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["offers", "→ #1 double[3]"], ["best", "→ #4 Main.Quote"]]}], "heap": ["<b>static</b> Main.created = 3", "<b>#1</b> double[3] {520.0, 480.0, 505.0}", "<b>#2</b> String[0] (args, empty)", "<b>#4</b> Main.Quote {price=480.0}"], "phase": "Compare", "note": "505.0 &lt; 480.0 is false, so best stays #4. As the body ends, <code>q</code> goes out of scope and #5 has no reference left: garbage too."},
+{"line": 12, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["offers", "→ #1 double[3]"], ["best", "→ #4 Main.Quote"]]}], "heap": ["<b>static</b> Main.created = 3", "<b>#1</b> double[3] {520.0, 480.0, 505.0}", "<b>#2</b> String[0] (args, empty)", "<b>#4</b> Main.Quote {price=480.0}"], "phase": "Loop ends", "note": "No offers left. Of 3 Quote objects, only #4 is still reachable. Short-lived objects like #3 and #5 are exactly what young-generation collections clean up cheaply."},
+{"line": 19, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["offers", "→ #1 double[3]"], ["best", "→ #4 Main.Quote"]]}], "heap": ["<b>static</b> Main.created = 3", "<b>#1</b> double[3] {520.0, 480.0, 505.0}", "<b>#2</b> String[0] (args, empty)", "<b>#4</b> Main.Quote {price=480.0}"], "out": "Best: Rs 480.0 of 3 quotes\n", "phase": "Print", "note": "Reads #4's price and the static counter."},
+{"line": 20, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["offers", "→ #1 double[3]"], ["best", "→ #4 Main.Quote"]]}], "heap": ["<b>static</b> Main.created = 3", "<b>#1</b> double[3] {520.0, 480.0, 505.0}", "<b>#2</b> String[0] (args, empty)", "<b>#4</b> Main.Quote {price=480.0}"], "phase": "main ends", "note": "main reaches its closing brace."},
+{"line": 20, "phase": "Program ends", "note": "main's frame is popped: best's #4 and the offers array lose their last references. The static counter stays with the class until the JVM exits.", "stack": [], "heap": []}]}</script>
+  </div>
+
+<h3 id="worked">Worked examples: real problems, solved and traced in memory</h3>
+  <p class="wx-intro">Three server-side programs seen through the eyes of the garbage collector. Watch which objects die young, which ones are kept alive by a static field (the <b>static</b> entries), and how removing a single map entry turns a whole session into garbage.</p>
+  <article class="wx">
+    <div class="wx__head"><span class="wx__num">Example 1</span><span class="wx__tag">Analytics · access logs</span></div>
+    <h4>Temporary objects die every iteration</h4>
+    <div class="wx__problem"><p class="wx__label">Problem statement</p><p>An analytics job reads web-server log lines like <code>GET /cart 120</code> and adds up the response times (the last number, in milliseconds). Each line is split into parts. Trace which objects survive the loop.</p></div>
+    <div class="prob__io"><div><small>Input</small><pre>log = {&quot;GET /cart 120&quot;, &quot;POST /pay 480&quot;, &quot;GET /home 35&quot;}</pre></div><div><small>Expected output</small><pre>Total time: 635 ms</pre></div></div>
+    <div class="wx__approach"><p class="wx__label">Approach</p><ol><li>Loop over the lines; <code>split(" ")</code> creates a new array of 3 Strings for each line.</li><li>Only the number is needed, so <code>parseInt(parts[2])</code> turns it into an int added to <code>totalMs</code>.</li><li>The <code>parts</code> array and its Strings are referenced only inside one iteration: they are garbage as soon as the body ends. This is the generational hypothesis in action: most objects die young.</li></ol></div>
+    <p class="wx__label">Solution: run it live</p>
+    <div class="runner">
+    <script type="application/json">{"lang": "java", "file": "Main.java", "tasks": [{"label": "Run · Temporary objects die every iteration", "hint": "Press <b>Run</b>. Then add a fourth log line <code>\"GET /help 9\"</code>. How many temporary String objects does the loop create in total now?", "code": "public class Main {\n    public static void main(String[] args) {\n        String[] log = {\"GET /cart 120\", \"POST /pay 480\", \"GET /home 35\"};\n        int totalMs = 0;\n        for (String line : log) {\n            String[] parts = line.split(\" \");\n            totalMs += Integer.parseInt(parts[2]);\n        }\n        System.out.println(\"Total time: \" + totalMs + \" ms\");\n    }\n}\n"}]}</script>
+    </div>
+    <p class="wx__label">What happens in memory, step by step</p>
+    <p class="wx__how">Recorded from the real JVM: press <b>Next</b> to execute one line at a time. Watch method calls push and pop frames on the stack, and objects (numbered #1, #2 …) appear on the heap.</p>
+    <div class="tracer">
+    <script type="application/json">{"lang": "java", "code": ["public class Main {", "    public static void main(String[] args) {", "        String[] log = {\"GET /cart 120\", \"POST /pay 480\", \"GET /home 35\"};", "        int totalMs = 0;", "        for (String line : log) {", "            String[] parts = line.split(\" \");", "            totalMs += Integer.parseInt(parts[2]);", "        }", "        System.out.println(\"Total time: \" + totalMs + \" ms\");", "    }", "}"], "steps": [{"line": 3, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["log", "→ #1 String[3]"]]}], "heap": ["<b>#1</b> String[3] {&quot;GET /cart 120&quot;, &quot;POST /pay 480&quot;, &quot;GET /home 35&quot;}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> String &quot;GET /cart 120&quot;", "<b>#4</b> String &quot;POST /pay 480&quot;", "<b>#5</b> String &quot;GET /home 35&quot;"], "newVar": "log", "phase": "Log lines", "note": "Array #1 holds three String objects (#3, #4, #5). These live as long as <code>log</code> does."}, {"line": 4, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["log", "→ #1 String[3]"], ["totalMs", "0"]]}], "heap": ["<b>#1</b> String[3] {&quot;GET /cart 120&quot;, &quot;POST /pay 480&quot;, &quot;GET /home 35&quot;}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> String &quot;GET /cart 120&quot;", "<b>#4</b> String &quot;POST /pay 480&quot;", "<b>#5</b> String &quot;GET /home 35&quot;"], "newVar": "totalMs", "phase": "Total", "note": "<code>totalMs</code> starts at 0 in main's frame."}, {"line": 5, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["log", "→ #1 String[3]"], ["totalMs", "0"], ["line", "→ #3 \"GET /cart 120\""]]}], "heap": ["<b>#1</b> String[3] {&quot;GET /cart 120&quot;, &quot;POST /pay 480&quot;, &quot;GET /home 35&quot;}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> String &quot;GET /cart 120&quot;", "<b>#4</b> String &quot;POST /pay 480&quot;", "<b>#5</b> String &quot;GET /home 35&quot;"], "newVar": "line", "phase": "Line 1", "note": "The for-each loop sets <code>line</code> → #3 \"GET /cart 120\"."}, {"line": 6, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["log", "→ #1 String[3]"], ["totalMs", "0"], ["line", "→ #3 \"GET /cart 120\""], ["parts", "→ #6 String[3]"]]}], "heap": ["<b>#1</b> String[3] {&quot;GET /cart 120&quot;, &quot;POST /pay 480&quot;, &quot;GET /home 35&quot;}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> String &quot;GET /cart 120&quot;", "<b>#4</b> String &quot;POST /pay 480&quot;", "<b>#5</b> String &quot;GET /home 35&quot;", "<b>#6</b> String[3] {&quot;GET&quot;, &quot;/cart&quot;, &quot;120&quot;}", "<b>#7</b> String &quot;GET&quot;", "<b>#8</b> String &quot;/cart&quot;", "<b>#9</b> String &quot;120&quot;"], "newVar": "parts", "phase": "split", "note": "<code>split(\" \")</code> creates a new array #6 and three new Strings #7, #8, #9 on the heap."}, {"line": 7, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["log", "→ #1 String[3]"], ["totalMs", "120"]]}], "heap": ["<b>#1</b> String[3] {&quot;GET /cart 120&quot;, &quot;POST /pay 480&quot;, &quot;GET /home 35&quot;}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> String &quot;GET /cart 120&quot;", "<b>#4</b> String &quot;POST /pay 480&quot;", "<b>#5</b> String &quot;GET /home 35&quot;"], "newVar": "totalMs", "phase": "Add", "note": "parseInt(\"120\") gives 120, so totalMs = 120. The body ends: <code>parts</code> and <code>line</code> go out of scope, and #6 to #9 are now unreachable. They lived for one iteration."}, {"line": 5, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["log", "→ #1 String[3]"], ["totalMs", "120"], ["line", "→ #4 \"POST /pay 480\""]]}], "heap": ["<b>#1</b> String[3] {&quot;GET /cart 120&quot;, &quot;POST /pay 480&quot;, &quot;GET /home 35&quot;}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> String &quot;GET /cart 120&quot;", "<b>#4</b> String &quot;POST /pay 480&quot;", "<b>#5</b> String &quot;GET /home 35&quot;"], "newVar": "line", "phase": "Line 2", "note": "<code>line</code> → #4 \"POST /pay 480\"."}, {"line": 6, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["log", "→ #1 String[3]"], ["totalMs", "120"], ["line", "→ #4 \"POST /pay 480\""], ["parts", "→ #10 String[3]"]]}], "heap": ["<b>#1</b> String[3] {&quot;GET /cart 120&quot;, &quot;POST /pay 480&quot;, &quot;GET /home 35&quot;}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> String &quot;GET /cart 120&quot;", "<b>#4</b> String &quot;POST /pay 480&quot;", "<b>#5</b> String &quot;GET /home 35&quot;", "<b>#10</b> String[3] {&quot;POST&quot;, &quot;/pay&quot;, &quot;480&quot;}", "<b>#11</b> String &quot;POST&quot;", "<b>#12</b> String &quot;/pay&quot;", "<b>#13</b> String &quot;480&quot;"], "newVar": "parts", "phase": "split", "note": "Another new array #10 with Strings #11 to #13. The previous parts were never reused."}, {"line": 7, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["log", "→ #1 String[3]"], ["totalMs", "600"]]}], "heap": ["<b>#1</b> String[3] {&quot;GET /cart 120&quot;, &quot;POST /pay 480&quot;, &quot;GET /home 35&quot;}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> String &quot;GET /cart 120&quot;", "<b>#4</b> String &quot;POST /pay 480&quot;", "<b>#5</b> String &quot;GET /home 35&quot;"], "newVar": "totalMs", "phase": "Add", "note": "totalMs = 120 + 480 = 600. #10 to #13 become garbage."}, {"line": 5, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["log", "→ #1 String[3]"], ["totalMs", "600"], ["line", "→ #5 \"GET /home 35\""]]}], "heap": ["<b>#1</b> String[3] {&quot;GET /cart 120&quot;, &quot;POST /pay 480&quot;, &quot;GET /home 35&quot;}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> String &quot;GET /cart 120&quot;", "<b>#4</b> String &quot;POST /pay 480&quot;", "<b>#5</b> String &quot;GET /home 35&quot;"], "newVar": "line", "phase": "Line 3", "note": "<code>line</code> → #5 \"GET /home 35\"."}, {"line": 6, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["log", "→ #1 String[3]"], ["totalMs", "600"], ["line", "→ #5 \"GET /home 35\""], ["parts", "→ #14 String[3]"]]}], "heap": ["<b>#1</b> String[3] {&quot;GET /cart 120&quot;, &quot;POST /pay 480&quot;, &quot;GET /home 35&quot;}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> String &quot;GET /cart 120&quot;", "<b>#4</b> String &quot;POST /pay 480&quot;", "<b>#5</b> String &quot;GET /home 35&quot;", "<b>#14</b> String[3] {&quot;GET&quot;, &quot;/home&quot;, &quot;35&quot;}", "<b>#15</b> String &quot;GET&quot;", "<b>#16</b> String &quot;/home&quot;", "<b>#17</b> String &quot;35&quot;"], "newVar": "parts", "phase": "split", "note": "Array #14 and Strings #15 to #17."}, {"line": 7, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["log", "→ #1 String[3]"], ["totalMs", "635"]]}], "heap": ["<b>#1</b> String[3] {&quot;GET /cart 120&quot;, &quot;POST /pay 480&quot;, &quot;GET /home 35&quot;}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> String &quot;GET /cart 120&quot;", "<b>#4</b> String &quot;POST /pay 480&quot;", "<b>#5</b> String &quot;GET /home 35&quot;"], "newVar": "totalMs", "phase": "Add", "note": "totalMs = 600 + 35 = 635. #14 to #17 become garbage."}, {"line": 5, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["log", "→ #1 String[3]"], ["totalMs", "635"]]}], "heap": ["<b>#1</b> String[3] {&quot;GET /cart 120&quot;, &quot;POST /pay 480&quot;, &quot;GET /home 35&quot;}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> String &quot;GET /cart 120&quot;", "<b>#4</b> String &quot;POST /pay 480&quot;", "<b>#5</b> String &quot;GET /home 35&quot;"], "phase": "Loop ends", "note": "All three lines are done. 12 temporary objects were created; none is reachable. In a real job processing crores of lines, these would fill Eden quickly and be swept by cheap minor GCs."}, {"line": 9, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["log", "→ #1 String[3]"], ["totalMs", "635"]]}], "heap": ["<b>#1</b> String[3] {&quot;GET /cart 120&quot;, &quot;POST /pay 480&quot;, &quot;GET /home 35&quot;}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> String &quot;GET /cart 120&quot;", "<b>#4</b> String &quot;POST /pay 480&quot;", "<b>#5</b> String &quot;GET /home 35&quot;"], "out": "Total time: 635 ms\n", "phase": "Print", "note": "Prints the total."}, {"line": 10, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["log", "→ #1 String[3]"], ["totalMs", "635"]]}], "heap": ["<b>#1</b> String[3] {&quot;GET /cart 120&quot;, &quot;POST /pay 480&quot;, &quot;GET /home 35&quot;}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> String &quot;GET /cart 120&quot;", "<b>#4</b> String &quot;POST /pay 480&quot;", "<b>#5</b> String &quot;GET /home 35&quot;"], "phase": "main finishes", "note": "main reaches its closing brace."}, {"line": 10, "phase": "Program ends", "note": "main returns, its frame is popped and the program ends.", "stack": [], "heap": []}]}</script>
+    </div>
+  </article>
+  <article class="wx">
+    <div class="wx__head"><span class="wx__num">Example 2</span><span class="wx__tag">SaaS · audit trail</span></div>
+    <h4>A static list that never lets go</h4>
+    <div class="wx__problem"><p class="wx__label">Problem statement</p><p>A SaaS app records every login in a static <code>audit</code> list "for auditing". Each login creates a <code>Session</code> object inside a helper method. Show that no Session ever becomes garbage, even though the helper's local variable disappears.</p></div>
+    <div class="prob__io"><div><small>Input</small><pre>logins: &quot;riya&quot;, &quot;arjun&quot;, &quot;kabir&quot;</pre></div><div><small>Expected output</small><pre>Sessions kept: 3</pre></div></div>
+    <div class="wx__approach"><p class="wx__label">Approach</p><ol><li><code>login</code> creates a Session and keeps a reference in the static list.</li><li>When <code>login</code> returns, its local <code>s</code> is gone, but the list (reachable from a static field, a GC root) still holds the Session.</li><li>Run this for a few lakh logins and the old generation fills with sessions nobody needs: a classic Java memory leak.</li></ol></div>
+    <p class="wx__label">Solution: run it live</p>
+    <div class="runner">
+    <script type="application/json">{"lang": "java", "file": "Main.java", "tasks": [{"label": "Run · A static list that never lets go", "hint": "Press <b>Run</b>. Then change <code>main</code> to call <code>login</code> in a loop 1,00,000 times. The program still works, but think about what those objects cost if the server runs for weeks.", "code": "import java.util.ArrayList;\nimport java.util.List;\n\npublic class Main {\n    static class Session {\n        String user;\n        Session(String user) { this.user = user; }\n    }\n\n    static List<Session> audit = new ArrayList<>();\n\n    static void login(String user) {\n        Session s = new Session(user);\n        audit.add(s);\n    }\n\n    public static void main(String[] args) {\n        login(\"riya\");\n        login(\"arjun\");\n        login(\"kabir\");\n        System.out.println(\"Sessions kept: \" + audit.size());\n    }\n}\n"}]}</script>
+    </div>
+    <p class="wx__label">What happens in memory, step by step</p>
+    <p class="wx__how">Recorded from the real JVM: press <b>Next</b> to execute one line at a time. Watch method calls push and pop frames on the stack, and objects (numbered #1, #2 …) appear on the heap.</p>
+    <div class="tracer">
+    <script type="application/json">{"lang": "java", "code": ["import java.util.ArrayList;", "import java.util.List;", "", "public class Main {", "    static class Session {", "        String user;", "        Session(String user) { this.user = user; }", "    }", "", "    static List<Session> audit = new ArrayList<>();", "", "    static void login(String user) {", "        Session s = new Session(user);", "        audit.add(s);", "    }", "", "    public static void main(String[] args) {", "        login(\"riya\");", "        login(\"arjun\");", "        login(\"kabir\");", "        System.out.println(\"Sessions kept: \" + audit.size());", "    }", "}"], "steps": [{"line": 18, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "login(String user)", "vars": [["user", "→ #1 \"riya\""]]}], "heap": ["<b>static</b> Main.audit = → #2 ArrayList", "<b>#1</b> String &quot;riya&quot;", "<b>#2</b> ArrayList size 0 []", "<b>#3</b> String[0] (args, empty)"], "newVar": "user", "phase": "Call login", "note": "Class Main has been initialised, so the static field <code>audit</code> (shown as a <b>static</b> entry) already points to an empty ArrayList #2. A frame for login is pushed with user → \"riya\"."}, {"line": 13, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "login(String user)", "vars": [["user", "→ #1 \"riya\""]]}, {"frame": "new Main.Session(String user)", "vars": [["this", "→ #4 Main.Session"], ["user", "→ #1 \"riya\""]]}], "heap": ["<b>static</b> Main.audit = → #2 ArrayList", "<b>#1</b> String &quot;riya&quot;", "<b>#2</b> ArrayList size 0 []", "<b>#3</b> String[0] (args, empty)", "<b>#4</b> Main.Session {user=null}"], "newVar": "this", "phase": "new Session", "note": "Session #4 is allocated (user = null) and its constructor runs."}, {"line": 7, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "login(String user)", "vars": [["user", "→ #1 \"riya\""]]}], "heap": ["<b>static</b> Main.audit = → #2 ArrayList", "<b>#1</b> String &quot;riya&quot;", "<b>#2</b> ArrayList size 0 []", "<b>#3</b> String[0] (args, empty)"], "phase": "Constructor done", "note": "Reference briefly on the operand stack."}, {"line": 13, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "login(String user)", "vars": [["user", "→ #1 \"riya\""], ["s", "→ #4 Main.Session"]]}], "heap": ["<b>static</b> Main.audit = → #2 ArrayList", "<b>#1</b> String &quot;riya&quot;", "<b>#2</b> ArrayList size 0 []", "<b>#3</b> String[0] (args, empty)", "<b>#4</b> Main.Session {user=&quot;riya&quot;}"], "newVar": "s", "phase": "Local s", "note": "<code>s</code> → #4 with user \"riya\"."}, {"line": 14, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "login(String user)", "vars": [["user", "→ #1 \"riya\""], ["s", "→ #4 Main.Session"]]}], "heap": ["<b>static</b> Main.audit = → #2 ArrayList", "<b>#1</b> String &quot;riya&quot;", "<b>#2</b> ArrayList size 1 [→#4]", "<b>#3</b> String[0] (args, empty)", "<b>#4</b> Main.Session {user=&quot;riya&quot;}"], "phase": "Keep it", "note": "<code>audit.add(s)</code>: the static list now holds #4."}, {"line": 15, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}], "heap": ["<b>static</b> Main.audit = → #2 ArrayList", "<b>#1</b> String &quot;riya&quot;", "<b>#2</b> ArrayList size 1 [→#4]", "<b>#3</b> String[0] (args, empty)", "<b>#4</b> Main.Session {user=&quot;riya&quot;}"], "phase": "Return", "note": "login's frame is popped and <code>s</code> is gone. #4 survives: the static list still refers to it."}, {"line": 19, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "login(String user)", "vars": [["user", "→ #5 \"arjun\""]]}], "heap": ["<b>static</b> Main.audit = → #2 ArrayList", "<b>#1</b> String &quot;riya&quot;", "<b>#2</b> ArrayList size 1 [→#4]", "<b>#3</b> String[0] (args, empty)", "<b>#4</b> Main.Session {user=&quot;riya&quot;}", "<b>#5</b> String &quot;arjun&quot;"], "newVar": "user", "phase": "Second login", "note": "A fresh frame with user → \"arjun\"."}, {"line": 13, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "login(String user)", "vars": [["user", "→ #5 \"arjun\""]]}, {"frame": "new Main.Session(String user)", "vars": [["this", "→ #6 Main.Session"], ["user", "→ #5 \"arjun\""]]}], "heap": ["<b>static</b> Main.audit = → #2 ArrayList", "<b>#1</b> String &quot;riya&quot;", "<b>#2</b> ArrayList size 1 [→#4]", "<b>#3</b> String[0] (args, empty)", "<b>#4</b> Main.Session {user=&quot;riya&quot;}", "<b>#5</b> String &quot;arjun&quot;", "<b>#6</b> Main.Session {user=null}"], "newVar": "this", "phase": "new Session", "note": "Session #6 is allocated."}, {"line": 7, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "login(String user)", "vars": [["user", "→ #5 \"arjun\""]]}], "heap": ["<b>static</b> Main.audit = → #2 ArrayList", "<b>#1</b> String &quot;riya&quot;", "<b>#2</b> ArrayList size 1 [→#4]", "<b>#3</b> String[0] (args, empty)", "<b>#4</b> Main.Session {user=&quot;riya&quot;}", "<b>#5</b> String &quot;arjun&quot;"], "phase": "Constructor done", "note": "Reference on the operand stack."}, {"line": 13, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "login(String user)", "vars": [["user", "→ #5 \"arjun\""], ["s", "→ #6 Main.Session"]]}], "heap": ["<b>static</b> Main.audit = → #2 ArrayList", "<b>#1</b> String &quot;riya&quot;", "<b>#2</b> ArrayList size 1 [→#4]", "<b>#3</b> String[0] (args, empty)", "<b>#4</b> Main.Session {user=&quot;riya&quot;}", "<b>#5</b> String &quot;arjun&quot;", "<b>#6</b> Main.Session {user=&quot;arjun&quot;}"], "newVar": "s", "phase": "Local s", "note": "<code>s</code> → #6."}, {"line": 14, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "login(String user)", "vars": [["user", "→ #5 \"arjun\""], ["s", "→ #6 Main.Session"]]}], "heap": ["<b>static</b> Main.audit = → #2 ArrayList", "<b>#1</b> String &quot;riya&quot;", "<b>#2</b> ArrayList size 2 [→#4, →#6]", "<b>#3</b> String[0] (args, empty)", "<b>#4</b> Main.Session {user=&quot;riya&quot;}", "<b>#5</b> String &quot;arjun&quot;", "<b>#6</b> Main.Session {user=&quot;arjun&quot;}"], "phase": "Keep it", "note": "The list now holds #4 and #6."}, {"line": 15, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}], "heap": ["<b>static</b> Main.audit = → #2 ArrayList", "<b>#1</b> String &quot;riya&quot;", "<b>#2</b> ArrayList size 2 [→#4, →#6]", "<b>#3</b> String[0] (args, empty)", "<b>#4</b> Main.Session {user=&quot;riya&quot;}", "<b>#5</b> String &quot;arjun&quot;", "<b>#6</b> Main.Session {user=&quot;arjun&quot;}"], "phase": "Return", "note": "Frame popped; #6 survives in the list."}, {"line": 20, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "login(String user)", "vars": [["user", "→ #7 \"kabir\""]]}], "heap": ["<b>static</b> Main.audit = → #2 ArrayList", "<b>#1</b> String &quot;riya&quot;", "<b>#2</b> ArrayList size 2 [→#4, →#6]", "<b>#3</b> String[0] (args, empty)", "<b>#4</b> Main.Session {user=&quot;riya&quot;}", "<b>#5</b> String &quot;arjun&quot;", "<b>#6</b> Main.Session {user=&quot;arjun&quot;}", "<b>#7</b> String &quot;kabir&quot;"], "newVar": "user", "phase": "Third login", "note": "Frame with user → \"kabir\"."}, {"line": 13, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "login(String user)", "vars": [["user", "→ #7 \"kabir\""]]}, {"frame": "new Main.Session(String user)", "vars": [["this", "→ #8 Main.Session"], ["user", "→ #7 \"kabir\""]]}], "heap": ["<b>static</b> Main.audit = → #2 ArrayList", "<b>#1</b> String &quot;riya&quot;", "<b>#2</b> ArrayList size 2 [→#4, →#6]", "<b>#3</b> String[0] (args, empty)", "<b>#4</b> Main.Session {user=&quot;riya&quot;}", "<b>#5</b> String &quot;arjun&quot;", "<b>#6</b> Main.Session {user=&quot;arjun&quot;}", "<b>#7</b> String &quot;kabir&quot;", "<b>#8</b> Main.Session {user=null}"], "newVar": "this", "phase": "new Session", "note": "Session #8 is allocated."}, {"line": 7, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "login(String user)", "vars": [["user", "→ #7 \"kabir\""]]}], "heap": ["<b>static</b> Main.audit = → #2 ArrayList", "<b>#1</b> String &quot;riya&quot;", "<b>#2</b> ArrayList size 2 [→#4, →#6]", "<b>#3</b> String[0] (args, empty)", "<b>#4</b> Main.Session {user=&quot;riya&quot;}", "<b>#5</b> String &quot;arjun&quot;", "<b>#6</b> Main.Session {user=&quot;arjun&quot;}", "<b>#7</b> String &quot;kabir&quot;"], "phase": "Constructor done", "note": "Reference on the operand stack."}, {"line": 13, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "login(String user)", "vars": [["user", "→ #7 \"kabir\""], ["s", "→ #8 Main.Session"]]}], "heap": ["<b>static</b> Main.audit = → #2 ArrayList", "<b>#1</b> String &quot;riya&quot;", "<b>#2</b> ArrayList size 2 [→#4, →#6]", "<b>#3</b> String[0] (args, empty)", "<b>#4</b> Main.Session {user=&quot;riya&quot;}", "<b>#5</b> String &quot;arjun&quot;", "<b>#6</b> Main.Session {user=&quot;arjun&quot;}", "<b>#7</b> String &quot;kabir&quot;", "<b>#8</b> Main.Session {user=&quot;kabir&quot;}"], "newVar": "s", "phase": "Local s", "note": "<code>s</code> → #8."}, {"line": 14, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "login(String user)", "vars": [["user", "→ #7 \"kabir\""], ["s", "→ #8 Main.Session"]]}], "heap": ["<b>static</b> Main.audit = → #2 ArrayList", "<b>#1</b> String &quot;riya&quot;", "<b>#2</b> ArrayList size 3 [→#4, →#6, →#8]", "<b>#3</b> String[0] (args, empty)", "<b>#4</b> Main.Session {user=&quot;riya&quot;}", "<b>#5</b> String &quot;arjun&quot;", "<b>#6</b> Main.Session {user=&quot;arjun&quot;}", "<b>#7</b> String &quot;kabir&quot;", "<b>#8</b> Main.Session {user=&quot;kabir&quot;}"], "phase": "Keep it", "note": "The list holds all three sessions."}, {"line": 15, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}], "heap": ["<b>static</b> Main.audit = → #2 ArrayList", "<b>#1</b> String &quot;riya&quot;", "<b>#2</b> ArrayList size 3 [→#4, →#6, →#8]", "<b>#3</b> String[0] (args, empty)", "<b>#4</b> Main.Session {user=&quot;riya&quot;}", "<b>#5</b> String &quot;arjun&quot;", "<b>#6</b> Main.Session {user=&quot;arjun&quot;}", "<b>#7</b> String &quot;kabir&quot;", "<b>#8</b> Main.Session {user=&quot;kabir&quot;}"], "phase": "Return", "note": "Frame popped. Notice the heap only ever grows in this program: no Session has disappeared."}, {"line": 21, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}], "heap": ["<b>static</b> Main.audit = → #2 ArrayList", "<b>#1</b> String &quot;riya&quot;", "<b>#2</b> ArrayList size 3 [→#4, →#6, →#8]", "<b>#3</b> String[0] (args, empty)", "<b>#4</b> Main.Session {user=&quot;riya&quot;}", "<b>#5</b> String &quot;arjun&quot;", "<b>#6</b> Main.Session {user=&quot;arjun&quot;}", "<b>#7</b> String &quot;kabir&quot;", "<b>#8</b> Main.Session {user=&quot;kabir&quot;}"], "out": "Sessions kept: 3\n", "phase": "Print", "note": "3 sessions kept. On a real server, every login since startup would still be here, slowly moving into the old generation."}, {"line": 22, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}], "heap": ["<b>static</b> Main.audit = → #2 ArrayList", "<b>#1</b> String &quot;riya&quot;", "<b>#2</b> ArrayList size 3 [→#4, →#6, →#8]", "<b>#3</b> String[0] (args, empty)", "<b>#4</b> Main.Session {user=&quot;riya&quot;}", "<b>#5</b> String &quot;arjun&quot;", "<b>#6</b> Main.Session {user=&quot;arjun&quot;}", "<b>#7</b> String &quot;kabir&quot;", "<b>#8</b> Main.Session {user=&quot;kabir&quot;}"], "phase": "main finishes", "note": "main reaches its closing brace. Even then the list stays reachable through the static field until the JVM exits."}, {"line": 22, "phase": "Program ends", "note": "main returns, its frame is popped and the program ends.", "stack": [], "heap": []}]}</script>
+    </div>
+  </article>
+  <article class="wx">
+    <div class="wx__head"><span class="wx__num">Example 3</span><span class="wx__tag">SaaS · active sessions</span></div>
+    <h4>Fixing the leak: remove on logout</h4>
+    <div class="wx__problem"><p class="wx__label">Problem statement</p><p>The fixed design keeps only <b>active</b> sessions in a static map and removes an entry when the user logs out. Trace a login, a second login and a logout, and see the removed session become garbage.</p></div>
+    <div class="prob__io"><div><small>Input</small><pre>login riya, login kabir, logout riya</pre></div><div><small>Expected output</small><pre>Active: [kabir]</pre></div></div>
+    <div class="wx__approach"><p class="wx__label">Approach</p><ol><li><code>login</code> puts a new Session into the map under the user name.</li><li><code>logout</code> calls <code>remove(user)</code>: the map drops its reference to that Session.</li><li>With no other reference, the Session is unreachable; the next collection reclaims it. The map's size now tracks real activity instead of growing forever.</li></ol></div>
+    <p class="wx__label">Solution: run it live</p>
+    <div class="runner">
+    <script type="application/json">{"lang": "java", "file": "Main.java", "tasks": [{"label": "Run · Fixing the leak: remove on logout", "hint": "Press <b>Run</b>. Then call <code>logout(\"kabir\")</code> too, before the print. What does the map hold now?", "code": "import java.util.HashMap;\nimport java.util.Map;\n\npublic class Main {\n    static class Session {\n        String user;\n        Session(String user) { this.user = user; }\n    }\n\n    static Map<String, Session> active = new HashMap<>();\n\n    static void login(String user) {\n        active.put(user, new Session(user));\n    }\n\n    static void logout(String user) {\n        active.remove(user);\n    }\n\n    public static void main(String[] args) {\n        login(\"riya\");\n        login(\"kabir\");\n        logout(\"riya\");\n        System.out.println(\"Active: \" + active.keySet());\n    }\n}\n"}]}</script>
+    </div>
+    <p class="wx__label">What happens in memory, step by step</p>
+    <p class="wx__how">Recorded from the real JVM: press <b>Next</b> to execute one line at a time. Watch method calls push and pop frames on the stack, and objects (numbered #1, #2 …) appear on the heap.</p>
+    <div class="tracer">
+    <script type="application/json">{"lang": "java", "code": ["import java.util.HashMap;", "import java.util.Map;", "", "public class Main {", "    static class Session {", "        String user;", "        Session(String user) { this.user = user; }", "    }", "", "    static Map<String, Session> active = new HashMap<>();", "", "    static void login(String user) {", "        active.put(user, new Session(user));", "    }", "", "    static void logout(String user) {", "        active.remove(user);", "    }", "", "    public static void main(String[] args) {", "        login(\"riya\");", "        login(\"kabir\");", "        logout(\"riya\");", "        System.out.println(\"Active: \" + active.keySet());", "    }", "}"], "steps": [{"line": 21, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "login(String user)", "vars": [["user", "→ #1 \"riya\""]]}], "heap": ["<b>static</b> Main.active = → #2 HashMap", "<b>#1</b> String &quot;riya&quot;", "<b>#2</b> HashMap size 0 (no bucket table yet)", "<b>#3</b> String[0] (args, empty)"], "newVar": "user", "phase": "Call login", "note": "The static field <code>active</code> points to an empty HashMap #2 (no bucket table until the first put). A frame for login is pushed with user → \"riya\"."}, {"line": 13, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "login(String user)", "vars": [["user", "→ #1 \"riya\""]]}, {"frame": "new Main.Session(String user)", "vars": [["this", "→ #4 Main.Session"], ["user", "→ #1 \"riya\""]]}], "heap": ["<b>static</b> Main.active = → #2 HashMap", "<b>#1</b> String &quot;riya&quot;", "<b>#2</b> HashMap size 0 (no bucket table yet)", "<b>#3</b> String[0] (args, empty)", "<b>#4</b> Main.Session {user=null}"], "newVar": "this", "phase": "new Session", "note": "Session #4 is allocated (user = null) for the put call."}, {"line": 7, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "login(String user)", "vars": [["user", "→ #1 \"riya\""]]}], "heap": ["<b>static</b> Main.active = → #2 HashMap", "<b>#1</b> String &quot;riya&quot;", "<b>#2</b> HashMap size 0 (no bucket table yet)", "<b>#3</b> String[0] (args, empty)"], "phase": "Constructor done", "note": "Reference on the operand stack."}, {"line": 13, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "login(String user)", "vars": [["user", "→ #1 \"riya\""]]}], "heap": ["<b>static</b> Main.active = → #2 HashMap", "<b>#1</b> String &quot;riya&quot;", "<b>#2</b> HashMap size 1, 16 buckets: [10] &quot;riya&quot;=→#4", "<b>#3</b> String[0] (args, empty)", "<b>#4</b> Main.Session {user=&quot;riya&quot;}"], "phase": "put", "note": "The map creates its 16-bucket table and stores \"riya\" → #4 in bucket 10."}, {"line": 14, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}], "heap": ["<b>static</b> Main.active = → #2 HashMap", "<b>#1</b> String &quot;riya&quot;", "<b>#2</b> HashMap size 1, 16 buckets: [10] &quot;riya&quot;=→#4", "<b>#3</b> String[0] (args, empty)", "<b>#4</b> Main.Session {user=&quot;riya&quot;}"], "phase": "Return", "note": "login's frame is popped. #4 is kept alive by the map, which is kept alive by the static field."}, {"line": 22, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "login(String user)", "vars": [["user", "→ #5 \"kabir\""]]}], "heap": ["<b>static</b> Main.active = → #2 HashMap", "<b>#1</b> String &quot;riya&quot;", "<b>#2</b> HashMap size 1, 16 buckets: [10] &quot;riya&quot;=→#4", "<b>#3</b> String[0] (args, empty)", "<b>#4</b> Main.Session {user=&quot;riya&quot;}", "<b>#5</b> String &quot;kabir&quot;"], "newVar": "user", "phase": "Second login", "note": "Frame with user → \"kabir\"."}, {"line": 13, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "login(String user)", "vars": [["user", "→ #5 \"kabir\""]]}, {"frame": "new Main.Session(String user)", "vars": [["this", "→ #6 Main.Session"], ["user", "→ #5 \"kabir\""]]}], "heap": ["<b>static</b> Main.active = → #2 HashMap", "<b>#1</b> String &quot;riya&quot;", "<b>#2</b> HashMap size 1, 16 buckets: [10] &quot;riya&quot;=→#4", "<b>#3</b> String[0] (args, empty)", "<b>#4</b> Main.Session {user=&quot;riya&quot;}", "<b>#5</b> String &quot;kabir&quot;", "<b>#6</b> Main.Session {user=null}"], "newVar": "this", "phase": "new Session", "note": "Session #6 is allocated."}, {"line": 7, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "login(String user)", "vars": [["user", "→ #5 \"kabir\""]]}], "heap": ["<b>static</b> Main.active = → #2 HashMap", "<b>#1</b> String &quot;riya&quot;", "<b>#2</b> HashMap size 1, 16 buckets: [10] &quot;riya&quot;=→#4", "<b>#3</b> String[0] (args, empty)", "<b>#4</b> Main.Session {user=&quot;riya&quot;}", "<b>#5</b> String &quot;kabir&quot;"], "phase": "Constructor done", "note": "Reference on the operand stack."}, {"line": 13, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "login(String user)", "vars": [["user", "→ #5 \"kabir\""]]}], "heap": ["<b>static</b> Main.active = → #2 HashMap", "<b>#1</b> String &quot;riya&quot;", "<b>#2</b> HashMap size 2, 16 buckets: [4] &quot;kabir&quot;=→#6 | [10] &quot;riya&quot;=→#4", "<b>#3</b> String[0] (args, empty)", "<b>#4</b> Main.Session {user=&quot;riya&quot;}", "<b>#5</b> String &quot;kabir&quot;", "<b>#6</b> Main.Session {user=&quot;kabir&quot;}"], "phase": "put", "note": "\"kabir\" → #6 goes into bucket 4. The map now has 2 entries."}, {"line": 14, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}], "heap": ["<b>static</b> Main.active = → #2 HashMap", "<b>#1</b> String &quot;riya&quot;", "<b>#2</b> HashMap size 2, 16 buckets: [4] &quot;kabir&quot;=→#6 | [10] &quot;riya&quot;=→#4", "<b>#3</b> String[0] (args, empty)", "<b>#4</b> Main.Session {user=&quot;riya&quot;}", "<b>#5</b> String &quot;kabir&quot;", "<b>#6</b> Main.Session {user=&quot;kabir&quot;}"], "phase": "Return", "note": "Frame popped. Both sessions are reachable through the map."}, {"line": 23, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "logout(String user)", "vars": [["user", "→ #1 \"riya\""]]}], "heap": ["<b>static</b> Main.active = → #2 HashMap", "<b>#1</b> String &quot;riya&quot;", "<b>#2</b> HashMap size 2, 16 buckets: [4] &quot;kabir&quot;=→#6 | [10] &quot;riya&quot;=→#4", "<b>#3</b> String[0] (args, empty)", "<b>#4</b> Main.Session {user=&quot;riya&quot;}", "<b>#5</b> String &quot;kabir&quot;", "<b>#6</b> Main.Session {user=&quot;kabir&quot;}"], "newVar": "user", "phase": "Call logout", "note": "A frame for logout is pushed with user → \"riya\"."}, {"line": 17, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "logout(String user)", "vars": [["user", "→ #1 \"riya\""]]}], "heap": ["<b>static</b> Main.active = → #2 HashMap", "<b>#1</b> String &quot;riya&quot;", "<b>#2</b> HashMap size 1, 16 buckets: [4] &quot;kabir&quot;=→#6", "<b>#3</b> String[0] (args, empty)", "<b>#5</b> String &quot;kabir&quot;", "<b>#6</b> Main.Session {user=&quot;kabir&quot;}"], "phase": "remove", "note": "The map drops its entry for \"riya\". Session #4 had no other reference, so it vanishes from the view: <b>garbage</b>, ready for the next collection."}, {"line": 18, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}], "heap": ["<b>static</b> Main.active = → #2 HashMap", "<b>#2</b> HashMap size 1, 16 buckets: [4] &quot;kabir&quot;=→#6", "<b>#3</b> String[0] (args, empty)", "<b>#5</b> String &quot;kabir&quot;", "<b>#6</b> Main.Session {user=&quot;kabir&quot;}"], "phase": "Return", "note": "logout's frame is popped, and with it the last reference to the \"riya\" key String in this view."}, {"line": 24, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}], "heap": ["<b>static</b> Main.active = → #2 HashMap", "<b>#2</b> HashMap size 1, 16 buckets: [4] &quot;kabir&quot;=→#6", "<b>#3</b> String[0] (args, empty)", "<b>#5</b> String &quot;kabir&quot;", "<b>#6</b> Main.Session {user=&quot;kabir&quot;}"], "out": "Active: [kabir]\n", "phase": "Print", "note": "Only kabir is active. The map's size now follows real logins and logouts."}, {"line": 25, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}], "heap": ["<b>static</b> Main.active = → #2 HashMap", "<b>#2</b> HashMap size 1, 16 buckets: [4] &quot;kabir&quot;=→#6", "<b>#3</b> String[0] (args, empty)", "<b>#5</b> String &quot;kabir&quot;", "<b>#6</b> Main.Session {user=&quot;kabir&quot;}"], "phase": "main finishes", "note": "main reaches its closing brace."}, {"line": 25, "phase": "Program ends", "note": "main returns, its frame is popped and the program ends.", "stack": [], "heap": []}]}</script>
+    </div>
+  </article>
+
+</section>
+
+<!-- ======================= PART 9: QUIZ AND REVISION ======================= -->
+<section class="part" id="quiz">
+  <span class="part-label"><b>9</b> Quiz and revision</span>
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <script type="application/json">[
+      { "q": "Where are most new objects allocated?", "options": ["Old generation", "Eden", "Survivor space S1", "Metaspace"], "answer": 1, "why": "New objects go into Eden in the young generation (very large objects are an exception and go straight to special old regions in G1)." },
+      { "q": "Why do generational collectors clean the young generation more often?", "options": ["It is bigger", "Most objects die young, so it is mostly garbage and cheap to clean", "Old objects can't be collected", "The JVM specification requires it"], "answer": 1, "why": "This is the weak generational hypothesis. A young collection only copies the few live objects, so it is fast." },
+      { "q": "What does System.gc() do?", "options": ["Immediately frees all garbage", "Requests a collection; the JVM may ignore it", "Deletes unreachable objects one by one", "Compiles the program"], "answer": 1, "why": "It is only a suggestion. With -XX:+DisableExplicitGC it does nothing, and it can never free reachable objects." },
+      { "q": "Which collector is the default in Java 9 and later on a typical multi-core server?", "options": ["Serial", "Parallel", "G1", "CMS"], "answer": 2, "why": "JEP 248 made G1 the default in Java 9. On very small machines (1 CPU or under about 2 GB) the JVM still picks Serial." },
+      { "q": "A log shows 38M->2M(64M). What does 2M mean?", "options": ["2 MB was freed", "2 MB is still in use after the collection", "The heap's maximum is 2 MB", "The pause took 2 ms"], "answer": 1, "why": "Before → after (current heap size). 36 MB were freed; 2 MB is live after the GC." },
+      { "q": "What does stop-the-world mean?", "options": ["The JVM exits", "All application threads pause while the GC does part of its work", "The GC stops running", "The OS kills the process"], "answer": 1, "why": "During an STW phase, application threads wait at safe points so the collector can work on a consistent heap." },
+      { "q": "Which of these can cause a memory leak in Java?", "options": ["Creating many short-lived objects", "Objects added to a static List and never removed", "Calling methods recursively 10 times", "Using local variables"], "answer": 1, "why": "Static collections are GC roots. Anything they hold stays reachable, so it can never be collected." },
+      { "q": "In a minor GC, what happens to a live object in Eden?", "options": ["It is deleted", "It is copied to a survivor space and its age increases", "It is moved to metaspace", "Nothing until a full GC"], "answer": 1, "why": "Live young objects are copied to a survivor space (or promoted to old if old enough); Eden is then freed in one go." }
+    ]</script>
+  </div>
+  <h3>Quick revision</h3>
+  <div class="revision">
+    <h3>Lesson 8.3 in one screen</h3>
+    <ul>
+      <li>GC frees <b>unreachable</b> objects automatically; it starts from the roots and keeps whatever it can reach.</li>
+      <li>Young generation = Eden + 2 survivor spaces; old generation for long-lived objects. Promotion after surviving enough minor GCs (max 15).</li>
+      <li>Minor GC: young only, frequent, short. Full GC: whole heap, rare, longest pause.</li>
+      <li>Concepts: mark (find live), sweep (free dead), compact or copy (remove gaps).</li>
+      <li>G1 is the default since Java 9; ZGC and Shenandoah target very short pauses; Parallel targets throughput.</li>
+      <li>Read <code>-Xlog:gc</code>: GC number, type and cause, before→after(heap size), pause time.</li>
+      <li><code>System.gc()</code> is a request. Leaks: static collections, unclosed resources, listeners, unbounded caches.</li>
+    </ul>
+  </div>
+  <h3>Interview and viva questions</h3>
+  <div class="faq">
+    <details><summary>Explain how generational garbage collection works.</summary><p>The heap is divided into a young generation (Eden and two survivor spaces) and an old generation. New objects go to Eden. When Eden fills, a minor GC copies live objects to a survivor space and increments their age; Eden is then freed in bulk. Objects that survive enough minor GCs are promoted to the old generation, which is collected less often by a major or full GC. It works well because most objects die young.</p></details>
+    <details><summary>What is the difference between minor, major and full GC?</summary><p>A minor GC collects only the young generation and is usually very short. “Major GC” is an informal term for collecting the old generation. A full GC collects the entire heap (young and old, often with compaction) and causes the longest stop-the-world pause. In G1 logs they appear as <code>Pause Young</code>, mixed collections, and <code>Pause Full</code>.</p></details>
+    <details><summary>Can Java have memory leaks if it has a garbage collector?</summary><p>Yes. The GC frees only unreachable objects. If code keeps references it no longer needs (static collections that only grow, caches without limits, listeners never unregistered, objects stored in long-lived sessions), those objects stay reachable and accumulate until <code>OutOfMemoryError</code>. Unclosed resources can also exhaust connections or file handles even when the heap is fine.</p></details>
+    <details><summary>Why is G1 the default collector?</summary><p>G1 balances throughput and pause times. It divides the heap into regions, collects the young regions in short pauses, marks the old generation concurrently, and then collects the old regions with the most garbage first (hence “Garbage First”), aiming at a pause goal (200 ms by default). It became the default in Java 9, replacing Parallel.</p></details>
+    <details><summary>Should you call System.gc()?</summary><p>Almost never. It is only a request, it often triggers a full, expensive collection, and it cannot free objects that are still referenced. If memory keeps growing, find what is holding the objects. Some teams start JVMs with <code>-XX:+DisableExplicitGC</code> to neutralise such calls from libraries.</p></details>
+  </div>
+
+  <h3 id="practice">Practice problems</h3>
+  <p class="prob-intro">Garbage collection is invisible in normal output, so these problems practise the skills around it: reading GC logs, spotting what keeps objects alive, and bounding memory use. The last three are business tasks.</p>
+  <div class="probs">
+    <article class="prob"><div class="prob__head"><span class="prob__num">P1</span><span class="prob__tag prob__tag--easy">Easy</span><h4>Read one GC log line</h4></div>
+      <p>Take a real <code>-Xlog:gc</code> line and print the GC number, the kind of pause, the memory freed and the pause time.</p>
+      <div class="prob__io"><div><small>Input</small><pre>[0.056s][info][gc] GC(3) Pause Young (Normal) (G1 Evacuation Pause) 38M-&gt;2M(64M) 0.572ms</pre></div><div><small>Expected output</small><pre>GC(3): Young pause of 0.572ms
+Heap 38 MB -&gt; 2 MB, freed 36 MB</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="java" data-file="Main.java"><pre><code>public class Main {
+    public static void main(String[] args) {
+        String line = &quot;[0.056s][info][gc] GC(3) Pause Young (Normal) (G1 Evacuation Pause) 38M-&gt;2M(64M) 0.572ms&quot;;
+        String[] words = line.split(&quot; &quot;);
+        String gcId = words[1];
+        String kind = words[3];                       // Young, Full, ...
+        String heap = words[words.length - 2];        // 38M-&gt;2M(64M)
+        String pause = words[words.length - 1];       // 0.572ms
+
+        int before = Integer.parseInt(heap.substring(0, heap.indexOf(&#x27;M&#x27;)));
+        int after = Integer.parseInt(heap.substring(heap.indexOf(&#x27;&gt;&#x27;) + 1, heap.indexOf(&quot;M(&quot;)));
+        System.out.println(gcId + &quot;: &quot; + kind + &quot; pause of &quot; + pause);
+        System.out.println(&quot;Heap &quot; + before + &quot; MB -&gt; &quot; + after + &quot; MB, freed &quot; + (before - after) + &quot; MB&quot;);
+    }
+}</code></pre><div class="output">GC(3): Young pause of 0.572ms
+Heap 38 MB -&gt; 2 MB, freed 36 MB</div></div>
+        <p><b>How it works:</b> a G1 log line has a fixed shape: uptime, level, tag, GC number, type, cause, <code>before->after(committed)</code> and the pause time. Here a <b>young</b> collection shrank the used heap from 38 MB to 2 MB: almost everything in Eden was garbage, which is the normal, healthy case.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P2</span><span class="prob__tag prob__tag--easy">Easy</span><h4>Created vs still alive</h4></div>
+      <p>A loop creates 10 price quotes but keeps only the cheapest. Count how many objects were created and how many are still reachable at the end.</p>
+      <div class="prob__io"><div><small>Input</small><pre>prices = {520, 480, 505, 499, 530, 470, 515, 490, 476, 510}</pre></div><div><small>Expected output</small><pre>Quotes created: 10
+Still reachable: 1 (best = Rs 470)
+Garbage: 9</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="java" data-file="Main.java"><pre><code>public class Main {
+    static class Quote {
+        final int price;
+        Quote(int price) { this.price = price; }
+    }
+
+    public static void main(String[] args) {
+        int[] prices = {520, 480, 505, 499, 530, 470, 515, 490, 476, 510};
+        Quote best = null;
+        int created = 0;
+        for (int p : prices) {
+            Quote q = new Quote(p);
+            created++;
+            if (best == null || q.price &lt; best.price) best = q;
+        }
+        System.out.println(&quot;Quotes created: &quot; + created);
+        System.out.println(&quot;Still reachable: 1 (best = Rs &quot; + best.price + &quot;)&quot;);
+        System.out.println(&quot;Garbage: &quot; + (created - 1));
+    }
+}</code></pre><div class="output">Quotes created: 10
+Still reachable: 1 (best = Rs 470)
+Garbage: 9</div></div>
+        <p><b>How it works:</b> each iteration creates a Quote; only the one held by <code>best</code> survives the iteration. 9 of 10 objects die young, which is why collectors split the heap into a young area that is cleaned often and cheaply, and an old area for the few survivors.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P3</span><span class="prob__tag prob__tag--medium">Medium</span><h4>Bound a growing cache</h4></div>
+      <p>A product-view cache must never hold more than 3 entries. Add entries one by one; when it is full, remove the oldest before adding. Print the cache after each step.</p>
+      <div class="prob__io"><div><small>Input</small><pre>views: &quot;P101&quot;, &quot;P205&quot;, &quot;P333&quot;, &quot;P101-v2&quot;, &quot;P419&quot;</pre></div><div><small>Expected output</small><pre>[P101]
+[P101, P205]
+[P101, P205, P333]
+  evicted P101
+[P205, P333, P101-v2]
+  evicted P205
+[P333, P101-v2, P419]</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="java" data-file="Main.java"><pre><code>import java.util.ArrayList;
+import java.util.List;
+
+public class Main {
+    static final int MAX = 3;
+    static List&lt;String&gt; cache = new ArrayList&lt;&gt;();
+
+    static void remember(String product) {
+        if (cache.size() == MAX) {
+            String evicted = cache.remove(0);   // oldest entry loses its reference
+            System.out.println(&quot;  evicted &quot; + evicted);
+        }
+        cache.add(product);
+    }
+
+    public static void main(String[] args) {
+        String[] views = {&quot;P101&quot;, &quot;P205&quot;, &quot;P333&quot;, &quot;P101-v2&quot;, &quot;P419&quot;};
+        for (String v : views) {
+            remember(v);
+            System.out.println(cache);
+        }
+    }
+}</code></pre><div class="output">[P101]
+[P101, P205]
+[P101, P205, P333]
+  evicted P101
+[P205, P333, P101-v2]
+  evicted P205
+[P333, P101-v2, P419]</div></div>
+        <p><b>How it works:</b> a static collection is a GC root, so anything in it lives forever unless you remove it. Capping the size turns an unbounded leak into a fixed memory cost. Real systems use ready-made caches with size limits and expiry times; the principle is the same.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P4</span><span class="prob__tag prob__tag--medium">Medium</span><h4>Unregister your listeners</h4></div>
+      <p>A price-alert service keeps a static list of listeners. Two screens register, then one screen closes. Show the difference between forgetting to unregister and doing it properly.</p>
+      <div class="prob__io"><div><small>Input</small><pre>screens: &quot;cart&quot;, &quot;wishlist&quot;; &quot;cart&quot; closes</pre></div><div><small>Expected output</small><pre>After closing without unregistering:
+  [cart] price drop: Headphones
+  [wishlist] price drop: Headphones
+After unregistering:
+  [wishlist] price drop: Smartwatch
+Listeners left: 1</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="java" data-file="Main.java"><pre><code>import java.util.ArrayList;
+import java.util.List;
+
+public class Main {
+    static class Screen {
+        final String name;
+        Screen(String name) { this.name = name; }
+        void onPriceDrop(String item) {
+            System.out.println(&quot;  [&quot; + name + &quot;] price drop: &quot; + item);
+        }
+    }
+
+    static List&lt;Screen&gt; listeners = new ArrayList&lt;&gt;();
+
+    static void publish(String item) {
+        for (Screen s : listeners) s.onPriceDrop(item);
+    }
+
+    public static void main(String[] args) {
+        Screen cart = new Screen(&quot;cart&quot;);
+        Screen wishlist = new Screen(&quot;wishlist&quot;);
+        listeners.add(cart);
+        listeners.add(wishlist);
+
+        cart = null;                                  // screen closed, but still registered!
+        System.out.println(&quot;After closing without unregistering:&quot;);
+        publish(&quot;Headphones&quot;);
+
+        listeners.removeIf(s -&gt; s.name.equals(&quot;cart&quot;));   // proper unregister
+        System.out.println(&quot;After unregistering:&quot;);
+        publish(&quot;Smartwatch&quot;);
+        System.out.println(&quot;Listeners left: &quot; + listeners.size());
+    }
+}</code></pre><div class="output">After closing without unregistering:
+  [cart] price drop: Headphones
+  [wishlist] price drop: Headphones
+After unregistering:
+  [wishlist] price drop: Smartwatch
+Listeners left: 1</div></div>
+        <p><b>How it works:</b> setting <code>cart = null</code> doesn't make the screen garbage: the static <code>listeners</code> list still reaches it, and it even keeps receiving events. Only removing it from the list makes it unreachable. In real apps, unregister in the screen's close or destroy method.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P5</span><span class="prob__tag prob__tag--medium">Medium</span><h4>Check GC pauses against an SLA</h4></div>
+      <p>An API promises responses within 50 ms. Given the pause times (ms) from a GC log, print the average pause, the longest pause, and how many pauses alone would break the promise.</p>
+      <div class="prob__io"><div><small>Input</small><pre>pauses = {0.74, 1.00, 1.05, 0.57, 62.4, 0.70, 4.62, 0.69}</pre></div><div><small>Expected output</small><pre>Average pause: 8.97 ms
+Longest pause: 62.40 ms
+Pauses over 50 ms: 1</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="java" data-file="Main.java"><pre><code>public class Main {
+    public static void main(String[] args) {
+        double[] pauses = {0.74, 1.00, 1.05, 0.57, 62.4, 0.70, 4.62, 0.69};
+        double sum = 0, max = 0;
+        int breaches = 0;
+        for (double p : pauses) {
+            sum += p;
+            if (p &gt; max) max = p;
+            if (p &gt; 50) breaches++;
+        }
+        System.out.printf(&quot;Average pause: %.2f ms%n&quot;, sum / pauses.length);
+        System.out.printf(&quot;Longest pause: %.2f ms%n&quot;, max);
+        System.out.println(&quot;Pauses over 50 ms: &quot; + breaches);
+    }
+}</code></pre><div class="output">Average pause: 8.97 ms
+Longest pause: 62.40 ms
+Pauses over 50 ms: 1</div></div>
+        <p><b>How it works:</b> the average looks fine (under 10 ms), but one 62.4 ms pause breaks the 50 ms promise for every request that was running at that moment. That's why latency-sensitive teams look at the <b>maximum</b> and high percentiles of GC pauses, not the average, and may choose a low-pause collector like ZGC.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P6</span><span class="prob__tag prob__tag--business">Business problem</span><h4>Expire idle sessions</h4></div>
+      <p>A banking portal logs users out after 15 minutes of inactivity. Given each user's last-activity minute and the current minute (60), remove expired sessions from the map so they can be garbage collected, and print who is still logged in.</p>
+      <div class="prob__io"><div><small>Input</small><pre>lastActive: riya=58, arjun=30, kabir=47, meera=44
+now = 60, timeout = 15 minutes</pre></div><div><small>Expected output</small><pre>expired: arjun (idle 30 min)
+expired: meera (idle 16 min)
+Still logged in: [kabir, riya]</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="java" data-file="Main.java"><pre><code>import java.util.Map;
+import java.util.TreeMap;
+
+public class Main {
+    public static void main(String[] args) {
+        Map&lt;String, Integer&gt; lastActive = new TreeMap&lt;&gt;();
+        lastActive.put(&quot;riya&quot;, 58);
+        lastActive.put(&quot;arjun&quot;, 30);
+        lastActive.put(&quot;kabir&quot;, 47);
+        lastActive.put(&quot;meera&quot;, 44);
+
+        int now = 60, timeout = 15;
+        lastActive.entrySet().removeIf(e -&gt; {
+            boolean expired = now - e.getValue() &gt; timeout;
+            if (expired) System.out.println(&quot;expired: &quot; + e.getKey() + &quot; (idle &quot; + (now - e.getValue()) + &quot; min)&quot;);
+            return expired;
+        });
+        System.out.println(&quot;Still logged in: &quot; + lastActive.keySet());
+    }
+}</code></pre><div class="output">expired: arjun (idle 30 min)
+expired: meera (idle 16 min)
+Still logged in: [kabir, riya]</div></div>
+        <p><b>How it works:</b></p><ol><li>Many users never press logout, so a session map without expiry is a slow leak.</li><li><code>removeIf</code> walks the entries once and removes those idle for more than 15 minutes: arjun (30 min) and meera (16 min). kabir has been idle exactly 13 minutes and stays.</li><li>A TreeMap keeps the names sorted so the output is predictable. Real systems use a cache library or the web framework's session timeout setting.</li></ol>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P7</span><span class="prob__tag prob__tag--business">Business problem</span><h4>Summarise a GC log</h4></div>
+      <p>An SRE pastes five GC log lines from a payments server. Count young and full pauses and add up the total pause time.</p>
+      <div class="prob__io"><div><small>Input</small><pre>5 lines from -Xlog:gc (see the code)</pre></div><div><small>Expected output</small><pre>Young pauses: 4, full pauses: 1
+Total pause time: 7.977 ms
+Check the cause of the full GC: here it was an explicit System.gc() call</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="java" data-file="Main.java"><pre><code>public class Main {
+    public static void main(String[] args) {
+        String[] log = {
+            &quot;[0.032s][info][gc] GC(0) Pause Young (Normal) (G1 Evacuation Pause) 7M-&gt;1M(64M) 0.738ms&quot;,
+            &quot;[0.038s][info][gc] GC(1) Pause Young (Normal) (G1 Evacuation Pause) 16M-&gt;1M(64M) 1.000ms&quot;,
+            &quot;[0.051s][info][gc] GC(2) Pause Young (Normal) (G1 Evacuation Pause) 38M-&gt;1M(64M) 1.048ms&quot;,
+            &quot;[0.056s][info][gc] GC(3) Pause Young (Normal) (G1 Evacuation Pause) 38M-&gt;2M(64M) 0.572ms&quot;,
+            &quot;[0.081s][info][gc] GC(6) Pause Full (System.gc()) 38M-&gt;3M(17M) 4.619ms&quot;
+        };
+        int young = 0, full = 0;
+        double totalMs = 0;
+        for (String line : log) {
+            if (line.contains(&quot;Pause Young&quot;)) young++;
+            else if (line.contains(&quot;Pause Full&quot;)) full++;
+            String last = line.substring(line.lastIndexOf(&#x27; &#x27;) + 1);      // e.g. 0.738ms
+            totalMs += Double.parseDouble(last.replace(&quot;ms&quot;, &quot;&quot;));
+        }
+        System.out.println(&quot;Young pauses: &quot; + young + &quot;, full pauses: &quot; + full);
+        System.out.printf(&quot;Total pause time: %.3f ms%n&quot;, totalMs);
+        if (full &gt; 0) System.out.println(&quot;Check the cause of the full GC: here it was an explicit System.gc() call&quot;);
+    }
+}</code></pre><div class="output">Young pauses: 4, full pauses: 1
+Total pause time: 7.977 ms
+Check the cause of the full GC: here it was an explicit System.gc() call</div></div>
+        <p><b>How it works:</b></p><ol><li>Each line ends with the pause time, so <code>lastIndexOf(' ')</code> finds it.</li><li>Young pauses are expected and short. A <b>Full</b> pause is the expensive one; its cause in brackets tells you why it happened. Here it was <code>System.gc()</code>, which some library may be calling. <code>-XX:+DisableExplicitGC</code> would turn such calls into no-ops.</li><li>These lines are real output from JDK 21 with G1.</li></ol>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P8</span><span class="prob__tag prob__tag--business">Business problem</span><h4>How often will Eden fill up?</h4></div>
+      <p>An order API handles 400 requests per second, and each request allocates about 250 KB of short-lived objects. With an Eden space of 600 MB, estimate the allocation rate and how often a young GC will run.</p>
+      <div class="prob__io"><div><small>Input</small><pre>400 requests/s, 250 KB per request, Eden = 600 MB</pre></div><div><small>Expected output</small><pre>Allocation rate: 97.7 MB/s
+Eden fills every 6.1 seconds
+About 10 young GCs per minute</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="java" data-file="Main.java"><pre><code>public class Main {
+    public static void main(String[] args) {
+        int requestsPerSecond = 400;
+        int kbPerRequest = 250;
+        int edenMb = 600;
+
+        double mbPerSecond = requestsPerSecond * kbPerRequest / 1024.0;
+        double secondsToFill = edenMb / mbPerSecond;
+        System.out.printf(&quot;Allocation rate: %.1f MB/s%n&quot;, mbPerSecond);
+        System.out.printf(&quot;Eden fills every %.1f seconds%n&quot;, secondsToFill);
+        System.out.printf(&quot;About %.0f young GCs per minute%n&quot;, 60 / secondsToFill);
+    }
+}</code></pre><div class="output">Allocation rate: 97.7 MB/s
+Eden fills every 6.1 seconds
+About 10 young GCs per minute</div></div>
+        <p><b>How it works:</b></p><ol><li>400 × 250 KB ≈ 97.7 MB of new objects every second.</li><li>A 600 MB Eden fills in about 6 seconds, so expect roughly 10 young collections per minute. That is normal; each is short if most objects are already dead.</li><li>Capacity planners use exactly this arithmetic, together with real GC logs, to size the heap. Halving the allocation per request halves the GC frequency.</li></ol>
+      </details>
+    </article>
+  </div>
+
+
+  <h3 id="scenarios">Real-world scenario questions (asked in company interviews)</h3>
+  <p class="scn-intro">GC questions separate developers who have read about it from those who have debugged it. Decide your answer first, then open the model answer.</p>
+  <div class="scenarios">
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Banking · batch job</span><span class="scn__tag scn__tag--level">Fresher</span></div>
+      <h4>“Let's call System.gc() after every batch”</h4>
+      <p class="scn__situation">A statement-generation job processes accounts in batches of 10,000. A teammate notices memory going up and down and suggests adding <code>System.gc()</code> after each batch “to keep memory clean”. What do you say?</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> do you know what System.gc() really does and what it costs?</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>Memory going up and down is normal: objects from a batch become garbage and young GCs clean them.</li>
+          <li><code>System.gc()</code> is only a request, and with G1 it usually triggers a <b>full</b> collection, the slowest kind, after every batch. The job gets slower, not cleaner.</li>
+          <li>If memory doesn't come back down after GCs, that is a leak: something still references the old batches. Find it with a heap dump instead.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> believing System.gc() can free objects that are still referenced.</p>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">E-commerce · product service</span><span class="scn__tag scn__tag--level">1–3 years</span></div>
+      <h4>OutOfMemoryError every Sunday</h4>
+      <p class="scn__situation">A product service is restarted every Monday deploy. By Sunday it dies with <code>OutOfMemoryError: Java heap space</code>. GC logs show the heap left after each full GC rising slowly all week. Someone added a <code>static Map&lt;String, Product&gt;</code> cache of every product ever viewed. Explain and fix.</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> can you connect the GC log pattern to a reachability leak?</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>The rising “after” value means live data is growing: the static map is a GC root, and it only ever gets new entries, so every product viewed all week stays reachable.</li>
+          <li>Confirm with a heap dump: the map will dominate the heap, with a path to a static field.</li>
+          <li>Fix: a cache with a maximum size and expiry (for example a caching library, or at least an LRU with a limit), or no cache if the database is fast enough.</li>
+          <li>Add a heap-after-GC alert so the next leak is caught on Tuesday, not Sunday.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> “double -Xmx” or “restart it daily”. Both just move the crash.</p>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Fintech · trading API</span><span class="scn__tag scn__tag--level">3+ years</span></div>
+      <h4>Latency spikes every few minutes</h4>
+      <p class="scn__situation">A quote API on a 16 GB G1 heap has a p99 latency target of 50 ms. Every few minutes a burst of requests takes 300–400 ms. Average latency looks fine. How do you investigate and what options would you consider?</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> can you correlate GC pauses with latency and choose sensible remedies?</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ol>
+          <li>Enable or read the GC log and line up pause timestamps with the slow requests. Look for <code>Pause Full</code>, long young pauses or humongous allocations.</li>
+          <li>If full GCs appear, find their cause: old generation filling (too small heap or a leak), humongous objects (very large arrays), or explicit <code>System.gc()</code> calls.</li>
+          <li>Reduce allocation in hot paths (reuse buffers, avoid huge temporary arrays), size the heap from measured live data, and consider ZGC, which keeps pauses very short even on large heaps.</li>
+          <li>Verify with load tests and compare p99 before and after, changing one thing at a time.</li>
+        </ol>
+        <p class="scn__avoid"><b>Avoid:</b> tuning random flags without evidence from logs.</p>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Travel · price alerts</span><span class="scn__tag scn__tag--level">1–3 years</span></div>
+      <h4>Closed screens that never go away</h4>
+      <p class="scn__situation">A travel app's backend creates a <code>FareWatcher</code> object for each user who opens a flight search and registers it with a global, static <code>FareFeed</code> to receive price updates. Months later the heap is full of FareWatcher objects for searches users abandoned long ago. Why, and how do you design it properly?</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> do you recognise the listener leak pattern?</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>The static FareFeed keeps a list of registered watchers. A watcher is reachable through it for as long as it stays registered, no matter that the user left.</li>
+          <li>Unregister when the search ends or the session expires; tie the watcher's lifetime to the session (for example in a try-with-resources style or a session-expiry hook).</li>
+          <li>Add an expiry to subscriptions so forgotten ones are removed automatically, and monitor the number of registered watchers.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> assuming the GC will notice the user is gone. It only sees references.</p>
+      </div></details>
+    </article>
+  </div>
+</section>
+
+<nav class="lesson-nav" id="lesson-nav" aria-label="Lesson navigation"></nav>
+<div class="ad-slot" data-slot="bottom"></div>
+</article>
+
+<aside class="lesson-side">
+  <nav class="toc" aria-label="In this lesson">
+    <h4>In this lesson</h4>
+    <ol>
+      <li><a href="#story">The story</a></li>
+      <li><a href="#definition">Definition</a></li>
+      <li><a href="#types">Types and ways to use it</a></li>
+      <li><a href="#steps">Step by step</a></li>
+      <li><a href="#animation">See it happen</a></li>
+      <li><a href="#real-world">Real-world use</a></li>
+      <li><a href="#run">Run the code</a></li>
+      <li><a href="#tracer">Line by line</a></li>
+      <li><a href="#worked">Worked examples</a></li>
+      <li><a href="#quiz">Quiz and revision</a></li>
+      <li><a href="#practice">Practice problems</a></li>
+      <li><a href="#scenarios">Industry scenarios</a></li>
+    </ol>
+  </nav>
+  <div class="ad-slot" data-slot="side"></div>
+  <div class="outline" id="outline"></div>
+</aside>
+</div>
+</main>
+
+<footer class="site-footer">
+  <div class="wrap">
+    <div><h4>MyPhatshala</h4><p>Free programming and IT lessons that show what happens behind the screen.</p></div>
+    <div><h4>Learn</h4><a href="../../../../#tracks">All courses</a><a href="../../">Core Java syllabus</a></div>
+    <div><h4>Site</h4><a href="../../../../about.html">About</a><a href="../../../../contact.html">Contact</a><a href="../../../../privacy.html">Privacy policy</a><a href="../../../../disclaimer.html">Disclaimer</a></div>
+    <div class="copyright">© MyPhatshala. All lesson content, diagrams and animations are original. Please do not copy without permission.</div>
+  </div>
+</footer>
+
+<script src="../../../../data/courses/core-java.js"></script>
+<script src="../../../../assets/js/lesson.js"></script>
+<script src="../../../../assets/js/ads.js"></script>
+<script src="../../../../assets/js/site.js"></script>
+</body>
+</html>

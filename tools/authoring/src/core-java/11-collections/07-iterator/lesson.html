@@ -1,0 +1,393 @@
+<!--META {
+"course": "core-java", "module": "11-collections", "lesson": "07-iterator",
+"title": "Iterator and ListIterator", "courseTitle": "Core Java", "number": "11.7",
+"track": "#E8772E", "trackId": "programming", "trackTitle": "Programming Languages", "level": "Intermediate",
+"minutes": 20,
+"description": "Iterator and ListIterator in Java: hasNext, next and remove; how the for-each loop uses an iterator; removing safely while looping; fail-fast iterators and ConcurrentModificationException (modCount); ListIterator's cursor, previous, set and add; fail-safe iterators of concurrent collections; and making your own class Iterable. With animations, a JVM tracer, {{NPROB}} practice problems, quiz and interview scenarios.",
+"ogTitle": "Iterators: walking a collection safely",
+"ogDescription": "Watch an iterator's cursor move on the heap, remove items safely mid-loop, and solve {{NPROB}} problems.",
+"lead": "Every for-each loop over a collection quietly creates an <b>Iterator</b>: a small object with a cursor that knows how to step through that collection, whether it's an array inside, a chain of nodes or a tree. Using one directly lets you do what a for-each can't: remove elements safely while looping, and, with a <b>ListIterator</b>, walk backwards, replace and insert at the cursor. You'll also see why changing a list behind an iterator's back throws <code>ConcurrentModificationException</code>.",
+"chips": ["Module 11 · Collections", "⏱ 20 min", "Intermediate", "{{NPROB}} practice problems"]
+} META-->
+<part n="1" id="story" label="The story">
+  <h2>The ticket checker's finger</h2>
+  <div class="story">
+    <p class="narration">On the Panvel local, the ticket checker walks the compartment keeping one finger on the passenger he's checking. When a ticketless passenger is taken off at Kharghar, he removes them and his finger stays in the right place. Kabir, coding the same thing, removed passengers inside a for-each loop. His program crashed.</p>
+    <div class="scene">
+      <svg viewBox="0 0 640 170" role="img" aria-label="An iterator cursor stepping through passengers; removing through the iterator is safe, removing through the list during a for-each throws ConcurrentModificationException">
+        <g font-size="10.5">
+          <rect x="14" y="24" width="70" height="40" rx="8" class="s-soft-acc" style="stroke:var(--track)"/><text x="49" y="49" text-anchor="middle" class="s-ink" font-weight="700">Riya</text>
+          <rect x="94" y="24" width="70" height="40" rx="8" class="s-card2" style="stroke:var(--red)"/><text x="129" y="49" text-anchor="middle" class="s-red" font-weight="700">no ticket</text>
+          <rect x="174" y="24" width="70" height="40" rx="8" class="s-soft-acc" style="stroke:var(--track)"/><text x="209" y="49" text-anchor="middle" class="s-ink" font-weight="700">Om</text>
+          <text x="129" y="86" text-anchor="middle" class="s-blue" font-weight="700">▲ cursor</text>
+          <text x="14" y="112" class="mono s-green">it.remove();</text><text x="114" y="112" class="s-green" font-weight="700">✓ safe: cursor adjusts</text>
+          <text x="14" y="138" class="mono s-red">list.remove(p);</text><text x="130" y="138" class="s-red" font-weight="700">✗ inside for-each</text>
+          <rect x="300" y="20" width="326" height="124" rx="12" class="s-board"/>
+          <text x="314" y="44" class="mono s-chalk">for (String p : list)</text>
+          <text x="314" y="64" class="mono s-chalk">  if (noTicket(p)) list.remove(p);</text>
+          <text x="314" y="94" class="mono s-kw">ConcurrentModificationException</text>
+          <text x="314" y="120" class="s-chalk">the hidden iterator saw the list change</text>
+        </g>
+        <text x="632" y="166" text-anchor="end" class="s-wm">myphatshala.com</text>
+      </svg>
+    </div>
+    <riya>Sir, Kabir's loop is just a for-each. Where's the iterator?</riya>
+    <arjun>Hidden. javac turns every for-each over a collection into <code>Iterator it = list.iterator(); while (it.hasNext()) { p = it.next(); … }</code>. When Kabir calls <code>list.remove</code>, the list changes without telling that iterator.</arjun>
+    <riya>And the iterator notices?</riya>
+    <arjun>Every list keeps a change counter. The iterator remembers the value it started with and checks it on every <code>next()</code>. If someone else changed the list, it stops immediately rather than return wrong data. Remove through the iterator itself, like the checker's finger, and everything stays consistent.</arjun>
+  </div>
+</part>
+
+<part n="2" id="definition" label="Definition">
+  <h2>What are Iterator and ListIterator?</h2>
+  <div class="def">
+    <div class="def__formal"><small>Formal definition (write this in exams)</small>
+      <p>An <b>Iterator&lt;E&gt;</b> (<code>java.util</code>) is an object that traverses the elements of a collection one at a time, obtained from <code>collection.iterator()</code>. It defines <code>hasNext()</code>, <code>next()</code> and the optional <code>remove()</code>, which removes the last element returned and is the only safe way to modify a collection during iteration. The enhanced for loop uses an iterator for any <code>Iterable</code>. Iterators of most <code>java.util</code> collections are <b>fail-fast</b>: if the collection is structurally modified other than through the iterator, the next operation throws <code>ConcurrentModificationException</code>. A <b>ListIterator&lt;E&gt;</b>, obtained from <code>list.listIterator()</code>, extends Iterator for lists with bidirectional movement (<code>hasPrevious</code>, <code>previous</code>), index queries (<code>nextIndex</code>, <code>previousIndex</code>) and modification at the cursor (<code>set</code>, <code>add</code>).</p></div>
+    <div class="def__simple"><small>In simple words</small>
+      <p>An iterator is a finger moving through a collection. A ListIterator is a finger that can also go backwards and edit the list where it points.</p></div>
+  </div>
+  <h3>Words you'll meet in this lesson</h3>
+  <div class="terms">
+    <div class="term"><b>Cursor</b><span>The iterator's position, <i>between</i> elements. <code>next()</code> jumps over one element and returns it.</span></div>
+    <div class="term"><b>Structural change</b><span>Adding or removing elements (not just <code>set</code>).</span></div>
+    <div class="term"><b>modCount</b><span>A counter in the collection, increased on every structural change.</span></div>
+    <div class="term"><b>Fail-fast</b><span>Throw <code>ConcurrentModificationException</code> as soon as an unexpected change is seen.</span></div>
+    <div class="term"><b>Fail-safe</b><span>Iterate over a snapshot or tolerate changes (concurrent collections).</span></div>
+    <div class="term"><b>Iterable</b><span>Any type with an <code>iterator()</code> method; usable in for-each.</span></div>
+  </div>
+  <h3>The methods</h3>
+  <div class="table-wrap">
+  <table class="compare" style="min-width:560px">
+    <thead><tr><th>Method</th><th>Iterator</th><th>ListIterator</th><th>What it does</th></tr></thead>
+    <tbody>
+      <tr><td><code>hasNext()</code> / <code>next()</code></td><td>✓</td><td>✓</td><td>Is there more? Return the next element.</td></tr>
+      <tr><td><code>remove()</code></td><td>✓</td><td>✓</td><td>Remove the element last returned by next/previous.</td></tr>
+      <tr><td><code>hasPrevious()</code> / <code>previous()</code></td><td></td><td>✓</td><td>Walk backwards.</td></tr>
+      <tr><td><code>nextIndex()</code> / <code>previousIndex()</code></td><td></td><td>✓</td><td>Index the cursor is next to.</td></tr>
+      <tr><td><code>set(e)</code></td><td></td><td>✓</td><td>Replace the element last returned.</td></tr>
+      <tr><td><code>add(e)</code></td><td></td><td>✓</td><td>Insert at the cursor.</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <exam><b>Exam tip:</b> <code>remove()</code> may be called <b>once per</b> <code>next()</code>; calling it twice, or before any <code>next()</code>, throws <code>IllegalStateException</code>. <code>next()</code> past the end throws <code>NoSuchElementException</code>. Modifying the collection directly during iteration throws <code>ConcurrentModificationException</code> (fail-fast).</exam>
+</part>
+
+{{AD}}
+
+<part n="3" id="types" label="Types and ways to use it">
+  <h2>Four iterator patterns</h2>
+  <div class="cards">
+    <div class="card"><svg class="ic" viewBox="0 0 40 40" fill="none" stroke="var(--blue)" stroke-width="2"><path d="M8 20h20M22 14l6 6-6 6"/></svg><h4>Walk</h4><p><code>while (it.hasNext()) it.next()</code>: what for-each does for you.</p><span class="tag">read</span></div>
+    <div class="card"><svg class="ic" viewBox="0 0 40 40" fill="none" stroke="var(--red)" stroke-width="2"><path d="M10 20h20"/></svg><h4>Remove safely</h4><p><code>it.remove()</code> during the loop. Or <code>removeIf</code>.</p><span class="tag">filter in place</span></div>
+    <div class="card"><svg class="ic" viewBox="0 0 40 40" fill="none" stroke="var(--green)" stroke-width="2"><path d="M30 20H10M16 14l-6 6 6 6"/></svg><h4>Walk back, edit</h4><p>ListIterator: <code>previous</code>, <code>set</code>, <code>add</code>.</p><span class="tag">lists only</span></div>
+    <div class="card"><svg class="ic" viewBox="0 0 40 40" fill="none" stroke="var(--track)" stroke-width="2"><rect x="8" y="8" width="24" height="24" rx="4"/><path d="M14 20h12"/></svg><h4>Your own Iterable</h4><p>Implement <code>iterator()</code>; your class works in for-each.</p><span class="tag">custom</span></div>
+  </div>
+
+  <h3>What for-each really does</h3>
+  <div class="code" data-lang="java" data-file="Main.java"><pre><code>import java.util.*;
+
+public class Main {
+    public static void main(String[] args) {
+        List&lt;String&gt; coach = new ArrayList&lt;&gt;(List.of("Riya", "Kabir", "Om"));
+
+        for (String p : coach) System.out.print(p + ";");      // you write this…
+        System.out.println();
+
+        Iterator&lt;String&gt; it = coach.iterator();                // …javac writes this
+        while (it.hasNext()) {
+            String p = it.next();
+            System.out.print(p + ";");
+        }
+        System.out.println();
+    }
+}</code></pre><div class="output">Riya;Kabir;Om;
+Riya;Kabir;Om;</div></div>
+
+  <h3>Removing while iterating, the right way</h3>
+  <div class="code" data-lang="java" data-file="Main.java"><pre><code>import java.util.*;
+
+public class Main {
+    public static void main(String[] args) {
+        List&lt;Integer&gt; marks = new ArrayList&lt;&gt;(List.of(78, 32, 91, 28, 64));
+        Iterator&lt;Integer&gt; it = marks.iterator();
+        while (it.hasNext()) {
+            if (it.next() &lt; 35) {
+                it.remove();                       // removes the element just returned
+            }
+        }
+        System.out.println(marks);
+
+        List&lt;Integer&gt; copy = new ArrayList&lt;&gt;(List.of(78, 32, 91, 28, 64));
+        copy.removeIf(m -&gt; m &lt; 35);               // the same in one line (Lesson 14.1)
+        System.out.println(copy);
+    }
+}</code></pre><div class="output">[78, 91, 64]
+[78, 91, 64]</div></div>
+
+  <h3>ListIterator: backwards, set and add</h3>
+  <div class="code" data-lang="java" data-file="Main.java"><pre><code>import java.util.*;
+
+public class Main {
+    public static void main(String[] args) {
+        List&lt;String&gt; route = new ArrayList&lt;&gt;(List.of("Panvel", "Kharghar", "Vashi"));
+        ListIterator&lt;String&gt; li = route.listIterator();
+
+        while (li.hasNext()) {
+            int i = li.nextIndex();
+            String stop = li.next();
+            if (stop.equals("Kharghar")) {
+                li.set("Kharghar (Fest)");          // replace the element just returned
+                li.add("Belapur");                  // insert right after it, at the cursor
+            }
+            System.out.println(i + ": " + stop);
+        }
+        System.out.print("Back: ");
+        while (li.hasPrevious()) System.out.print(li.previous() + "|");
+        System.out.println();
+    }
+}</code></pre><div class="output">0: Panvel
+1: Kharghar
+3: Vashi
+Back: Vashi|Belapur|Kharghar (Fest)|Panvel|</div></div>
+  <p>Notice two things: “Belapur” wasn't printed in the forward loop, because <code>add</code> inserts <i>before</i> the cursor and the next <code>next()</code> continues with Vashi; and Vashi's index is now <b>3</b>, because Belapur took index 2.</p>
+
+  <h3>Making your own class iterable</h3>
+  <div class="code" data-lang="java" data-file="Main.java"><pre><code>import java.util.Iterator;
+
+class Countdown implements Iterable&lt;Integer&gt; {
+    private final int from;
+    Countdown(int from) { this.from = from; }
+
+    public Iterator&lt;Integer&gt; iterator() {
+        return new Iterator&lt;&gt;() {                // anonymous class (Lesson 10.5)
+            int current = from;
+            public boolean hasNext() { return current &gt; 0; }
+            public Integer next() { return current--; }
+        };
+    }
+}
+
+public class Main {
+    public static void main(String[] args) {
+        for (int n : new Countdown(3)) System.out.print(n + " ");
+        System.out.println("Launch!");
+    }
+}</code></pre><div class="output">3 2 1 Launch!</div></div>
+  <warn><b>Don't change a collection behind its iterator.</b> <code>list.add</code> or <code>list.remove</code> inside a for-each over the same list throws <code>ConcurrentModificationException</code> (except by luck when removing the second-to-last element, as Lesson 11.3 showed). Use <code>it.remove()</code>, <code>ListIterator.add</code>, <code>removeIf</code>, or collect changes and apply them after the loop.</warn>
+  <tip><b>Rule of thumb:</b> for-each for reading; an explicit Iterator when you need to remove; ListIterator when you need to replace, insert or go backwards in a list. For collections shared between threads, use concurrent collections whose iterators don't throw (Module 12).</tip>
+</part>
+
+<part n="4" id="steps" label="Step by step">
+  <h2>How fail-fast checking works</h2>
+  <ol class="stepper">
+    <li><h4>The list counts its changes</h4>
+      <span class="behind">ArrayList inherits a field <code>modCount</code> from <code>AbstractList</code>. Every <code>add</code>/<code>remove</code>/<code>clear</code> increments it; <code>set</code> doesn't (no structural change).</span></li>
+    <li><h4>The iterator takes a note</h4>
+      <div class="code" data-lang="java" data-file="ArrayList.Itr (simplified)"><pre><code>int cursor;                       // index of the next element
+int lastRet = -1;                 // index of the last element returned
+int expectedModCount = modCount;  // the count when iteration started</code></pre></div>
+      <span class="behind"><code>list.iterator()</code> creates an <code>ArrayList.Itr</code>, an inner class (Lesson 10.5) that reads the list's private array through its outer link.</span></li>
+    <li><h4>Every next() checks</h4>
+      <span class="behind"><code>next()</code> first calls <code>checkForComodification()</code>: if <code>modCount != expectedModCount</code>, throw <code>ConcurrentModificationException</code>. Otherwise return <code>elementData[cursor]</code>, set <code>lastRet = cursor</code> and advance.</span></li>
+    <li><h4>it.remove() keeps them in sync</h4>
+      <span class="behind">It removes index <code>lastRet</code> from the list (which bumps <code>modCount</code>), moves <code>cursor</code> back to <code>lastRet</code>, sets <code>lastRet = -1</code> (so a second remove fails) and updates <code>expectedModCount</code>. No exception.</span></li>
+    <li><h4>Best effort, not a guarantee</h4>
+      <span class="behind">Fail-fast checks catch most bugs, but the Java docs warn they're not guaranteed, especially across threads. Treat the exception as a bug detector, never as program logic.</span></li>
+  </ol>
+</part>
+
+<part n="5" id="animation" label="See it happen">
+  <h2>The cursor and the change counter: both views</h2>
+  <p>Left: a loop that removes failing marks. Right: the iterator's <code>cursor</code>, <code>lastRet</code> and <code>expectedModCount</code> next to the list's array and <code>modCount</code>.</p>
+  {{ANIM}}
+</part>
+
+<part n="6" id="real-world" label="Real-world use">
+  <h2>Iterators in real systems</h2>
+  <p>Iterators matter whenever code walks large or changing data, and when you build your own data types.</p>
+  {{ANIM2}}
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="14" y="22" width="92" height="46" rx="6" class="s-card" style="stroke:var(--line)"/><text x="60" y="42" text-anchor="middle" font-size="8.5" class="mono s-ink">expired sessions</text><text x="60" y="58" text-anchor="middle" font-size="8.5" class="mono s-red">it.remove()</text></svg></div>
+    <div><h4>1. Cleaning up in place</h4><p>Background jobs remove expired sessions, cancelled orders or stale cache entries while scanning, using <code>iterator.remove()</code> or <code>removeIf</code> on the collection or a map's <code>entrySet()</code>.</p>
+      <div class="uc-flow"><span>scan entries</span><i>→</i><span class="java">it.remove()</span><i>→</i><span>no CME, no copy</span></div></div>
+  </div>
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="18" y="20" width="84" height="50" rx="6" class="s-board"/><text x="26" y="40" font-size="8" class="mono s-chalk">rs.next()</text><text x="26" y="56" font-size="8" class="mono s-chalk">reader.readLine()</text></svg></div>
+    <div><h4>2. Streaming large data</h4><p>Database result sets, file readers and paged API clients follow the same “has next / get next” idea, so millions of rows can be processed without loading them all.</p>
+      <div class="uc-flow"><span>while (rs.next())</span><i>→</i><span class="java">one row at a time</span><i>→</i><span>constant memory</span></div></div>
+  </div>
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="22" y="22" width="76" height="46" rx="6" class="s-card" style="stroke:var(--line)"/><text x="60" y="49" text-anchor="middle" font-size="8.5" class="mono s-ink">implements Iterable</text></svg></div>
+    <div><h4>3. Custom collections</h4><p>A <code>Playlist</code>, <code>Route</code> or <code>Portfolio</code> class that implements <code>Iterable</code> works in for-each and hides how it stores its items.</p>
+      <div class="uc-flow"><span>for (Song s : playlist)</span><i>→</i><span class="java">playlist.iterator()</span><i>→</i><span>internals hidden</span></div></div>
+  </div>
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="16" y="22" width="88" height="46" rx="6" class="s-card" style="stroke:var(--green)"/><text x="60" y="42" text-anchor="middle" font-size="8.5" class="mono s-ink">CopyOnWriteArrayList</text><text x="60" y="58" text-anchor="middle" font-size="8.5" class="s-green">snapshot iterator</text></svg></div>
+    <div><h4>4. Listener lists</h4><p>Event systems keep listeners in a <code>CopyOnWriteArrayList</code>: iterating (firing events) is frequent, changes are rare, and its iterator walks a snapshot, so a listener can unregister itself mid-event without an exception.</p>
+      <div class="uc-flow"><span>fire event</span><i>→</i><span class="java">snapshot iteration</span><i>→</i><span>safe removal</span></div></div>
+  </div>
+  <p class="muted">Examples are simplified. JDBC's ResultSet isn't a java.util.Iterator, but follows the same pattern.</p>
+</part>
+
+{{AD}}
+
+<part n="7" id="run" label="Run the code">
+  <h2>Checking tickets on a train</h2>
+  <div class="code" data-lang="java" data-file="Main.java"><pre><code>import java.util.*;
+
+public class Main {
+    public static void main(String[] args) {
+        List&lt;String&gt; coach = new ArrayList&lt;&gt;(List.of("Riya:T", "Kabir:-", "Om:T", "Zoya:-", "Meera:T"));
+        List&lt;String&gt; fined = new ArrayList&lt;&gt;();
+
+        Iterator&lt;String&gt; it = coach.iterator();
+        while (it.hasNext()) {
+            String[] p = it.next().split(":");
+            if (p[1].equals("-")) {               // no ticket
+                fined.add(p[0]);
+                it.remove();                      // safe removal at the cursor
+            }
+        }
+
+        ListIterator&lt;String&gt; li = coach.listIterator();
+        while (li.hasNext()) {
+            String name = li.next().split(":")[0];
+            li.set(name + " ✓");                  // mark as checked
+        }
+
+        System.out.println("Fined: " + fined);
+        System.out.println("Checked: " + coach);
+    }
+}</code></pre><div class="output">Fined: [Kabir, Zoya]
+Checked: [Riya ✓, Om ✓, Meera ✓]</div></div>
+  <ul class="anno">
+    <li><code>coach.iterator()</code><span>A fresh iterator with its cursor before the first passenger.</span></li>
+    <li><code>it.remove()</code><span>Removes the passenger just returned by <code>next()</code>; the iterator adjusts.</span></li>
+    <li><code>listIterator()</code> + <code>set</code><span>Replaces each element in place as we pass it.</span></li>
+    <li>Adding to <code>fined</code><span>Fine: it's a different list from the one being iterated.</span></li>
+  </ul>
+  <div class="runner">
+    <script type="application/json">{
+      "lang": "java", "file": "Main.java",
+      "tasks": [
+        { "label": "1 · Ticket check", "hint": "Press <b>Run</b>. Then use <code>li.add(\"TTE\")</code> after Om to show where the checker is standing.",
+          "code": "import java.util.*;\n\npublic class Main {\n    public static void main(String[] args) {\n        List<String> coach = new ArrayList<>(List.of(\"Riya:T\", \"Kabir:-\", \"Om:T\", \"Zoya:-\", \"Meera:T\"));\n        List<String> fined = new ArrayList<>();\n\n        Iterator<String> it = coach.iterator();\n        while (it.hasNext()) {\n            String[] p = it.next().split(\":\");\n            if (p[1].equals(\"-\")) {\n                fined.add(p[0]);\n                it.remove();\n            }\n        }\n\n        ListIterator<String> li = coach.listIterator();\n        while (li.hasNext()) {\n            String name = li.next().split(\":\")[0];\n            li.set(name + \" ✓\");\n        }\n\n        System.out.println(\"Fined: \" + fined);\n        System.out.println(\"Checked: \" + coach);\n    }\n}\n" },
+        { "label": "2 · Spot the error: remove inside for-each", "hint": "Rewrite the loop with an explicit <code>Iterator</code> and <code>it.remove()</code>.",
+          "code": "import java.util.*;\n\npublic class Main {\n    public static void main(String[] args) {\n        List<Integer> marks = new ArrayList<>(List.of(78, 32, 91, 28, 64));\n        for (Integer m : marks) {\n            if (m < 35) {\n                marks.remove(m);\n            }\n        }\n        System.out.println(marks);\n    }\n}\n", "_expect": "exception" },
+        { "label": "3 · Spot the error: remove twice", "hint": "<code>remove()</code> is allowed once per <code>next()</code>. Delete the second call.",
+          "code": "import java.util.*;\n\npublic class Main {\n    public static void main(String[] args) {\n        List<String> l = new ArrayList<>(List.of(\"a\", \"b\", \"c\"));\n        Iterator<String> it = l.iterator();\n        it.next();\n        it.remove();\n        it.remove();\n        System.out.println(l);\n    }\n}\n", "_expect": "exception" },
+        { "label": "4 · Predict: where does add go?", "hint": "<b>Predict first:</b> what's printed inside the loop, and what's the final list?",
+          "code": "import java.util.*;\n\npublic class Main {\n    public static void main(String[] args) {\n        List<String> l = new ArrayList<>(List.of(\"A\", \"B\", \"C\"));\n        ListIterator<String> li = l.listIterator();\n        while (li.hasNext()) {\n            String s = li.next();\n            System.out.print(s + \" \");\n            if (s.equals(\"A\")) li.add(\"X\");\n        }\n        System.out.println(\"→ \" + l);\n    }\n}\n" },
+        { "label": "5 · Your own Iterable", "hint": "Make <code>Range</code> iterable from <code>start</code> to <code>end</code> (inclusive), so the for-each prints 5 6 7 8.",
+          "code": "import java.util.Iterator;\n\nclass Range implements Iterable<Integer> {\n    private final int start, end;\n    Range(int start, int end) { this.start = start; this.end = end; }\n\n    public Iterator<Integer> iterator() {\n        return new Iterator<>() {\n            int next = start;\n            public boolean hasNext() { return next <= end; }\n            public Integer next() { return next++; }\n        };\n    }\n}\n\npublic class Main {\n    public static void main(String[] args) {\n        for (int n : new Range(5, 8)) System.out.print(n + \" \");\n        System.out.println();\n    }\n}\n" }
+      ]
+    }</script>
+  </div>
+</part>
+
+<part n="8" id="tracer" label="Line by line">
+  <h2>The iterator object on the heap</h2>
+  <p>This trace is recorded from the real JVM. The iterator is an object, <code>ArrayList.Itr</code>, with a <code>cursor</code> (index of the next element) and <code>lastRet</code> (index last returned). Watch <code>it.remove()</code> move the cursor back so nothing is skipped.</p>
+  {{TRACER}}
+
+{{WORKED}}
+</part>
+
+<part n="9" id="quiz" label="Quiz and revision">
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <script type="application/json">[
+      { "q": "Which three methods does Iterator declare?", "options": ["add, get, size", "hasNext, next, remove", "first, last, next", "begin, end, step"], "answer": 1, "why": "remove is optional (it may throw UnsupportedOperationException in read-only collections)." },
+      { "q": "What does the for-each loop over a List use?", "options": ["Indexes", "An Iterator", "A ListIterator always", "Recursion"], "answer": 1, "why": "javac compiles it to iterator(), hasNext() and next()." },
+      { "q": "Calling list.remove(x) inside a for-each over the same list usually throws…", "options": ["IllegalStateException", "ConcurrentModificationException", "NoSuchElementException", "Nothing"], "answer": 1, "why": "The list's modCount no longer matches the iterator's expectedModCount." },
+      { "q": "it.next(); it.remove(); it.remove(); throws…", "options": ["Nothing", "IllegalStateException", "ConcurrentModificationException", "IndexOutOfBoundsException"], "answer": 1, "why": "remove is allowed once per next()." },
+      { "q": "Which can ListIterator do that Iterator can't?", "options": ["remove", "hasNext", "previous and set", "next"], "answer": 2, "why": "ListIterator adds previous, nextIndex, set and add." },
+      { "q": "ListIterator.add(e) inserts the element…", "options": ["At the end", "At the front", "At the cursor, before the next element", "Replaces the current element"], "answer": 2, "why": "So the following next() is not affected and won't return e." },
+      { "q": "What makes an iterator 'fail-fast'?", "options": ["It's very fast", "It throws as soon as it detects a concurrent structural change", "It never fails", "It copies the collection"], "answer": 1, "why": "It compares modCount with its expected value on each operation." },
+      { "q": "To use your class in a for-each loop, it must implement…", "options": ["Iterator", "Iterable", "Collection", "Comparable"], "answer": 1, "why": "for-each calls iterator() on any Iterable." }
+    ]</script>
+  </div>
+  <h3>Quick revision</h3>
+  <div class="revision">
+    <h3>Lesson 11.7 in one screen</h3>
+    <ul>
+      <li>Iterator: <code>hasNext()</code>, <code>next()</code>, <code>remove()</code>. for-each = hidden iterator.</li>
+      <li>Remove while looping: <code>it.remove()</code> (once per next) or <code>removeIf</code>. Never <code>list.remove</code> inside for-each.</li>
+      <li>Fail-fast: <code>modCount</code> vs <code>expectedModCount</code> → <code>ConcurrentModificationException</code>. Best effort only.</li>
+      <li>Errors: second remove → <code>IllegalStateException</code>; next past end → <code>NoSuchElementException</code>.</li>
+      <li>ListIterator: <code>hasPrevious/previous</code>, <code>nextIndex/previousIndex</code>, <code>set</code>, <code>add</code> (at the cursor).</li>
+      <li>Implement <code>Iterable</code> to use your class in for-each. Concurrent collections have fail-safe iterators.</li>
+    </ul>
+  </div>
+  <h3>Interview and viva questions</h3>
+  <div class="faq">
+    <details><summary>What is ConcurrentModificationException and how do you avoid it?</summary><p>It's thrown by fail-fast iterators when a collection is structurally modified during iteration by anything other than the iterator itself. Avoid it by removing through <code>Iterator.remove()</code>, using <code>removeIf</code>, collecting changes and applying them after the loop, iterating over a copy, or using a concurrent collection. It can happen in a single thread; it's not only a threading issue.</p></details>
+    <details><summary>Fail-fast vs fail-safe iterators?</summary><p>Fail-fast iterators (ArrayList, HashMap…) throw on concurrent modification. Fail-safe (more precisely weakly consistent or snapshot) iterators, as in <code>CopyOnWriteArrayList</code> and <code>ConcurrentHashMap</code>, don't throw: they iterate over a snapshot or tolerate concurrent changes, possibly not reflecting the latest updates.</p></details>
+    <details><summary>Iterator vs ListIterator?</summary><p>Iterator works on any Collection and moves forward only, with remove. ListIterator works on Lists, moves both ways, knows indexes, and can set and add at the cursor.</p></details>
+    <details><summary>Iterator vs Enumeration?</summary><p>Enumeration (<code>hasMoreElements</code>, <code>nextElement</code>) is the legacy interface of Vector and Hashtable. Iterator replaced it with shorter names and a <code>remove</code> method.</p></details>
+    <details><summary>How do you remove entries from a HashMap while iterating?</summary><p>Iterate over <code>map.entrySet().iterator()</code> and call <code>it.remove()</code>, or use <code>map.entrySet().removeIf(e -&gt; …)</code> / <code>map.values().removeIf(…)</code>. Calling <code>map.remove(key)</code> inside a for-each over the map throws ConcurrentModificationException.</p></details>
+  </div>
+
+{{PRACTICE}}
+
+  <h3 id="scenarios">Real-world scenario questions (asked in company interviews)</h3>
+  <p class="scn-intro">Iterator questions are usually ConcurrentModificationException stories. Explain the mechanism, then the fix.</p>
+  <div class="scenarios">
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Backend · bug</span><span class="scn__tag scn__tag--level">Fresher</span></div>
+      <h4>CME in a single-threaded job</h4>
+      <p class="scn__situation">A colleague says “ConcurrentModificationException means two threads are fighting”. But the failing job runs on one thread: it loops over orders and calls <code>orders.remove(o)</code> for cancelled ones. Explain.</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> what “concurrent” means here.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>“Concurrent” means “during iteration”, not “multi-threaded”. The for-each's hidden iterator saw <code>modCount</code> change because the list was modified directly.</li>
+          <li>Fix: <code>orders.removeIf(Order::isCancelled)</code>, or an explicit iterator with <code>it.remove()</code>.</li>
+          <li>Add a test with two adjacent cancelled orders to make sure none is skipped.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> switching to <code>CopyOnWriteArrayList</code> just to silence it in single-threaded code; it copies the whole array on every write.</p>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Caching · maps</span><span class="scn__tag scn__tag--level">Junior</span></div>
+      <h4>Evicting expired cache entries</h4>
+      <p class="scn__situation">A cache is a <code>HashMap&lt;String, Entry&gt;</code>. A cleanup task does <code>for (String k : cache.keySet()) if (expired(k)) cache.remove(k);</code> and crashes. How do you write it correctly?</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> removing from maps during iteration.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li><code>cache.entrySet().removeIf(e -&gt; e.getValue().isExpired());</code>, or an explicit <code>Iterator&lt;Map.Entry&lt;…&gt;&gt;</code> with <code>it.remove()</code>.</li>
+          <li>If other threads read/write the cache, make it a <code>ConcurrentHashMap</code>, whose iterators don't throw and whose <code>removeIf</code> is safe.</li>
+          <li>Consider a cache library with built-in expiry.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> catching the exception and restarting the loop. It's O(n²) and hides the bug.</p>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Library · API design</span><span class="scn__tag scn__tag--level">Junior</span></div>
+      <h4>Exposing a class's items without exposing the list</h4>
+      <p class="scn__situation">A <code>Playlist</code> class stores songs in a private ArrayList. Callers want to loop over songs with for-each, but must not add or remove songs directly. How?</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> Iterable and encapsulation.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>Make <code>Playlist implements Iterable&lt;Song&gt;</code> and return <code>Collections.unmodifiableList(songs).iterator()</code>, whose <code>remove()</code> throws <code>UnsupportedOperationException</code>.</li>
+          <li>Offer explicit methods (<code>addSong</code>, <code>removeSong</code>) that apply business rules.</li>
+          <li>The internal list can later change type without affecting callers.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> a getter returning the internal ArrayList. Any caller could <code>clear()</code> it.</p>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Events · concurrency</span><span class="scn__tag scn__tag--level">Mid</span></div>
+      <h4>A listener that unsubscribes itself</h4>
+      <p class="scn__situation">An event bus loops over its listeners and calls each one. One listener unsubscribes itself when called, and the bus crashes with ConcurrentModificationException. What are your options?</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> snapshot iteration and its trade-offs.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>Store listeners in a <code>CopyOnWriteArrayList</code>: iteration walks a snapshot, so unsubscribing during an event is safe. Ideal when events are frequent and subscriptions rare.</li>
+          <li>Alternatively iterate over a copy (<code>new ArrayList&lt;&gt;(listeners)</code>) per event, or queue unsubscriptions and apply them after the loop.</li>
+          <li>Note the semantics: the removed listener may still receive the current event.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> synchronising the whole loop if listeners can call back into the bus; it risks deadlocks.</p>
+      </div></details>
+    </article>
+  </div>
+</part>

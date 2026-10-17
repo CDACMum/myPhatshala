@@ -1,0 +1,913 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>JIT compiler and performance | MyPhatshala</title>
+<meta name="description" content="The Java JIT compiler explained: the interpreter runs first, hot code is detected with counters, tiered compilation moves methods from C1 to C2, inlining, escape analysis and dead code elimination at a high level, warm-up, deoptimisation, why naive timing benchmarks lie (and JMH), and how to read -XX:+PrintCompilation output. With animations, a JVM tracer, 7 practice problems, quiz and industry scenarios.">
+<meta name="mp:minutes" content="22">
+<link rel="canonical" href="https://myphatshala.com/courses/core-java/08-jvm-memory/05-jit-compiler/">
+<meta property="og:title" content="Inside the JIT: why Java gets faster while it runs · MyPhatshala">
+<meta property="og:description" content="Watch a method go from interpreter to C1 to C2, read real PrintCompilation output, see why the first run is slow, and solve 7 problems.">
+<link rel="icon" href="../../../../assets/img/logo.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Fraunces:ital,opsz,wght@0,9..144,600;0,9..144,700;1,9..144,600&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../../../../assets/css/style.css">
+<link rel="stylesheet" href="../../../../assets/css/lesson.css">
+<script src="../../../../assets/js/config.js"></script>
+<script>try { const t = localStorage.getItem("mp-theme"); if (t) document.documentElement.dataset.theme = t; } catch (e) {}</script>
+<script type="application/ld+json">{"@context": "https://schema.org", "@type": "LearningResource", "name": "JIT compiler and performance", "learningResourceType": "Lesson", "educationalLevel": "Beginner", "isAccessibleForFree": true, "inLanguage": "en", "isPartOf": {"@type": "Course", "name": "Core Java", "provider": {"@type": "Organization", "name": "MyPhatshala"}}}</script>
+</head>
+<body style="--track:#E8772E" data-lesson="08-jvm-memory/05-jit-compiler" data-course-root="../../">
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="site-header">
+  <div class="wrap">
+    <a class="brand" href="../../../../" aria-label="MyPhatshala home"><img src="../../../../assets/img/logo.svg" width="34" height="34" alt=""><span>My<b>Phatshala</b></span></a>
+    <nav class="nav" aria-label="Main">
+      <a href="../../../../#tracks">All courses</a>
+      <a href="../../">Core Java syllabus</a>
+      <button class="theme-btn" id="theme-btn" aria-label="Toggle dark mode"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg></button>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+<section class="lesson-hero">
+  <div class="wrap">
+    <nav class="crumbs" aria-label="Breadcrumb"><a href="../../../../">Home</a><span>›</span><a href="../../../../#track-programming">Programming Languages</a><span>›</span><a href="../../">Core Java</a><span>›</span><b>Lesson 8.5</b></nav>
+    <h1>JIT compiler and performance</h1>
+    <p class="lead">Java starts by interpreting your bytecode, then quietly compiles the parts you use most into fast machine code while the program runs. That's why the same loop can be seven times faster in its fifth round than in its first. You'll see how the JVM finds hot code, what C1 and C2 do, what inlining and escape analysis mean, how to read -XX:+PrintCompilation, why naive timing benchmarks lie, and then practise with 7 problems.</p>
+    <div class="lesson-meta"><span>Module 8 · JVM Memory</span><span>⏱ 22 min</span><span>Intermediate</span><span>7 practice problems</span></div>
+  </div>
+</section>
+
+<div class="wrap lesson-layout">
+<article class="lesson-main">
+<!-- ======================= PART 1: THE STORY ======================= -->
+<section class="part" id="story">
+  <span class="part-label"><b>1</b> The story</span>
+  <h2>The benchmark that proved the wrong thing</h2>
+  <div class="story">
+    <p class="narration">Riya wants to show her team that her new invoice calculator is fast. She times one call with <code>System.nanoTime()</code>: 3 milliseconds. Kabir times it in a loop and gets 0.4 milliseconds per call. Same code, same laptop, a seven-fold difference. They argue until Arjun Sir walks by.</p>
+    <div class="scene">
+      <svg viewBox="0 0 640 170" role="img" aria-label="A bar chart of six rounds of the same work: the first two bars are tall, the rest short. Labels show the code moving from interpreter to C1 to C2 compiled code.">
+        <g font-size="10">
+          <text x="160" y="18" text-anchor="middle" font-weight="700" class="s-ink">Same work, six rounds (time per round)</text>
+          <path d="M30 146 H300" style="stroke:var(--line);stroke-width:1.5"/>
+          <g class="s-soft-acc" style="stroke:var(--track);stroke-width:1.4">
+            <rect x="40" y="36" width="34" height="110" rx="3"/><rect x="84" y="71" width="34" height="75" rx="3"/>
+          </g>
+          <g class="s-soft-green" style="stroke:var(--green);stroke-width:1.4">
+            <rect x="128" y="113" width="34" height="33" rx="3"/><rect x="172" y="114" width="34" height="32" rx="3"/><rect x="216" y="131" width="34" height="15" rx="3"/><rect x="260" y="131" width="34" height="15" rx="3"/>
+          </g>
+          <g font-size="9" class="mono s-ink" text-anchor="middle"><text x="57" y="30">3186</text><text x="101" y="65">2169</text><text x="145" y="107">958</text><text x="189" y="108">921</text><text x="233" y="125">437</text><text x="277" y="125">432</text></g>
+          <g font-size="9" class="s-ink2" text-anchor="middle"><text x="57" y="160">1</text><text x="101" y="160">2</text><text x="145" y="160">3</text><text x="189" y="160">4</text><text x="233" y="160">5</text><text x="277" y="160">6</text></g>
+          <text x="20" y="90" font-size="9" class="s-ink2" transform="rotate(-90 20 90)" text-anchor="middle">microseconds</text>
+          <rect x="340" y="30" width="86" height="40" rx="6" class="s-card2" style="stroke:var(--line)"/>
+          <text x="383" y="48" text-anchor="middle" class="s-ink" font-weight="700">Interpreter</text><text x="383" y="62" text-anchor="middle" font-size="9" class="s-ink2">tier 0</text>
+          <path d="M430 50 H452" style="stroke:var(--blue);stroke-width:2"/><path d="M446 44l8 6-8 6" style="stroke:var(--blue);stroke-width:2;fill:none"/>
+          <rect x="458" y="30" width="72" height="40" rx="6" class="s-soft-blue" style="stroke:var(--blue)"/>
+          <text x="494" y="48" text-anchor="middle" class="s-ink" font-weight="700">C1</text><text x="494" y="62" text-anchor="middle" font-size="9" class="s-ink2">tier 3, quick</text>
+          <path d="M534 50 H556" style="stroke:var(--blue);stroke-width:2"/><path d="M550 44l8 6-8 6" style="stroke:var(--blue);stroke-width:2;fill:none"/>
+          <rect x="562" y="30" width="66" height="40" rx="6" class="s-soft-green" style="stroke:var(--green);stroke-width:1.6"/>
+          <text x="595" y="48" text-anchor="middle" class="s-ink" font-weight="700">C2</text><text x="595" y="62" text-anchor="middle" font-size="9" class="s-ink2">tier 4, best</text>
+          <text x="484" y="100" text-anchor="middle" class="s-ink2">The JVM compiles hot code</text>
+          <text x="484" y="116" text-anchor="middle" class="s-ink2">while your program keeps running.</text>
+          <text x="484" y="140" text-anchor="middle" class="s-acc" font-weight="700">Round 1 measures the warm-up,</text>
+          <text x="484" y="156" text-anchor="middle" class="s-acc" font-weight="700">not your code's real speed.</text>
+        </g>
+        <text x="632" y="166" text-anchor="end" class="s-wm">myphatshala.com</text>
+      </svg>
+    </div>
+    <div class="panel">
+      <div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#FCE6D6"/><path d="M14 64c2-12 9-18 18-18s16 6 18 18z" fill="#2E5AAC"/><circle cx="32" cy="29" r="12" fill="#C68B5E"/><path d="M19 29c0-10 6-15 13-15s13 5 13 15c-3-5-7-8-13-8s-10 3-13 8z" fill="#2A1B14"/><path d="M43 27c3 6 3 14 0 20" stroke="#2A1B14" stroke-width="4" fill="none" stroke-linecap="round"/><circle cx="27.5" cy="30" r="1.5" fill="#2A1B14"/><circle cx="36.5" cy="30" r="1.5" fill="#2A1B14"/><path d="M28 35q4 3 8 0" stroke="#2A1B14" stroke-width="1.6" fill="none" stroke-linecap="round"/><circle cx="32" cy="24" r="1.2" fill="#D64545"/></svg></div>
+      <div class="bubble"><b class="who">Riya</b><p>Sir, who is right? Is my method 3 ms or 0.4 ms?</p></div>
+    </div>
+    <div class="panel panel--right">
+      <div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#DDEFE6"/><path d="M12 64c2-12 10-18 20-18s18 6 20 18z" fill="#F4F1EA"/><path d="M28 46l4 8 4-8" fill="#2F7D5B"/><circle cx="32" cy="28" r="12" fill="#B57A50"/><path d="M20 26c0-8 5-13 12-13s12 5 12 13c-2-3-6-5-12-5s-10 2-12 5z" fill="#5A5A5A"/><path d="M22 32c1 8 5 11 10 11s9-3 10-11c-2 3-6 4-10 4s-8-1-10-4z" fill="#5A5A5A"/><circle cx="27" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><circle cx="37" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><path d="M30.4 29h3.2" stroke="#1B2433" stroke-width="1.4"/><circle cx="27" cy="29" r="1.1" fill="#1B2433"/><circle cx="37" cy="29" r="1.1" fill="#1B2433"/></svg></div>
+      <div class="bubble"><b class="who">Arjun Sir</b><p>Both measurements are real, but they measure different things. The first time, your method ran in the <b>interpreter</b>. As it kept running, the <b>JIT compiler</b> turned it into optimised machine code, so later rounds were far faster.</p></div>
+    </div>
+    <div class="panel">
+      <div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#FCE6D6"/><path d="M14 64c2-12 9-18 18-18s16 6 18 18z" fill="#2E5AAC"/><circle cx="32" cy="29" r="12" fill="#C68B5E"/><path d="M19 29c0-10 6-15 13-15s13 5 13 15c-3-5-7-8-13-8s-10 3-13 8z" fill="#2A1B14"/><path d="M43 27c3 6 3 14 0 20" stroke="#2A1B14" stroke-width="4" fill="none" stroke-linecap="round"/><circle cx="27.5" cy="30" r="1.5" fill="#2A1B14"/><circle cx="36.5" cy="30" r="1.5" fill="#2A1B14"/><path d="M28 35q4 3 8 0" stroke="#2A1B14" stroke-width="1.6" fill="none" stroke-linecap="round"/><circle cx="32" cy="24" r="1.2" fill="#D64545"/></svg></div>
+      <div class="bubble"><b class="who">Riya</b><p>So Java changes its own speed while it runs?</p></div>
+    </div>
+    <div class="panel panel--right">
+      <div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#DDEFE6"/><path d="M12 64c2-12 10-18 20-18s18 6 20 18z" fill="#F4F1EA"/><path d="M28 46l4 8 4-8" fill="#2F7D5B"/><circle cx="32" cy="28" r="12" fill="#B57A50"/><path d="M20 26c0-8 5-13 12-13s12 5 12 13c-2-3-6-5-12-5s-10 2-12 5z" fill="#5A5A5A"/><path d="M22 32c1 8 5 11 10 11s9-3 10-11c-2 3-6 4-10 4s-8-1-10-4z" fill="#5A5A5A"/><circle cx="27" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><circle cx="37" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><path d="M30.4 29h3.2" stroke="#1B2433" stroke-width="1.4"/><circle cx="27" cy="29" r="1.1" fill="#1B2433"/><circle cx="37" cy="29" r="1.1" fill="#1B2433"/></svg></div>
+      <div class="bubble"><b class="who">Arjun Sir</b><p>Exactly. Today you'll see how the JVM decides what to compile, what the compilers do, and how to measure performance without fooling yourself.</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- ======================= PART 2: DEFINITION ======================= -->
+<section class="part" id="definition">
+  <span class="part-label"><b>2</b> Definition</span>
+  <h2>What is the JIT compiler?</h2>
+  <div class="def">
+    <div class="def__formal"><small>Formal definition (write this in exams)</small>
+      <p>A <b>Just-In-Time (JIT) compiler</b> translates frequently executed bytecode into native machine code at run time. In HotSpot, methods start in the <b>interpreter</b>; per-method invocation and loop (back-edge) counters detect <b>hot</b> code, which is compiled in the background. With <b>tiered compilation</b> (the default since Java 8), hot methods are first compiled by <b>C1</b>, a fast compiler that also collects profiling data, and the hottest are recompiled by <b>C2</b>, an optimising compiler that uses the profile for optimisations such as <b>inlining</b>, <b>escape analysis</b> and dead code elimination. If an assumption behind optimised code becomes invalid, the code is <b>deoptimised</b> and execution falls back to the interpreter.</p></div>
+    <div class="def__simple"><small>In simple words</small>
+      <p>A translator reads a speech line by line for the first few minutes. Once she notices the same phrases coming up again and again, she writes polished translations of those phrases and just reads them out. The speech gets faster the longer it goes on.</p></div>
+  </div>
+  <h3>Words you'll meet in this lesson</h3>
+  <div class="terms">
+    <div class="term"><b>Hot code</b><span>Methods and loops that run often enough to be worth compiling.</span></div>
+    <div class="term"><b>Tiered compilation</b><span>Interpreter (tier 0) → C1 (tiers 1–3) → C2 (tier 4).</span></div>
+    <div class="term"><b>Inlining</b><span>Copying a called method's body into the caller, removing the call.</span></div>
+    <div class="term"><b>Escape analysis</b><span>Finding objects that never leave a method, so they need not be heap objects.</span></div>
+    <div class="term"><b>Warm-up</b><span>The early phase when code is still interpreted or being compiled.</span></div>
+    <div class="term"><b>Deoptimisation</b><span>Throwing away compiled code whose assumptions no longer hold.</span></div>
+  </div>
+  <h3>JIT facts at a glance</h3>
+  <table class="facts">
+    <tr><th>Starts with</th><td>The interpreter. No method is compiled before it has been used</td></tr>
+    <tr><th>Hot detection</th><td>Counters per method for calls and loop back-edges. Defaults (JDK 21): about 200 calls for C1 (<code>Tier3InvocationThreshold</code>), about 5,000 for C2 (<code>Tier4InvocationThreshold</code>), adjusted for loops and load</td></tr>
+    <tr><th>Tiers</th><td>0 interpreter; 1–3 C1 (3 = with full profiling); 4 C2. Tiered compilation is on by default since Java 8</td></tr>
+    <tr><th>Key C2 optimisations</th><td>Inlining (small methods under 35 bytes of bytecode, hot ones up to 325), escape analysis with scalar replacement, dead code elimination, loop optimisations</td></tr>
+    <tr><th>See it</th><td><code>java -XX:+PrintCompilation Main</code>; compare <code>-Xint</code> (interpreter only)</td></tr>
+    <tr><th>Measure properly</th><td>Warm up, repeat, use the results, and prefer JMH (Java Microbenchmark Harness)</td></tr>
+  </table>
+  <div class="callout callout--exam"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19V5a2 2 0 0 1 2-2h12v18H6a2 2 0 0 1-2-2zm0 0a2 2 0 0 1 2-2h12"/></svg><p><b>Exam tip:</b> javac does almost no optimisation: it turns source into bytecode. The big optimisations happen at run time, in the JIT. So “Java is interpreted” and “Java is compiled” are both half-truths: it is compiled to bytecode, interpreted at first, and JIT-compiled where it matters.</p></div>
+</section>
+
+<div class="ad-slot" data-slot="mid"></div>
+
+<!-- ======================= PART 3: TYPES AND WAYS TO USE IT ======================= -->
+<section class="part" id="types">
+  <span class="part-label"><b>3</b> Types and ways to use it</span>
+  <h2>Two compilers, three big optimisations</h2>
+  <div class="cards">
+    <div class="card"><svg class="ic" viewBox="0 0 40 40" fill="none" stroke="var(--blue)" stroke-width="2"><path d="M8 32h24M12 32V20M20 32V14M28 32V8"/></svg><h4>C1 (client compiler)</h4><p>Compiles quickly with basic optimisations, and in tier 3 adds counters that record which types and branches actually occur. Gets code faster early.</p><span class="tag">tiers 1–3</span></div>
+    <div class="card"><svg class="ic" viewBox="0 0 40 40" fill="none" stroke="var(--green)" stroke-width="2"><circle cx="20" cy="20" r="14"/><path d="M13 20l5 5 9-10"/></svg><h4>C2 (server compiler)</h4><p>Slower to compile, much better code. Uses C1's profile to make bold assumptions, such as “this call always goes to the same class”.</p><span class="tag">tier 4</span></div>
+    <div class="card"><svg class="ic" viewBox="0 0 40 40" fill="none" stroke="var(--track)" stroke-width="2"><rect x="6" y="6" width="28" height="12" rx="2"/><rect x="6" y="22" width="28" height="12" rx="2"/><path d="M20 18v4"/></svg><h4>Inlining, escape analysis, dead code</h4><p>Inline small hot methods; avoid allocating objects that never escape; delete code whose result is never used. Most other optimisations build on inlining.</p><span class="tag">C2 at work</span></div>
+  </div>
+  <h3>Seeing the JIT work: -XX:+PrintCompilation</h3>
+  <p>This program times the same method six times (your numbers will differ):</p>
+  <div class="code" data-lang="java" data-file="Main.java" data-check="skip"><pre><code>public class Main {
+    static long invoiceTotal(int items) {
+        long total = 0;
+        for (int i = 1; i &lt;= items; i++) {
+            total += i * 118L / 100;          // each item's price with 18% GST
+        }
+        return total;
+    }
+
+    public static void main(String[] args) {
+        for (int round = 1; round &lt;= 6; round++) {
+            long start = System.nanoTime();
+            long t = invoiceTotal(1_000_000);
+            long micros = (System.nanoTime() - start) / 1_000;
+            System.out.println("Round " + round + ": " + micros + " us (total " + t + ")");
+        }
+    }
+}</code></pre><div class="output">Round 1: 3186 us (total 590000100000)
+Round 2: 2169 us (total 590000100000)
+Round 3: 958 us (total 590000100000)
+Round 4: 921 us (total 590000100000)
+Round 5: 437 us (total 590000100000)
+Round 6: 432 us (total 590000100000)</div></div>
+  <p>The same run with compilation logging, keeping only our method's lines (hundreds of JDK methods are compiled too):</p>
+  <div class="code" data-lang="bash" data-file="Terminal"><pre><code>java -XX:+PrintCompilation Main</code></pre><div class="output">27    9 %     3       Main::invoiceTotal @ 4 (30 bytes)
+27   10       3       Main::invoiceTotal (30 bytes)
+27   11 %     4       Main::invoiceTotal @ 4 (30 bytes)
+28    9 %     3       Main::invoiceTotal @ 4 (30 bytes)   made not entrant
+29   11 %     4       Main::invoiceTotal @ 4 (30 bytes)   made not entrant
+Round 1: 3186 us (total 590000100000)
+46  120 %     4       Main::invoiceTotal @ 4 (30 bytes)
+47  121       4       Main::invoiceTotal (30 bytes)
+Round 2: 2169 us (total 590000100000)
+Round 3: 958 us (total 590000100000)
+48   10       3       Main::invoiceTotal (30 bytes)   made not entrant
+Round 4: 921 us (total 590000100000)
+Round 5: 437 us (total 590000100000)
+Round 6: 432 us (total 590000100000)</div></div>
+  <div class="table-wrap">
+  <table class="compare" style="min-width:560px">
+    <thead><tr><th>Column</th><th>Example</th><th>Meaning</th></tr></thead>
+    <tbody>
+      <tr><td>Time</td><td><code>47</code></td><td>Milliseconds since the JVM started</td></tr>
+      <tr><td>Compile id</td><td><code>121</code></td><td>A running number for each compilation task</td></tr>
+      <tr><td>Flags</td><td><code>%</code></td><td><code>%</code> = on-stack replacement (a hot loop compiled while running); others: <code>s</code> synchronized, <code>!</code> has exception handlers, <code>n</code> native</td></tr>
+      <tr><td>Tier</td><td><code>3</code> / <code>4</code></td><td>3 = C1 with profiling, 4 = C2</td></tr>
+      <tr><td>Method and size</td><td><code>Main::invoiceTotal @ 4 (30 bytes)</code></td><td>The method, the loop's bytecode index for OSR, and the bytecode size</td></tr>
+      <tr><td>Status</td><td><code>made not entrant</code></td><td>This compiled version is retired: replaced by a better tier, or deoptimised</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <div class="callout callout--warn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3 2 21h20L12 3z"/><path d="M12 10v5M12 18v.5"/></svg><p><b>Naive benchmarks lie.</b> Timing one call measures the interpreter and class loading. Timing a loop whose result is never used may measure nothing, because C2 can delete the work. GC pauses, CPU frequency changes and other processes add noise. For real measurements use <b>JMH</b> (Java Microbenchmark Harness), which handles warm-up, forks fresh JVMs, and consumes results so they can't be optimised away.</p></div>
+</section>
+
+<!-- ======================= PART 4: STEP BY STEP ======================= -->
+<section class="part" id="steps">
+  <span class="part-label"><b>4</b> Step by step</span>
+  <h2>The journey of one hot method</h2>
+  <ol class="stepper">
+    <li><h4>Interpret and count</h4>
+      <div class="code" data-lang="java" data-file="Main.java"><pre><code>total += withGst(price);   // called again and again</code></pre></div>
+      <span class="behind">The interpreter executes bytecode one instruction at a time. Each call to <code>withGst</code> increments its invocation counter; each jump back to the top of a loop increments a back-edge counter.</span></li>
+    <li><h4>Hot: queue it for C1</h4>
+      <p>After about 200 calls (default tiered thresholds, adjusted by the JVM), the method is queued for compilation.</p>
+      <span class="behind">Compilation happens on separate compiler threads, so your code keeps running in the interpreter meanwhile. A long loop inside a single call can be compiled on the spot and switched to mid-loop: on-stack replacement, shown as <code>%</code>.</span></li>
+    <li><h4>C1 code runs and gathers a profile</h4>
+      <p>The tier 3 code is already much faster than the interpreter, and it records what really happens.</p>
+      <span class="behind">The profile notes which classes appear at each call site, which branches are taken and how often loops run. C2 relies on this to make speculative optimisations.</span></li>
+    <li><h4>Very hot: C2 optimises</h4>
+      <div class="code" data-lang="java" data-file="Main.java"><pre><code>// after inlining, the loop effectively becomes:
+total += price * 118 / 100;</code></pre></div>
+      <span class="behind">C2 inlines small hot methods, keeps values in CPU registers, removes unneeded bounds checks and allocations (escape analysis), unrolls loops and deletes dead code. The new tier 4 code replaces the tier 3 version, which is “made not entrant”.</span></li>
+    <li><h4>When assumptions break: deoptimise</h4>
+      <p>Suppose C2 assumed a call always reached one class, and a new subclass shows up.</p>
+      <span class="behind">The JVM discards that compiled code and continues in the interpreter, then recompiles later with the new information. Your program's results never change; only its speed does.</span></li>
+  </ol>
+</section>
+
+<!-- ======================= PART 5: SEE IT HAPPEN ======================= -->
+<section class="part" id="animation">
+  <span class="part-label"><b>5</b> See it happen</span>
+  <h2>Interpreter to C1 to C2: both views</h2>
+  <p>Left: the program and real <code>-XX:+PrintCompilation</code> lines from the run above. Right: the tier a method is running in, and what the JVM is doing.</p>
+  <div class="anim" data-frames="6">
+    <div class="anim__title">How <code>invoiceTotal</code> gets fast <span>6 steps</span></div>
+    <div class="anim__views">
+      <div class="view view--see">
+        <span class="view__tag">What you see</span>
+        <svg viewBox="0 0 360 250" role="img" aria-label="The program line and compilation log at each step">
+          <rect x="10" y="12" width="340" height="40" rx="8" class="s-board"/>
+          <g font-size="11" class="mono s-chalk">
+            <text x="22" y="37" data-on="1-4">long t = invoiceTotal(1_000_000);</text>
+            <text x="22" y="37" data-on="5">// a compiled version is retired</text>
+            <text x="22" y="37" data-on="6">// six rounds of the same work</text>
+          </g>
+          <rect x="10" y="62" width="340" height="130" rx="8" style="fill:#0F1512"/>
+          <g font-size="10" class="mono" style="fill:#B9F5D0;font-variant-ligatures:none;white-space:pre">
+            <text x="22" y="84" data-on="1">// round 1 starts in the interpreter</text>
+            <text x="22" y="102" data-on="1">// 1,000,000 loop jumps to count</text>
+            <text x="22" y="84" data-on="2">27    9 %     3</text>
+            <text x="22" y="100" data-on="2">  Main::invoiceTotal @ 4 (30 bytes)</text>
+            <text x="22" y="122" data-on="2">// hot loop: OSR-compiled by C1</text>
+            <text x="22" y="84" data-on="3">27   10       3</text>
+            <text x="22" y="100" data-on="3">  Main::invoiceTotal (30 bytes)</text>
+            <text x="22" y="122" data-on="3">Round 1: 3186 us</text>
+            <text x="22" y="84" data-on="4">47  121       4</text>
+            <text x="22" y="100" data-on="4">  Main::invoiceTotal (30 bytes)</text>
+            <text x="22" y="122" data-on="4">Round 2: 2169 us</text>
+            <text x="22" y="138" data-on="4">Round 3: 958 us</text>
+            <text x="22" y="84" data-on="5">48   10       3</text>
+            <text x="22" y="100" data-on="5">  Main::invoiceTotal (30 bytes)</text>
+            <text x="22" y="116" data-on="5">  made not entrant</text>
+            <text x="22" y="138" data-on="5">// tier 3 copy no longer needed</text>
+            <text x="22" y="84" data-on="6">Round 1: 3186 us</text>
+            <text x="22" y="100" data-on="6">Round 2: 2169 us</text>
+            <text x="22" y="116" data-on="6">Round 3: 958 us</text>
+            <text x="22" y="132" data-on="6">Round 4: 921 us</text>
+            <text x="22" y="148" data-on="6">Round 5: 437 us</text>
+            <text x="22" y="164" data-on="6">Round 6: 432 us</text>
+          </g>
+          <g font-size="10.2" class="s-ink2" text-anchor="middle">
+            <text x="180" y="222" data-on="1">Slow start: bytecode is interpreted.</text>
+            <text x="180" y="222" data-on="2">The loop got hot inside the first call.</text>
+            <text x="180" y="222" data-on="3">The whole method is compiled by C1 too.</text>
+            <text x="180" y="222" data-on="4">C2 (tier 4) takes over: rounds speed up.</text>
+            <text x="180" y="222" data-on="5">Older code is retired, not your results.</text>
+            <text x="180" y="222" data-on="6">Same work, about 7 times faster by round 6.</text>
+          </g>
+          <text x="354" y="246" text-anchor="end" class="s-wm">myphatshala.com</text>
+        </svg>
+        <ol class="caps" hidden>
+          <li><b>Interpreter:</b> the first call starts in the interpreter, which is simple but slow.</li>
+          <li><b>OSR:</b> the loop inside the very first call becomes hot, so C1 compiles it and switches to the compiled loop mid-call (<code>%</code>).</li>
+          <li><b>C1:</b> the whole method is compiled at tier 3. Round 1 finishes at 3186 microseconds.</li>
+          <li><b>C2:</b> tier 4 versions arrive (compile ids 120 and 121); rounds 3 and 4 are about three times faster than round 1.</li>
+          <li><b>Retired:</b> the old tier 3 code is “made not entrant” because the C2 version replaces it.</li>
+          <li><b>Steady state:</b> by round 5 the method is fully optimised: about 7 times faster than round 1. Your numbers will differ.</li>
+        </ol>
+      </div>
+      <div class="view view--behind">
+        <span class="view__tag">Behind the screen</span>
+        <svg viewBox="0 0 360 250" role="img" aria-label="Three execution tiers on the left, details of the current tier on the right">
+          <text x="87" y="22" text-anchor="middle" font-size="10" font-weight="700" class="s-ink2">Where the code runs</text>
+          <rect x="12" y="32" width="150" height="40" rx="6" class="s-card2" style="stroke:var(--line)"/>
+          <rect x="12" y="32" width="150" height="40" rx="6" style="fill:none;stroke:var(--track);stroke-width:2.6" data-on="1"/>
+          <text x="22" y="49" font-size="9.6" font-weight="700" class="s-ink">Tier 0 · Interpreter</text>
+          <text x="22" y="64" font-size="8.8" class="s-ink2">one bytecode at a time</text>
+          <rect x="12" y="82" width="150" height="40" rx="6" class="s-soft-blue" style="stroke:var(--blue)"/>
+          <rect x="12" y="82" width="150" height="40" rx="6" style="fill:none;stroke:var(--track);stroke-width:2.6" data-on="2-3"/>
+          <text x="22" y="99" font-size="9.6" font-weight="700" class="s-ink">Tier 3 · C1</text>
+          <text x="22" y="114" font-size="8.8" class="s-ink2">fast compile + profiling</text>
+          <rect x="12" y="132" width="150" height="40" rx="6" class="s-soft-green" style="stroke:var(--green)"/>
+          <rect x="12" y="132" width="150" height="40" rx="6" style="fill:none;stroke:var(--track);stroke-width:2.6" data-on="4-6"/>
+          <text x="22" y="149" font-size="9.6" font-weight="700" class="s-ink">Tier 4 · C2</text>
+          <text x="22" y="164" font-size="8.8" class="s-ink2">optimised with the profile</text>
+          <path d="M87 72 V80" style="stroke:var(--blue);stroke-width:1.6"/><path d="M83 76l4 5 4-5" style="stroke:var(--blue);stroke-width:1.6;fill:none"/>
+          <path d="M87 122 V130" style="stroke:var(--blue);stroke-width:1.6"/><path d="M83 126l4 5 4-5" style="stroke:var(--blue);stroke-width:1.6;fill:none"/>
+          <rect x="174" y="32" width="174" height="140" rx="8" class="s-card" style="stroke:var(--line)"/>
+          <g font-size="9.4" class="s-ink">
+            <g data-on="1"><text x="184" y="52" font-weight="700" class="s-acc">Counting</text><text x="184" y="70">invocations: 1</text><text x="184" y="86">loop back-edges: rising fast</text><rect x="184" y="98" width="150" height="10" rx="3" class="s-card2" style="stroke:var(--line)"/><rect x="184" y="98" width="60" height="10" rx="3" class="s-soft-acc" style="stroke:var(--track)"/><text x="184" y="128" class="s-ink2">threshold reached → compile</text></g>
+            <g data-on="2"><text x="184" y="52" font-weight="700" class="s-blue">Compiler thread (C1)</text><text x="184" y="70">compiles the hot loop</text><text x="184" y="86">in the background</text><text x="184" y="108">OSR: jump from the</text><text x="184" y="124">interpreted loop into</text><text x="184" y="140">compiled code mid-call</text></g>
+            <g data-on="3"><text x="184" y="52" font-weight="700" class="s-blue">C1 code + profile</text><text x="184" y="70">records how the code</text><text x="184" y="86">really behaves:</text><text x="184" y="104">• branches taken</text><text x="184" y="120">• loop trip counts</text><text x="184" y="136">• types at call sites</text></g>
+            <g data-on="4"><text x="184" y="52" font-weight="700" class="s-green">C2 optimisations</text><text x="184" y="70">• inline small methods</text><text x="184" y="86">• values in registers</text><text x="184" y="102">• escape analysis</text><text x="184" y="118">• dead code removed</text><text x="184" y="134">• loops unrolled</text></g>
+            <g data-on="5"><text x="184" y="52" font-weight="700" class="s-red">Made not entrant</text><text x="184" y="70">old tier 3 code retired:</text><text x="184" y="86">new calls use tier 4</text><text x="184" y="108">(the same happens on</text><text x="184" y="124">deoptimisation, when an</text><text x="184" y="140">assumption breaks)</text></g>
+          </g>
+          <g data-on="6">
+            <path d="M184 160 H340" style="stroke:var(--line);stroke-width:1.2"/>
+            <g class="s-soft-acc" style="stroke:var(--track)"><rect x="188" y="50" width="20" height="110" rx="2"/><rect x="214" y="85" width="20" height="75" rx="2"/></g>
+            <g class="s-soft-green" style="stroke:var(--green)"><rect x="240" y="127" width="20" height="33" rx="2"/><rect x="266" y="128" width="20" height="32" rx="2"/><rect x="292" y="145" width="20" height="15" rx="2"/><rect x="318" y="145" width="20" height="15" rx="2"/></g>
+            <text x="261" y="46" text-anchor="middle" font-size="9" class="s-ink2">time per round</text>
+          </g>
+          <g font-size="9.6" class="s-ink2" text-anchor="middle">
+            <text x="180" y="200" data-on="1">Counters decide what is worth compiling.</text>
+            <text x="180" y="200" data-on="2">Compiling happens alongside your program.</text>
+            <text x="180" y="200" data-on="3">Quick code now, data for better code later.</text>
+            <text x="180" y="200" data-on="4">C2 bets on the profile and wins big.</text>
+            <text x="180" y="200" data-on="5">Code versions come and go; results never change.</text>
+            <text x="180" y="200" data-on="6">Warm-up rounds are slow; measure steady state.</text>
+          </g>
+          <text x="354" y="246" text-anchor="end" class="s-wm">myphatshala.com</text>
+        </svg>
+        <ol class="caps" hidden>
+          <li>In tier 0 the interpreter runs the method and updates its invocation and back-edge counters. A million loop iterations push the back-edge counter over the threshold quickly.</li>
+          <li>The method's loop is queued for C1. A compiler thread builds it while the interpreter keeps going, then execution jumps into the compiled loop (on-stack replacement).</li>
+          <li>Tier 3 code is fast and also profiles: which branches run, how many times loops turn, which classes appear at each call.</li>
+          <li>Using that profile, C2 compiles tier 4 code with inlining, register allocation, escape analysis, dead code elimination and loop unrolling.</li>
+          <li>The tier 3 version is marked not entrant. Deoptimisation works the same way if C2's assumptions later turn out wrong.</li>
+          <li>The time per round falls as the code moves up the tiers. Benchmarks must skip this warm-up to measure steady-state speed.</li>
+        </ol>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ======================= PART 6: REAL-WORLD USE ======================= -->
+<section class="part" id="real-world">
+  <span class="part-label"><b>6</b> Real-world use</span>
+  <h2>The JIT in real systems</h2>
+  <p>Most of the time the JIT just works. These are the situations where developers need to understand it.</p>
+  <!--ANIM2-->
+  <h3 id="animated-example">Watch it with an example: a bank's month-end interest job speeding up</h3>
+  <p class="anim-intro">A batch job calls <code>addInterest()</code> for every account. Watch the JVM spot the hot method, compile it twice, and briefly step back when a new account type appears.</p>
+  <div class="anim anim--one" data-frames="6" data-delay="4600">
+    <div class="anim__title">Hot code gets compiled, and recompiled <span>6 steps</span></div>
+    <div class="anim__views">
+      <div class="view view--story">
+        <span class="view__tag">Animated example</span>
+        <svg viewBox="0 0 360 200" role="img" aria-label="tiered JIT compilation in a batch job">
+          <rect x="6" y="8" width="348" height="28" rx="8" class="s-board" style="stroke:board;stroke-width:1.5"/>
+          <text data-on="1" x="14" y="27" font-size="10" class="s-chalk mono">for (Account a : accounts) a.addInterest();</text>
+          <text data-on="2" x="14" y="27" font-size="10" class="s-chalk mono">// call 200: addInterest is hot</text>
+          <text data-on="3" x="14" y="27" font-size="10" class="s-chalk mono">// C1 code runs and profiles</text>
+          <text data-on="4" x="14" y="27" font-size="10" class="s-chalk mono">// call 5,000: C2 compiles</text>
+          <text data-on="5" x="14" y="27" font-size="10" class="s-chalk mono">// first FixedDeposit account!</text>
+          <text data-on="6" x="14" y="27" font-size="10" class="s-chalk mono">// recompiled for both types</text>
+          <text x="14" y="58" font-size="10" class="s-ink">calls to addInterest:</text>
+          <text data-on="1" x="200" y="58" font-size="10" font-weight="700" class="s-ink mono">150</text>
+          <text data-on="2" x="200" y="58" font-size="10" font-weight="700" class="s-ink mono">200</text>
+          <text data-on="3" x="200" y="58" font-size="10" font-weight="700" class="s-ink mono">1,800</text>
+          <text data-on="4" x="200" y="58" font-size="10" font-weight="700" class="s-ink mono">5,000</text>
+          <text data-on="5" x="200" y="58" font-size="10" font-weight="700" class="s-ink mono">lakhs</text>
+          <text data-on="6" x="200" y="58" font-size="10" font-weight="700" class="s-ink mono">lakhs</text>
+          <rect x="14" y="70" width="100" height="30" rx="8" class="s-card2" style="stroke:var(--line);stroke-width:1.5"/><text x="64" y="88.42" font-size="9.5" text-anchor="middle" font-weight="700" class="s-ink">Interpreter</text>
+          <rect x="130" y="70" width="100" height="30" rx="8" class="s-soft-blue" style="stroke:var(--blue);stroke-width:1.5"/><text x="180" y="88.42" font-size="9.5" text-anchor="middle" font-weight="700" class="s-ink">C1 (tier 3)</text>
+          <rect x="246" y="70" width="100" height="30" rx="8" class="s-soft-green" style="stroke:var(--green);stroke-width:1.5"/><text x="296" y="88.42" font-size="9.5" text-anchor="middle" font-weight="700" class="s-ink">C2 (tier 4)</text>
+          <g data-on="1-2,5"><rect x="14" y="70" width="100" height="30" rx="8" class="" style="stroke:var(--track);stroke-width:3;fill:none"/></g>
+          <g data-on="3"><rect x="130" y="70" width="100" height="30" rx="8" class="" style="stroke:var(--track);stroke-width:3;fill:none"/></g>
+          <g data-on="4,6"><rect x="246" y="70" width="100" height="30" rx="8" class="" style="stroke:var(--track);stroke-width:3;fill:none"/></g>
+          <text data-on="2" x="180" y="116" font-size="9.5" text-anchor="middle" class="s-blue">queued for C1 on a compiler thread</text>
+          <text data-on="3" x="180" y="116" font-size="9.5" text-anchor="middle" class="s-ink2">profile: receiver is always Savings</text>
+          <text data-on="4" x="180" y="116" font-size="9.5" text-anchor="middle" class="s-green">inlined addInterest + getBalance</text>
+          <text data-on="5" x="180" y="116" font-size="9.5" text-anchor="middle" font-weight="700" class="s-red">assumption broken: deoptimise</text>
+          <text data-on="6" x="180" y="116" font-size="9.5" text-anchor="middle" class="s-green">both types inlined behind a type check</text>
+          <text x="14" y="148" font-size="9.5" class="s-ink2">speed</text>
+          <rect x="60" y="138" width="284" height="14" rx="4" class="s-card2" style="stroke:var(--line);stroke-width:1.5"/>
+          <g data-on="1"><rect x="60" y="138" width="30" height="14" rx="4" class="s-soft-acc" style="stroke:var(--track);stroke-width:1.5"/></g>
+          <g data-on="2"><rect x="60" y="138" width="30" height="14" rx="4" class="s-soft-acc" style="stroke:var(--track);stroke-width:1.5"/></g>
+          <g data-on="3"><rect x="60" y="138" width="120" height="14" rx="4" class="s-soft-blue" style="stroke:var(--blue);stroke-width:1.5"/></g>
+          <g data-on="4"><rect x="60" y="138" width="270" height="14" rx="4" class="s-soft-green" style="stroke:var(--green);stroke-width:1.5"/></g>
+          <g data-on="5"><rect x="60" y="138" width="40" height="14" rx="4" class="s-soft-acc" style="stroke:var(--track);stroke-width:1.5"/></g>
+          <g data-on="6"><rect x="60" y="138" width="270" height="14" rx="4" class="s-soft-green" style="stroke:var(--green);stroke-width:1.5"/></g>
+          <text data-on="6" x="14" y="176" font-size="9.5" class="s-ink2">interest credited: same on every account, every tier</text>
+          <text data-on="5" x="14" y="176" font-size="9.5" class="s-red">"made not entrant" in -XX:+PrintCompilation</text>
+          <text x="354" y="195" text-anchor="end" class="s-wm">myphatshala.com</text>
+        </svg>
+        <ol class="caps" hidden>
+          <li><b>Batch starts:</b> the job runs in the interpreter, one bytecode at a time. The JVM counts every call to <code>addInterest</code>.</li>
+          <li><b>Hot:</b> around 200 calls (the default C1 threshold) the method is queued for compilation. A compiler thread works on it while the job keeps running.</li>
+          <li><b>C1:</b> quickly compiled tier 3 code takes over and records a profile: so far every account at this call site is a <code>SavingsAccount</code>.</li>
+          <li><b>C2:</b> after thousands of calls, C2 compiles tier 4 code that relies on that profile and inlines <code>addInterest</code> and the getters it uses. The job reaches full speed.</li>
+          <li><b>Surprise:</b> the first <code>FixedDeposit</code> account arrives. C2's assumption no longer holds, so that code is thrown away (deoptimised) and execution falls back for a while.</li>
+          <li><b>Recompiled:</b> with the new profile, C2 compiles again, this time handling both types. Speed recovers, and the interest credited was correct at every moment: only speed ever changes.</li>
+        </ol>
+      </div>
+    </div>
+  </div>
+  <!--/ANIM2-->
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="14" y="20" width="40" height="50" rx="4" class="s-soft-acc" style="stroke:var(--track)"/><rect x="66" y="20" width="40" height="50" rx="4" class="s-soft-green" style="stroke:var(--green)"/><text x="34" y="49" text-anchor="middle" font-size="8" class="mono s-ink">cold</text><text x="86" y="49" text-anchor="middle" font-size="8" class="mono s-ink">warm</text></svg></div>
+    <div><h4>1. Warming up before taking traffic</h4><p>A freshly started instance is slower for its first seconds or minutes. Teams send synthetic requests to new instances, or use gradual traffic ramps, before they serve real users at full load.</p>
+      <div class="uc-flow"><span>New instance</span><i>→</i><span class="java">warm-up requests</span><i>→</i><span>Join load balancer</span></div></div>
+  </div>
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="14" y="14" width="92" height="62" rx="6" class="s-board"/><g font-size="7.6" class="mono" style="fill:#9FD3B8"><text x="20" y="32">@Benchmark</text><text x="20" y="46">@Warmup(5)</text><text x="20" y="60">Blackhole bh</text></g></svg></div>
+    <div><h4>2. Honest micro-benchmarks</h4><p>Before replacing one algorithm or library with another, teams measure with JMH. It runs warm-up iterations, forks fresh JVMs, reports errors, and protects results from dead code elimination.</p>
+      <div class="uc-flow"><span>Two implementations</span><i>→</i><span class="java">JMH benchmark</span><i>→</i><span>Reliable comparison</span></div></div>
+  </div>
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><circle cx="40" cy="45" r="20" class="s-soft-blue" style="stroke:var(--blue)"/><path d="M60 45h40" style="stroke:var(--green);stroke-width:2"/><text x="40" y="49" text-anchor="middle" font-size="8" class="mono s-ink">getter</text></svg></div>
+    <div><h4>3. Clean code without a speed penalty</h4><p>Getters, small helper methods and interfaces with one implementation are typically inlined by C2. Write readable code first; optimise only what a profiler shows is slow.</p>
+      <div class="uc-flow"><span>Small methods</span><i>→</i><span class="java">inlined by C2</span><i>→</i><span>No call overhead</span></div></div>
+  </div>
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><path d="M14 70 L34 40 L54 60 L74 24 L94 50 L108 30" style="stroke:var(--blue);stroke-width:2;fill:none"/><text x="60" y="84" text-anchor="middle" font-size="8" class="mono s-ink2">allocation rate</text></svg></div>
+    <div><h4>4. Allocation-heavy hot paths</h4><p>Escape analysis removes some temporary objects, but not all (for example, objects stored in fields or passed to methods that aren't inlined). In very hot paths, teams reduce allocation, which also lowers GC pressure (Lesson 8.3).</p>
+      <div class="uc-flow"><span>Profiler shows hot path</span><i>→</i><span class="java">fewer temporary objects</span><i>→</i><span>Less GC</span></div></div>
+  </div>
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="20" y="20" width="80" height="50" rx="6" class="s-card2" style="stroke:var(--line)"/><text x="60" y="42" text-anchor="middle" font-size="8.4" class="mono s-ink">start-up</text><text x="60" y="58" text-anchor="middle" font-size="8.4" class="mono s-ink">matters</text></svg></div>
+    <div><h4>5. Short-lived programs</h4><p>Command-line tools and serverless functions may finish before the JIT has warmed up. For them, start-up techniques such as class data sharing, or ahead-of-time compiled native images (for example with GraalVM), can matter more than peak speed.</p>
+      <div class="uc-flow"><span>Runs for 1 second</span><i>→</i><span class="java">CDS / native image</span><i>→</i><span>Fast start</span></div></div>
+  </div>
+  <p class="muted">Examples are simplified. JIT behaviour varies between JVM versions and hardware; always confirm a performance idea with measurements on your own system.</p>
+</section>
+
+<div class="ad-slot" data-slot="mid"></div>
+
+<!-- ======================= PART 7: RUN THE CODE ======================= -->
+<section class="part" id="run">
+  <span class="part-label"><b>7</b> Run the code</span>
+  <h2>Warm-up you can see</h2>
+  <p>The same program as above. Its timings are machine-dependent: your numbers will differ, but the pattern (slow first rounds, fast later ones) should appear.</p>
+  <div class="code" data-lang="java" data-file="Main.java" data-check="skip"><pre><code>public class Main {
+    static long invoiceTotal(int items) {
+        long total = 0;
+        for (int i = 1; i &lt;= items; i++) {
+            total += i * 118L / 100;          // each item's price with 18% GST
+        }
+        return total;
+    }
+
+    public static void main(String[] args) {
+        for (int round = 1; round &lt;= 6; round++) {
+            long start = System.nanoTime();
+            long t = invoiceTotal(1_000_000);
+            long micros = (System.nanoTime() - start) / 1_000;
+            System.out.println("Round " + round + ": " + micros + " us (total " + t + ")");
+        }
+    }
+}</code></pre><div class="output">Round 1: 2851 us (total 590000100000)
+Round 2: 2437 us (total 590000100000)
+Round 3: 929 us (total 590000100000)
+Round 4: 927 us (total 590000100000)
+Round 5: 449 us (total 590000100000)
+Round 6: 451 us (total 590000100000)</div></div>
+  <ul class="anno">
+    <li><code>System.nanoTime()</code><span>A high-resolution timer for measuring durations (not the time of day).</span></li>
+    <li><code>i * 118L / 100</code><span>The <code>L</code> makes the multiplication use <code>long</code>, so it can't overflow <code>int</code>.</span></li>
+    <li><code>(total " + t + ")"</code><span>Printing the result keeps the work alive; an unused result could be optimised away.</span></li>
+    <li><code>Round 1</code> vs <code>Round 6</code><span>Interpreter and C1 first, C2 later. Locally, try <code>java -Xint Main</code> to see every round stay slow.</span></li>
+  </ul>
+  <div class="runner">
+    <script type="application/json">{"lang": "java", "file": "Main.java", "tasks": [
+{"label": "1 · Warm-up in action", "hint": "Press <b>Run</b> a few times. Your numbers will differ, but the first rounds are almost always slower: they start in the interpreter while the JIT compiles <code>invoiceTotal</code>. Locally, compare with <code>java -Xint Main</code> (interpreter only).", "code": "public class Main {\n    static long invoiceTotal(int items) {\n        long total = 0;\n        for (int i = 1; i <= items; i++) {\n            total += i * 118L / 100;          // each item's price with 18% GST\n        }\n        return total;\n    }\n\n    public static void main(String[] args) {\n        for (int round = 1; round <= 6; round++) {\n            long start = System.nanoTime();\n            long t = invoiceTotal(1_000_000);\n            long micros = (System.nanoTime() - start) / 1_000;\n            System.out.println(\"Round \" + round + \": \" + micros + \" us (total \" + t + \")\");\n        }\n    }\n}\n"},
+{"label": "2 · Predict: does the loop even run?", "hint": "<b>Predict first:</b> the first loop's result is never used. After warm-up, C2 may remove that work entirely, so its time can collapse to almost nothing. Your numbers will differ; compare the two lines.", "code": "public class Main {\n    static int discount(int price) {\n        return price > 1000 ? price / 10 : 0;\n    }\n\n    public static void main(String[] args) {\n        for (int round = 1; round <= 5; round++) {\n            long t0 = System.nanoTime();\n            for (int p = 0; p < 5_000_000; p++) {\n                discount(p);                       // result ignored\n            }\n            long t1 = System.nanoTime();\n            long used = 0;\n            for (int p = 0; p < 5_000_000; p++) {\n                used += discount(p);               // result used\n            }\n            long t2 = System.nanoTime();\n            System.out.println(\"Round \" + round + \": ignored \" + (t1 - t0) / 1000 + \" us, used \"\n                    + (t2 - t1) / 1000 + \" us (\" + used + \")\");\n        }\n    }\n}\n"},
+{"label": "3 · Escape analysis and the GC", "hint": "Each loop iteration creates a <code>Point</code> that never leaves the method. Once C2 compiles it, escape analysis can avoid the allocations. Your numbers will differ. Locally, run with <code>-Xlog:gc</code> and then with <code>-XX:-DoEscapeAnalysis -Xlog:gc</code>: in our test, the second run made about 20 times more GC pauses.", "code": "public class Main {\n    static class Point {\n        final int x, y;\n        Point(int x, int y) { this.x = x; this.y = y; }\n    }\n\n    static long sum(int n) {\n        long s = 0;\n        for (int i = 0; i < n; i++) {\n            Point p = new Point(i, i + 1);   // never escapes this method\n            s += p.x + p.y;\n        }\n        return s;\n    }\n\n    public static void main(String[] args) {\n        long total = 0;\n        long start = System.nanoTime();\n        for (int r = 0; r < 20; r++) total += sum(5_000_000);\n        System.out.println(\"Total: \" + total);\n        System.out.println(\"Time: \" + (System.nanoTime() - start) / 1_000_000 + \" ms\");\n    }\n}\n"},
+{"label": "4 · Predict the crash", "hint": "<b>Predict first:</b> which exception, and in which round? It fails on the very first call, in the interpreter. Compiled code would behave exactly the same: the JIT may speed up bounds checks but never removes one that can fail. Fix the condition to <code>i &lt; amounts.length</code>.", "code": "public class Main {\n    static long total(int[] amounts) {\n        long sum = 0;\n        for (int i = 0; i <= amounts.length; i++) {\n            sum += amounts[i];\n        }\n        return sum;\n    }\n\n    public static void main(String[] args) {\n        int[] amounts = {499, 1200, 75};\n        for (int round = 1; round <= 100_000; round++) {\n            total(amounts);\n        }\n        System.out.println(\"done\");\n    }\n}\n", "_expect": "exception"},
+{"label": "5 · Spot the error", "hint": "The JIT can only optimise code that compiles. <code>System.nanoTime()</code> returns a <code>long</code>; storing it in an <code>int</code> needs a cast, and would overflow anyway. Use <code>long start</code>.", "code": "public class Main {\n    public static void main(String[] args) {\n        int start = System.nanoTime();\n        long sum = 0;\n        for (int i = 0; i < 1000; i++) sum += i;\n        System.out.println(sum + \" in \" + (System.nanoTime() - start) + \" ns\");\n    }\n}\n", "_expect": "compile-error"}]}</script>
+  </div>
+</section>
+
+<!-- ======================= PART 8: LINE BY LINE ======================= -->
+<section class="part" id="tracer">
+  <span class="part-label"><b>8</b> Line by line</span>
+  <h2>Work whose result nobody uses</h2>
+  <p>Recorded from the real JVM, which runs in the interpreter while you step. Every call happens here; the notes explain which ones C2 would delete once the loop is hot.</p>
+  <div class="tracer">
+    <script type="application/json">{"lang": "java", "code": ["public class Main {", "    static int discount(int price) {", "        return price > 1000 ? price / 10 : 0;", "    }", "", "    public static void main(String[] args) {", "        int sum = 0;", "        for (int i = 1; i <= 3; i++) {", "            discount(800 * i);", "            sum += discount(500 * i);", "        }", "        System.out.println(\"Discounts: Rs \" + sum);", "    }", "}"], "steps": [
+{"line": 7, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["sum", "0"]]}], "heap": ["<b>#1</b> String[0] (args, empty)"], "newVar": "sum", "phase": "Start", "note": "sum = 0. Right now every line runs in the <b>interpreter</b>: the JVM reads the bytecode instruction by instruction."},
+{"line": 8, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["sum", "0"], ["i", "1"]]}], "heap": ["<b>#1</b> String[0] (args, empty)"], "newVar": "i", "phase": "Loop", "note": "i = 1."},
+{"line": 9, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["sum", "0"], ["i", "1"]]}, {"frame": "discount(int price)", "vars": [["price", "800"]]}], "heap": ["<b>#1</b> String[0] (args, empty)"], "newVar": "price", "phase": "Call 1", "note": "discount(800) pushes a frame. Its result is not used anywhere."},
+{"line": 3, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["sum", "0"], ["i", "1"]]}], "heap": ["<b>#1</b> String[0] (args, empty)"], "phase": "Return", "note": "800 is not &gt; 1000, so it returns 0. Frame popped."},
+{"line": 9, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["sum", "0"], ["i", "1"]]}], "heap": ["<b>#1</b> String[0] (args, empty)"], "phase": "Thrown away", "note": "The returned value is simply discarded (a <code>pop</code> instruction). The interpreter still did all the work."},
+{"line": 10, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["sum", "0"], ["i", "1"]]}, {"frame": "discount(int price)", "vars": [["price", "500"]]}], "heap": ["<b>#1</b> String[0] (args, empty)"], "newVar": "price", "phase": "Call 2", "note": "discount(500), and this result is used."},
+{"line": 3, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["sum", "0"], ["i", "1"]]}], "heap": ["<b>#1</b> String[0] (args, empty)"], "phase": "Return", "note": "0."},
+{"line": 10, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["sum", "0"], ["i", "1"]]}], "heap": ["<b>#1</b> String[0] (args, empty)"], "phase": "Add", "note": "sum stays 0."},
+{"line": 8, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["sum", "0"], ["i", "2"]]}], "heap": ["<b>#1</b> String[0] (args, empty)"], "newVar": "i", "phase": "Loop", "note": "i = 2."},
+{"line": 9, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["sum", "0"], ["i", "2"]]}, {"frame": "discount(int price)", "vars": [["price", "1600"]]}], "heap": ["<b>#1</b> String[0] (args, empty)"], "newVar": "price", "phase": "Call 1", "note": "discount(1600): result ignored again."},
+{"line": 3, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["sum", "0"], ["i", "2"]]}], "heap": ["<b>#1</b> String[0] (args, empty)"], "phase": "Return", "note": "1600 / 10 = 160, computed and thrown away."},
+{"line": 9, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["sum", "0"], ["i", "2"]]}], "heap": ["<b>#1</b> String[0] (args, empty)"], "phase": "Thrown away", "note": "Discarded. Once this loop is hot, C2 inlines discount here, sees the result is never used and the method has no side effects, and deletes the whole call: <b>dead code elimination</b>."},
+{"line": 10, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["sum", "0"], ["i", "2"]]}, {"frame": "discount(int price)", "vars": [["price", "1000"]]}], "heap": ["<b>#1</b> String[0] (args, empty)"], "newVar": "price", "phase": "Call 2", "note": "discount(1000)."},
+{"line": 3, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["sum", "0"], ["i", "2"]]}], "heap": ["<b>#1</b> String[0] (args, empty)"], "phase": "Return", "note": "1000 &gt; 1000 is false, so 0."},
+{"line": 10, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["sum", "0"], ["i", "2"]]}], "heap": ["<b>#1</b> String[0] (args, empty)"], "phase": "Add", "note": "sum still 0."},
+{"line": 8, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["sum", "0"], ["i", "3"]]}], "heap": ["<b>#1</b> String[0] (args, empty)"], "newVar": "i", "phase": "Loop", "note": "i = 3."},
+{"line": 9, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["sum", "0"], ["i", "3"]]}, {"frame": "discount(int price)", "vars": [["price", "2400"]]}], "heap": ["<b>#1</b> String[0] (args, empty)"], "newVar": "price", "phase": "Call 1", "note": "discount(2400), result ignored."},
+{"line": 3, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["sum", "0"], ["i", "3"]]}], "heap": ["<b>#1</b> String[0] (args, empty)"], "phase": "Return", "note": "240, discarded."},
+{"line": 9, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["sum", "0"], ["i", "3"]]}], "heap": ["<b>#1</b> String[0] (args, empty)"], "phase": "Thrown away", "note": "This is exactly the trap in naive benchmarks: time a loop whose result is never used, and the JIT may optimise the work away, so you measure nothing."},
+{"line": 10, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["sum", "0"], ["i", "3"]]}, {"frame": "discount(int price)", "vars": [["price", "1500"]]}], "heap": ["<b>#1</b> String[0] (args, empty)"], "newVar": "price", "phase": "Call 2", "note": "discount(1500)."},
+{"line": 3, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["sum", "0"], ["i", "3"]]}], "heap": ["<b>#1</b> String[0] (args, empty)"], "phase": "Return", "note": "150."},
+{"line": 10, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["sum", "150"], ["i", "3"]]}], "heap": ["<b>#1</b> String[0] (args, empty)"], "newVar": "sum", "phase": "Add", "note": "sum = 150."},
+{"line": 8, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["sum", "150"]]}], "heap": ["<b>#1</b> String[0] (args, empty)"], "phase": "Loop ends", "note": "i = 4 is not ≤ 3."},
+{"line": 12, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["sum", "150"]]}], "heap": ["<b>#1</b> String[0] (args, empty)"], "out": "Discounts: Rs 150\n", "phase": "Print", "note": "Using the result (printing it) is what keeps the second call alive in compiled code. Benchmark tools like JMH consume results with a Blackhole for the same reason."},
+{"line": 13, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["sum", "150"]]}], "heap": ["<b>#1</b> String[0] (args, empty)"], "phase": "main ends", "note": "main reaches its closing brace."},
+{"line": 13, "phase": "Program ends", "note": "main returns and the program ends. It was far too short for any JIT compilation of discount to happen.", "stack": [], "heap": []}]}</script>
+  </div>
+
+<h3 id="worked">Worked examples: real problems, solved and traced in memory</h3>
+  <p class="wx-intro">The JIT compiler is invisible in a debugger: while you step through code, the JVM runs it in the interpreter. These traces show the program exactly as the interpreter runs it, and the notes explain what the JIT would change once the same code becomes hot: which calls get inlined, and which objects never need to reach the heap.</p>
+  <article class="wx">
+    <div class="wx__head"><span class="wx__num">Example 1</span><span class="wx__tag">E-commerce · pricing</span></div>
+    <h4>A small method that will become hot</h4>
+    <div class="wx__problem"><p class="wx__label">Problem statement</p><p>A cart adds 18% GST to each price (in paise, to avoid decimals) using a small helper <code>withGst</code>. A static counter shows how often the helper runs. In production it runs lakhs of times a minute. Trace one cart.</p></div>
+    <div class="prob__io"><div><small>Input</small><pre>cart = (49900, 12000, 7500) paise</pre></div><div><small>Expected output</small><pre>Total: 81892 paise, withGst called 3 times</pre></div></div>
+    <div class="wx__approach"><p class="wx__label">Approach</p><ol><li>Keep money in <code>long</code> paise: integer maths, no rounding surprises.</li><li>Call the helper once per item. Each call pushes and pops a frame in the interpreter.</li><li>The JVM counts calls per method. After a few hundred calls, C1 compiles it; after thousands, C2 compiles an optimised version, usually inlined into the loop.</li></ol></div>
+    <p class="wx__label">Solution: run it live</p>
+    <div class="runner">
+    <script type="application/json">{"lang": "java", "file": "Main.java", "tasks": [{"label": "Run · A small method that will become hot", "hint": "Press <b>Run</b>. Then wrap the loop in <code>for (int r = 0; r &lt; 100_000; r++)</code> and print <code>calls</code>. Locally, run it with <code>java -XX:+PrintCompilation Main</code> and look for <code>Main::withGst</code>.", "code": "public class Main {\n    static int calls = 0;\n\n    static long withGst(long paise) {\n        calls++;\n        return paise * 118 / 100;\n    }\n\n    public static void main(String[] args) {\n        long[] cart = {49900, 12000, 7500};\n        long total = 0;\n        for (long price : cart) {\n            total += withGst(price);\n        }\n        System.out.println(\"Total: \" + total + \" paise, withGst called \" + calls + \" times\");\n    }\n}\n"}]}</script>
+    </div>
+    <p class="wx__label">What happens in memory, step by step</p>
+    <p class="wx__how">Recorded from the real JVM: press <b>Next</b> to execute one line at a time. Watch method calls push and pop frames on the stack, and objects (numbered #1, #2 …) appear on the heap.</p>
+    <div class="tracer">
+    <script type="application/json">{"lang": "java", "code": ["public class Main {", "    static int calls = 0;", "", "    static long withGst(long paise) {", "        calls++;", "        return paise * 118 / 100;", "    }", "", "    public static void main(String[] args) {", "        long[] cart = {49900, 12000, 7500};", "        long total = 0;", "        for (long price : cart) {", "            total += withGst(price);", "        }", "        System.out.println(\"Total: \" + total + \" paise, withGst called \" + calls + \" times\");", "    }", "}"], "steps": [{"line": 10, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["cart", "→ #1 long[3]"]]}], "heap": ["<b>static</b> Main.calls = 0", "<b>#1</b> long[3] {49900, 12000, 7500}", "<b>#2</b> String[0] (args, empty)"], "newVar": "cart", "phase": "Cart", "note": "The prices array #1 is on the heap. The <b>static</b> entry shows the counter <code>calls</code>."}, {"line": 11, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["cart", "→ #1 long[3]"], ["total", "0"]]}], "heap": ["<b>static</b> Main.calls = 0", "<b>#1</b> long[3] {49900, 12000, 7500}", "<b>#2</b> String[0] (args, empty)"], "newVar": "total", "phase": "Total", "note": "total = 0 in main's frame."}, {"line": 12, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["cart", "→ #1 long[3]"], ["total", "0"], ["price", "49900"]]}], "heap": ["<b>static</b> Main.calls = 0", "<b>#1</b> long[3] {49900, 12000, 7500}", "<b>#2</b> String[0] (args, empty)"], "newVar": "price", "phase": "Item 1", "note": "price = 49900 paise (Rs 499)."}, {"line": 13, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["cart", "→ #1 long[3]"], ["total", "0"], ["price", "49900"]]}, {"frame": "withGst(long paise)", "vars": [["paise", "49900"]]}], "heap": ["<b>static</b> Main.calls = 0", "<b>#1</b> long[3] {49900, 12000, 7500}", "<b>#2</b> String[0] (args, empty)"], "newVar": "paise", "phase": "Call withGst", "note": "The interpreter pushes a frame for withGst with paise = 49900. Behind the scenes the JVM also bumps the method's <b>invocation counter</b>, which is how it notices hot methods."}, {"line": 5, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["cart", "→ #1 long[3]"], ["total", "0"], ["price", "49900"]]}, {"frame": "withGst(long paise)", "vars": [["paise", "49900"]]}], "heap": ["<b>static</b> Main.calls = 1", "<b>#1</b> long[3] {49900, 12000, 7500}", "<b>#2</b> String[0] (args, empty)"], "phase": "Count", "note": "Our own counter: calls = 1."}, {"line": 6, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["cart", "→ #1 long[3]"], ["total", "0"], ["price", "49900"]]}], "heap": ["<b>static</b> Main.calls = 1", "<b>#1</b> long[3] {49900, 12000, 7500}", "<b>#2</b> String[0] (args, empty)"], "phase": "Return", "note": "49900 × 118 / 100 = 58882. Frame popped."}, {"line": 13, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["cart", "→ #1 long[3]"], ["total", "58882"]]}], "heap": ["<b>static</b> Main.calls = 1", "<b>#1</b> long[3] {49900, 12000, 7500}", "<b>#2</b> String[0] (args, empty)"], "newVar": "total", "phase": "Add", "note": "total = 58882."}, {"line": 12, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["cart", "→ #1 long[3]"], ["total", "58882"], ["price", "12000"]]}], "heap": ["<b>static</b> Main.calls = 1", "<b>#1</b> long[3] {49900, 12000, 7500}", "<b>#2</b> String[0] (args, empty)"], "newVar": "price", "phase": "Item 2", "note": "price = 12000."}, {"line": 13, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["cart", "→ #1 long[3]"], ["total", "58882"], ["price", "12000"]]}, {"frame": "withGst(long paise)", "vars": [["paise", "12000"]]}], "heap": ["<b>static</b> Main.calls = 1", "<b>#1</b> long[3] {49900, 12000, 7500}", "<b>#2</b> String[0] (args, empty)"], "newVar": "paise", "phase": "Call again", "note": "Same method, a fresh frame. Still interpreted: 2 calls is nowhere near hot."}, {"line": 5, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["cart", "→ #1 long[3]"], ["total", "58882"], ["price", "12000"]]}, {"frame": "withGst(long paise)", "vars": [["paise", "12000"]]}], "heap": ["<b>static</b> Main.calls = 2", "<b>#1</b> long[3] {49900, 12000, 7500}", "<b>#2</b> String[0] (args, empty)"], "phase": "Count", "note": "calls = 2."}, {"line": 6, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["cart", "→ #1 long[3]"], ["total", "58882"], ["price", "12000"]]}], "heap": ["<b>static</b> Main.calls = 2", "<b>#1</b> long[3] {49900, 12000, 7500}", "<b>#2</b> String[0] (args, empty)"], "phase": "Return", "note": "12000 × 118 / 100 = 14160."}, {"line": 13, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["cart", "→ #1 long[3]"], ["total", "73042"]]}], "heap": ["<b>static</b> Main.calls = 2", "<b>#1</b> long[3] {49900, 12000, 7500}", "<b>#2</b> String[0] (args, empty)"], "newVar": "total", "phase": "Add", "note": "total = 73042."}, {"line": 12, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["cart", "→ #1 long[3]"], ["total", "73042"], ["price", "7500"]]}], "heap": ["<b>static</b> Main.calls = 2", "<b>#1</b> long[3] {49900, 12000, 7500}", "<b>#2</b> String[0] (args, empty)"], "newVar": "price", "phase": "Item 3", "note": "price = 7500."}, {"line": 13, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["cart", "→ #1 long[3]"], ["total", "73042"], ["price", "7500"]]}, {"frame": "withGst(long paise)", "vars": [["paise", "7500"]]}], "heap": ["<b>static</b> Main.calls = 2", "<b>#1</b> long[3] {49900, 12000, 7500}", "<b>#2</b> String[0] (args, empty)"], "newVar": "paise", "phase": "Call again", "note": "Third frame for withGst. With default tiered settings, a method is queued for C1 compilation after roughly 200 calls (fewer or more depending on loops and load) and for C2 after thousands."}, {"line": 5, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["cart", "→ #1 long[3]"], ["total", "73042"], ["price", "7500"]]}, {"frame": "withGst(long paise)", "vars": [["paise", "7500"]]}], "heap": ["<b>static</b> Main.calls = 3", "<b>#1</b> long[3] {49900, 12000, 7500}", "<b>#2</b> String[0] (args, empty)"], "phase": "Count", "note": "calls = 3."}, {"line": 6, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["cart", "→ #1 long[3]"], ["total", "73042"], ["price", "7500"]]}], "heap": ["<b>static</b> Main.calls = 3", "<b>#1</b> long[3] {49900, 12000, 7500}", "<b>#2</b> String[0] (args, empty)"], "phase": "Return", "note": "7500 × 118 / 100 = 8850."}, {"line": 13, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["cart", "→ #1 long[3]"], ["total", "81892"]]}], "heap": ["<b>static</b> Main.calls = 3", "<b>#1</b> long[3] {49900, 12000, 7500}", "<b>#2</b> String[0] (args, empty)"], "newVar": "total", "phase": "Add", "note": "total = 81892 paise."}, {"line": 12, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["cart", "→ #1 long[3]"], ["total", "81892"]]}], "heap": ["<b>static</b> Main.calls = 3", "<b>#1</b> long[3] {49900, 12000, 7500}", "<b>#2</b> String[0] (args, empty)"], "phase": "Loop ends", "note": "All items done. In a real server this loop runs constantly, so withGst would soon be compiled to machine code and very likely inlined into the loop."}, {"line": 15, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["cart", "→ #1 long[3]"], ["total", "81892"]]}], "heap": ["<b>static</b> Main.calls = 3", "<b>#1</b> long[3] {49900, 12000, 7500}", "<b>#2</b> String[0] (args, empty)"], "out": "Total: 81892 paise, withGst called 3 times\n", "phase": "Print", "note": "Rs 818.92, expressed in paise."}, {"line": 16, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["cart", "→ #1 long[3]"], ["total", "81892"]]}], "heap": ["<b>static</b> Main.calls = 3", "<b>#1</b> long[3] {49900, 12000, 7500}", "<b>#2</b> String[0] (args, empty)"], "phase": "main finishes", "note": "main reaches its closing brace."}, {"line": 16, "phase": "Program ends", "note": "main returns, its frame is popped and the program ends.", "stack": [], "heap": []}]}</script>
+    </div>
+  </article>
+  <article class="wx">
+    <div class="wx__head"><span class="wx__num">Example 2</span><span class="wx__tag">Retail · cart total</span></div>
+    <h4>Getters: calls in the interpreter, gone after inlining</h4>
+    <div class="wx__problem"><p class="wx__label">Problem statement</p><p>Good design hides fields behind getters. A cart total calls <code>getPrice()</code> and <code>getQty()</code> for each item. Does all this calling cost anything in production? Trace it and read the notes on inlining.</p></div>
+    <div class="prob__io"><div><small>Input</small><pre>items: (Rs 250 × 2), (Rs 99 × 3)</pre></div><div><small>Expected output</small><pre>Cart total: Rs 797</pre></div></div>
+    <div class="wx__approach"><p class="wx__label">Approach</p><ol><li>Store each item as an object with private fields and getters.</li><li>Loop over the items and add price × quantity.</li><li>In the trace every getter call pushes a frame. Once the loop is hot, the JIT <b>inlines</b> these tiny methods: it copies their body into the caller, so the compiled loop reads the fields directly.</li></ol></div>
+    <p class="wx__label">Solution: run it live</p>
+    <div class="runner">
+    <script type="application/json">{"lang": "java", "file": "Main.java", "tasks": [{"label": "Run · Getters: calls in the interpreter, gone after inlining", "hint": "Press <b>Run</b>. Then add a third item <code>new Item(1200, 1)</code> and predict the total first.", "code": "public class Main {\n    static class Item {\n        private final int price;\n        private final int qty;\n        Item(int price, int qty) { this.price = price; this.qty = qty; }\n        int getPrice() { return price; }\n        int getQty() { return qty; }\n    }\n\n    public static void main(String[] args) {\n        Item[] cart = {new Item(250, 2), new Item(99, 3)};\n        int total = 0;\n        for (Item it : cart) {\n            total += it.getPrice() * it.getQty();\n        }\n        System.out.println(\"Cart total: Rs \" + total);\n    }\n}\n"}]}</script>
+    </div>
+    <p class="wx__label">What happens in memory, step by step</p>
+    <p class="wx__how">Recorded from the real JVM: press <b>Next</b> to execute one line at a time. Watch method calls push and pop frames on the stack, and objects (numbered #1, #2 …) appear on the heap.</p>
+    <div class="tracer">
+    <script type="application/json">{"lang": "java", "code": ["public class Main {", "    static class Item {", "        private final int price;", "        private final int qty;", "        Item(int price, int qty) { this.price = price; this.qty = qty; }", "        int getPrice() { return price; }", "        int getQty() { return qty; }", "    }", "", "    public static void main(String[] args) {", "        Item[] cart = {new Item(250, 2), new Item(99, 3)};", "        int total = 0;", "        for (Item it : cart) {", "            total += it.getPrice() * it.getQty();", "        }", "        System.out.println(\"Cart total: Rs \" + total);", "    }", "}"], "steps": [{"line": 11, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "new Main.Item(int price, int qty)", "vars": [["this", "→ #1 Main.Item"], ["price", "250"], ["qty", "2"]]}], "heap": ["<b>#1</b> Main.Item {price=0, qty=0}", "<b>#2</b> String[0] (args, empty)"], "newVar": "this", "phase": "First item", "note": "Item #1 is allocated and its constructor frame runs with price 250, qty 2."}, {"line": 5, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}], "heap": ["<b>#2</b> String[0] (args, empty)"], "phase": "Constructor done", "note": "Its reference waits on main's operand stack (inside the array initializer), so the view briefly shows no Item."}, {"line": 11, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "new Main.Item(int price, int qty)", "vars": [["this", "→ #3 Main.Item"], ["price", "99"], ["qty", "3"]]}], "heap": ["<b>#2</b> String[0] (args, empty)", "<b>#3</b> Main.Item {price=0, qty=0}"], "newVar": "this", "phase": "Second item", "note": "Item #3 is allocated: price 99, qty 3."}, {"line": 5, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}], "heap": ["<b>#2</b> String[0] (args, empty)"], "phase": "Constructor done", "note": "Reference waits on the operand stack."}, {"line": 11, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["cart", "→ #4 Main.Item[2]"]]}], "heap": ["<b>#1</b> Main.Item {price=250, qty=2}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Main.Item {price=99, qty=3}", "<b>#4</b> Main.Item[2] {→#1, →#3}"], "newVar": "cart", "phase": "Array", "note": "Array #4 now holds both items; <code>cart</code> refers to it."}, {"line": 12, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["cart", "→ #4 Main.Item[2]"], ["total", "0"]]}], "heap": ["<b>#1</b> Main.Item {price=250, qty=2}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Main.Item {price=99, qty=3}", "<b>#4</b> Main.Item[2] {→#1, →#3}"], "newVar": "total", "phase": "Total", "note": "total = 0."}, {"line": 13, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["cart", "→ #4 Main.Item[2]"], ["total", "0"], ["it", "→ #1 Main.Item"]]}], "heap": ["<b>#1</b> Main.Item {price=250, qty=2}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Main.Item {price=99, qty=3}", "<b>#4</b> Main.Item[2] {→#1, →#3}"], "newVar": "it", "phase": "Item 1", "note": "<code>it</code> → #1."}, {"line": 14, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["cart", "→ #4 Main.Item[2]"], ["total", "0"], ["it", "→ #1 Main.Item"]]}, {"frame": "Main.Item.getPrice()", "vars": [["this", "→ #1 Main.Item"]]}], "heap": ["<b>#1</b> Main.Item {price=250, qty=2}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Main.Item {price=99, qty=3}", "<b>#4</b> Main.Item[2] {→#1, →#3}"], "newVar": "this", "phase": "getPrice()", "note": "A frame is pushed just to read one field. In the interpreter, every call costs a frame push and pop."}, {"line": 6, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["cart", "→ #4 Main.Item[2]"], ["total", "0"], ["it", "→ #1 Main.Item"]]}], "heap": ["<b>#1</b> Main.Item {price=250, qty=2}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Main.Item {price=99, qty=3}", "<b>#4</b> Main.Item[2] {→#1, →#3}"], "phase": "Return", "note": "Returns 250; frame popped."}, {"line": 14, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["cart", "→ #4 Main.Item[2]"], ["total", "0"], ["it", "→ #1 Main.Item"]]}, {"frame": "Main.Item.getQty()", "vars": [["this", "→ #1 Main.Item"]]}], "heap": ["<b>#1</b> Main.Item {price=250, qty=2}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Main.Item {price=99, qty=3}", "<b>#4</b> Main.Item[2] {→#1, →#3}"], "newVar": "this", "phase": "getQty()", "note": "Another frame for one field read."}, {"line": 7, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["cart", "→ #4 Main.Item[2]"], ["total", "0"], ["it", "→ #1 Main.Item"]]}], "heap": ["<b>#1</b> Main.Item {price=250, qty=2}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Main.Item {price=99, qty=3}", "<b>#4</b> Main.Item[2] {→#1, →#3}"], "phase": "Return", "note": "Returns 2; frame popped."}, {"line": 14, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["cart", "→ #4 Main.Item[2]"], ["total", "500"]]}], "heap": ["<b>#1</b> Main.Item {price=250, qty=2}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Main.Item {price=99, qty=3}", "<b>#4</b> Main.Item[2] {→#1, →#3}"], "newVar": "total", "phase": "Add", "note": "total = 250 × 2 = 500."}, {"line": 13, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["cart", "→ #4 Main.Item[2]"], ["total", "500"], ["it", "→ #3 Main.Item"]]}], "heap": ["<b>#1</b> Main.Item {price=250, qty=2}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Main.Item {price=99, qty=3}", "<b>#4</b> Main.Item[2] {→#1, →#3}"], "newVar": "it", "phase": "Item 2", "note": "<code>it</code> → #3."}, {"line": 14, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["cart", "→ #4 Main.Item[2]"], ["total", "500"], ["it", "→ #3 Main.Item"]]}, {"frame": "Main.Item.getPrice()", "vars": [["this", "→ #3 Main.Item"]]}], "heap": ["<b>#1</b> Main.Item {price=250, qty=2}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Main.Item {price=99, qty=3}", "<b>#4</b> Main.Item[2] {→#1, →#3}"], "newVar": "this", "phase": "getPrice()", "note": "Frame pushed again."}, {"line": 6, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["cart", "→ #4 Main.Item[2]"], ["total", "500"], ["it", "→ #3 Main.Item"]]}], "heap": ["<b>#1</b> Main.Item {price=250, qty=2}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Main.Item {price=99, qty=3}", "<b>#4</b> Main.Item[2] {→#1, →#3}"], "phase": "Return", "note": "99."}, {"line": 14, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["cart", "→ #4 Main.Item[2]"], ["total", "500"], ["it", "→ #3 Main.Item"]]}, {"frame": "Main.Item.getQty()", "vars": [["this", "→ #3 Main.Item"]]}], "heap": ["<b>#1</b> Main.Item {price=250, qty=2}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Main.Item {price=99, qty=3}", "<b>#4</b> Main.Item[2] {→#1, →#3}"], "newVar": "this", "phase": "getQty()", "note": "Frame pushed again."}, {"line": 7, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["cart", "→ #4 Main.Item[2]"], ["total", "500"], ["it", "→ #3 Main.Item"]]}], "heap": ["<b>#1</b> Main.Item {price=250, qty=2}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Main.Item {price=99, qty=3}", "<b>#4</b> Main.Item[2] {→#1, →#3}"], "phase": "Return", "note": "3."}, {"line": 14, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["cart", "→ #4 Main.Item[2]"], ["total", "797"]]}], "heap": ["<b>#1</b> Main.Item {price=250, qty=2}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Main.Item {price=99, qty=3}", "<b>#4</b> Main.Item[2] {→#1, →#3}"], "newVar": "total", "phase": "Add", "note": "total = 500 + 297 = 797."}, {"line": 13, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["cart", "→ #4 Main.Item[2]"], ["total", "797"]]}], "heap": ["<b>#1</b> Main.Item {price=250, qty=2}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Main.Item {price=99, qty=3}", "<b>#4</b> Main.Item[2] {→#1, →#3}"], "phase": "Loop ends", "note": "Four getter frames for two items. Once this loop is hot, the JIT inlines both getters (each is only a few bytes of bytecode, well under the 35-byte inlining limit for ordinary methods), so the compiled loop reads <code>price</code> and <code>qty</code> directly with no calls at all. Clean code costs nothing here."}, {"line": 16, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["cart", "→ #4 Main.Item[2]"], ["total", "797"]]}], "heap": ["<b>#1</b> Main.Item {price=250, qty=2}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Main.Item {price=99, qty=3}", "<b>#4</b> Main.Item[2] {→#1, →#3}"], "out": "Cart total: Rs 797\n", "phase": "Print", "note": "Rs 797."}, {"line": 17, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["cart", "→ #4 Main.Item[2]"], ["total", "797"]]}], "heap": ["<b>#1</b> Main.Item {price=250, qty=2}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Main.Item {price=99, qty=3}", "<b>#4</b> Main.Item[2] {→#1, →#3}"], "phase": "main finishes", "note": "main reaches its closing brace."}, {"line": 17, "phase": "Program ends", "note": "main returns, its frame is popped and the program ends.", "stack": [], "heap": []}]}</script>
+    </div>
+  </article>
+  <article class="wx">
+    <div class="wx__head"><span class="wx__num">Example 3</span><span class="wx__tag">Payments · fees and ledger</span></div>
+    <h4>Escape analysis: which object really needs the heap?</h4>
+    <div class="wx__problem"><p class="wx__label">Problem statement</p><p>A payment service adds a Rs 5 fee (500 paise) using a temporary <code>Money</code> object, then records the charged amount in a ledger, which is a static list. Trace both methods and decide which <code>Money</code> object escapes its method.</p></div>
+    <div class="prob__io"><div><small>Input</small><pre>amount = 10000 paise, fee = 500 paise</pre></div><div><small>Expected output</small><pre>Charged 10500 paise, ledger size 1</pre></div></div>
+    <div class="wx__approach"><p class="wx__label">Approach</p><ol><li><code>addFee</code> creates a Money, reads one field, and returns a plain <code>long</code>: the object never leaves the method.</li><li><code>record</code> creates a Money and stores it in a static list: the object <b>escapes</b> and must live on the heap.</li><li>C2's escape analysis can replace a non-escaping object with plain local values (<b>scalar replacement</b>), so in hot compiled code the first object may never be allocated at all.</li></ol></div>
+    <p class="wx__label">Solution: run it live</p>
+    <div class="runner">
+    <script type="application/json">{"lang": "java", "file": "Main.java", "tasks": [{"label": "Run · Escape analysis: which object really needs the heap?", "hint": "Press <b>Run</b>. Then change <code>addFee</code> to also do <code>ledger.add(m);</code>. Does its Money object still stay inside the method?", "code": "import java.util.ArrayList;\nimport java.util.List;\n\npublic class Main {\n    static class Money {\n        final long paise;\n        Money(long paise) { this.paise = paise; }\n    }\n\n    static List<Money> ledger = new ArrayList<>();\n\n    static long addFee(long paise) {\n        Money m = new Money(paise + 500);\n        return m.paise;\n    }\n\n    static void record(long paise) {\n        Money m = new Money(paise);\n        ledger.add(m);\n    }\n\n    public static void main(String[] args) {\n        long charged = addFee(10000);\n        record(charged);\n        System.out.println(\"Charged \" + charged + \" paise, ledger size \" + ledger.size());\n    }\n}\n"}]}</script>
+    </div>
+    <p class="wx__label">What happens in memory, step by step</p>
+    <p class="wx__how">Recorded from the real JVM: press <b>Next</b> to execute one line at a time. Watch method calls push and pop frames on the stack, and objects (numbered #1, #2 …) appear on the heap.</p>
+    <div class="tracer">
+    <script type="application/json">{"lang": "java", "code": ["import java.util.ArrayList;", "import java.util.List;", "", "public class Main {", "    static class Money {", "        final long paise;", "        Money(long paise) { this.paise = paise; }", "    }", "", "    static List<Money> ledger = new ArrayList<>();", "", "    static long addFee(long paise) {", "        Money m = new Money(paise + 500);", "        return m.paise;", "    }", "", "    static void record(long paise) {", "        Money m = new Money(paise);", "        ledger.add(m);", "    }", "", "    public static void main(String[] args) {", "        long charged = addFee(10000);", "        record(charged);", "        System.out.println(\"Charged \" + charged + \" paise, ledger size \" + ledger.size());", "    }", "}"], "steps": [{"line": 23, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "addFee(long paise)", "vars": [["paise", "10000"]]}], "heap": ["<b>static</b> Main.ledger = → #1 ArrayList", "<b>#1</b> ArrayList size 0 []", "<b>#2</b> String[0] (args, empty)"], "newVar": "paise", "phase": "Call addFee", "note": "The static field <code>ledger</code> points to an empty list #1. A frame for addFee is pushed with paise = 10000."}, {"line": 13, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "addFee(long paise)", "vars": [["paise", "10000"]]}, {"frame": "new Main.Money(long paise)", "vars": [["this", "→ #3 Main.Money"], ["paise", "10500"]]}], "heap": ["<b>static</b> Main.ledger = → #1 ArrayList", "<b>#1</b> ArrayList size 0 []", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Main.Money {paise=0}"], "newVar": "this", "phase": "new Money", "note": "Money #3 is allocated (paise 0) and its constructor runs with 10500."}, {"line": 7, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "addFee(long paise)", "vars": [["paise", "10000"]]}], "heap": ["<b>static</b> Main.ledger = → #1 ArrayList", "<b>#1</b> ArrayList size 0 []", "<b>#2</b> String[0] (args, empty)"], "phase": "Constructor done", "note": "Reference on the operand stack."}, {"line": 13, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "addFee(long paise)", "vars": [["paise", "10000"], ["m", "→ #3 Main.Money"]]}], "heap": ["<b>static</b> Main.ledger = → #1 ArrayList", "<b>#1</b> ArrayList size 0 []", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Main.Money {paise=10500}"], "newVar": "m", "phase": "Local m", "note": "<code>m</code> → #3. Only this frame can see it."}, {"line": 14, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}], "heap": ["<b>static</b> Main.ledger = → #1 ArrayList", "<b>#1</b> ArrayList size 0 []", "<b>#2</b> String[0] (args, empty)"], "phase": "Return a long", "note": "addFee returns 10500, a primitive. Its frame is popped and #3 is already unreachable: it never <b>escaped</b>. In C2-compiled code, escape analysis can keep 10500 in a register and skip creating #3 altogether."}, {"line": 23, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["charged", "10500"]]}], "heap": ["<b>static</b> Main.ledger = → #1 ArrayList", "<b>#1</b> ArrayList size 0 []", "<b>#2</b> String[0] (args, empty)"], "newVar": "charged", "phase": "Store", "note": "charged = 10500."}, {"line": 24, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["charged", "10500"]]}, {"frame": "record(long paise)", "vars": [["paise", "10500"]]}], "heap": ["<b>static</b> Main.ledger = → #1 ArrayList", "<b>#1</b> ArrayList size 0 []", "<b>#2</b> String[0] (args, empty)"], "newVar": "paise", "phase": "Call record", "note": "A frame for record with paise = 10500."}, {"line": 18, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["charged", "10500"]]}, {"frame": "record(long paise)", "vars": [["paise", "10500"]]}, {"frame": "new Main.Money(long paise)", "vars": [["this", "→ #4 Main.Money"], ["paise", "10500"]]}], "heap": ["<b>static</b> Main.ledger = → #1 ArrayList", "<b>#1</b> ArrayList size 0 []", "<b>#2</b> String[0] (args, empty)", "<b>#4</b> Main.Money {paise=0}"], "newVar": "this", "phase": "new Money", "note": "Money #4 is allocated."}, {"line": 7, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["charged", "10500"]]}, {"frame": "record(long paise)", "vars": [["paise", "10500"]]}], "heap": ["<b>static</b> Main.ledger = → #1 ArrayList", "<b>#1</b> ArrayList size 0 []", "<b>#2</b> String[0] (args, empty)"], "phase": "Constructor done", "note": "Reference on the operand stack."}, {"line": 18, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["charged", "10500"]]}, {"frame": "record(long paise)", "vars": [["paise", "10500"], ["m", "→ #4 Main.Money"]]}], "heap": ["<b>static</b> Main.ledger = → #1 ArrayList", "<b>#1</b> ArrayList size 0 []", "<b>#2</b> String[0] (args, empty)", "<b>#4</b> Main.Money {paise=10500}"], "newVar": "m", "phase": "Local m", "note": "<code>m</code> → #4."}, {"line": 19, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["charged", "10500"]]}, {"frame": "record(long paise)", "vars": [["paise", "10500"], ["m", "→ #4 Main.Money"]]}], "heap": ["<b>static</b> Main.ledger = → #1 ArrayList", "<b>#1</b> ArrayList size 1 [→#4]", "<b>#2</b> String[0] (args, empty)", "<b>#4</b> Main.Money {paise=10500}"], "phase": "Escape!", "note": "<code>ledger.add(m)</code> stores #4 in a list reachable from a static field. The object outlives the method, so it must be a real heap object even in compiled code."}, {"line": 20, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["charged", "10500"]]}], "heap": ["<b>static</b> Main.ledger = → #1 ArrayList", "<b>#1</b> ArrayList size 1 [→#4]", "<b>#2</b> String[0] (args, empty)", "<b>#4</b> Main.Money {paise=10500}"], "phase": "Return", "note": "record's frame is popped; #4 lives on in the ledger."}, {"line": 25, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["charged", "10500"]]}], "heap": ["<b>static</b> Main.ledger = → #1 ArrayList", "<b>#1</b> ArrayList size 1 [→#4]", "<b>#2</b> String[0] (args, empty)", "<b>#4</b> Main.Money {paise=10500}"], "out": "Charged 10500 paise, ledger size 1\n", "phase": "Print", "note": "One Money object survived; the other was temporary."}, {"line": 26, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["charged", "10500"]]}], "heap": ["<b>static</b> Main.ledger = → #1 ArrayList", "<b>#1</b> ArrayList size 1 [→#4]", "<b>#2</b> String[0] (args, empty)", "<b>#4</b> Main.Money {paise=10500}"], "phase": "main finishes", "note": "main reaches its closing brace."}, {"line": 26, "phase": "Program ends", "note": "main returns, its frame is popped and the program ends.", "stack": [], "heap": []}]}</script>
+    </div>
+  </article>
+
+</section>
+
+<!-- ======================= PART 9: QUIZ AND REVISION ======================= -->
+<section class="part" id="quiz">
+  <span class="part-label"><b>9</b> Quiz and revision</span>
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <script type="application/json">[
+      { "q": "When a Java method is called for the very first time, how is it usually executed in HotSpot?", "options": ["As C2-compiled machine code", "By the interpreter", "As C1 code compiled by javac", "It is compiled ahead of time"], "answer": 1, "why": "Methods start in the interpreter; only hot ones get compiled by the JIT." },
+      { "q": "How does the JVM decide which code is hot?", "options": ["The programmer marks it", "Counters for method calls and loop back-edges", "It compiles every method at start-up", "Random sampling of source files"], "answer": 1, "why": "Invocation and back-edge counters cross thresholds, and the code is queued for compilation." },
+      { "q": "In tiered compilation, what is the usual order?", "options": ["C2, then C1", "Interpreter, C1 (with profiling), then C2", "javac, then C2 only", "C1 only"], "answer": 1, "why": "Tier 0 interpreter, tier 3 C1 with profiling, tier 4 C2 using the profile." },
+      { "q": "What is inlining?", "options": ["Writing code on one line", "Copying a called method's body into the caller to remove the call", "Storing objects on the stack", "Merging two classes"], "answer": 1, "why": "Inlining removes call overhead and lets the compiler optimise across method boundaries." },
+      { "q": "Escape analysis can let the JIT…", "options": ["Skip garbage collection entirely", "Avoid allocating objects that never leave a method", "Remove all objects from the heap", "Convert classes to records"], "answer": 1, "why": "If an object doesn't escape, its fields can be kept as local values (scalar replacement), so no heap allocation is needed." },
+      { "q": "In -XX:+PrintCompilation output, what does % mean?", "options": ["The method is synchronized", "On-stack replacement: a hot loop compiled and entered mid-execution", "The method failed to compile", "Percentage of CPU used"], "answer": 1, "why": "% marks an OSR compilation; the number after @ is the loop's bytecode index." },
+      { "q": "Why is timing a single call with System.nanoTime() misleading?", "options": ["nanoTime is inaccurate", "The first call includes interpretation, class loading and compilation warm-up", "Java can't be timed", "It always returns 0"], "answer": 1, "why": "Early calls don't reflect steady-state performance. Warm up, repeat, and preferably use JMH." },
+      { "q": "A loop computes values but never uses the results. After warm-up its time drops to almost 0. Why?", "options": ["The CPU cached the answer", "C2 removed the work as dead code", "The GC deleted the loop", "nanoTime overflowed"], "answer": 1, "why": "Code whose results are unused and that has no side effects can be eliminated by the optimising compiler." }
+    ]</script>
+  </div>
+  <h3>Quick revision</h3>
+  <div class="revision">
+    <h3>Lesson 8.5 in one screen</h3>
+    <ul>
+      <li>javac → bytecode; the JVM interprets first, then JIT-compiles hot code to machine code at run time.</li>
+      <li>Hot = counters for calls and loop back-edges cross thresholds (about 200 for C1, about 5,000 for C2 by default).</li>
+      <li>Tiers: 0 interpreter → 3 C1 with profiling → 4 C2 optimised. OSR compiles hot loops mid-call.</li>
+      <li>C2: inlining, escape analysis (scalar replacement), dead code elimination, loop optimisations.</li>
+      <li>Deoptimisation: compiled code is discarded when assumptions break (“made not entrant”).</li>
+      <li>Warm-up makes early runs slow; measure steady state, use results, prefer JMH.</li>
+      <li>Tools: <code>-XX:+PrintCompilation</code>, <code>-Xint</code>, <code>-XX:TieredStopAtLevel=1</code>.</li>
+    </ul>
+  </div>
+  <h3>Interview and viva questions</h3>
+  <div class="faq">
+    <details><summary>What is the JIT compiler and why does Java use it?</summary><p>It compiles frequently executed bytecode into native machine code while the program runs. Starting in the interpreter gives fast start-up and keeps bytecode portable; compiling only hot code focuses effort where it pays, and run-time profiling lets the JIT make optimisations an ahead-of-time compiler can't safely make, such as optimising for the classes and branches actually seen.</p></details>
+    <details><summary>Explain tiered compilation.</summary><p>Code starts at tier 0 in the interpreter. When it becomes hot it is compiled by C1, usually at tier 3, which produces decent code quickly and collects profiling data. If it stays hot, C2 recompiles it at tier 4 using that profile for aggressive optimisations. Tiered compilation has been the default since Java 8.</p></details>
+    <details><summary>What is escape analysis?</summary><p>An analysis in C2 that checks whether an object created in a method can be seen outside it (returned, stored in a field or a collection, passed to code that isn't inlined). If it doesn't escape, the JIT can replace the object with its fields as local values (scalar replacement) and avoid the heap allocation, and it can also remove unneeded locking on that object.</p></details>
+    <details><summary>Why can a micro-benchmark written with System.nanoTime() be wrong?</summary><p>It may measure warm-up (interpretation, class loading, compilation) instead of steady state; the JIT may remove work whose results are unused; GC pauses and other processes add noise; and one run proves little. JMH handles warm-up, multiple forks and iterations, and prevents dead code elimination with Blackholes.</p></details>
+    <details><summary>What is deoptimisation?</summary><p>C2 makes speculative assumptions, for example that a call site always sees one class. If that stops being true (say a new subclass is loaded), the JVM invalidates the compiled code, continues in the interpreter and may recompile later. It affects speed, never correctness.</p></details>
+  </div>
+
+  <h3 id="practice">Practice problems</h3>
+  <p class="prob-intro">You can't print the JIT's decisions from inside a normal program, so these problems practise the skills around it: spotting hot code, reading <code>-XX:+PrintCompilation</code> output, and measuring honestly. The last three are business tasks.</p>
+  <div class="probs">
+    <article class="prob"><div class="prob__head"><span class="prob__num">P1</span><span class="prob__tag prob__tag--easy">Easy</span><h4>Which methods are hot?</h4></div>
+      <p>Count how many times each of three methods runs while processing 500 orders, and flag those called more than 200 times (roughly where C1 compilation starts with default settings).</p>
+      <div class="prob__io"><div><small>Input</small><pre>500 orders; every order is validated, every 4th gets a coupon, 1 report at the end</pre></div><div><small>Expected output</small><pre>validate: 500 calls  &lt;- hot, will be compiled
+coupon  : 125 calls
+report  : 1 calls</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="java" data-file="Main.java"><pre><code>public class Main {
+    static int validateCalls, couponCalls, reportCalls;
+
+    static boolean validate(int amount) { validateCalls++; return amount &gt; 0; }
+    static int coupon(int amount) { couponCalls++; return amount / 10; }
+    static void report() { reportCalls++; }
+
+    static void show(String name, int calls) {
+        System.out.println(name + &quot;: &quot; + calls + &quot; calls&quot; + (calls &gt; 200 ? &quot;  &lt;- hot, will be compiled&quot; : &quot;&quot;));
+    }
+
+    public static void main(String[] args) {
+        for (int order = 1; order &lt;= 500; order++) {
+            if (validate(order * 100) &amp;&amp; order % 4 == 0) {
+                coupon(order * 100);
+            }
+        }
+        report();
+        show(&quot;validate&quot;, validateCalls);
+        show(&quot;coupon  &quot;, couponCalls);
+        show(&quot;report  &quot;, reportCalls);
+    }
+}</code></pre><div class="output">validate: 500 calls  &lt;- hot, will be compiled
+coupon  : 125 calls
+report  : 1 calls</div></div>
+        <p><b>How it works:</b> the JVM keeps counters like these for every method (and for loop back-edges). Methods that cross the thresholds are compiled, first by C1, later by C2 if they stay hot. <code>report()</code>, called once, is simply interpreted: compiling it would cost more than it saves. The 200 here is the default <code>Tier3InvocationThreshold</code>; the real decision also considers loops and compiler load.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P2</span><span class="prob__tag prob__tag--easy">Easy</span><h4>Read one PrintCompilation line</h4></div>
+      <p>Split a line of <code>-XX:+PrintCompilation</code> output into its parts and explain the tier.</p>
+      <div class="prob__io"><div><small>Input</small><pre>&quot;     36    9       4       Main::gst (6 bytes)&quot;</pre></div><div><small>Expected output</small><pre>time:       36 ms after start
+compile id: 9
+tier:       4 = C2, fully optimised
+method:     Main::gst
+bytecode:   6 bytes</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="java" data-file="Main.java"><pre><code>public class Main {
+    public static void main(String[] args) {
+        String line = &quot;     36    9       4       Main::gst (6 bytes)&quot;;
+        String[] p = line.trim().split(&quot;\\s+&quot;);
+        String[] tierNames = {&quot;interpreter&quot;, &quot;C1, no profiling&quot;, &quot;C1, light profiling&quot;,
+                              &quot;C1, full profiling&quot;, &quot;C2, fully optimised&quot;};
+        int tier = Integer.parseInt(p[2]);
+        System.out.println(&quot;time:       &quot; + p[0] + &quot; ms after start&quot;);
+        System.out.println(&quot;compile id: &quot; + p[1]);
+        System.out.println(&quot;tier:       &quot; + tier + &quot; = &quot; + tierNames[tier]);
+        System.out.println(&quot;method:     &quot; + p[3]);
+        System.out.println(&quot;bytecode:   &quot; + p[4].substring(1) + &quot; bytes&quot;);
+    }
+}</code></pre><div class="output">time:       36 ms after start
+compile id: 9
+tier:       4 = C2, fully optimised
+method:     Main::gst
+bytecode:   6 bytes</div></div>
+        <p><b>How it works:</b> the columns are a timestamp (ms since start), a compile id, optional flags (such as <code>%</code> for OSR), the tier (0 to 4), the method and its bytecode size. This real line says <code>Main::gst</code>, a 6-byte method, was compiled by C2 (tier 4) 36 ms after start-up. The regex <code>\s+</code> splits on any run of spaces.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P3</span><span class="prob__tag prob__tag--medium">Medium</span><h4>Classify compilation events</h4></div>
+      <p>Given real lines from <code>-XX:+PrintCompilation</code>, count normal compilations, OSR compilations (marked <code>%</code>) and deoptimised code (“made not entrant”).</p>
+      <div class="prob__io"><div><small>Input</small><pre>7 lines (see the code)</pre></div><div><small>Expected output</small><pre>Normal compilations: 3
+OSR compilations:    2
+Old code discarded:  2</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="java" data-file="Main.java"><pre><code>public class Main {
+    public static void main(String[] args) {
+        String[] log = {
+            &quot;35    8       3       Main::gst (6 bytes)&quot;,
+            &quot;36    9       4       Main::gst (6 bytes)&quot;,
+            &quot;36    8       3       Main::gst (6 bytes)   made not entrant&quot;,
+            &quot;38   10 %     3       Main::main @ 4 (36 bytes)&quot;,
+            &quot;39   11       3       Main::main (36 bytes)&quot;,
+            &quot;39   12 %     4       Main::main @ 4 (36 bytes)&quot;,
+            &quot;42   10 %     3       Main::main @ 4 (36 bytes)   made not entrant&quot;
+        };
+        int normal = 0, osr = 0, discarded = 0;
+        for (String line : log) {
+            if (line.contains(&quot;made not entrant&quot;)) discarded++;
+            else if (line.contains(&quot; % &quot;)) osr++;
+            else normal++;
+        }
+        System.out.println(&quot;Normal compilations: &quot; + normal);
+        System.out.println(&quot;OSR compilations:    &quot; + osr);
+        System.out.println(&quot;Old code discarded:  &quot; + discarded);
+    }
+}</code></pre><div class="output">Normal compilations: 3
+OSR compilations:    2
+Old code discarded:  2</div></div>
+        <p><b>How it works:</b> <b>OSR</b> (on-stack replacement) compiles a long-running loop while the method is still inside it, switching to compiled code mid-loop; <code>@ 4</code> is the bytecode index of the loop. “Made not entrant” means older code is retired, usually because a better tier replaced it (tier 3 → 4) or an assumption broke (deoptimisation). These lines come from the GST example in this lesson.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P4</span><span class="prob__tag prob__tag--medium">Medium</span><h4>Keep the result, or the JIT may drop the work</h4></div>
+      <p>A benchmark computes discounts in a loop. Make sure the work can't be optimised away by combining every result into a checksum that is printed at the end.</p>
+      <div class="prob__io"><div><small>Input</small><pre>prices 1..1,00,000 (Rs), discount 10% above Rs 1000</pre></div><div><small>Expected output</small><pre>Checksum: 499910400</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="java" data-file="Main.java"><pre><code>public class Main {
+    static int discount(int price) {
+        return price &gt; 1000 ? price / 10 : 0;
+    }
+
+    public static void main(String[] args) {
+        long checksum = 0;
+        for (int price = 1; price &lt;= 100_000; price++) {
+            checksum += discount(price);      // result is used
+        }
+        System.out.println(&quot;Checksum: &quot; + checksum);
+    }
+}</code></pre><div class="output">Checksum: 499910400</div></div>
+        <p><b>How it works:</b> if the loop just called <code>discount(price)</code> and ignored the result, C2 could inline it, see it has no side effects, and delete it: a timing would then measure an empty loop. Using every result (and printing the total) keeps the computation real. JMH does the same thing with its <code>Blackhole</code> class.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P5</span><span class="prob__tag prob__tag--business">Business problem</span><h4>Ignore the warm-up when reporting speed</h4></div>
+      <p>A team timed 10 rounds of an invoice-generation job (microseconds, as measured on one machine). Report the naive average, the steady-state average after discarding 4 warm-up rounds, and how much slower the first round was.</p>
+      <div class="prob__io"><div><small>Input</small><pre>rounds = {4551, 2228, 1217, 1198, 819, 557, 561, 549, 553, 560}</pre></div><div><small>Expected output</small><pre>Naive average:  1279.3 us
+Steady average: 599.8 us
+First round was 7.6x slower than steady state</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="java" data-file="Main.java"><pre><code>public class Main {
+    public static void main(String[] args) {
+        long[] rounds = {4551, 2228, 1217, 1198, 819, 557, 561, 549, 553, 560};
+        int warmup = 4;
+        long all = 0, steady = 0;
+        for (int i = 0; i &lt; rounds.length; i++) {
+            all += rounds[i];
+            if (i &gt;= warmup) steady += rounds[i];
+        }
+        double naive = (double) all / rounds.length;
+        double steadyAvg = (double) steady / (rounds.length - warmup);
+        System.out.printf(&quot;Naive average:  %.1f us%n&quot;, naive);
+        System.out.printf(&quot;Steady average: %.1f us%n&quot;, steadyAvg);
+        System.out.printf(&quot;First round was %.1fx slower than steady state%n&quot;, rounds[0] / steadyAvg);
+    }
+}</code></pre><div class="output">Naive average:  1279.3 us
+Steady average: 599.8 us
+First round was 7.6x slower than steady state</div></div>
+        <p><b>How it works:</b></p><ol><li>The first rounds ran in the interpreter and C1 while C2 was still compiling, so they are much slower. The first six numbers are real measurements from this lesson's warm-up demo.</li><li>Averaging everything mixes two different situations. Report steady-state numbers (and, separately, start-up time if that matters to your users).</li><li>Tools like JMH run warm-up iterations automatically and repeat measurements in fresh JVMs.</li></ol>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P6</span><span class="prob__tag prob__tag--business">Business problem</span><h4>Daily sales total: primitives in the hot loop</h4></div>
+      <p>Sum 1,00,000 order amounts (in paise) twice: once with a <code>long</code> accumulator and once with a boxed <code>Long</code>. Show the totals agree, and explain why the hot loop should use the primitive.</p>
+      <div class="prob__io"><div><small>Input</small><pre>amount of order i = (i % 500 + 1) × 100 paise</pre></div><div><small>Expected output</small><pre>long total: Rs 25050000
+Long total: Rs 25050000
+Same? true</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="java" data-file="Main.java"><pre><code>public class Main {
+    public static void main(String[] args) {
+        long primitiveTotal = 0;
+        Long boxedTotal = 0L;
+        for (int i = 0; i &lt; 100_000; i++) {
+            long amount = (i % 500 + 1) * 100L;
+            primitiveTotal += amount;
+            boxedTotal += amount;          // unbox, add, box a new Long
+        }
+        System.out.println(&quot;long total: Rs &quot; + primitiveTotal / 100);
+        System.out.println(&quot;Long total: Rs &quot; + boxedTotal / 100);
+        System.out.println(&quot;Same? &quot; + (primitiveTotal == boxedTotal));
+    }
+}</code></pre><div class="output">long total: Rs 25050000
+Long total: Rs 25050000
+Same? true</div></div>
+        <p><b>How it works:</b></p><ol><li>The results are identical, but <code>boxedTotal += amount</code> creates a new <code>Long</code> object on most iterations (only small values are cached).</li><li>Escape analysis can sometimes remove such boxes in compiled code, but you can't rely on it; the primitive version never allocates.</li><li>In hot paths (billing runs, analytics), prefer primitives and let the JIT do the rest.</li></ol>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P7</span><span class="prob__tag prob__tag--business">Business problem</span><h4>Latency of the first requests after a deploy</h4></div>
+      <p>After a deploy, an API's first 10 requests and the next 10 were timed (ms). Compare the averages and the worst request of each group to decide whether the service needs a warm-up step before taking traffic.</p>
+      <div class="prob__io"><div><small>Input</small><pre>first = {180, 150, 96, 88, 61, 47, 40, 33, 30, 28}
+later = {22, 21, 23, 20, 22, 21, 24, 22, 21, 23}</pre></div><div><small>Expected output</small><pre>First 10: average 75.3 ms, worst 180 ms
+Next 10:  average 21.9 ms, worst 24 ms
+Needs warm-up before traffic? yes</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="java" data-file="Main.java"><pre><code>public class Main {
+    static void summary(String name, int[] ms) {
+        int sum = 0, worst = 0;
+        for (int t : ms) {
+            sum += t;
+            worst = Math.max(worst, t);
+        }
+        System.out.printf(&quot;%s average %.1f ms, worst %d ms%n&quot;, name, (double) sum / ms.length, worst);
+    }
+
+    public static void main(String[] args) {
+        int[] first = {180, 150, 96, 88, 61, 47, 40, 33, 30, 28};
+        int[] later = {22, 21, 23, 20, 22, 21, 24, 22, 21, 23};
+        summary(&quot;First 10:&quot;, first);
+        summary(&quot;Next 10: &quot;, later);
+        System.out.println(&quot;Needs warm-up before traffic? &quot; + (first[0] &gt; 3 * later[0] ? &quot;yes&quot; : &quot;no&quot;));
+    }
+}</code></pre><div class="output">First 10: average 75.3 ms, worst 180 ms
+Next 10:  average 21.9 ms, worst 24 ms
+Needs warm-up before traffic? yes</div></div>
+        <p><b>How it works:</b></p><ol><li>Right after start-up the code runs in the interpreter, classes are still loading and caches are cold, so the first requests are several times slower.</li><li>Teams send synthetic warm-up requests before adding a new instance to the load balancer, or use readiness checks so real users never see the cold phase.</li><li>The figures here are sample data for the exercise; measure your own service.</li></ol>
+      </details>
+    </article>
+  </div>
+
+
+  <h3 id="scenarios">Real-world scenario questions (asked in company interviews)</h3>
+  <p class="scn-intro">Performance questions test whether you measure before you change things. Decide your answer first, then open the model answer.</p>
+  <div class="scenarios">
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Fintech · code review</span><span class="scn__tag scn__tag--level">Fresher</span></div>
+      <h4>“Getters are slow, use public fields”</h4>
+      <p class="scn__situation">During a code review for a loan-EMI service, a senior asks you to replace getters with public fields “because method calls are slow in hot loops”. How do you respond?</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> do you know about inlining, and do you ask for measurements?</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>Tiny methods like getters are among the first things C2 inlines once code is hot, so in steady state the call usually disappears and the field is read directly.</li>
+          <li>Public fields would weaken encapsulation (anyone could set an invalid interest rate) for a gain that is probably zero.</li>
+          <li>If there is a real concern, measure: a JMH benchmark or a profiler on the real service, not a guess.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> optimising by folklore.</p>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">E-commerce · deployment</span><span class="scn__tag scn__tag--level">1–3 years</span></div>
+      <h4>Timeouts for two minutes after every deploy</h4>
+      <p class="scn__situation">After each rolling deploy of a checkout service, the first one to two minutes on each new instance show many slow requests and some timeouts, then everything is normal. CPU on the new instances is very high during that time. What is happening and what can you do?</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> can you connect cold-start symptoms to class loading and JIT warm-up?</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>A fresh JVM is loading classes and running code in the interpreter, while compiler threads compile hot paths. That burns CPU and makes early requests slow: classic warm-up.</li>
+          <li>Send warm-up traffic (exercise the main endpoints) before the instance is marked ready, and ramp real traffic gradually.</li>
+          <li>Make sure the container has enough CPU for compiler threads during start-up, and consider start-up features such as application class data sharing.</li>
+          <li>Measure: compare latency per instance age to confirm the cause.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> disabling the JIT tiers or adding flags without measuring.</p>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Analytics · library choice</span><span class="scn__tag scn__tag--level">1–3 years</span></div>
+      <h4>The benchmark that said the new parser is 50 times faster</h4>
+      <p class="scn__situation">A teammate times two CSV parsers by running each once on a small file with <code>System.nanoTime()</code>, old parser first, and reports that the new one is 50 times faster. You need to decide which parser the team adopts. What is wrong with the test and how would you redo it?</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> do you know the classic benchmarking traps?</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>The first parser paid for warm-up: class loading of shared libraries, interpretation, JIT compilation. The second benefited from the already-warm JVM. One run on a small file measures start-up, not parsing speed.</li>
+          <li>Redo it with JMH: warm-up iterations, several measurement iterations, separate forks per parser, and consume the parsed results with a Blackhole.</li>
+          <li>Use realistic input sizes (the real daily file), and also check memory allocation and correctness, not only time.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> trusting a single timing, or benchmarking both in the same JVM run in a fixed order.</p>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Payments · performance tuning</span><span class="scn__tag scn__tag--level">3+ years</span></div>
+      <h4>Throughput dropped after adding a new payment type</h4>
+      <p class="scn__situation">A payment router calls <code>processor.process(txn)</code> in a hot loop. For months there was one <code>Processor</code> implementation. After adding a second and third (UPI and wallet), throughput of that loop dropped noticeably, although each implementation is simple. Explain a likely JIT-related reason and how you would confirm it.</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> do you understand profile-based inlining and deoptimisation?</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>With one implementation, C2 saw a single receiver type at that call site and inlined <code>process</code> directly (monomorphic call). When new classes appeared, that assumption broke: the code was deoptimised and recompiled.</li>
+          <li>With two types C2 can still inline both behind a type check (bimorphic), but with three or more the site is usually megamorphic: a virtual call that isn't inlined, which also blocks optimisations such as escape analysis inside the loop.</li>
+          <li>Confirm with <code>-XX:+PrintCompilation</code> (look for “made not entrant” around the change) and diagnostic inlining output, or with a profiler; then decide whether it matters for the business SLA before redesigning (for example, grouping transactions by type).</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> blaming the new classes' code without evidence; the change was in what the JIT can assume.</p>
+      </div></details>
+    </article>
+  </div>
+</section>
+
+<nav class="lesson-nav" id="lesson-nav" aria-label="Lesson navigation"></nav>
+<div class="ad-slot" data-slot="bottom"></div>
+</article>
+
+<aside class="lesson-side">
+  <nav class="toc" aria-label="In this lesson">
+    <h4>In this lesson</h4>
+    <ol>
+      <li><a href="#story">The story</a></li>
+      <li><a href="#definition">Definition</a></li>
+      <li><a href="#types">Types and ways to use it</a></li>
+      <li><a href="#steps">Step by step</a></li>
+      <li><a href="#animation">See it happen</a></li>
+      <li><a href="#real-world">Real-world use</a></li>
+      <li><a href="#run">Run the code</a></li>
+      <li><a href="#tracer">Line by line</a></li>
+      <li><a href="#worked">Worked examples</a></li>
+      <li><a href="#quiz">Quiz and revision</a></li>
+      <li><a href="#practice">Practice problems</a></li>
+      <li><a href="#scenarios">Industry scenarios</a></li>
+    </ol>
+  </nav>
+  <div class="ad-slot" data-slot="side"></div>
+  <div class="outline" id="outline"></div>
+</aside>
+</div>
+</main>
+
+<footer class="site-footer">
+  <div class="wrap">
+    <div><h4>MyPhatshala</h4><p>Free programming and IT lessons that show what happens behind the screen.</p></div>
+    <div><h4>Learn</h4><a href="../../../../#tracks">All courses</a><a href="../../">Core Java syllabus</a></div>
+    <div><h4>Site</h4><a href="../../../../about.html">About</a><a href="../../../../contact.html">Contact</a><a href="../../../../privacy.html">Privacy policy</a><a href="../../../../disclaimer.html">Disclaimer</a></div>
+    <div class="copyright">© MyPhatshala. All lesson content, diagrams and animations are original. Please do not copy without permission.</div>
+  </div>
+</footer>
+
+<script src="../../../../data/courses/core-java.js"></script>
+<script src="../../../../assets/js/lesson.js"></script>
+<script src="../../../../assets/js/ads.js"></script>
+<script src="../../../../assets/js/site.js"></script>
+</body>
+</html>

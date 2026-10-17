@@ -1,0 +1,370 @@
+<!--META {
+"course": "core-java", "module": "11-collections", "lesson": "06-hashmap-internals",
+"title": "HashMap and how it works internally", "courseTitle": "Core Java", "number": "11.6",
+"track": "#E8772E", "trackId": "programming", "trackTitle": "Programming Languages", "level": "Intermediate",
+"minutes": 28,
+"description": "HashMap in Java, inside and out: put, get, getOrDefault, merge and iterating entries; then the internals every interview asks about: the bucket table, hash() spreading, index = (n-1) & hash, collisions and chains, load factor 0.75 and resizing from 16 to 32 buckets, treeification at 8, null keys, mutable-key bugs, LinkedHashMap and TreeMap. Traced on the real JVM, with animations, {{NPROB}} practice problems, quiz and interview scenarios.",
+"ogTitle": "HashMap internals: buckets, collisions and resizing",
+"ogDescription": "Watch keys land in buckets, collide, and split when the table doubles, recorded from a real JVM, and solve {{NPROB}} problems.",
+"lead": "<code>HashMap</code> finds a value by its key in about the same time whether it holds ten entries or ten million. That speed comes from a simple idea: turn the key into a number, and use the number to jump straight to a small <b>bucket</b>. You'll learn to use HashMap fluently, then open it up: how the bucket is chosen, what happens when two keys land in the same bucket, why the table doubles when it's 75% full, and the bugs that appear when keys misbehave. This is one of the most asked topics in Java interviews.",
+"chips": ["Module 11 · Collections", "⏱ 28 min", "Intermediate", "{{NPROB}} practice problems"]
+} META-->
+<part n="1" id="story" label="The story">
+  <h2>Sixteen pigeonholes in the staff room</h2>
+  <div class="story">
+    <p class="narration">Arjun Sir's staff room has a wall of 16 pigeonholes for letters. A clerk doesn't search all 16: she takes the teacher's name, does a quick calculation that always gives the same answer for the same name, and drops the letter straight into that hole. When two teachers' names give the same hole, both letters sit there, and she checks the names when someone collects.</p>
+    <div class="scene">
+      <svg viewBox="0 0 640 170" role="img" aria-label="Keys hashed into 16 buckets; idli and samosa land in the same bucket 9 and are chained">
+        <g font-size="10.5">
+          <rect x="14" y="20" width="120" height="30" rx="8" class="s-soft-blue" style="stroke:var(--blue)"/><text x="74" y="40" text-anchor="middle" class="mono s-ink">"idli"</text>
+          <rect x="14" y="62" width="120" height="30" rx="8" class="s-soft-blue" style="stroke:var(--blue)"/><text x="74" y="82" text-anchor="middle" class="mono s-ink">"samosa"</text>
+          <rect x="14" y="104" width="120" height="30" rx="8" class="s-soft-blue" style="stroke:var(--blue)"/><text x="74" y="124" text-anchor="middle" class="mono s-ink">"chai"</text>
+          <text x="150" y="40" class="mono s-ink2">hash → 9</text><text x="150" y="82" class="mono s-ink2">hash → 9</text><text x="150" y="124" class="mono s-ink2">hash → 3</text>
+          <g>
+            <rect x="250" y="14" width="370" height="140" rx="10" class="s-card2"/>
+            <text x="262" y="32" font-weight="700" class="s-ink">table[16]</text>
+            <rect x="262" y="42" width="100" height="24" rx="5" class="s-card" style="stroke:var(--line)"/><text x="270" y="59" class="mono s-ink3">[3]</text><text x="300" y="59" class="mono s-ink">chai=15</text>
+            <rect x="262" y="76" width="350" height="24" rx="5" class="s-card" style="stroke:var(--track)"/><text x="270" y="93" class="mono s-ink3">[9]</text><text x="300" y="93" class="mono s-ink">idli=30</text><text x="370" y="93" class="s-acc" font-weight="700">→</text><text x="390" y="93" class="mono s-ink">samosa=20</text><text x="490" y="93" class="s-acc">a chain</text>
+            <text x="262" y="132" class="s-ink2">other 14 buckets empty for now</text>
+          </g>
+        </g>
+        <text x="632" y="166" text-anchor="end" class="s-wm">myphatshala.com</text>
+      </svg>
+    </div>
+    <riya>Sir, that's exactly what the canteen app needs. Prices by dish name, instantly.</riya>
+    <arjun>And it's exactly what a <code>HashMap</code> does. The “quick calculation” is the key's <code>hashCode()</code>. The pigeonholes are an array of buckets. When two keys share a bucket, the entries are chained and <code>equals()</code> picks the right one.</arjun>
+    <riya>What if the canteen grows to 500 dishes? Sixteen holes would be stuffed.</riya>
+    <arjun>Then the map does what the clerk would: when it's 75% full, it builds a wall with twice as many holes and re-sorts the letters. Let's watch every step happen in a real JVM.</arjun>
+  </div>
+</part>
+
+<part n="2" id="definition" label="Definition">
+  <h2>What is a HashMap?</h2>
+  <div class="def">
+    <div class="def__formal"><small>Formal definition (write this in exams)</small>
+      <p><code>java.util.HashMap&lt;K,V&gt;</code> is a hash-table based implementation of the <code>Map</code> interface that stores <b>key–value pairs</b> with <b>unique keys</b>. It permits one <code>null</code> key and any number of <code>null</code> values, makes no guarantee about iteration order, and is not synchronised. Internally it keeps an array of <b>buckets</b> (<code>table</code>); a key's bucket index is computed from its <code>hashCode()</code> (spread by <code>hash()</code>) as <code>(n − 1) &amp; hash</code>. Entries in the same bucket form a linked list, converted to a balanced tree when a bucket grows large. When the number of entries exceeds <b>capacity × load factor</b> (default 16 × 0.75 = 12), the table <b>doubles</b> and entries are redistributed. Average time for <code>get</code> and <code>put</code> is O(1).</p></div>
+    <div class="def__simple"><small>In simple words</small>
+      <p>A dictionary: give it a key, get the value. Speed comes from computing where the key lives instead of searching for it.</p></div>
+  </div>
+  <h3>Words you'll meet in this lesson</h3>
+  <div class="terms">
+    <div class="term"><b>Entry / Node</b><span>One key–value pair, stored as <code>Node{hash, key, value, next}</code>.</span></div>
+    <div class="term"><b>Bucket</b><span>One slot of the <code>table</code> array; holds zero, one or a chain of nodes.</span></div>
+    <div class="term"><b>Collision</b><span>Two different keys map to the same bucket.</span></div>
+    <div class="term"><b>Capacity</b><span>Number of buckets: 16 by default, always a power of two.</span></div>
+    <div class="term"><b>Load factor</b><span>How full the table may get before growing: 0.75 by default.</span></div>
+    <div class="term"><b>Threshold</b><span>capacity × load factor. Exceed it and the table doubles (rehash).</span></div>
+    <div class="term"><b>Treeify</b><span>Turning a long chain (8+ nodes) into a red-black tree, once the table has 64+ buckets.</span></div>
+  </div>
+  <table class="facts">
+    <tr><th>Default capacity / load factor</th><td>16 buckets, 0.75 → first resize when the 13th entry is added</td></tr>
+    <tr><th>Bucket index</th><td><code>(n − 1) &amp; hash</code>, where <code>hash = h ^ (h &gt;&gt;&gt; 16)</code> and <code>h = key.hashCode()</code></td></tr>
+    <tr><th>Collisions</th><td>Chained in a linked list (new nodes at the tail); a tree when a chain reaches 8 and capacity ≥ 64</td></tr>
+    <tr><th>Null</th><td>One null key (always bucket 0), many null values. <code>Hashtable</code> allows neither</td></tr>
+    <tr><th>Cost</th><td><code>get/put/remove</code> O(1) average; worst case O(log n) with treeified buckets</td></tr>
+  </table>
+  <exam><b>Exam tip:</b> the steps of <code>put(k, v)</code>: (1) <code>hash(k)</code>, (2) index = <code>(n − 1) &amp; hash</code>, (3) empty bucket → new node; otherwise walk the chain comparing hash and <code>equals</code>: same key → <b>replace the value</b> (and return the old one), else append a node, (4) if <code>++size &gt; threshold</code> → <b>resize</b> to double capacity. Learn this sequence word for word.</exam>
+</part>
+
+{{AD}}
+
+<part n="3" id="types" label="Types and ways to use it">
+  <h2>Using a HashMap well</h2>
+  <div class="cards">
+    <div class="card"><svg class="ic" viewBox="0 0 40 40" fill="none" stroke="var(--green)" stroke-width="2"><path d="M20 8v24M8 20h24"/></svg><h4>Put and update</h4><p><code>put</code>, <code>putIfAbsent</code>, <code>merge</code>, <code>compute</code>.</p><span class="tag">write</span></div>
+    <div class="card"><svg class="ic" viewBox="0 0 40 40" fill="none" stroke="var(--blue)" stroke-width="2"><circle cx="18" cy="18" r="9"/><path d="M25 25l8 8"/></svg><h4>Look up</h4><p><code>get</code>, <code>getOrDefault</code>, <code>containsKey</code>, <code>containsValue</code>.</p><span class="tag">read</span></div>
+    <div class="card"><svg class="ic" viewBox="0 0 40 40" fill="none" stroke="var(--track)" stroke-width="2"><path d="M8 10h24M8 20h24M8 30h24"/></svg><h4>Iterate</h4><p><code>entrySet()</code>, <code>keySet()</code>, <code>values()</code>, <code>forEach</code>.</p><span class="tag">walk</span></div>
+    <div class="card"><svg class="ic" viewBox="0 0 40 40" fill="none" stroke="var(--blue)" stroke-width="2"><path d="M8 12h24M8 20h16M8 28h10"/></svg><h4>Ordered cousins</h4><p><code>LinkedHashMap</code> (insertion order), <code>TreeMap</code> (sorted keys).</p><span class="tag">order</span></div>
+  </div>
+
+  <h3>Everyday operations</h3>
+  <div class="code" data-lang="java" data-file="Main.java"><pre><code>import java.util.HashMap;
+import java.util.Map;
+
+public class Main {
+    public static void main(String[] args) {
+        Map&lt;String, Integer&gt; price = new HashMap&lt;&gt;();
+        System.out.println(price.put("chai", 15));      // null: no old value
+        System.out.println(price.put("chai", 20));      // 15: old value replaced
+        price.put("dosa", 60);
+        price.putIfAbsent("dosa", 99);                   // ignored: key exists
+
+        System.out.println(price.get("chai") + " " + price.get("tea"));
+        System.out.println(price.getOrDefault("tea", 0) + " " + price.containsKey("dosa"));
+
+        Map&lt;String, Integer&gt; sold = new HashMap&lt;&gt;();
+        for (String d : new String[]{"chai", "dosa", "chai"}) {
+            sold.merge(d, 1, Integer::sum);              // count: start at 1 or add 1
+        }
+        for (Map.Entry&lt;String, Integer&gt; e : sold.entrySet()) {
+            System.out.println(e.getKey() + " sold " + e.getValue());
+        }
+    }
+}</code></pre><div class="output">null
+15
+20 null
+0 true
+chai sold 2
+dosa sold 1</div></div>
+  <p><code>merge</code> and <code>Integer::sum</code> use a method reference (Lesson 14.1); read it as “if the key is new, store 1, otherwise add 1 to the old value”.</p>
+
+  <h3>Collisions are normal</h3>
+  <div class="code" data-lang="java" data-file="Main.java"><pre><code>public class Main {
+    public static void main(String[] args) {
+        // different keys, same hash code: a true collision
+        System.out.println("Aa".hashCode() + " " + "BB".hashCode());
+        // different hash codes, same bucket in a 16-bucket table
+        System.out.println(index("idli", 16) + " " + index("samosa", 16));
+        System.out.println(index("idli", 32) + " " + index("samosa", 32));   // after doubling
+    }
+
+    static int index(String key, int buckets) {
+        int h = key.hashCode();
+        int hash = h ^ (h &gt;&gt;&gt; 16);           // HashMap.hash(): mix high bits into low bits
+        return (buckets - 1) &amp; hash;          // same as hash % buckets for powers of two
+    }
+}</code></pre><div class="output">2112 2112
+9 9
+9 25</div></div>
+  <p>With 16 buckets, “idli” and “samosa” share bucket 9. When the table grows to 32, one more bit of the hash is used and they separate: idli stays at 9, samosa moves to 9 + 16 = 25.</p>
+
+  <h3>The mutable-key bug</h3>
+  <div class="code" data-lang="java" data-file="Main.java"><pre><code>import java.util.*;
+
+public class Main {
+    public static void main(String[] args) {
+        List&lt;Integer&gt; seat = new ArrayList&lt;&gt;(List.of(4, 32));   // coach 4, seat 32
+        Map&lt;List&lt;Integer&gt;, String&gt; booked = new HashMap&lt;&gt;();
+        booked.put(seat, "Riya");
+
+        seat.set(1, 33);                     // key changed after being stored!
+        System.out.println(booked.get(seat) + " " + booked.get(List.of(4, 32)) + " " + booked.size());
+    }
+}</code></pre><div class="output">null null 1</div></div>
+  <warn><b>Keys must not change while in a map.</b> The entry sits in the bucket chosen by the <i>old</i> hash. After the change, the new hash points to another bucket, and the old key no longer equals anything you can build. The entry is stuck: size 1, but unreachable. Use immutable keys: <code>String</code>, <code>Integer</code>, enums, records.</warn>
+  <tip><b>Rule of thumb:</b> HashMap for lookups; <code>LinkedHashMap</code> when output should follow insertion order; <code>TreeMap</code> when keys must be sorted or you need <code>floorKey</code>/<code>ceilingKey</code>; <code>ConcurrentHashMap</code> when several threads write. If you know the size, pre-size it: <code>new HashMap&lt;&gt;(expected * 4 / 3 + 1)</code>, or <code>HashMap.newHashMap(expected)</code> on Java 19+.</tip>
+</part>
+
+<part n="4" id="steps" label="Step by step">
+  <h2>Inside <code>put("samosa", 20)</code></h2>
+  <ol class="stepper">
+    <li><h4>Compute the hash</h4>
+      <div class="code" data-lang="java" data-file="HashMap (simplified)"><pre><code>int h = key.hashCode();          // "samosa" → -909675842
+int hash = h ^ (h &gt;&gt;&gt; 16);       // spread the high bits down</code></pre></div>
+      <span class="behind">Only the low bits pick the bucket, so <code>hash()</code> mixes the top 16 bits into the bottom 16. That way keys that differ only in high bits don't all collide.</span></li>
+    <li><h4>Find the bucket</h4>
+      <span class="behind"><code>index = (n − 1) &amp; hash</code>. With n = 16, <code>n − 1</code> is binary 1111, so this keeps the last 4 bits: a number from 0 to 15. Faster than <code>%</code>, and the reason capacity is always a power of two.</span></li>
+    <li><h4>Bucket occupied? Walk the chain</h4>
+      <span class="behind">Bucket 9 already holds “idli”. For each node, the map compares the stored hash first (cheap) and then <code>equals</code>. “idli” ≠ “samosa”, so it keeps walking. If an equal key were found, its value would be replaced and the old value returned.</span></li>
+    <li><h4>Append a new node</h4>
+      <span class="behind">A <code>Node{hash, "samosa", 20, next=null}</code> is linked after “idli”. If this chain reached 8 nodes, the bucket would be converted to a red-black tree (or the table resized, if it has fewer than 64 buckets).</span></li>
+    <li><h4>Check the threshold</h4>
+      <span class="behind"><code>++size &gt; threshold</code>? With capacity 16 the threshold is 12, so the 13th entry triggers <code>resize()</code>: a new table of 32, and every node moves either to the same index or to index + 16, depending on one extra hash bit. No full rehash of keys is needed.</span></li>
+  </ol>
+</part>
+
+<part n="5" id="animation" label="See it happen">
+  <h2>put, collide, get, resize: both views</h2>
+  <p>Left: map calls in your code. Right: the bucket table, a chain forming in bucket 9, and what happens when the table doubles.</p>
+  {{ANIM}}
+</part>
+
+<part n="6" id="real-world" label="Real-world use">
+  <h2>HashMap in real systems</h2>
+  <p>Hash maps are the workhorse of backend code: caches, indexes, counters and lookups.</p>
+  {{ANIM2}}
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="14" y="20" width="92" height="50" rx="6" class="s-card" style="stroke:var(--line)"/><text x="22" y="40" font-size="8.5" class="mono s-ink">session id →</text><text x="22" y="56" font-size="8.5" class="mono s-green">  user Riya</text></svg></div>
+    <div><h4>1. Sessions and caches</h4><p>Web servers map session IDs to logged-in users; services cache exchange rates, product details and config by key to avoid slow database calls.</p>
+      <div class="uc-flow"><span>request cookie</span><i>→</i><span class="java">sessions.get(id)</span><i>→</i><span>user, in O(1)</span></div></div>
+  </div>
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="14" y="20" width="92" height="50" rx="6" class="s-card" style="stroke:var(--line)"/><text x="22" y="40" font-size="8.5" class="mono s-ink">"UPI" → 1,204</text><text x="22" y="56" font-size="8.5" class="mono s-ink">"CARD" → 388</text></svg></div>
+    <div><h4>2. Counting and grouping</h4><p>Orders per city, errors per type, votes per candidate: <code>merge(key, 1, Integer::sum)</code> or <code>computeIfAbsent(key, k -&gt; new ArrayList&lt;&gt;()).add(item)</code> for grouping.</p>
+      <div class="uc-flow"><span>event</span><i>→</i><span class="java">counts.merge(type, 1, Integer::sum)</span><i>→</i><span>dashboard</span></div></div>
+  </div>
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="14" y="30" width="40" height="30" rx="4" class="s-soft-blue" style="stroke:var(--blue)"/><rect x="66" y="30" width="40" height="30" rx="4" class="s-soft-green" style="stroke:var(--green)"/><path d="M54 45h12" style="stroke:var(--ink-3);stroke-width:2"/></svg></div>
+    <div><h4>3. Joining data in memory</h4><p>To combine orders with customers, load customers into a map by ID once, then look each order's customer up in O(1), instead of a nested loop.</p>
+      <div class="uc-flow"><span>10k customers → map</span><i>→</i><span class="java">byId.get(order.custId)</span><i>→</i><span>enriched orders</span></div></div>
+  </div>
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="20" y="22" width="80" height="46" rx="6" class="s-card" style="stroke:var(--red)"/><text x="60" y="44" text-anchor="middle" font-size="8.5" class="s-red">1 bucket,</text><text x="60" y="58" text-anchor="middle" font-size="8.5" class="s-red">10,000 keys</text></svg></div>
+    <div><h4>4. Hash flooding and bad hash codes</h4><p>Attackers once sent web servers thousands of parameters with colliding hash codes to slow them down. Java 8's treeified buckets cap the damage at O(log n). A home-made <code>hashCode()</code> that returns a constant causes the same slowdown by accident.</p>
+      <div class="uc-flow"><span>bad hashCode</span><i>→</i><span class="java">every key in one bucket</span><i>→</i><span>O(1) becomes slow</span></div></div>
+  </div>
+  <p class="muted">Examples are simplified. Shared caches across servers use stores like Redis; inside one JVM with many threads, ConcurrentHashMap.</p>
+</part>
+
+{{AD}}
+
+<part n="7" id="run" label="Run the code">
+  <h2>Canteen billing with a price map and a sales counter</h2>
+  <div class="code" data-lang="java" data-file="Main.java"><pre><code>import java.util.*;
+
+public class Main {
+    public static void main(String[] args) {
+        Map&lt;String, Integer&gt; price = new HashMap&lt;&gt;();
+        price.put("chai", 15);
+        price.put("idli", 30);
+        price.put("samosa", 20);
+        price.put("dosa", 60);
+
+        String[] orders = {"chai", "idli", "chai", "pav", "samosa", "chai"};
+        Map&lt;String, Integer&gt; sold = new TreeMap&lt;&gt;();     // sorted report
+        int bill = 0;
+        List&lt;String&gt; unknown = new ArrayList&lt;&gt;();
+
+        for (String item : orders) {
+            Integer p = price.get(item);
+            if (p == null) {
+                unknown.add(item);
+                continue;
+            }
+            bill += p;
+            sold.merge(item, 1, Integer::sum);
+        }
+
+        System.out.println("Sold: " + sold);
+        System.out.println("Bill: ₹" + bill + ", not on menu: " + unknown);
+        for (Map.Entry&lt;String, Integer&gt; e : sold.entrySet()) {
+            System.out.println(e.getKey() + " → ₹" + e.getValue() * price.get(e.getKey()));
+        }
+    }
+}</code></pre><div class="output">Sold: {chai=3, idli=1, samosa=1}
+Bill: ₹95, not on menu: [pav]
+chai → ₹45
+idli → ₹30
+samosa → ₹20</div></div>
+  <ul class="anno">
+    <li><code>price.get(item)</code><span>O(1) lookup; returns <code>null</code> for an unknown dish, so the result is kept as <code>Integer</code>.</span></li>
+    <li><code>sold.merge(item, 1, Integer::sum)</code><span>First time: puts 1. Later: adds 1.</span></li>
+    <li><code>new TreeMap&lt;&gt;()</code><span>The report prints dishes alphabetically.</span></li>
+    <li><code>entrySet()</code><span>The efficient way to walk keys and values together.</span></li>
+  </ul>
+  <div class="runner">
+    <script type="application/json">{
+      "lang": "java", "file": "Main.java",
+      "tasks": [
+        { "label": "1 · Canteen billing", "hint": "Press <b>Run</b>. Then add \"pav\" to the price map with ₹25 and run again.",
+          "code": "import java.util.*;\n\npublic class Main {\n    public static void main(String[] args) {\n        Map<String, Integer> price = new HashMap<>();\n        price.put(\"chai\", 15);\n        price.put(\"idli\", 30);\n        price.put(\"samosa\", 20);\n        price.put(\"dosa\", 60);\n\n        String[] orders = {\"chai\", \"idli\", \"chai\", \"pav\", \"samosa\", \"chai\"};\n        Map<String, Integer> sold = new TreeMap<>();\n        int bill = 0;\n        List<String> unknown = new ArrayList<>();\n\n        for (String item : orders) {\n            Integer p = price.get(item);\n            if (p == null) {\n                unknown.add(item);\n                continue;\n            }\n            bill += p;\n            sold.merge(item, 1, Integer::sum);\n        }\n\n        System.out.println(\"Sold: \" + sold);\n        System.out.println(\"Bill: ₹\" + bill + \", not on menu: \" + unknown);\n        for (Map.Entry<String, Integer> e : sold.entrySet()) {\n            System.out.println(e.getKey() + \" → ₹\" + e.getValue() * price.get(e.getKey()));\n        }\n    }\n}\n" },
+        { "label": "2 · Predict: put returns", "hint": "<b>Predict first:</b> what does each <code>put</code> print? What's the final size?",
+          "code": "import java.util.*;\n\npublic class Main {\n    public static void main(String[] args) {\n        Map<String, Integer> m = new HashMap<>();\n        System.out.println(m.put(\"a\", 1));\n        System.out.println(m.put(\"b\", 2));\n        System.out.println(m.put(\"a\", 3));\n        System.out.println(m + \" size \" + m.size());\n    }\n}\n" },
+        { "label": "3 · Spot the error: unboxing a missing key", "hint": "It crashes with <code>NullPointerException</code>. Which hidden call failed? Use <code>getOrDefault</code>.",
+          "code": "import java.util.*;\n\npublic class Main {\n    public static void main(String[] args) {\n        Map<String, Integer> stock = new HashMap<>();\n        stock.put(\"chai\", 40);\n        int left = stock.get(\"coffee\") - 1;\n        System.out.println(left);\n    }\n}\n", "_expect": "exception" },
+        { "label": "4 · Bucket calculator", "hint": "Try your own name and favourite dishes. Which ones collide with 16 buckets? Do they still collide with 64?",
+          "code": "public class Main {\n    static int index(String key, int buckets) {\n        int h = key.hashCode();\n        int hash = h ^ (h >>> 16);\n        return (buckets - 1) & hash;\n    }\n\n    public static void main(String[] args) {\n        String[] keys = {\"chai\", \"idli\", \"samosa\", \"dosa\", \"vada\", \"Riya\"};\n        for (String k : keys) {\n            System.out.println(k + \" → bucket \" + index(k, 16) + \" of 16, \" + index(k, 32) + \" of 32\");\n        }\n    }\n}\n" },
+        { "label": "5 · Group by first letter", "hint": "Press <b>Run</b>. Then group by word length instead (use <code>Integer</code> keys).",
+          "code": "import java.util.*;\n\npublic class Main {\n    public static void main(String[] args) {\n        String[] dishes = {\"chai\", \"dosa\", \"chole\", \"idli\", \"dal\"};\n        Map<Character, List<String>> groups = new TreeMap<>();\n        for (String d : dishes) {\n            groups.computeIfAbsent(d.charAt(0), k -> new ArrayList<>()).add(d);\n        }\n        System.out.println(groups);\n    }\n}\n" }
+      ]
+    }</script>
+  </div>
+</part>
+
+<part n="8" id="tracer" label="Line by line">
+  <h2>A real collision in bucket 9</h2>
+  <p>This trace is recorded from the real JVM. The heap line shows the map's bucket table: <code>[9] "idli"=30 → "samosa"=20</code> means two entries chained in bucket 9. Watch the update of an existing key and a lookup that walks the chain.</p>
+  {{TRACER}}
+
+{{WORKED}}
+</part>
+
+<part n="9" id="quiz" label="Quiz and revision">
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <script type="application/json">[
+      { "q": "What are HashMap's default capacity and load factor?", "options": ["10 and 0.5", "16 and 0.75", "16 and 1.0", "32 and 0.75"], "answer": 1, "why": "So the first resize happens when the 13th entry is added (16 × 0.75 = 12)." },
+      { "q": "How is the bucket index computed (n = table length)?", "options": ["hashCode() % 10", "(n − 1) & hash", "key.length() % n", "Random"], "answer": 1, "why": "With n a power of two, (n − 1) & hash keeps the low bits; hash = h ^ (h >>> 16)." },
+      { "q": "map.put(k, v) when k is already present…", "options": ["Adds a second entry", "Replaces the value and returns the old one", "Throws", "Ignores v"], "answer": 1, "why": "Keys are unique; put returns the previous value (or null)." },
+      { "q": "Two different keys in the same bucket is called…", "options": ["A resize", "A collision", "Treeification", "An error"], "answer": 1, "why": "Collisions are normal; entries are chained and told apart by equals." },
+      { "q": "When does a bucket become a red-black tree?", "options": ["Always", "When it has 8+ nodes and the table has 64+ buckets", "When size > 12", "Never in Java"], "answer": 1, "why": "TREEIFY_THRESHOLD = 8, MIN_TREEIFY_CAPACITY = 64 (otherwise the table resizes instead)." },
+      { "q": "How many null keys can a HashMap hold?", "options": ["None", "One", "Unlimited", "Two"], "answer": 1, "why": "One null key (bucket 0); values may be null freely. Hashtable allows no nulls." },
+      { "q": "During a resize from 16 to 32, where can an entry from bucket 9 go?", "options": ["Anywhere", "Bucket 9 or bucket 25", "Bucket 18", "It's dropped"], "answer": 1, "why": "One extra hash bit decides: same index, or index + old capacity." },
+      { "q": "Why must map keys be immutable (or never changed)?", "options": ["Speed only", "A changed key's hash no longer matches its bucket, so it can't be found", "Java forbids it", "To allow nulls"], "answer": 1, "why": "The entry stays in the bucket of its old hash." }
+    ]</script>
+  </div>
+  <h3>Quick revision</h3>
+  <div class="revision">
+    <h3>Lesson 11.6 in one screen</h3>
+    <ul>
+      <li>HashMap: key → value, unique keys, one null key, unordered, O(1) average.</li>
+      <li>Inside: <code>Node[] table</code>; node = hash, key, value, next.</li>
+      <li>put: <code>hash = h ^ (h &gt;&gt;&gt; 16)</code> → index <code>(n−1) &amp; hash</code> → empty? insert : walk chain (hash + equals) → replace or append → <code>size &gt; threshold</code>? resize.</li>
+      <li>Defaults 16 / 0.75 → resize at the 13th entry → 32 buckets; nodes go to index or index + oldCap.</li>
+      <li>Chains → tree at 8 nodes (if capacity ≥ 64); back to list at 6.</li>
+      <li>Needs correct, stable <code>equals</code>/<code>hashCode</code>; never mutate keys.</li>
+      <li>Use: <code>getOrDefault</code>, <code>putIfAbsent</code>, <code>merge</code>, <code>computeIfAbsent</code>, <code>entrySet</code>. Ordered: LinkedHashMap, TreeMap. Threads: ConcurrentHashMap.</li>
+    </ul>
+  </div>
+  <h3>Interview and viva questions</h3>
+  <div class="faq">
+    <details><summary>Explain how HashMap works internally.</summary><p>It's an array of buckets. <code>put</code> computes the key's hash (hashCode with high bits spread), finds the bucket with <code>(n − 1) &amp; hash</code>, and either inserts a new node, or walks the bucket's chain comparing hash and <code>equals</code> to replace an existing key's value or append a node. When size exceeds capacity × 0.75, the table doubles and nodes are split between index and index + old capacity. Long chains (8+) become red-black trees when the table has at least 64 buckets. <code>get</code> follows the same hash → bucket → equals path.</p></details>
+    <details><summary>What happens if hashCode is good but equals is not overridden?</summary><p>Equal-looking keys may land in the same bucket, but <code>equals</code> (identity) says they differ, so you get duplicates and failed lookups with a new key object. Both methods must be overridden consistently (Lesson 10.3).</p></details>
+    <details><summary>Why is the capacity always a power of two?</summary><p>So the index can be computed with a fast bit mask, <code>(n − 1) &amp; hash</code>, instead of the slower <code>%</code>, and so that on resize each bucket splits cleanly into two (same index or index + old capacity) by checking a single bit.</p></details>
+    <details><summary>HashMap vs Hashtable vs ConcurrentHashMap?</summary><p>HashMap: not thread-safe, allows one null key and null values. Hashtable: legacy, every method synchronised, no nulls. ConcurrentHashMap: thread-safe with fine-grained locking/CAS, high concurrency, no null keys or values. Use ConcurrentHashMap for shared maps.</p></details>
+    <details><summary>Why did Java 8 add treeification?</summary><p>If many keys collide (poor hashCode or a deliberate attack), a chain could grow to thousands of nodes and make get/put O(n). Converting large buckets to red-black trees keeps the worst case at O(log n).</p></details>
+  </div>
+
+{{PRACTICE}}
+
+  <h3 id="scenarios">Real-world scenario questions (asked in company interviews)</h3>
+  <p class="scn-intro">HashMap is the single most asked Java collections topic. Interviewers love scenarios where the internals explain a production bug.</p>
+  <div class="scenarios">
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Backend · performance</span><span class="scn__tag scn__tag--level">Junior</span></div>
+      <h4>A cache that got slower as it grew</h4>
+      <p class="scn__situation">A product cache uses <code>HashMap&lt;ProductKey, Product&gt;</code>. Lookups were fast with 1,000 entries but take milliseconds with 100,000. Profiling shows time spent in <code>ProductKey.equals</code>. What's your hypothesis?</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> the effect of a poor hashCode.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>Most keys probably share a few hash codes (e.g. <code>hashCode</code> uses only a category field, or returns a constant), so buckets hold long chains and each lookup calls equals many times.</li>
+          <li>Check bucket distribution in a test; fix <code>hashCode</code> to use all fields that <code>equals</code> uses (<code>Objects.hash(...)</code>) or make the key a record.</li>
+          <li>Treeification softens it to O(log n) only if keys are Comparable; a good hash is the real fix.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> increasing the initial capacity. More buckets don't help if every key hashes to the same value.</p>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Railways · bug</span><span class="scn__tag scn__tag--level">Junior</span></div>
+      <h4>A booking that can't be found or removed</h4>
+      <p class="scn__situation">Bookings are stored in a <code>HashMap&lt;Seat, Booking&gt;</code>. After a passenger changes coach (the code updates <code>seat.coach</code>), <code>map.get(seat)</code> returns null and <code>map.remove(seat)</code> does nothing, but <code>size()</code> still counts it. Explain.</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> mutable keys and bucket placement.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>The entry was placed by the old hash. Changing a field used in <code>hashCode</code> changes the hash, so lookups go to a different bucket.</li>
+          <li>Make <code>Seat</code> immutable (final fields, or a record). To change seat: <code>remove(oldSeat)</code>, then <code>put(newSeat, booking)</code>.</li>
+          <li>Add a test that mutating keys is impossible (no setters).</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> “just iterate the map to find it”. That turns O(1) into O(n) and hides the design flaw.</p>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Platform · concurrency</span><span class="scn__tag scn__tag--level">Mid</span></div>
+      <h4>Lost counts under load</h4>
+      <p class="scn__situation">A shared <code>HashMap&lt;String, Integer&gt;</code> counts API calls per client from many request threads with <code>map.put(k, map.getOrDefault(k, 0) + 1)</code>. Under load the totals are too low, and once a thread got stuck at 100% CPU. What's happening?</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> HashMap isn't thread-safe.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>Read-modify-write races lose increments; concurrent resizes can corrupt the table (older JDKs could even form a cycle in a chain, causing infinite loops).</li>
+          <li>Use <code>ConcurrentHashMap</code> with <code>merge(k, 1, Integer::sum)</code>, or <code>ConcurrentHashMap&lt;String, LongAdder&gt;</code> for very hot counters.</li>
+          <li>Module 12 covers why races happen.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> <code>Collections.synchronizedMap</code> with the same get-then-put code; the compound action is still not atomic.</p>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Batch · memory</span><span class="scn__tag scn__tag--level">Junior</span></div>
+      <h4>Loading 10 lakh customers into a map</h4>
+      <p class="scn__situation">A job builds a <code>HashMap</code> of 1,000,000 customers by ID. It's slower than expected and memory spikes during loading. What would you change?</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> resizing cost and pre-sizing.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>Starting at 16 buckets, the map resizes about 17 times, each time allocating a doubled table and moving every node.</li>
+          <li>Pre-size: capacity ≥ expected / 0.75 (e.g. <code>HashMap.newHashMap(1_000_000)</code> on Java 19+, or <code>new HashMap&lt;&gt;(1_333_334)</code>).</li>
+          <li>Consider primitive-keyed maps from a library if memory is critical, or stream the data instead of holding it all.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> <code>new HashMap&lt;&gt;(1_000_000)</code> thinking it holds a million without resizing; with load factor 0.75 it still resizes once.</p>
+      </div></details>
+    </article>
+  </div>
+</part>

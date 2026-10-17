@@ -1,0 +1,957 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ExecutorService and thread pools | MyPhatshala</title>
+<meta name="description" content="ExecutorService and thread pools in Java: Executors factory methods, submit(), Callable vs Runnable, Future.get() with timeouts, invokeAll, shutdown() and awaitTermination(), RejectedExecutionException, CompletableFuture and Java 21 virtual threads. With animations, a JVM tracer, 9 practice problems, quiz and interview scenarios.">
+<meta name="mp:minutes" content="25">
+<link rel="canonical" href="https://myphatshala.com/courses/core-java/12-multithreading/06-executor-service/">
+<meta property="og:title" content="ExecutorService in Java: thread pools, Callable and Future · MyPhatshala">
+<meta property="og:description" content="Watch two pooled workers handle many tasks, collect results with Futures, and solve 9 problems.">
+<link rel="icon" href="../../../../assets/img/logo.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Fraunces:ital,opsz,wght@0,9..144,600;0,9..144,700;1,9..144,600&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../../../../assets/css/style.css">
+<link rel="stylesheet" href="../../../../assets/css/lesson.css">
+<script src="../../../../assets/js/config.js"></script>
+<script>try { const t = localStorage.getItem("mp-theme"); if (t) document.documentElement.dataset.theme = t; } catch (e) {}</script>
+<script type="application/ld+json">{"@context": "https://schema.org", "@type": "LearningResource", "name": "ExecutorService and thread pools", "learningResourceType": "Lesson", "educationalLevel": "Intermediate", "isAccessibleForFree": true, "inLanguage": "en", "isPartOf": {"@type": "Course", "name": "Core Java", "provider": {"@type": "Organization", "name": "MyPhatshala"}}}</script>
+</head>
+<body style="--track:#E8772E" data-lesson="12-multithreading/06-executor-service" data-course-root="../../">
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="site-header">
+  <div class="wrap">
+    <a class="brand" href="../../../../" aria-label="MyPhatshala home"><img src="../../../../assets/img/logo.svg" width="34" height="34" alt=""><span>My<b>Phatshala</b></span></a>
+    <nav class="nav" aria-label="Main">
+      <a href="../../../../#tracks">All courses</a>
+      <a href="../../">Core Java syllabus</a>
+      <button class="theme-btn" id="theme-btn" aria-label="Toggle dark mode"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg></button>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+<section class="lesson-hero">
+  <div class="wrap">
+    <nav class="crumbs" aria-label="Breadcrumb"><a href="../../../../">Home</a><span>›</span><a href="../../../../#track-programming">Programming Languages</a><span>›</span><a href="../../">Core Java</a><span>›</span><b>Lesson 12.6</b></nav>
+    <h1>ExecutorService and thread pools</h1>
+    <p class="lead">So far you created a <code>new Thread</code> for every job. Real servers never do that: thousands of tasks would mean thousands of threads. Instead they hand tasks to a <b>thread pool</b>, a few long-lived workers that take jobs from a queue. You'll use <code>ExecutorService</code> to run Runnables and Callables, get results back through <code>Future</code>s, set timeouts, shut pools down correctly, and meet CompletableFuture and virtual threads.</p>
+    <div class="lesson-meta"><span>Module 12 · Multithreading</span><span>⏱ 25 min</span><span>Intermediate</span><span>9 practice problems</span></div>
+  </div>
+</section>
+
+<div class="wrap lesson-layout">
+<article class="lesson-main">
+<!-- ======================= PART 1: THE STORY ======================= -->
+<section class="part" id="story">
+  <span class="part-label"><b>1</b> The story</span>
+  <h2>One thread per order? The server disagrees</h2>
+  <div class="story">
+    <p class="narration">Riya's canteen app goes viral during exam week. Her server creates a new thread for every incoming order. At lunchtime 5,000 orders arrive in a minute, the server runs out of memory, and nobody gets lunch.</p>
+    <div class="scene">
+      <svg viewBox="0 0 640 170" role="img" aria-label="Left: thousands of threads, one per order, overwhelm a server. Right: a queue of orders feeding four reusable workers">
+        <g font-size="10.5">
+          <text x="14" y="24" font-weight="700" class="s-red">new Thread per order</text>
+          <g style="stroke:var(--red);stroke-width:1.2">
+            <path d="M20 40v40M30 40v40M40 40v40M50 40v40M60 40v40M70 40v40M80 40v40M90 40v40M100 40v40M110 40v40M120 40v40M130 40v40M140 40v40M150 40v40M160 40v40M170 40v40M180 40v40M190 40v40M200 40v40M210 40v40M220 40v40M230 40v40M240 40v40M250 40v40M260 40v40"/>
+          </g>
+          <text x="14" y="104" class="s-red">5,000 threads × own stack = out of memory</text>
+          <path d="M318 20v130" style="stroke:var(--line);stroke-width:1;stroke-dasharray:4 4"/>
+          <text x="340" y="24" font-weight="700" class="s-green">a pool of 4 workers + a queue</text>
+          <rect x="340" y="44" width="130" height="40" rx="6" class="s-soft-acc" style="stroke:var(--track)"/>
+          <text x="405" y="68" text-anchor="middle" class="s-acc" font-weight="700">orders queue</text>
+          <path d="M472 64h30" style="stroke:var(--ink-3);stroke-width:1.5"/><path d="M496 58l8 6-8 6" style="fill:none;stroke:var(--ink-3);stroke-width:1.5"/>
+          <rect x="510" y="36" width="50" height="22" rx="5" class="s-soft-blue" style="stroke:var(--blue)"/><rect x="570" y="36" width="50" height="22" rx="5" class="s-soft-blue" style="stroke:var(--blue)"/>
+          <rect x="510" y="66" width="50" height="22" rx="5" class="s-soft-blue" style="stroke:var(--blue)"/><rect x="570" y="66" width="50" height="22" rx="5" class="s-soft-blue" style="stroke:var(--blue)"/>
+          <text x="340" y="112" class="s-green">same 4 threads serve every order</text>
+        </g>
+        <text x="632" y="166" text-anchor="end" class="s-wm">myphatshala.com</text>
+      </svg>
+    </div>
+    <div class="panel">
+      <div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#FCE6D6"/><path d="M14 64c2-12 9-18 18-18s16 6 18 18z" fill="#2E5AAC"/><circle cx="32" cy="29" r="12" fill="#C68B5E"/><path d="M19 29c0-10 6-15 13-15s13 5 13 15c-3-5-7-8-13-8s-10 3-13 8z" fill="#2A1B14"/><path d="M43 27c3 6 3 14 0 20" stroke="#2A1B14" stroke-width="4" fill="none" stroke-linecap="round"/><circle cx="27.5" cy="30" r="1.5" fill="#2A1B14"/><circle cx="36.5" cy="30" r="1.5" fill="#2A1B14"/><path d="M28 35q4 3 8 0" stroke="#2A1B14" stroke-width="1.6" fill="none" stroke-linecap="round"/><circle cx="32" cy="24" r="1.2" fill="#D64545"/></svg></div>
+      <div class="bubble"><b class="who">Riya</b><p>Sir, threads were supposed to make it faster!</p></div>
+    </div>
+    <div class="panel panel--right">
+      <div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#DDEFE6"/><path d="M12 64c2-12 10-18 20-18s18 6 20 18z" fill="#F4F1EA"/><path d="M28 46l4 8 4-8" fill="#2F7D5B"/><circle cx="32" cy="28" r="12" fill="#B57A50"/><path d="M20 26c0-8 5-13 12-13s12 5 12 13c-2-3-6-5-12-5s-10 2-12 5z" fill="#5A5A5A"/><path d="M22 32c1 8 5 11 10 11s9-3 10-11c-2 3-6 4-10 4s-8-1-10-4z" fill="#5A5A5A"/><circle cx="27" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><circle cx="37" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><path d="M30.4 29h3.2" stroke="#1B2433" stroke-width="1.4"/><circle cx="27" cy="29" r="1.1" fill="#1B2433"/><circle cx="37" cy="29" r="1.1" fill="#1B2433"/></svg></div>
+      <div class="bubble"><b class="who">Arjun Sir</b><p>Threads cost memory and switching time. Thousands of them help nobody. Keep a few <b>workers</b> and a <b>queue</b> of orders: each worker finishes an order and takes the next.</p></div>
+    </div>
+    <div class="panel">
+      <div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#FCE6D6"/><path d="M14 64c2-12 9-18 18-18s16 6 18 18z" fill="#2E5AAC"/><circle cx="32" cy="29" r="12" fill="#C68B5E"/><path d="M19 29c0-10 6-15 13-15s13 5 13 15c-3-5-7-8-13-8s-10 3-13 8z" fill="#2A1B14"/><path d="M43 27c3 6 3 14 0 20" stroke="#2A1B14" stroke-width="4" fill="none" stroke-linecap="round"/><circle cx="27.5" cy="30" r="1.5" fill="#2A1B14"/><circle cx="36.5" cy="30" r="1.5" fill="#2A1B14"/><path d="M28 35q4 3 8 0" stroke="#2A1B14" stroke-width="1.6" fill="none" stroke-linecap="round"/><circle cx="32" cy="24" r="1.2" fill="#D64545"/></svg></div>
+      <div class="bubble"><b class="who">Riya</b><p>Do I write that queue and the workers myself?</p></div>
+    </div>
+    <div class="panel panel--right">
+      <div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#DDEFE6"/><path d="M12 64c2-12 10-18 20-18s18 6 20 18z" fill="#F4F1EA"/><path d="M28 46l4 8 4-8" fill="#2F7D5B"/><circle cx="32" cy="28" r="12" fill="#B57A50"/><path d="M20 26c0-8 5-13 12-13s12 5 12 13c-2-3-6-5-12-5s-10 2-12 5z" fill="#5A5A5A"/><path d="M22 32c1 8 5 11 10 11s9-3 10-11c-2 3-6 4-10 4s-8-1-10-4z" fill="#5A5A5A"/><circle cx="27" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><circle cx="37" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><path d="M30.4 29h3.2" stroke="#1B2433" stroke-width="1.4"/><circle cx="27" cy="29" r="1.1" fill="#1B2433"/><circle cx="37" cy="29" r="1.1" fill="#1B2433"/></svg></div>
+      <div class="bubble"><b class="who">Arjun Sir</b><p>No. Java has it ready: <code>ExecutorService</code>. You submit tasks; it runs them on a pool and gives you a <code>Future</code> for each result.</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- ======================= PART 2: DEFINITION ======================= -->
+<section class="part" id="definition">
+  <span class="part-label"><b>2</b> Definition</span>
+  <h2>What are ExecutorService and thread pools?</h2>
+  <div class="def">
+    <div class="def__formal"><small>Formal definition (write this in exams)</small>
+      <p>An <b>executor</b> separates task submission from task execution. <code>java.util.concurrent.ExecutorService</code> is an executor that manages a <b>thread pool</b>: a set of reusable worker threads that take submitted tasks from a queue and run them. Tasks are <code>Runnable</code> (no result) or <code>Callable&lt;V&gt;</code> (returns a <code>V</code> and may throw checked exceptions). <code>submit()</code> returns a <code>Future&lt;V&gt;</code>, which represents the pending result: <code>get()</code> waits for it, <code>isDone()</code> checks it, and <code>cancel()</code> attempts to stop the task. A pool is ended with <code>shutdown()</code> (finish queued tasks, accept no new ones) or <code>shutdownNow()</code> (interrupt running tasks).</p></div>
+    <div class="def__simple"><small>In simple words</small>
+      <p>A thread pool is a call centre: a fixed team of agents (threads) and a waiting line (queue). You don't hire a new agent for every call. You get a ticket (Future) to collect your answer later.</p></div>
+  </div>
+  <h3>Words you'll meet in this lesson</h3>
+  <div class="terms">
+    <div class="term"><b>ExecutorService</b><span>Runs tasks on a pool; you never call <code>new Thread</code>.</span></div>
+    <div class="term"><b>Thread pool</b><span>Reusable worker threads plus a task queue.</span></div>
+    <div class="term"><b>Callable&lt;V&gt;</b><span>A task whose <code>call()</code> returns a value.</span></div>
+    <div class="term"><b>Future&lt;V&gt;</b><span>A handle to a result that may not be ready yet.</span></div>
+    <div class="term"><b>shutdown()</b><span>No new tasks; finish the queued ones; then the workers end.</span></div>
+    <div class="term"><b>CompletableFuture</b><span>A Future you can chain steps onto, without blocking.</span></div>
+  </div>
+  <h3>Runnable vs Callable</h3>
+  <div class="table-wrap">
+  <table class="compare" style="min-width:540px">
+    <thead><tr><th></th><th><code>Runnable</code></th><th><code>Callable&lt;V&gt;</code></th></tr></thead>
+    <tbody>
+      <tr><td>Method</td><td><code>void run()</code></td><td><code>V call() throws Exception</code></td></tr>
+      <tr><td>Returns a result</td><td>No</td><td>Yes</td></tr>
+      <tr><td>Checked exceptions</td><td>Must catch inside</td><td>Allowed; reach you via <code>get()</code></td></tr>
+      <tr><td>Use with <code>new Thread</code></td><td>Yes</td><td>No (needs an executor)</td></tr>
+      <tr><td>Lambda example</td><td><code>() -&gt; send(sms)</code></td><td><code>() -&gt; fetchPrice(shop)</code></td></tr>
+    </tbody>
+  </table>
+  </div>
+  <div class="callout callout--exam"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19V5a2 2 0 0 1 2-2h12v18H6a2 2 0 0 1-2-2zm0 0a2 2 0 0 1 2-2h12"/></svg><p><b>Exam tip:</b> “A thread pool reuses a fixed number of threads to execute many tasks, reducing thread-creation overhead and limiting resource use.” And: <code>Future.get()</code> blocks; a failed task's exception arrives wrapped in <code>ExecutionException</code>.</p></div>
+</section>
+
+<div class="ad-slot" data-slot="mid"></div>
+
+<!-- ======================= PART 3: TYPES AND WAYS TO USE IT ======================= -->
+<section class="part" id="types">
+  <span class="part-label"><b>3</b> Types and ways to use it</span>
+  <h2>Pools and how they reuse threads</h2>
+  <h3>Five jobs, two workers</h3>
+  <div class="code" data-lang="java" data-file="Main.java" data-check="skip"><pre><code>import java.util.concurrent.*;
+
+public class Main {
+    public static void main(String[] args) throws InterruptedException {
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        for (int i = 1; i &lt;= 5; i++) {
+            int job = i;
+            pool.submit(() -&gt; System.out.println("job " + job + " on " + Thread.currentThread().getName()));
+        }
+        pool.shutdown();
+        pool.awaitTermination(5, TimeUnit.SECONDS);
+    }
+}</code></pre><div class="output">job 1 on pool-1-thread-1
+job 3 on pool-1-thread-1
+job 4 on pool-1-thread-1
+job 5 on pool-1-thread-1
+job 2 on pool-1-thread-2</div></div>
+  <p class="muted">One real run. Your order of lines and which worker took which job will differ, but you'll only ever see two thread names.</p>
+
+  <h3>Kinds of executors</h3>
+  <div class="cards">
+    <div class="card"><svg class="ic" viewBox="0 0 40 40" fill="none" stroke="var(--blue)" stroke-width="2"><rect x="8" y="10" width="10" height="20" rx="2"/><rect x="22" y="10" width="10" height="20" rx="2"/></svg><h4>Fixed pool</h4><p>Exactly <i>n</i> workers. The default choice for steady server work.</p><span class="tag">newFixedThreadPool(n)</span></div>
+    <div class="card"><svg class="ic" viewBox="0 0 40 40" fill="none" stroke="var(--green)" stroke-width="2"><rect x="15" y="10" width="10" height="20" rx="2"/></svg><h4>Single thread</h4><p>One worker: tasks run one at a time, in submission order.</p><span class="tag">newSingleThreadExecutor()</span></div>
+    <div class="card"><svg class="ic" viewBox="0 0 40 40" fill="none" stroke="var(--track)" stroke-width="2"><circle cx="20" cy="20" r="11"/><path d="M20 13v7h6"/></svg><h4>Scheduled</h4><p>Run after a delay or repeatedly: reminders, cleanups, reports.</p><span class="tag">newScheduledThreadPool(n)</span></div>
+    <div class="card"><svg class="ic" viewBox="0 0 40 40" fill="none" stroke="var(--ink-3)" stroke-width="2"><path d="M10 28c6-16 14-16 20 0"/><circle cx="20" cy="14" r="3"/></svg><h4>Virtual threads</h4><p>Java 21: very cheap threads, one per task, ideal for I/O-heavy work.</p><span class="tag">newVirtualThreadPerTaskExecutor()</span></div>
+  </div>
+  <div class="code" data-lang="java" data-file="Main.java"><pre><code>Executors.newFixedThreadPool(n)          // n workers, unbounded queue: steady CPU/IO work
+Executors.newCachedThreadPool()          // grows as needed, idle threads die: short bursts
+Executors.newSingleThreadExecutor()      // one worker: tasks run strictly in order
+Executors.newScheduledThreadPool(n)      // delays and repeats: schedule(task, 5, SECONDS)
+Executors.newVirtualThreadPerTaskExecutor()  // Java 21: a cheap virtual thread per task</code></pre></div>
+  <div class="callout callout--warn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3 2 21h20L12 3z"/><path d="M12 10v5M12 18v.5"/></svg><p><b>Always shut pools down.</b> Pool threads are normal (non-daemon) threads. Forget <code>shutdown()</code> and your program never exits; in a server, forgetting it on short-lived pools leaks threads until memory runs out. Use try/finally, or in Java 21 a try-with-resources block (<code>ExecutorService</code> is <code>AutoCloseable</code>).</p></div>
+</section>
+
+<!-- ======================= PART 4: STEP BY STEP ======================= -->
+<section class="part" id="steps">
+  <span class="part-label"><b>4</b> Step by step</span>
+  <h2>The life of a submitted task</h2>
+  <ol class="stepper">
+    <li><h4>Create the pool</h4>
+      <div class="code" data-lang="java" data-file="Main.java"><pre><code>ExecutorService pool = Executors.newFixedThreadPool(4);</code></pre></div>
+      <span class="behind">A <code>ThreadPoolExecutor</code> object with an empty queue. Worker threads are started as the first tasks arrive.</span></li>
+    <li><h4>submit()</h4>
+      <div class="code" data-lang="java" data-file="Main.java"><pre><code>Future&lt;Integer&gt; f = pool.submit(() -&gt; fetchPrice("BuyNow"));</code></pre></div>
+      <span class="behind">The Callable is wrapped in a <code>FutureTask</code>. If a worker is free (or the pool may start one), it runs; otherwise it joins the queue. <code>submit</code> returns at once.</span></li>
+    <li><h4>A worker runs it</h4>
+      <span class="behind">The worker calls <code>call()</code>. The result (or the exception) is stored inside the FutureTask, which becomes done, and any thread waiting in <code>get()</code> is woken.</span></li>
+    <li><h4>The worker loops</h4>
+      <span class="behind">Instead of ending, the worker takes the next task from the queue, or waits for one (like the consumer in Lesson 12.5).</span></li>
+    <li><h4>shutdown()</h4>
+      <span class="behind">New submissions are rejected with <code>RejectedExecutionException</code>. Queued tasks still run. When the queue is empty, workers exit; <code>awaitTermination</code> lets you wait for that moment.</span></li>
+  </ol>
+</section>
+
+<!-- ======================= PART 5: SEE IT HAPPEN ======================= -->
+<section class="part" id="animation">
+  <span class="part-label"><b>5</b> See it happen</span>
+  <h2>Submit, queue, reuse: both views</h2>
+  <p>Left: the code you write and the Futures you hold. Right: inside the pool, the task queue and two worker threads that never get replaced.</p>
+  <div class="anim" data-frames="6">
+    <div class="anim__title">A thread pool at work <span>6 steps</span></div>
+    <div class="anim__views">
+      <div class="view view--see">
+        <span class="view__tag">What you see</span>
+        <svg viewBox="0 0 360 250" role="img" aria-label="Tasks are submitted to a pool of two worker threads; each submit returns a Future that later holds the result">
+          <rect x="8" y="8" width="344" height="74" rx="8" class="s-board" style="stroke:board;stroke-width:1.5"/>
+          <text data-on="1" x="18" y="32" font-size="9.4" class="s-chalk mono">ExecutorService pool =</text>
+          <text data-on="1" x="18" y="54" font-size="9.4" class="s-chalk mono">    Executors.newFixedThreadPool(2);</text>
+          <text data-on="2" x="18" y="32" font-size="9.4" class="s-chalk mono">Future&lt;Integer&gt; f1 = pool.submit(task1);</text>
+          <text data-on="2" x="18" y="54" font-size="9.4" class="s-chalk mono">Future&lt;Integer&gt; f2 = pool.submit(task2);</text>
+          <text data-on="3" x="18" y="32" font-size="9.4" class="s-chalk mono">Future&lt;Integer&gt; f3 = pool.submit(task3);</text>
+          <text data-on="3" x="18" y="54" font-size="9.4" class="s-chalk mono">// only 2 workers: task3 waits</text>
+          <text data-on="4" x="18" y="32" font-size="9.4" class="s-chalk mono">// a worker finished task1</text>
+          <text data-on="4" x="18" y="54" font-size="9.4" class="s-chalk mono">// and picks up task3</text>
+          <text data-on="5" x="18" y="32" font-size="9.4" class="s-chalk mono">int total = f1.get() + f2.get()</text>
+          <text data-on="5" x="18" y="54" font-size="9.4" class="s-chalk mono">          + f3.get();   // waits if needed</text>
+          <text data-on="6" x="18" y="32" font-size="9.4" class="s-chalk mono">pool.shutdown();</text>
+          <text data-on="6" x="18" y="54" font-size="9.4" class="s-chalk mono">// workers end after the queue is empty</text>
+          <text x="10" y="104" font-size="9.5" font-weight="700" class="s-ink2">your code (main)</text>
+          <g data-on="2-"><rect x="10" y="112" width="82" height="36" rx="8" class="s-card2" style="stroke:var(--line);stroke-width:1.5"/></g>
+          <text data-on="2-" x="18" y="128" font-size="9.5" font-weight="700" class="s-ink mono">f1</text>
+          <g data-on="2-"><rect x="100" y="112" width="82" height="36" rx="8" class="s-card2" style="stroke:var(--line);stroke-width:1.5"/></g>
+          <text data-on="2-" x="108" y="128" font-size="9.5" font-weight="700" class="s-ink mono">f2</text>
+          <g data-on="3-"><rect x="190" y="112" width="82" height="36" rx="8" class="s-card2" style="stroke:var(--line);stroke-width:1.5"/></g>
+          <text data-on="3-" x="198" y="128" font-size="9.5" font-weight="700" class="s-ink mono">f3</text>
+          <text data-on="2-3" x="18" y="143" font-size="8.6" class="s-acc mono">pending</text>
+          <text data-on="4-" x="18" y="143" font-size="8.6" class="s-green mono">done: 10</text>
+          <text data-on="2-4" x="108" y="143" font-size="8.6" class="s-acc mono">pending</text>
+          <text data-on="5-" x="108" y="143" font-size="8.6" class="s-green mono">done: 20</text>
+          <text data-on="3-4" x="198" y="143" font-size="8.6" class="s-acc mono">pending</text>
+          <text data-on="5-" x="198" y="143" font-size="8.6" class="s-green mono">done: 30</text>
+          <text data-on="5-" x="10" y="180" font-size="12" font-weight="700" class="s-green mono">total = 60</text>
+          <text data-on="1-2" x="10" y="204" font-size="9.5" class="s-ink3">no new Thread() written anywhere</text>
+          <text data-on="6" x="10" y="204" font-size="9.5" class="s-ink2">pool threads stop; JVM can exit</text>
+          <text data-on="1" x="180" y="234" font-size="10.5" text-anchor="middle" class="s-ink2">Create a pool of 2 workers.</text>
+          <text data-on="2" x="180" y="234" font-size="10.5" text-anchor="middle" class="s-ink2">Submit two tasks: two Futures.</text>
+          <text data-on="3" x="180" y="234" font-size="10.5" text-anchor="middle" class="s-ink2">A third task queues.</text>
+          <text data-on="4" x="180" y="234" font-size="10.5" text-anchor="middle" class="s-ink2">task1 done; worker takes task3.</text>
+          <text data-on="5" x="180" y="234" font-size="10.5" text-anchor="middle" class="s-ink2">get() collects the results.</text>
+          <text data-on="6" x="180" y="234" font-size="10.5" text-anchor="middle" class="s-ink2">Shut the pool down.</text>
+          <text x="354" y="245" text-anchor="end" class="s-wm">myphatshala.com</text>
+        </svg>
+        <ol class="caps" hidden>
+          <li><code>Executors.newFixedThreadPool(2)</code> creates an <b>ExecutorService</b> with 2 worker threads that will be reused for every task.</li>
+          <li><code>submit(task)</code> hands over the job and returns immediately with a <b>Future</b>: a receipt for a result that isn't ready yet.</li>
+          <li>A third task arrives while both workers are busy. It waits in the pool's queue; no extra thread is created.</li>
+          <li>When a worker finishes task1, its Future becomes <b>done</b>, and the same worker immediately takes task3 from the queue.</li>
+          <li><code>future.get()</code> returns the result, waiting if the task hasn't finished. main never touches a Thread object.</li>
+          <li><code>shutdown()</code> stops accepting new tasks; the workers finish what's queued and then end. Without it, the pool's threads keep the JVM alive.</li>
+        </ol>
+      </div>
+      <div class="view view--behind">
+        <span class="view__tag">Behind the screen</span>
+        <svg viewBox="0 0 360 250" role="img" aria-label="Inside the ThreadPoolExecutor: a task queue and two reusable worker threads">
+          <rect x="6" y="6" width="348" height="200" rx="8" class="s-card" style="stroke:var(--line);stroke-width:1.5"/>
+          <text x="16" y="24" font-size="10" font-weight="700" class="s-ink2">ThreadPoolExecutor (core size 2)</text>
+          <rect x="16" y="36" width="150" height="50" rx="8" class="s-soft-acc" style="stroke:var(--track);stroke-width:1.5"/>
+          <text x="26" y="52" font-size="9.5" font-weight="700" class="s-acc">task queue</text>
+          <text data-on="3" x="26" y="74" font-size="10" font-weight="700" class="s-ink mono">task3</text>
+          <text data-on="1-2,4-" x="26" y="74" font-size="9" class="s-ink3">(empty)</text>
+          <rect x="186" y="36" width="160" height="54" rx="8" class="s-soft-blue" style="stroke:var(--blue);stroke-width:1.5"/>
+          <text x="196" y="54" font-size="9" font-weight="700" class="s-blue mono">pool-1-thread-1</text>
+          <rect x="186" y="100" width="160" height="54" rx="8" class="s-soft-blue" style="stroke:var(--blue);stroke-width:1.5"/>
+          <text x="196" y="118" font-size="9" font-weight="700" class="s-blue mono">pool-1-thread-2</text>
+          <text data-on="1" x="196" y="76" font-size="9" class="s-ink3 mono">idle (waits on queue)</text>
+          <text data-on="2" x="196" y="76" font-size="9" class="s-ink mono">running task1</text>
+          <text data-on="3" x="196" y="76" font-size="9" class="s-ink mono">running task1</text>
+          <text data-on="4" x="196" y="76" font-size="9" class="s-ink mono">running task3</text>
+          <text data-on="5" x="196" y="76" font-size="9" class="s-ink3 mono">idle</text>
+          <text data-on="6" x="196" y="76" font-size="9" class="s-ink3 mono">TERMINATED</text>
+          <text data-on="1" x="196" y="140" font-size="9" class="s-ink3 mono">idle (waits on queue)</text>
+          <text data-on="2" x="196" y="140" font-size="9" class="s-ink mono">running task2</text>
+          <text data-on="3" x="196" y="140" font-size="9" class="s-ink mono">running task2</text>
+          <text data-on="4" x="196" y="140" font-size="9" class="s-ink mono">running task2</text>
+          <text data-on="5" x="196" y="140" font-size="9" class="s-ink3 mono">idle</text>
+          <text data-on="6" x="196" y="140" font-size="9" class="s-ink3 mono">TERMINATED</text>
+          <g data-on="4"><path d="M166 62 L184 62" style="stroke:var(--green);stroke-width:2;fill:none"/><path d="M176.0 57.5 L184 62 L176.0 66.5" style="stroke:var(--green);stroke-width:2;fill:none;stroke-linecap:round;stroke-linejoin:round"/></g>
+          <text x="16" y="116" font-size="9.5" font-weight="700" class="s-ink2">Futures on the heap</text>
+          <text data-on="4-" x="16" y="134" font-size="9" class="s-green mono">f1: NEW → COMPLETED</text>
+          <text data-on="5-" x="16" y="150" font-size="9" class="s-green mono">f2, f3: COMPLETED</text>
+          <text data-on="2-3" x="16" y="134" font-size="9" class="s-acc mono">f1, f2: NEW (not done)</text>
+          <text data-on="1-5" x="16" y="180" font-size="9.2" class="s-ink2">threads created once, reused for every task</text>
+          <text data-on="6" x="16" y="180" font-size="9.2" class="s-ink2">shutdown(): queue drained, workers exit</text>
+          <text data-on="1" x="180" y="236" font-size="10.5" text-anchor="middle" class="s-ink2">Two workers, empty queue.</text>
+          <text data-on="2" x="180" y="236" font-size="10.5" text-anchor="middle" class="s-ink2">Each worker runs one task.</text>
+          <text data-on="3" x="180" y="236" font-size="10.5" text-anchor="middle" class="s-ink2">Extra task waits in the queue.</text>
+          <text data-on="4" x="180" y="236" font-size="10.5" text-anchor="middle" class="s-ink2">A freed worker takes the next task.</text>
+          <text data-on="5" x="180" y="236" font-size="10.5" text-anchor="middle" class="s-ink2">Results stored in Futures.</text>
+          <text data-on="6" x="180" y="236" font-size="10.5" text-anchor="middle" class="s-ink2">Workers end after shutdown.</text>
+          <text x="354" y="245" text-anchor="end" class="s-wm">myphatshala.com</text>
+        </svg>
+        <ol class="caps" hidden>
+          <li>Inside, the pool keeps a <b>task queue</b> and up to 2 worker threads named <code>pool-1-thread-1</code> and <code>-2</code>. Idle workers wait on the queue (like a consumer, Lesson 12.5).</li>
+          <li>Submitted tasks are wrapped in <code>FutureTask</code> objects. Each worker takes one and runs its <code>call()</code>.</li>
+          <li>With both workers busy, task3 sits in the queue. This is how a pool limits how many threads exist, however many tasks arrive.</li>
+          <li>Worker 1 finishes task1, stores the result in f1's FutureTask, and loops back to take task3. No thread was created or destroyed.</li>
+          <li>All results are stored. <code>get()</code> on a completed Future returns at once.</li>
+          <li>After <code>shutdown()</code>, the workers find the queue empty and closed, so they exit and become TERMINATED.</li>
+        </ol>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ======================= PART 6: REAL-WORLD USE ======================= -->
+<section class="part" id="real-world">
+  <span class="part-label"><b>6</b> Real-world use</span>
+  <h2>Pools power every Java server</h2>
+  <p>Web servers, database connection handling, message consumers and schedulers are all built on executors.</p>
+  <!--ANIM2-->
+  <h3 id="animated-example">Watch it with an example: a travel site searching three airlines</h3>
+  <p class="anim-intro">A flight search asks three airline APIs for prices at the same time, using a pool and Futures, and shows the cheapest. One airline is slow, so the search uses a timeout.</p>
+  <div class="anim anim--one" data-frames="5" data-delay="4600">
+    <div class="anim__title">Fare search with Futures <span>5 steps</span></div>
+    <div class="anim__views">
+      <div class="view view--story">
+        <span class="view__tag">Animated example</span>
+        <svg viewBox="0 0 360 230" role="img" aria-label="Three Callable tasks run on a pool; two return prices, one times out; the cheapest available fare is shown">
+          <rect x="10" y="18" width="110" height="42" rx="8" class="s-card2" style="stroke:var(--line);stroke-width:1.5"/>
+          <text x="20" y="44" font-size="10" font-weight="700" class="s-ink">IndiAir</text>
+          <g data-on="2-"><rect x="150" y="18" width="90" height="42" rx="8" class="s-soft-blue" style="stroke:var(--blue);stroke-width:1.5"/></g>
+          <text data-on="2-" x="160" y="36" font-size="9" font-weight="700" class="s-blue mono">Future</text>
+          <g data-on="2-"><path d="M120 39 L148 39" style="stroke:var(--ink-3);stroke-width:2;fill:none"/><path d="M140.0 34.5 L148 39 L140.0 43.5" style="stroke:var(--ink-3);stroke-width:2;fill:none;stroke-linecap:round;stroke-linejoin:round"/></g>
+          <rect x="10" y="70" width="110" height="42" rx="8" class="s-card2" style="stroke:var(--line);stroke-width:1.5"/>
+          <text x="20" y="96" font-size="10" font-weight="700" class="s-ink">SkyJet</text>
+          <g data-on="2-"><rect x="150" y="70" width="90" height="42" rx="8" class="s-soft-blue" style="stroke:var(--blue);stroke-width:1.5"/></g>
+          <text data-on="2-" x="160" y="88" font-size="9" font-weight="700" class="s-blue mono">Future</text>
+          <g data-on="2-"><path d="M120 91 L148 91" style="stroke:var(--ink-3);stroke-width:2;fill:none"/><path d="M140.0 86.5 L148 91 L140.0 95.5" style="stroke:var(--ink-3);stroke-width:2;fill:none;stroke-linecap:round;stroke-linejoin:round"/></g>
+          <rect x="10" y="122" width="110" height="42" rx="8" class="s-card2" style="stroke:var(--line);stroke-width:1.5"/>
+          <text x="20" y="148" font-size="10" font-weight="700" class="s-ink">BlueWing</text>
+          <g data-on="2-"><rect x="150" y="122" width="90" height="42" rx="8" class="s-soft-blue" style="stroke:var(--blue);stroke-width:1.5"/></g>
+          <text data-on="2-" x="160" y="140" font-size="9" font-weight="700" class="s-blue mono">Future</text>
+          <g data-on="2-"><path d="M120 143 L148 143" style="stroke:var(--ink-3);stroke-width:2;fill:none"/><path d="M140.0 138.5 L148 143 L140.0 147.5" style="stroke:var(--ink-3);stroke-width:2;fill:none;stroke-linecap:round;stroke-linejoin:round"/></g>
+          <text data-on="2" x="160" y="54" font-size="9" class="s-acc mono">pending</text>
+          <text data-on="2" x="160" y="106" font-size="9" class="s-acc mono">pending</text>
+          <text data-on="2-3" x="160" y="158" font-size="9" class="s-acc mono">pending</text>
+          <text data-on="3-" x="160" y="54" font-size="9.5" font-weight="700" class="s-green mono">₹4,850</text>
+          <text data-on="3-" x="160" y="106" font-size="9.5" font-weight="700" class="s-green mono">₹4,420</text>
+          <text data-on="4-" x="160" y="158" font-size="9.5" font-weight="700" class="s-red mono">timeout ✗</text>
+          <g data-on="5"><rect x="256" y="60" width="96" height="70" rx="8" class="s-soft-green" style="stroke:var(--green);stroke-width:1.5"/></g>
+          <text data-on="5" x="304" y="84" font-size="9.5" text-anchor="middle" font-weight="700" class="s-green">cheapest</text>
+          <text data-on="5" x="304" y="104" font-size="11" text-anchor="middle" font-weight="700" class="s-ink">SkyJet</text>
+          <text data-on="5" x="304" y="120" font-size="10.5" text-anchor="middle" class="s-ink mono">₹4,420</text>
+          <text data-on="3-4" x="256" y="30" font-size="9.5" class="s-ink2 mono">get(800 ms)</text>
+          <text data-on="1" x="180" y="204" font-size="10.5" text-anchor="middle" class="s-ink2">Search for Pune → Delhi.</text>
+          <text data-on="2" x="180" y="204" font-size="10.5" text-anchor="middle" class="s-ink2">Three tasks submitted at once.</text>
+          <text data-on="3" x="180" y="204" font-size="10.5" text-anchor="middle" class="s-ink2">Two answers arrive.</text>
+          <text data-on="4" x="180" y="204" font-size="10.5" text-anchor="middle" class="s-ink2">BlueWing misses the deadline.</text>
+          <text data-on="5" x="180" y="204" font-size="10.5" text-anchor="middle" class="s-ink2">Show the best answer we have.</text>
+          <text x="354" y="225" text-anchor="end" class="s-wm">myphatshala.com</text>
+        </svg>
+        <ol class="caps" hidden>
+          <li>The user searches Pune → Delhi. The site must ask three airline APIs; each call takes a few hundred milliseconds.</li>
+          <li>Each call is a <code>Callable&lt;Integer&gt;</code> submitted to a pool. Three Futures come back at once, all pending.</li>
+          <li>IndiAir and SkyJet answer; their Futures complete. Because the calls overlapped, the wait was about as long as the slowest of them, not the sum.</li>
+          <li><code>get(800, MILLISECONDS)</code> on BlueWing's Future throws <code>TimeoutException</code>. The site cancels that task instead of making the user wait.</li>
+          <li>The cheapest fare among the answers is shown. This is how comparison sites stay fast even when one partner is slow. (Illustrative times and prices.)</li>
+        </ol>
+      </div>
+    </div>
+  </div>
+  <!--/ANIM2-->
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="20" y="20" width="22" height="50" rx="4" class="s-soft-blue" style="stroke:var(--blue)"/><rect x="49" y="20" width="22" height="50" rx="4" class="s-soft-blue" style="stroke:var(--blue)"/><rect x="78" y="20" width="22" height="50" rx="4" class="s-soft-blue" style="stroke:var(--blue)"/></svg></div>
+    <div><h4>1. Web request handling</h4><p>Servers like Tomcat keep a pool of request threads (often a couple of hundred). Each request borrows a worker and returns it when the response is sent.</p>
+      <div class="uc-flow"><span>HTTP request</span><i>→</i><span class="java">request pool</span><i>→</i><span>response</span></div></div>
+  </div>
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><circle cx="30" cy="45" r="12" class="s-soft-acc" style="stroke:var(--track)"/><circle cx="60" cy="45" r="12" class="s-soft-acc" style="stroke:var(--track)"/><circle cx="90" cy="45" r="12" class="s-soft-acc" style="stroke:var(--track)"/></svg></div>
+    <div><h4>2. Fan-out calls</h4><p>A product page calls price, stock, reviews and delivery-estimate services at once and combines the answers with Futures or CompletableFuture.</p>
+      <div class="uc-flow"><span>4 services</span><i>→</i><span class="java">CompletableFuture.allOf</span><i>→</i><span>one page</span></div></div>
+  </div>
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><circle cx="60" cy="45" r="26" class="s-card" style="stroke:var(--line)"/><path d="M60 45V27M60 45l13 8" style="stroke:var(--track);stroke-width:2.5"/></svg></div>
+    <div><h4>3. Scheduled jobs</h4><p>Send EMI reminders every morning, clear expired carts every 10 minutes, refresh exchange rates every hour.</p>
+      <div class="uc-flow"><span>every 10 min</span><i>→</i><span class="java">scheduleAtFixedRate</span><i>→</i><span>carts cleaned</span></div></div>
+  </div>
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><path d="M20 60c10-30 30-30 40 0s30 30 40 0" style="fill:none;stroke:var(--green);stroke-width:2.5"/></svg></div>
+    <div><h4>4. Virtual threads for I/O</h4><p>Since Java 21, services that mostly wait on databases and APIs can run one cheap virtual thread per request, handling far more concurrent requests with simple blocking code.</p>
+      <div class="uc-flow"><span>10,000 requests</span><i>→</i><span class="java">virtual threads</span><i>→</i><span>few OS threads</span></div></div>
+  </div>
+  <p class="muted">Sizes and timings are illustrative. Frameworks such as Spring configure and manage these executors for you, but they are the same ExecutorService underneath.</p>
+</section>
+
+<div class="ad-slot" data-slot="mid"></div>
+
+<!-- ======================= PART 7: RUN THE CODE ======================= -->
+<section class="part" id="run">
+  <span class="part-label"><b>7</b> Run the code</span>
+  <h2>Three shop prices, fetched in parallel</h2>
+  <div class="code" data-lang="java" data-file="Main.java"><pre><code>import java.util.*;
+import java.util.concurrent.*;
+
+public class Main {
+    static int fetchPrice(String shop) throws InterruptedException {
+        Thread.sleep(100);                    // pretend network call
+        return switch (shop) {
+            case "Shopkart" -&gt; 18999;
+            case "BuyNow" -&gt; 18499;
+            default -&gt; 19250;
+        };
+    }
+
+    public static void main(String[] args) throws Exception {
+        List&lt;String&gt; shops = List.of("Shopkart", "BuyNow", "MegaMart");
+        ExecutorService pool = Executors.newFixedThreadPool(3);
+        List&lt;Future&lt;Integer&gt;&gt; prices = new ArrayList&lt;&gt;();
+        for (String s : shops) {
+            prices.add(pool.submit(() -&gt; fetchPrice(s)));
+        }
+        for (int i = 0; i &lt; shops.size(); i++) {
+            System.out.println(shops.get(i) + ": Rs " + prices.get(i).get());
+        }
+        pool.shutdown();
+    }
+}</code></pre><div class="output">Shopkart: Rs 18999
+BuyNow: Rs 18499
+MegaMart: Rs 19250</div></div>
+  <ul class="anno">
+    <li><code>Executors.newFixedThreadPool(3)</code><span>Three workers, so all three calls can run at the same time.</span></li>
+    <li><code>pool.submit(() -&gt; fetchPrice(s))</code><span>A Callable: it returns the price, and may throw <code>InterruptedException</code> (allowed in <code>call()</code>).</span></li>
+    <li><code>prices.get(i).get()</code><span>Read results in shop order; each <code>get</code> waits only if that price isn't ready.</span></li>
+    <li><code>pool.shutdown()</code><span>Lets the JVM exit once the workers are idle.</span></li>
+  </ul>
+  <div class="runner">
+    <script type="application/json">{
+ "lang": "java",
+ "file": "Main.java",
+ "tasks": [
+  {
+   "label": "1 · Price check on a pool",
+   "hint": "Press <b>Run</b>. The three 100 ms calls overlap, so it takes about 0.1 s, not 0.3 s. Then change the pool size to 1 and compare.",
+   "code": "import java.util.*;\nimport java.util.concurrent.*;\n\npublic class Main {\n    static int fetchPrice(String shop) throws InterruptedException {\n        Thread.sleep(100);\n        return switch (shop) {\n            case \"Shopkart\" -> 18999;\n            case \"BuyNow\" -> 18499;\n            default -> 19250;\n        };\n    }\n\n    public static void main(String[] args) throws Exception {\n        long t0 = System.currentTimeMillis();\n        List<String> shops = List.of(\"Shopkart\", \"BuyNow\", \"MegaMart\");\n        ExecutorService pool = Executors.newFixedThreadPool(3);\n        List<Future<Integer>> prices = new ArrayList<>();\n        for (String s : shops) prices.add(pool.submit(() -> fetchPrice(s)));\n        for (int i = 0; i < shops.size(); i++) {\n            System.out.println(shops.get(i) + \": Rs \" + prices.get(i).get());\n        }\n        pool.shutdown();\n        System.out.println(\"took about \" + (System.currentTimeMillis() - t0) / 100 * 100 + \" ms\");\n    }\n}\n"
+  },
+  {
+   "label": "2 · Predict: which threads?",
+   "hint": "<b>Predict first:</b> 6 jobs, pool of 2. How many different thread names appear?",
+   "code": "import java.util.*;\nimport java.util.concurrent.*;\n\npublic class Main {\n    public static void main(String[] args) throws InterruptedException {\n        ExecutorService pool = Executors.newFixedThreadPool(2);\n        Set<String> names = ConcurrentHashMap.newKeySet();\n        for (int i = 0; i < 6; i++) {\n            pool.submit(() -> names.add(Thread.currentThread().getName()));\n        }\n        pool.shutdown();\n        pool.awaitTermination(1, TimeUnit.SECONDS);\n        System.out.println(names.size() + \" worker(s): \" + new TreeSet<>(names));\n    }\n}\n"
+  },
+  {
+   "label": "3 · Predict: a failure nobody saw",
+   "hint": "<b>Predict first:</b> does anything get printed about the division by zero? Then add <code>f.get()</code> inside a try/catch for <code>ExecutionException</code>.",
+   "code": "import java.util.concurrent.*;\n\npublic class Main {\n    public static void main(String[] args) throws InterruptedException {\n        ExecutorService pool = Executors.newSingleThreadExecutor();\n        Future<Integer> f = pool.submit(() -> 500 / 0);\n        pool.shutdown();\n        pool.awaitTermination(1, TimeUnit.SECONDS);\n        System.out.println(\"pool finished, done = \" + f.isDone());\n    }\n}\n"
+  },
+  {
+   "label": "4 · Crash: submit after shutdown",
+   "hint": "A pool that has been shut down rejects new work. Submit all tasks before calling <code>shutdown()</code>.",
+   "code": "import java.util.concurrent.*;\n\npublic class Main {\n    public static void main(String[] args) {\n        ExecutorService pool = Executors.newFixedThreadPool(2);\n        pool.submit(() -> System.out.println(\"order 1 packed\"));\n        pool.shutdown();\n        pool.submit(() -> System.out.println(\"order 2 packed\"));\n    }\n}\n",
+   "_expect": "exception"
+  },
+  {
+   "label": "5 · Spot the error",
+   "hint": "<code>Future.get()</code> throws the checked <code>InterruptedException</code> and <code>ExecutionException</code>. Add <code>throws Exception</code> to main, or catch them.",
+   "code": "import java.util.concurrent.*;\n\npublic class Main {\n    public static void main(String[] args) {\n        ExecutorService pool = Executors.newFixedThreadPool(1);\n        Future<Integer> f = pool.submit(() -> 21 * 2);\n        int answer = f.get();\n        System.out.println(answer);\n        pool.shutdown();\n    }\n}\n",
+   "_expect": "compile-error"
+  }
+ ]
+}</script>
+  </div>
+</section>
+
+<!-- ======================= PART 8: LINE BY LINE ======================= -->
+<section class="part" id="tracer">
+  <span class="part-label"><b>8</b> Line by line</span>
+  <h2>Two Callables, two Futures</h2>
+  <p>Recorded from the real JVM, following <b>main</b>. Watch the pool, the Callable objects and the Future objects appear on the heap; the prices are computed on pool threads and come back through <code>get()</code>.</p>
+  <div class="tracer">
+    <script type="application/json">{"lang": "java", "code": ["import java.util.concurrent.*;", "", "public class Main {", "    static int priceOf(String item) {", "        return item.length() * 100;", "    }", "", "    public static void main(String[] args) throws Exception {", "        ExecutorService pool = Executors.newFixedThreadPool(2);", "        Callable<Integer> mouse = () -> priceOf(\"mouse\");", "        Callable<Integer> keyboard = () -> priceOf(\"keyboard\");", "        Future<Integer> f1 = pool.submit(mouse);", "        Future<Integer> f2 = pool.submit(keyboard);", "        int total = f1.get() + f2.get();", "        pool.shutdown();", "        System.out.println(\"cart total: Rs \" + total + \", done \" + f1.isDone());", "    }", "}"], "steps": [{"line": 9, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["pool", "→ #1 ThreadPoolExecutor"]]}], "heap": ["<b>#1</b> ThreadPoolExecutor", "<b>#2</b> String[0] (args, empty)"], "newVar": "pool", "phase": "Pool", "note": "An ExecutorService with up to 2 worker threads. They are created lazily, when tasks arrive."}, {"line": 10, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["pool", "→ #1 ThreadPoolExecutor"], ["mouse", "→ #3 lambda"]]}], "heap": ["<b>#1</b> ThreadPoolExecutor", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> lambda object (a Callable)"], "newVar": "mouse", "phase": "Task 1", "note": "A Callable: like a Runnable, but <code>call()</code> returns a value (an Integer here). Now <code>mouse</code> = → #3 lambda. New object <b>#3</b> on the heap: lambda object (a Callable)."}, {"line": 11, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["pool", "→ #1 ThreadPoolExecutor"], ["mouse", "→ #3 lambda"], ["keyboard", "→ #4 lambda"]]}], "heap": ["<b>#1</b> ThreadPoolExecutor", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> lambda object (a Callable)", "<b>#4</b> lambda object (a Callable)"], "newVar": "keyboard", "phase": "Task 2", "note": "A second Callable object. Now <code>keyboard</code> = → #4 lambda. New object <b>#4</b> on the heap: lambda object (a Callable)."}, {"line": 12, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["pool", "→ #1 ThreadPoolExecutor"], ["mouse", "→ #3 lambda"], ["keyboard", "→ #4 lambda"], ["f1", "→ #5 FutureTask"]]}], "heap": ["<b>#1</b> ThreadPoolExecutor", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> lambda object (a Callable)", "<b>#4</b> lambda object (a Callable)", "<b>#5</b> FutureTask"], "newVar": "f1", "phase": "Submit", "note": "<code>submit</code> wraps the task in a FutureTask, gives it to a worker, and returns that Future at once. The price is computed on the worker thread."}, {"line": 13, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["pool", "→ #1 ThreadPoolExecutor"], ["mouse", "→ #3 lambda"], ["keyboard", "→ #4 lambda"], ["f1", "→ #5 FutureTask"], ["f2", "→ #6 FutureTask"]]}], "heap": ["<b>#1</b> ThreadPoolExecutor", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> lambda object (a Callable)", "<b>#4</b> lambda object (a Callable)", "<b>#5</b> FutureTask", "<b>#6</b> FutureTask"], "newVar": "f2", "phase": "Submit", "note": "The second task goes to the second worker. Both may already be finished by the next line, or not: the Futures handle that."}, {"line": 14, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["pool", "→ #1 ThreadPoolExecutor"], ["mouse", "→ #3 lambda"], ["keyboard", "→ #4 lambda"], ["f1", "→ #5 FutureTask"], ["f2", "→ #6 FutureTask"], ["total", "1300"]]}], "heap": ["<b>#1</b> ThreadPoolExecutor", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> lambda object (a Callable)", "<b>#4</b> lambda object (a Callable)", "<b>#5</b> FutureTask", "<b>#6</b> FutureTask"], "newVar": "total", "phase": "Collect", "note": "<code>get()</code> returns each result, waiting if necessary: 500 + 800."}, {"line": 15, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["pool", "→ #1 ThreadPoolExecutor"], ["mouse", "→ #3 lambda"], ["keyboard", "→ #4 lambda"], ["f1", "→ #5 FutureTask"], ["f2", "→ #6 FutureTask"], ["total", "1300"]]}], "heap": ["<b>#1</b> ThreadPoolExecutor", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> lambda object (a Callable)", "<b>#4</b> lambda object (a Callable)", "<b>#5</b> FutureTask", "<b>#6</b> FutureTask"], "phase": "Shut down", "note": "No more tasks. The two worker threads end once idle, so the JVM can exit."}, {"line": 16, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["pool", "→ #1 ThreadPoolExecutor"], ["mouse", "→ #3 lambda"], ["keyboard", "→ #4 lambda"], ["f1", "→ #5 FutureTask"], ["f2", "→ #6 FutureTask"], ["total", "1300"]]}], "heap": ["<b>#1</b> ThreadPoolExecutor", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> lambda object (a Callable)", "<b>#4</b> lambda object (a Callable)", "<b>#5</b> FutureTask", "<b>#6</b> FutureTask"], "out": "cart total: Rs 1300, done true\n", "phase": "Print", "note": "The Future reports it is done. Prints <code>cart total: Rs 1300, done true</code>."}, {"line": 17, "phase": "Program ends", "note": "<code>main</code> returns, its frame is popped and the program ends.", "stack": [], "heap": []}]}</script>
+  </div>
+
+<h3 id="worked">Worked examples: real problems, solved and traced in memory</h3>
+  <p class="wx-intro">Three common executor patterns: a pool processing many small jobs, Callables with Futures collected by <code>invokeAll</code>, and a Future with a timeout. Results are always read in submission order, so the output never changes.</p>
+  <article class="wx">
+    <div class="wx__head"><span class="wx__num">Example 1</span><span class="wx__tag">E-commerce · invoices</span></div>
+    <h4>Ten invoices on a pool of three workers</h4>
+    <div class="wx__problem"><p class="wx__label">Problem statement</p><p>At closing time a shop generates 10 invoices. Creating a thread for each is wasteful; use a fixed pool of 3. Count the invoices with an <code>AtomicInteger</code>, shut down properly, and print the total.</p></div>
+    <div class="prob__io"><div><small>Input</small><pre>invoice ids 1..10</pre></div><div><small>Expected output</small><pre>finished: true, invoices made: 10</pre></div></div>
+    <div class="wx__approach"><p class="wx__label">Approach</p><ol><li>Create <code>Executors.newFixedThreadPool(3)</code>.</li><li>Submit 10 Runnables; each increments a shared AtomicInteger.</li><li><code>shutdown()</code>, then <code>awaitTermination</code> to wait until all tasks have finished.</li></ol></div>
+    <p class="wx__label">Solution: run it live</p>
+    <div class="runner">
+    <script type="application/json">{"lang": "java", "file": "Main.java", "tasks": [{"label": "Run · Ten invoices on a pool of three workers", "hint": "Press <b>Run</b>. Then print <code>Thread.currentThread().getName()</code> inside the task: you'll see only pool-1-thread-1 to -3 doing all ten jobs (in some order).", "code": "import java.util.concurrent.*;\nimport java.util.concurrent.atomic.AtomicInteger;\n\npublic class Main {\n    public static void main(String[] args) throws InterruptedException {\n        ExecutorService pool = Executors.newFixedThreadPool(3);\n        AtomicInteger made = new AtomicInteger();\n        for (int id = 1; id <= 10; id++) {\n            int invoice = id;\n            pool.submit(() -> {\n                String pdf = \"INV-\" + invoice + \".pdf\";\n                made.incrementAndGet();\n            });\n        }\n        pool.shutdown();\n        boolean finished = pool.awaitTermination(5, TimeUnit.SECONDS);\n        System.out.println(\"finished: \" + finished + \", invoices made: \" + made.get());\n    }\n}\n"}]}</script>
+    </div>
+    <p class="wx__label">What happens in memory, step by step</p>
+    <p class="wx__how">Recorded from the real JVM: press <b>Next</b> to execute one line at a time. Watch method calls push and pop frames on the stack, and objects (numbered #1, #2 …) appear on the heap.</p>
+    <div class="tracer">
+    <script type="application/json">{"lang": "java", "code": ["import java.util.concurrent.*;", "import java.util.concurrent.atomic.AtomicInteger;", "", "public class Main {", "    public static void main(String[] args) throws InterruptedException {", "        ExecutorService pool = Executors.newFixedThreadPool(3);", "        AtomicInteger made = new AtomicInteger();", "        for (int id = 1; id <= 10; id++) {", "            int invoice = id;", "            pool.submit(() -> {", "                String pdf = \"INV-\" + invoice + \".pdf\";", "                made.incrementAndGet();", "            });", "        }", "        pool.shutdown();", "        boolean finished = pool.awaitTermination(5, TimeUnit.SECONDS);", "        System.out.println(\"finished: \" + finished + \", invoices made: \" + made.get());", "    }", "}"], "steps": [{"line": 6, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["pool", "→ #1 ThreadPoolExecutor"]]}], "heap": ["<b>#1</b> ThreadPoolExecutor", "<b>#2</b> String[0] (args, empty)"], "newVar": "pool", "phase": "Pool", "note": "A pool of 3 reusable workers."}, {"line": 7, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["pool", "→ #1 ThreadPoolExecutor"], ["made", "→ #3 AtomicInteger"]]}], "heap": ["<b>#1</b> ThreadPoolExecutor", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> AtomicInteger 0"], "newVar": "made", "phase": "Counter", "note": "A thread-safe counter shared by all tasks. Now <code>made</code> = → #3 AtomicInteger. New object <b>#3</b> on the heap: AtomicInteger 0."}, {"line": 8, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["pool", "→ #1 ThreadPoolExecutor"], ["made", "→ #3 AtomicInteger"], ["id", "1"]]}], "heap": ["<b>#1</b> ThreadPoolExecutor", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> AtomicInteger 0"], "newVar": "id", "phase": "Assign", "note": "Now <code>id</code> = 1."}, {"line": 9, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["pool", "→ #1 ThreadPoolExecutor"], ["made", "→ #3 AtomicInteger"], ["id", "1"], ["invoice", "1"]]}], "heap": ["<b>#1</b> ThreadPoolExecutor", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> AtomicInteger 0"], "newVar": "invoice", "phase": "Assign", "note": "Now <code>invoice</code> = 1."}, {"line": 10, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["pool", "→ #1 ThreadPoolExecutor"], ["made", "→ #3 AtomicInteger"], ["id", "1"]]}], "heap": ["<b>#1</b> ThreadPoolExecutor", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> AtomicInteger 0"], "phase": "First task", "note": "Submitted; a worker starts it straight away."}, {"line": 8, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["pool", "→ #1 ThreadPoolExecutor"], ["made", "→ #3 AtomicInteger"], ["id", "2"]]}], "heap": ["<b>#1</b> ThreadPoolExecutor", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> AtomicInteger 0"], "newVar": "id", "phase": "Assign", "note": "Now <code>id</code> = 2."}, {"line": 9, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["pool", "→ #1 ThreadPoolExecutor"], ["made", "→ #3 AtomicInteger"], ["id", "2"], ["invoice", "2"]]}], "heap": ["<b>#1</b> ThreadPoolExecutor", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> AtomicInteger 0"], "newVar": "invoice", "phase": "Assign", "note": "Now <code>invoice</code> = 2."}, {"line": 10, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["pool", "→ #1 ThreadPoolExecutor"], ["made", "→ #3 AtomicInteger"], ["id", "2"]]}], "heap": ["<b>#1</b> ThreadPoolExecutor", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> AtomicInteger 0"], "phase": "Step", "note": "This line runs; nothing visible changes."}, {"line": 8, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["pool", "→ #1 ThreadPoolExecutor"], ["made", "→ #3 AtomicInteger"], ["id", "3"]]}], "heap": ["<b>#1</b> ThreadPoolExecutor", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> AtomicInteger 0"], "newVar": "id", "phase": "Assign", "note": "Now <code>id</code> = 3."}, {"line": 9, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["pool", "→ #1 ThreadPoolExecutor"], ["made", "→ #3 AtomicInteger"], ["id", "3"], ["invoice", "3"]]}], "heap": ["<b>#1</b> ThreadPoolExecutor", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> AtomicInteger 0"], "newVar": "invoice", "phase": "Assign", "note": "Now <code>invoice</code> = 3."}, {"line": 10, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["pool", "→ #1 ThreadPoolExecutor"], ["made", "→ #3 AtomicInteger"], ["id", "3"]]}], "heap": ["<b>#1</b> ThreadPoolExecutor", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> AtomicInteger 0"], "phase": "Step", "note": "This line runs; nothing visible changes."}, {"line": 8, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["pool", "→ #1 ThreadPoolExecutor"], ["made", "→ #3 AtomicInteger"], ["id", "4"]]}], "heap": ["<b>#1</b> ThreadPoolExecutor", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> AtomicInteger 0"], "newVar": "id", "phase": "Assign", "note": "Now <code>id</code> = 4."}, {"line": 9, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["pool", "→ #1 ThreadPoolExecutor"], ["made", "→ #3 AtomicInteger"], ["id", "4"], ["invoice", "4"]]}], "heap": ["<b>#1</b> ThreadPoolExecutor", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> AtomicInteger 0"], "newVar": "invoice", "phase": "Assign", "note": "Now <code>invoice</code> = 4."}, {"line": 10, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["pool", "→ #1 ThreadPoolExecutor"], ["made", "→ #3 AtomicInteger"], ["id", "4"]]}], "heap": ["<b>#1</b> ThreadPoolExecutor", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> AtomicInteger 0"], "phase": "Step", "note": "This line runs; nothing visible changes."}, {"line": 8, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["pool", "→ #1 ThreadPoolExecutor"], ["made", "→ #3 AtomicInteger"], ["id", "5"]]}], "heap": ["<b>#1</b> ThreadPoolExecutor", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> AtomicInteger 0"], "newVar": "id", "phase": "Assign", "note": "Now <code>id</code> = 5."}, {"line": 9, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["pool", "→ #1 ThreadPoolExecutor"], ["made", "→ #3 AtomicInteger"], ["id", "5"], ["invoice", "5"]]}], "heap": ["<b>#1</b> ThreadPoolExecutor", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> AtomicInteger 0"], "newVar": "invoice", "phase": "Assign", "note": "Now <code>invoice</code> = 5."}, {"line": 10, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["pool", "→ #1 ThreadPoolExecutor"], ["made", "→ #3 AtomicInteger"], ["id", "5"]]}], "heap": ["<b>#1</b> ThreadPoolExecutor", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> AtomicInteger 0"], "phase": "Step", "note": "This line runs; nothing visible changes."}, {"line": 8, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["pool", "→ #1 ThreadPoolExecutor"], ["made", "→ #3 AtomicInteger"], ["id", "6"]]}], "heap": ["<b>#1</b> ThreadPoolExecutor", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> AtomicInteger 0"], "newVar": "id", "phase": "Assign", "note": "Now <code>id</code> = 6."}, {"line": 9, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["pool", "→ #1 ThreadPoolExecutor"], ["made", "→ #3 AtomicInteger"], ["id", "6"], ["invoice", "6"]]}], "heap": ["<b>#1</b> ThreadPoolExecutor", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> AtomicInteger 0"], "newVar": "invoice", "phase": "Assign", "note": "Now <code>invoice</code> = 6."}, {"line": 10, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["pool", "→ #1 ThreadPoolExecutor"], ["made", "→ #3 AtomicInteger"], ["id", "6"]]}], "heap": ["<b>#1</b> ThreadPoolExecutor", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> AtomicInteger 0"], "phase": "Step", "note": "This line runs; nothing visible changes."}, {"line": 8, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["pool", "→ #1 ThreadPoolExecutor"], ["made", "→ #3 AtomicInteger"], ["id", "7"]]}], "heap": ["<b>#1</b> ThreadPoolExecutor", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> AtomicInteger 0"], "newVar": "id", "phase": "Assign", "note": "Now <code>id</code> = 7."}, {"line": 9, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["pool", "→ #1 ThreadPoolExecutor"], ["made", "→ #3 AtomicInteger"], ["id", "7"], ["invoice", "7"]]}], "heap": ["<b>#1</b> ThreadPoolExecutor", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> AtomicInteger 0"], "newVar": "invoice", "phase": "Assign", "note": "Now <code>invoice</code> = 7."}, {"line": 10, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["pool", "→ #1 ThreadPoolExecutor"], ["made", "→ #3 AtomicInteger"], ["id", "7"]]}], "heap": ["<b>#1</b> ThreadPoolExecutor", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> AtomicInteger 0"], "phase": "Step", "note": "This line runs; nothing visible changes."}, {"line": 8, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["pool", "→ #1 ThreadPoolExecutor"], ["made", "→ #3 AtomicInteger"], ["id", "8"]]}], "heap": ["<b>#1</b> ThreadPoolExecutor", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> AtomicInteger 0"], "newVar": "id", "phase": "Assign", "note": "Now <code>id</code> = 8."}, {"line": 9, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["pool", "→ #1 ThreadPoolExecutor"], ["made", "→ #3 AtomicInteger"], ["id", "8"], ["invoice", "8"]]}], "heap": ["<b>#1</b> ThreadPoolExecutor", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> AtomicInteger 0"], "newVar": "invoice", "phase": "Assign", "note": "Now <code>invoice</code> = 8."}, {"line": 10, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["pool", "→ #1 ThreadPoolExecutor"], ["made", "→ #3 AtomicInteger"], ["id", "8"]]}], "heap": ["<b>#1</b> ThreadPoolExecutor", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> AtomicInteger 0"], "phase": "Step", "note": "This line runs; nothing visible changes."}, {"line": 8, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["pool", "→ #1 ThreadPoolExecutor"], ["made", "→ #3 AtomicInteger"], ["id", "9"]]}], "heap": ["<b>#1</b> ThreadPoolExecutor", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> AtomicInteger 0"], "newVar": "id", "phase": "Assign", "note": "Now <code>id</code> = 9."}, {"line": 9, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["pool", "→ #1 ThreadPoolExecutor"], ["made", "→ #3 AtomicInteger"], ["id", "9"], ["invoice", "9"]]}], "heap": ["<b>#1</b> ThreadPoolExecutor", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> AtomicInteger 0"], "newVar": "invoice", "phase": "Assign", "note": "Now <code>invoice</code> = 9."}, {"line": 10, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["pool", "→ #1 ThreadPoolExecutor"], ["made", "→ #3 AtomicInteger"], ["id", "9"]]}], "heap": ["<b>#1</b> ThreadPoolExecutor", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> AtomicInteger 0"], "phase": "Step", "note": "This line runs; nothing visible changes."}, {"line": 8, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["pool", "→ #1 ThreadPoolExecutor"], ["made", "→ #3 AtomicInteger"], ["id", "10"]]}], "heap": ["<b>#1</b> ThreadPoolExecutor", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> AtomicInteger 0"], "newVar": "id", "phase": "Assign", "note": "Now <code>id</code> = 10."}, {"line": 9, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["pool", "→ #1 ThreadPoolExecutor"], ["made", "→ #3 AtomicInteger"], ["id", "10"], ["invoice", "10"]]}], "heap": ["<b>#1</b> ThreadPoolExecutor", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> AtomicInteger 0"], "newVar": "invoice", "phase": "Assign", "note": "Now <code>invoice</code> = 10."}, {"line": 10, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["pool", "→ #1 ThreadPoolExecutor"], ["made", "→ #3 AtomicInteger"], ["id", "10"]]}], "heap": ["<b>#1</b> ThreadPoolExecutor", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> AtomicInteger 0"], "phase": "Tenth task", "note": "All 10 submitted. At most 3 run at once; the rest wait in the queue."}, {"line": 8, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["pool", "→ #1 ThreadPoolExecutor"], ["made", "→ #3 AtomicInteger"]]}], "heap": ["<b>#1</b> ThreadPoolExecutor", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> AtomicInteger 0"], "phase": "Check", "note": "The loop condition is checked."}, {"line": 15, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["pool", "→ #1 ThreadPoolExecutor"], ["made", "→ #3 AtomicInteger"]]}], "heap": ["<b>#1</b> ThreadPoolExecutor", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> AtomicInteger 0"], "phase": "Shutdown", "note": "No new tasks accepted; queued ones still run."}, {"line": 16, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["pool", "→ #1 ThreadPoolExecutor"], ["made", "→ #3 AtomicInteger"], ["finished", "true"]]}], "heap": ["<b>#1</b> ThreadPoolExecutor", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> AtomicInteger 10"], "newVar": "finished", "phase": "Wait", "note": "Blocks until every task has finished (or 5 seconds pass). Returns true here."}, {"line": 17, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["pool", "→ #1 ThreadPoolExecutor"], ["made", "→ #3 AtomicInteger"], ["finished", "true"]]}], "heap": ["<b>#1</b> ThreadPoolExecutor", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> AtomicInteger 10"], "out": "finished: true, invoices made: 10\n", "phase": "Report", "note": "10 invoices, made by only 3 threads. Prints <code>finished: true, invoices made: 10</code>."}, {"line": 18, "phase": "Program ends", "note": "<code>main</code> returns, its frame is popped and the program ends.", "stack": [], "heap": []}]}</script>
+  </div>
+  </article>
+  <article class="wx">
+    <div class="wx__head"><span class="wx__num">Example 2</span><span class="wx__tag">Analytics · dashboard</span></div>
+    <h4>Three dashboard numbers with invokeAll</h4>
+    <div class="wx__problem"><p class="wx__label">Problem statement</p><p>A sales dashboard needs today's orders, revenue and new customers. Each is a separate query (a <code>Callable&lt;Integer&gt;</code>). Run all three at once with <code>invokeAll</code> and print them in a fixed order.</p></div>
+    <div class="prob__io"><div><small>Input</small><pre>orders = 3 bills; revenue = 1200 + 850 + 400; new customers = 2</pre></div><div><small>Expected output</small><pre>orders: 3
+revenue: 2450
+new customers: 2</pre></div></div>
+    <div class="wx__approach"><p class="wx__label">Approach</p><ol><li>Write three Callables in a <code>List</code>.</li><li><code>invokeAll</code> runs them and returns a list of Futures in the <b>same order</b>, once all are done.</li><li>Read each Future with <code>get()</code>.</li></ol></div>
+    <p class="wx__label">Solution: run it live</p>
+    <div class="runner">
+    <script type="application/json">{"lang": "java", "file": "Main.java", "tasks": [{"label": "Run · Three dashboard numbers with invokeAll", "hint": "Press <b>Run</b>. Then add a fourth query (average bill) and a fourth label.", "code": "import java.util.*;\nimport java.util.concurrent.*;\n\npublic class Main {\n    public static void main(String[] args) throws Exception {\n        int[] bills = {1200, 850, 400};\n        List<Callable<Integer>> queries = List.of(\n            () -> bills.length,\n            () -> Arrays.stream(bills).sum(),\n            () -> 2\n        );\n        ExecutorService pool = Executors.newFixedThreadPool(3);\n        List<Future<Integer>> answers = pool.invokeAll(queries);\n        pool.shutdown();\n        String[] labels = {\"orders\", \"revenue\", \"new customers\"};\n        for (int i = 0; i < labels.length; i++) {\n            System.out.println(labels[i] + \": \" + answers.get(i).get());\n        }\n    }\n}\n"}]}</script>
+    </div>
+    <p class="wx__label">What happens in memory, step by step</p>
+    <p class="wx__how">Recorded from the real JVM: press <b>Next</b> to execute one line at a time. Watch method calls push and pop frames on the stack, and objects (numbered #1, #2 …) appear on the heap.</p>
+    <div class="tracer">
+    <script type="application/json">{"lang": "java", "code": ["import java.util.*;", "import java.util.concurrent.*;", "", "public class Main {", "    public static void main(String[] args) throws Exception {", "        int[] bills = {1200, 850, 400};", "        List<Callable<Integer>> queries = List.of(", "            () -> bills.length,", "            () -> Arrays.stream(bills).sum(),", "            () -> 2", "        );", "        ExecutorService pool = Executors.newFixedThreadPool(3);", "        List<Future<Integer>> answers = pool.invokeAll(queries);", "        pool.shutdown();", "        String[] labels = {\"orders\", \"revenue\", \"new customers\"};", "        for (int i = 0; i < labels.length; i++) {", "            System.out.println(labels[i] + \": \" + answers.get(i).get());", "        }", "    }", "}"], "steps": [{"line": 6, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["bills", "→ #1 int[3]"]]}], "heap": ["<b>#1</b> int[3] {1200, 850, 400}", "<b>#2</b> String[0] (args, empty)"], "newVar": "bills", "phase": "Data", "note": "Today's three bills. Now <code>bills</code> = → #1 int[3]. New object <b>#1</b> on the heap: int[3] {1200, 850, 400}."}, {"line": 7, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["bills", "→ #1 int[3]"], ["queries", "→ #3 ImmutableCollections.ListN"]]}], "heap": ["<b>#1</b> int[3] {1200, 850, 400}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> immutable List (List.of) size 3 [→#4, →#5, →#6]", "<b>#4</b> lambda object (a Callable)", "<b>#5</b> lambda object (a Callable)", "<b>#6</b> lambda object (a Callable)"], "newVar": "queries", "phase": "Queries", "note": "An immutable list of three Callable objects."}, {"line": 12, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["bills", "→ #1 int[3]"], ["queries", "→ #3 ImmutableCollections.ListN"], ["pool", "→ #7 ThreadPoolExecutor"]]}], "heap": ["<b>#1</b> int[3] {1200, 850, 400}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> immutable List (List.of) size 3 [→#4, →#5, →#6]", "<b>#4</b> lambda object (a Callable)", "<b>#5</b> lambda object (a Callable)", "<b>#6</b> lambda object (a Callable)", "<b>#7</b> ThreadPoolExecutor"], "newVar": "pool", "phase": "Pool", "note": "Three workers, one per query."}, {"line": 13, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["bills", "→ #1 int[3]"], ["queries", "→ #3 ImmutableCollections.ListN"], ["pool", "→ #7 ThreadPoolExecutor"], ["answers", "→ #8 ArrayList"]]}], "heap": ["<b>#1</b> int[3] {1200, 850, 400}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> immutable List (List.of) size 3 [→#4, →#5, →#6]", "<b>#4</b> lambda object (a Callable)", "<b>#5</b> lambda object (a Callable)", "<b>#6</b> lambda object (a Callable)", "<b>#7</b> ThreadPoolExecutor", "<b>#8</b> ArrayList size 3, capacity 3 [→#9, →#10, →#11]", "<b>#9</b> FutureTask", "<b>#10</b> FutureTask", "<b>#11</b> FutureTask"], "newVar": "answers", "phase": "invokeAll", "note": "Runs all three in parallel and waits until all are done. The Futures come back in the order of the list."}, {"line": 14, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["bills", "→ #1 int[3]"], ["queries", "→ #3 ImmutableCollections.ListN"], ["pool", "→ #7 ThreadPoolExecutor"], ["answers", "→ #8 ArrayList"]]}], "heap": ["<b>#1</b> int[3] {1200, 850, 400}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> immutable List (List.of) size 3 [→#4, →#5, →#6]", "<b>#4</b> lambda object (a Callable)", "<b>#5</b> lambda object (a Callable)", "<b>#6</b> lambda object (a Callable)", "<b>#7</b> ThreadPoolExecutor", "<b>#8</b> ArrayList size 3, capacity 3 [→#9, →#10, →#11]", "<b>#9</b> FutureTask", "<b>#10</b> FutureTask", "<b>#11</b> FutureTask"], "phase": "Shutdown", "note": "Done with the pool."}, {"line": 15, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["bills", "→ #1 int[3]"], ["queries", "→ #3 ImmutableCollections.ListN"], ["pool", "→ #7 ThreadPoolExecutor"], ["answers", "→ #8 ArrayList"], ["labels", "→ #12 String[3]"]]}], "heap": ["<b>#1</b> int[3] {1200, 850, 400}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> immutable List (List.of) size 3 [→#4, →#5, →#6]", "<b>#4</b> lambda object (a Callable)", "<b>#5</b> lambda object (a Callable)", "<b>#6</b> lambda object (a Callable)", "<b>#7</b> ThreadPoolExecutor", "<b>#8</b> ArrayList size 3, capacity 3 [→#9, →#10, →#11]", "<b>#9</b> FutureTask", "<b>#10</b> FutureTask", "<b>#11</b> FutureTask", "<b>#12</b> String[3] {&quot;orders&quot;, &quot;revenue&quot;, &quot;new customers&quot;}", "<b>#13</b> String &quot;orders&quot;", "<b>#14</b> String &quot;revenue&quot;", "<b>#15</b> String &quot;new customers&quot;"], "newVar": "labels", "phase": "Assign", "note": "Now <code>labels</code> = → #12 String[3]. New object <b>#12</b> on the heap: String[3] {&quot;orders&quot;, &quot;revenue&quot;, &quot;new customers&quot;}. New object <b>#13</b> on the heap: String &quot;orders&quot;. New object <b>#14</b> on the heap: String &quot;revenue&quot;."}, {"line": 16, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["bills", "→ #1 int[3]"], ["queries", "→ #3 ImmutableCollections.ListN"], ["pool", "→ #7 ThreadPoolExecutor"], ["answers", "→ #8 ArrayList"], ["labels", "→ #12 String[3]"], ["i", "0"]]}], "heap": ["<b>#1</b> int[3] {1200, 850, 400}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> immutable List (List.of) size 3 [→#4, →#5, →#6]", "<b>#4</b> lambda object (a Callable)", "<b>#5</b> lambda object (a Callable)", "<b>#6</b> lambda object (a Callable)", "<b>#7</b> ThreadPoolExecutor", "<b>#8</b> ArrayList size 3, capacity 3 [→#9, →#10, →#11]", "<b>#9</b> FutureTask", "<b>#10</b> FutureTask", "<b>#11</b> FutureTask", "<b>#12</b> String[3] {&quot;orders&quot;, &quot;revenue&quot;, &quot;new customers&quot;}", "<b>#13</b> String &quot;orders&quot;", "<b>#14</b> String &quot;revenue&quot;", "<b>#15</b> String &quot;new customers&quot;"], "newVar": "i", "phase": "Assign", "note": "Now <code>i</code> = 0."}, {"line": 17, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["bills", "→ #1 int[3]"], ["queries", "→ #3 ImmutableCollections.ListN"], ["pool", "→ #7 ThreadPoolExecutor"], ["answers", "→ #8 ArrayList"], ["labels", "→ #12 String[3]"], ["i", "0"]]}], "heap": ["<b>#1</b> int[3] {1200, 850, 400}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> immutable List (List.of) size 3 [→#4, →#5, →#6]", "<b>#4</b> lambda object (a Callable)", "<b>#5</b> lambda object (a Callable)", "<b>#6</b> lambda object (a Callable)", "<b>#7</b> ThreadPoolExecutor", "<b>#8</b> ArrayList size 3, capacity 3 [→#9, →#10, →#11]", "<b>#9</b> FutureTask", "<b>#10</b> FutureTask", "<b>#11</b> FutureTask", "<b>#12</b> String[3] {&quot;orders&quot;, &quot;revenue&quot;, &quot;new customers&quot;}", "<b>#13</b> String &quot;orders&quot;", "<b>#14</b> String &quot;revenue&quot;", "<b>#15</b> String &quot;new customers&quot;"], "out": "orders: 3\n", "phase": "Read", "note": "<code>get()</code> on a finished Future returns at once."}, {"line": 16, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["bills", "→ #1 int[3]"], ["queries", "→ #3 ImmutableCollections.ListN"], ["pool", "→ #7 ThreadPoolExecutor"], ["answers", "→ #8 ArrayList"], ["labels", "→ #12 String[3]"], ["i", "1"]]}], "heap": ["<b>#1</b> int[3] {1200, 850, 400}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> immutable List (List.of) size 3 [→#4, →#5, →#6]", "<b>#4</b> lambda object (a Callable)", "<b>#5</b> lambda object (a Callable)", "<b>#6</b> lambda object (a Callable)", "<b>#7</b> ThreadPoolExecutor", "<b>#8</b> ArrayList size 3, capacity 3 [→#9, →#10, →#11]", "<b>#9</b> FutureTask", "<b>#10</b> FutureTask", "<b>#11</b> FutureTask", "<b>#12</b> String[3] {&quot;orders&quot;, &quot;revenue&quot;, &quot;new customers&quot;}", "<b>#13</b> String &quot;orders&quot;", "<b>#14</b> String &quot;revenue&quot;", "<b>#15</b> String &quot;new customers&quot;"], "newVar": "i", "phase": "Assign", "note": "Now <code>i</code> = 1."}, {"line": 17, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["bills", "→ #1 int[3]"], ["queries", "→ #3 ImmutableCollections.ListN"], ["pool", "→ #7 ThreadPoolExecutor"], ["answers", "→ #8 ArrayList"], ["labels", "→ #12 String[3]"], ["i", "1"]]}], "heap": ["<b>#1</b> int[3] {1200, 850, 400}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> immutable List (List.of) size 3 [→#4, →#5, →#6]", "<b>#4</b> lambda object (a Callable)", "<b>#5</b> lambda object (a Callable)", "<b>#6</b> lambda object (a Callable)", "<b>#7</b> ThreadPoolExecutor", "<b>#8</b> ArrayList size 3, capacity 3 [→#9, →#10, →#11]", "<b>#9</b> FutureTask", "<b>#10</b> FutureTask", "<b>#11</b> FutureTask", "<b>#12</b> String[3] {&quot;orders&quot;, &quot;revenue&quot;, &quot;new customers&quot;}", "<b>#13</b> String &quot;orders&quot;", "<b>#14</b> String &quot;revenue&quot;", "<b>#15</b> String &quot;new customers&quot;"], "out": "revenue: 2450\n", "phase": "Print", "note": "Prints <code>revenue: 2450</code>."}, {"line": 16, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["bills", "→ #1 int[3]"], ["queries", "→ #3 ImmutableCollections.ListN"], ["pool", "→ #7 ThreadPoolExecutor"], ["answers", "→ #8 ArrayList"], ["labels", "→ #12 String[3]"], ["i", "2"]]}], "heap": ["<b>#1</b> int[3] {1200, 850, 400}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> immutable List (List.of) size 3 [→#4, →#5, →#6]", "<b>#4</b> lambda object (a Callable)", "<b>#5</b> lambda object (a Callable)", "<b>#6</b> lambda object (a Callable)", "<b>#7</b> ThreadPoolExecutor", "<b>#8</b> ArrayList size 3, capacity 3 [→#9, →#10, →#11]", "<b>#9</b> FutureTask", "<b>#10</b> FutureTask", "<b>#11</b> FutureTask", "<b>#12</b> String[3] {&quot;orders&quot;, &quot;revenue&quot;, &quot;new customers&quot;}", "<b>#13</b> String &quot;orders&quot;", "<b>#14</b> String &quot;revenue&quot;", "<b>#15</b> String &quot;new customers&quot;"], "newVar": "i", "phase": "Assign", "note": "Now <code>i</code> = 2."}, {"line": 17, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["bills", "→ #1 int[3]"], ["queries", "→ #3 ImmutableCollections.ListN"], ["pool", "→ #7 ThreadPoolExecutor"], ["answers", "→ #8 ArrayList"], ["labels", "→ #12 String[3]"], ["i", "2"]]}], "heap": ["<b>#1</b> int[3] {1200, 850, 400}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> immutable List (List.of) size 3 [→#4, →#5, →#6]", "<b>#4</b> lambda object (a Callable)", "<b>#5</b> lambda object (a Callable)", "<b>#6</b> lambda object (a Callable)", "<b>#7</b> ThreadPoolExecutor", "<b>#8</b> ArrayList size 3, capacity 3 [→#9, →#10, →#11]", "<b>#9</b> FutureTask", "<b>#10</b> FutureTask", "<b>#11</b> FutureTask", "<b>#12</b> String[3] {&quot;orders&quot;, &quot;revenue&quot;, &quot;new customers&quot;}", "<b>#13</b> String &quot;orders&quot;", "<b>#14</b> String &quot;revenue&quot;", "<b>#15</b> String &quot;new customers&quot;"], "out": "new customers: 2\n", "phase": "Print", "note": "Prints <code>new customers: 2</code>."}, {"line": 16, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["bills", "→ #1 int[3]"], ["queries", "→ #3 ImmutableCollections.ListN"], ["pool", "→ #7 ThreadPoolExecutor"], ["answers", "→ #8 ArrayList"], ["labels", "→ #12 String[3]"]]}], "heap": ["<b>#1</b> int[3] {1200, 850, 400}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> immutable List (List.of) size 3 [→#4, →#5, →#6]", "<b>#4</b> lambda object (a Callable)", "<b>#5</b> lambda object (a Callable)", "<b>#6</b> lambda object (a Callable)", "<b>#7</b> ThreadPoolExecutor", "<b>#8</b> ArrayList size 3, capacity 3 [→#9, →#10, →#11]", "<b>#9</b> FutureTask", "<b>#10</b> FutureTask", "<b>#11</b> FutureTask", "<b>#12</b> String[3] {&quot;orders&quot;, &quot;revenue&quot;, &quot;new customers&quot;}", "<b>#13</b> String &quot;orders&quot;", "<b>#14</b> String &quot;revenue&quot;", "<b>#15</b> String &quot;new customers&quot;"], "phase": "Check", "note": "The loop condition is checked."}, {"line": 19, "phase": "Program ends", "note": "<code>main</code> returns, its frame is popped and the program ends.", "stack": [], "heap": []}]}</script>
+  </div>
+  </article>
+  <article class="wx">
+    <div class="wx__head"><span class="wx__num">Example 3</span><span class="wx__tag">Banking · timeouts</span></div>
+    <h4>A credit-score check with a deadline</h4>
+    <div class="wx__problem"><p class="wx__label">Problem statement</p><p>A loan app asks a credit bureau for a score. The bureau sometimes takes too long. Wait at most 200 ms with <code>get(timeout)</code>; on timeout, cancel the task and send the application for manual review.</p></div>
+    <div class="prob__io"><div><small>Input</small><pre>the bureau call takes 5 s (too slow)</pre></div><div><small>Expected output</small><pre>bureau too slow, cancelled: true -&gt; manual review</pre></div></div>
+    <div class="wx__approach"><p class="wx__label">Approach</p><ol><li>Submit a Callable that sleeps 5 s, then returns 742.</li><li><code>get(200, TimeUnit.MILLISECONDS)</code> throws <code>TimeoutException</code>.</li><li>In the catch: <code>cancel(true)</code> interrupts the worker; then <code>shutdown()</code>.</li></ol></div>
+    <p class="wx__label">Solution: run it live</p>
+    <div class="runner">
+    <script type="application/json">{"lang": "java", "file": "Main.java", "tasks": [{"label": "Run · A credit-score check with a deadline", "hint": "Press <b>Run</b>. Then change the sleep to 50 ms: <code>get</code> returns 742 in time.", "code": "import java.util.concurrent.*;\n\npublic class Main {\n    public static void main(String[] args) throws Exception {\n        ExecutorService pool = Executors.newSingleThreadExecutor();\n        Future<Integer> score = pool.submit(() -> {\n            Thread.sleep(5000);\n            return 742;\n        });\n        try {\n            System.out.println(\"score: \" + score.get(200, TimeUnit.MILLISECONDS));\n        } catch (TimeoutException e) {\n            boolean stopped = score.cancel(true);\n            System.out.println(\"bureau too slow, cancelled: \" + stopped + \" -> manual review\");\n        }\n        pool.shutdown();\n    }\n}\n"}]}</script>
+    </div>
+    <p class="wx__label">What happens in memory, step by step</p>
+    <p class="wx__how">Recorded from the real JVM: press <b>Next</b> to execute one line at a time. Watch method calls push and pop frames on the stack, and objects (numbered #1, #2 …) appear on the heap.</p>
+    <div class="tracer">
+    <script type="application/json">{"lang": "java", "code": ["import java.util.concurrent.*;", "", "public class Main {", "    public static void main(String[] args) throws Exception {", "        ExecutorService pool = Executors.newSingleThreadExecutor();", "        Future<Integer> score = pool.submit(() -> {", "            Thread.sleep(5000);", "            return 742;", "        });", "        try {", "            System.out.println(\"score: \" + score.get(200, TimeUnit.MILLISECONDS));", "        } catch (TimeoutException e) {", "            boolean stopped = score.cancel(true);", "            System.out.println(\"bureau too slow, cancelled: \" + stopped + \" -> manual review\");", "        }", "        pool.shutdown();", "    }", "}"], "steps": [{"line": 5, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["pool", "→ #1 Executors.AutoShutdownDelegatedExecutorService"]]}], "heap": ["<b>#1</b> Executors.AutoShutdownDelegatedExecutorService", "<b>#2</b> String[0] (args, empty)"], "newVar": "pool", "phase": "Pool", "note": "A pool with exactly one worker thread."}, {"line": 6, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["pool", "→ #1 Executors.AutoShutdownDelegatedExecutorService"], ["score", "→ #3 FutureTask"]]}], "heap": ["<b>#1</b> Executors.AutoShutdownDelegatedExecutorService", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> FutureTask"], "newVar": "score", "phase": "Submit", "note": "The bureau call starts on the worker and sleeps (simulating a slow network)."}, {"line": 11, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["pool", "→ #1 Executors.AutoShutdownDelegatedExecutorService"], ["score", "→ #3 FutureTask"], ["e", "→ #4 TimeoutException"]]}], "heap": ["<b>#1</b> Executors.AutoShutdownDelegatedExecutorService", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> FutureTask", "<b>#4</b> TimeoutException"], "newVar": "e", "phase": "Timed get", "note": "main waits at most 200 ms. The result isn't ready, so <code>get</code> throws TimeoutException."}, {"line": 13, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["pool", "→ #1 Executors.AutoShutdownDelegatedExecutorService"], ["score", "→ #3 FutureTask"], ["e", "→ #4 TimeoutException"], ["stopped", "true"]]}], "heap": ["<b>#1</b> Executors.AutoShutdownDelegatedExecutorService", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> FutureTask", "<b>#4</b> TimeoutException"], "newVar": "stopped", "phase": "Cancel", "note": "<code>cancel(true)</code> interrupts the worker: its sleep throws and the task ends early."}, {"line": 14, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["pool", "→ #1 Executors.AutoShutdownDelegatedExecutorService"], ["score", "→ #3 FutureTask"]]}], "heap": ["<b>#1</b> Executors.AutoShutdownDelegatedExecutorService", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> FutureTask"], "out": "bureau too slow, cancelled: true -> manual review\n", "phase": "Fallback", "note": "The application continues without the score. Prints <code>bureau too slow, cancelled: true -&gt; manual review</code>."}, {"line": 16, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["pool", "→ #1 Executors.AutoShutdownDelegatedExecutorService"], ["score", "→ #3 FutureTask"]]}], "heap": ["<b>#1</b> Executors.AutoShutdownDelegatedExecutorService", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> FutureTask"], "phase": "Shutdown", "note": "The worker is idle again and exits."}, {"line": 17, "phase": "Program ends", "note": "<code>main</code> returns, its frame is popped and the program ends.", "stack": [], "heap": []}]}</script>
+  </div>
+  </article>
+
+</section>
+
+<!-- ======================= PART 9: QUIZ AND REVISION ======================= -->
+<section class="part" id="quiz">
+  <span class="part-label"><b>9</b> Quiz and revision</span>
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <script type="application/json">[
+ {
+  "q": "What is the main benefit of a thread pool?",
+  "options": [
+   "Threads never fail",
+   "Threads are created once and reused, and their number is limited",
+   "No need for locks",
+   "Tasks run in order"
+  ],
+  "answer": 1,
+  "why": "Reuse avoids creation cost; a limit protects memory and CPU."
+ },
+ {
+  "q": "Callable differs from Runnable because…",
+  "options": [
+   "it can't be a lambda",
+   "call() returns a value and may throw checked exceptions",
+   "it runs faster",
+   "it needs Thread"
+  ],
+  "answer": 1,
+  "why": "Runnable.run() returns void and can't throw checked exceptions."
+ },
+ {
+  "q": "What does submit() return?",
+  "options": [
+   "The result",
+   "A Future",
+   "A Thread",
+   "void"
+  ],
+  "answer": 1,
+  "why": "A Future represents the pending result."
+ },
+ {
+  "q": "future.get() on a task that's still running…",
+  "options": [
+   "returns null",
+   "waits until it finishes",
+   "throws immediately",
+   "cancels it"
+  ],
+  "answer": 1,
+  "why": "Use get(timeout, unit) to limit the wait."
+ },
+ {
+  "q": "A task throws an exception. What does get() do?",
+  "options": [
+   "Returns null",
+   "Throws ExecutionException with the original as the cause",
+   "Kills the pool",
+   "Nothing"
+  ],
+  "answer": 1,
+  "why": "Failures are stored in the Future and rethrown wrapped."
+ },
+ {
+  "q": "After shutdown(), what happens to tasks already in the queue?",
+  "options": [
+   "They are dropped",
+   "They still run",
+   "They throw",
+   "They wait forever"
+  ],
+  "answer": 1,
+  "why": "shutdown() stops new submissions; shutdownNow() tries to stop everything and returns queued tasks."
+ },
+ {
+  "q": "What happens if you forget shutdown() on a fixed pool?",
+  "options": [
+   "Nothing",
+   "Its worker threads stay alive and the JVM may never exit",
+   "A compile error",
+   "Tasks are lost"
+  ],
+  "answer": 1,
+  "why": "Pool threads are non-daemon by default."
+ },
+ {
+  "q": "Results of invokeAll(list) come back…",
+  "options": [
+   "in completion order",
+   "in the same order as the list",
+   "randomly",
+   "only the first"
+  ],
+  "answer": 1,
+  "why": "invokeAll waits for all and returns Futures in task order."
+ }
+]</script>
+  </div>
+  <h3>Quick revision</h3>
+  <div class="revision">
+    <h3>Lesson 12.6 in one screen</h3>
+    <ul>
+      <li>A thread pool = reusable workers + a task queue. Create it with <code>Executors.newFixedThreadPool(n)</code> and friends.</li>
+      <li><code>submit(Runnable | Callable)</code> returns a <code>Future</code>; <code>execute(Runnable)</code> returns nothing.</li>
+      <li><code>Callable&lt;V&gt;</code> returns a value and may throw checked exceptions.</li>
+      <li><code>get()</code> waits; <code>get(t, unit)</code> may throw <code>TimeoutException</code>; failures come as <code>ExecutionException</code>.</li>
+      <li><code>invokeAll</code> runs a list of Callables and returns Futures in the same order.</li>
+      <li>Always <code>shutdown()</code>; <code>awaitTermination</code> waits; submitting afterwards throws <code>RejectedExecutionException</code>.</li>
+      <li>CompletableFuture chains async steps; Java 21 virtual threads make one-thread-per-task cheap for I/O work.</li>
+    </ul>
+  </div>
+  <h3>Interview and viva questions</h3>
+  <div class="faq">
+    <details><summary>Why use a thread pool instead of creating threads?</summary><p>Creating and destroying threads is costly, and unlimited threads exhaust memory and waste CPU on switching. A pool reuses a bounded number of threads, queues extra work, and centralises lifecycle management (shutdown, naming, error handling).</p></details>
+    <details><summary>Difference between submit() and execute()?</summary><p><code>execute(Runnable)</code> comes from <code>Executor</code> and returns nothing; an exception in the task goes to the thread's uncaught-exception handler. <code>submit()</code> accepts Runnable or Callable and returns a Future; exceptions are captured and rethrown by <code>get()</code> as ExecutionException.</p></details>
+    <details><summary>Difference between shutdown() and shutdownNow()?</summary><p><code>shutdown()</code> stops accepting tasks but lets queued and running tasks finish. <code>shutdownNow()</code> also interrupts running tasks and returns the list of tasks that never started. Neither waits; use <code>awaitTermination</code> for that.</p></details>
+    <details><summary>How do you choose the pool size?</summary><p>For CPU-bound work, about the number of cores (<code>availableProcessors()</code>). For I/O-bound work, more threads, roughly cores × (1 + wait time / compute time), or virtual threads. Always measure under realistic load.</p></details>
+    <details><summary>What is the difference between Future and CompletableFuture?</summary><p>A Future can only be polled or waited on with <code>get()</code>. A CompletableFuture can also be completed manually and lets you attach callbacks (<code>thenApply</code>, <code>thenCombine</code>, <code>exceptionally</code>) that run when the result arrives, so you can compose async steps without blocking threads.</p></details>
+  </div>
+
+  <h3 id="practice">Practice problems</h3>
+  <p class="prob-intro">Use pools, Callables and Futures instead of raw threads. Results are read from Futures in a fixed order, so every output is the same each run. The last three are business tasks.</p>
+  <div class="probs">
+    <article class="prob"><div class="prob__head"><span class="prob__num">P1</span><span class="prob__tag prob__tag--easy">Easy</span><h4>Submit a Callable</h4></div>
+      <p>Submit a Callable that returns 6 × 7 to a single-thread pool and print the result.</p>
+      <div class="prob__io"><div><small>Input</small><pre>(none)</pre></div><div><small>Expected output</small><pre>answer: 42</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="java" data-file="Main.java"><pre><code>import java.util.concurrent.*;
+
+public class Main {
+    public static void main(String[] args) throws Exception {
+        ExecutorService pool = Executors.newSingleThreadExecutor();
+        Future&lt;Integer&gt; f = pool.submit(() -&gt; 6 * 7);
+        System.out.println(&quot;answer: &quot; + f.get());
+        pool.shutdown();
+    }
+}</code></pre><div class="output">answer: 42</div></div>
+        <p><b>How it works:</b> a lambda that returns a value is treated as a <code>Callable</code>. <code>get()</code> waits for the result.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P2</span><span class="prob__tag prob__tag--easy">Easy</span><h4>Shutdown and awaitTermination</h4></div>
+      <p>Submit 5 Runnables that each add their number to an AtomicInteger, shut down, wait, and print the sum.</p>
+      <div class="prob__io"><div><small>Input</small><pre>1..5</pre></div><div><small>Expected output</small><pre>sum = 15</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="java" data-file="Main.java"><pre><code>import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicInteger;
+
+public class Main {
+    public static void main(String[] args) throws InterruptedException {
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        AtomicInteger sum = new AtomicInteger();
+        for (int i = 1; i &lt;= 5; i++) {
+            int n = i;
+            pool.submit(() -&gt; sum.addAndGet(n));
+        }
+        pool.shutdown();
+        pool.awaitTermination(1, TimeUnit.SECONDS);
+        System.out.println(&quot;sum = &quot; + sum.get());
+    }
+}</code></pre><div class="output">sum = 15</div></div>
+        <p><b>How it works:</b> <code>shutdown()</code> alone doesn't wait. <code>awaitTermination</code> blocks until the queued tasks are finished (or the timeout passes).</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P3</span><span class="prob__tag prob__tag--easy">Easy</span><h4>Runnable Future returns null</h4></div>
+      <p>Submit a Runnable and print what its Future's <code>get()</code> returns, and whether it's done.</p>
+      <div class="prob__io"><div><small>Input</small><pre>(none)</pre></div><div><small>Expected output</small><pre>cleaning cache
+get() = null, done = true</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="java" data-file="Main.java"><pre><code>import java.util.concurrent.*;
+
+public class Main {
+    public static void main(String[] args) throws Exception {
+        ExecutorService pool = Executors.newSingleThreadExecutor();
+        Future&lt;?&gt; f = pool.submit(() -&gt; System.out.println(&quot;cleaning cache&quot;));
+        System.out.println(&quot;get() = &quot; + f.get() + &quot;, done = &quot; + f.isDone());
+        pool.shutdown();
+    }
+}</code></pre><div class="output">cleaning cache
+get() = null, done = true</div></div>
+        <p><b>How it works:</b> a Runnable has no result, so <code>get()</code> returns null. It's still useful: it waits for completion and rethrows failures.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P4</span><span class="prob__tag prob__tag--medium">Medium</span><h4>Exceptions come back through get()</h4></div>
+      <p>A task divides by zero. Catch the <code>ExecutionException</code> from <code>get()</code> and print its cause.</p>
+      <div class="prob__io"><div><small>Input</small><pre>(none)</pre></div><div><small>Expected output</small><pre>task failed: java.lang.ArithmeticException: / by zero</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="java" data-file="Main.java"><pre><code>import java.util.concurrent.*;
+
+public class Main {
+    public static void main(String[] args) throws InterruptedException {
+        ExecutorService pool = Executors.newSingleThreadExecutor();
+        Future&lt;Integer&gt; f = pool.submit(() -&gt; 100 / 0);
+        try {
+            f.get();
+        } catch (ExecutionException e) {
+            System.out.println(&quot;task failed: &quot; + e.getCause());
+        }
+        pool.shutdown();
+    }
+}</code></pre><div class="output">task failed: java.lang.ArithmeticException: / by zero</div></div>
+        <p><b>How it works:</b> the exception happened on a worker thread. The pool catches it and stores it in the Future; <code>get()</code> rethrows it wrapped in <code>ExecutionException</code>. If you never call <code>get()</code>, the failure is silently lost.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P5</span><span class="prob__tag prob__tag--medium">Medium</span><h4>Squares with invokeAll</h4></div>
+      <p>Build Callables that square 2, 3, 4 and 5, run them with <code>invokeAll</code>, and print the results in order.</p>
+      <div class="prob__io"><div><small>Input</small><pre>2, 3, 4, 5</pre></div><div><small>Expected output</small><pre>4 9 16 25 </pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="java" data-file="Main.java"><pre><code>import java.util.*;
+import java.util.concurrent.*;
+
+public class Main {
+    public static void main(String[] args) throws Exception {
+        List&lt;Callable&lt;Integer&gt;&gt; jobs = new ArrayList&lt;&gt;();
+        for (int n = 2; n &lt;= 5; n++) {
+            int x = n;
+            jobs.add(() -&gt; x * x);
+        }
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        for (Future&lt;Integer&gt; f : pool.invokeAll(jobs)) {
+            System.out.print(f.get() + &quot; &quot;);
+        }
+        System.out.println();
+        pool.shutdown();
+    }
+}</code></pre><div class="output">4 9 16 25 </div></div>
+        <p><b>How it works:</b> invokeAll returns Futures in the same order as the tasks, however the workers scheduled them.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P6</span><span class="prob__tag prob__tag--medium">Medium</span><h4>CompletableFuture pipeline</h4></div>
+      <p>Compute a price of 400 asynchronously, add 18% GST with <code>thenApply</code>, and format it with another <code>thenApply</code>. Print with <code>join()</code>.</p>
+      <div class="prob__io"><div><small>Input</small><pre>price 400</pre></div><div><small>Expected output</small><pre>Total with GST: Rs 472</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="java" data-file="Main.java"><pre><code>import java.util.concurrent.CompletableFuture;
+
+public class Main {
+    public static void main(String[] args) {
+        String bill = CompletableFuture.supplyAsync(() -&gt; 400)
+                .thenApply(p -&gt; p * 118 / 100)
+                .thenApply(t -&gt; &quot;Total with GST: Rs &quot; + t)
+                .join();
+        System.out.println(bill);
+    }
+}</code></pre><div class="output">Total with GST: Rs 472</div></div>
+        <p><b>How it works:</b> <code>CompletableFuture</code> lets you chain steps that run when the previous one completes, without blocking in between. By default it uses the shared ForkJoinPool. <code>join()</code> is like <code>get()</code> but throws an unchecked exception.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P7</span><span class="prob__tag prob__tag--business">Business problem</span><h4>Parallel GST for store branches</h4></div>
+      <p>Three branches have daily sales of 25000, 18000 and 32000. Compute each branch's 18% GST in a Callable on a pool, then print each and the total GST.</p>
+      <div class="prob__io"><div><small>Input</small><pre>25000, 18000, 32000</pre></div><div><small>Expected output</small><pre>Pune: GST Rs 4500
+Nagpur: GST Rs 3240
+Nashik: GST Rs 5760
+total GST: Rs 13500</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="java" data-file="Main.java"><pre><code>import java.util.*;
+import java.util.concurrent.*;
+
+public class Main {
+    public static void main(String[] args) throws Exception {
+        String[] branch = {&quot;Pune&quot;, &quot;Nagpur&quot;, &quot;Nashik&quot;};
+        int[] sales = {25000, 18000, 32000};
+        ExecutorService pool = Executors.newFixedThreadPool(3);
+        List&lt;Future&lt;Integer&gt;&gt; gst = new ArrayList&lt;&gt;();
+        for (int s : sales) gst.add(pool.submit(() -&gt; s * 18 / 100));
+        int total = 0;
+        for (int i = 0; i &lt; branch.length; i++) {
+            int g = gst.get(i).get();
+            total += g;
+            System.out.println(branch[i] + &quot;: GST Rs &quot; + g);
+        }
+        System.out.println(&quot;total GST: Rs &quot; + total);
+        pool.shutdown();
+    }
+}</code></pre><div class="output">Pune: GST Rs 4500
+Nagpur: GST Rs 3240
+Nashik: GST Rs 5760
+total GST: Rs 13500</div></div>
+        <p><b>How it works:</b> results are summed on main from the Futures, so no shared variable or lock is needed. Collecting results through Futures is usually simpler than sharing state between tasks.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P8</span><span class="prob__tag prob__tag--business">Business problem</span><h4>Email batch with a bounded pool</h4></div>
+      <p>Send 8 promotional emails using a pool of 2 workers. Each task returns <code>true</code> if the address contains "@". Count successes and failures.</p>
+      <div class="prob__io"><div><small>Input</small><pre>8 addresses, 2 invalid</pre></div><div><small>Expected output</small><pre>sent 6, failed 2</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="java" data-file="Main.java"><pre><code>import java.util.*;
+import java.util.concurrent.*;
+
+public class Main {
+    public static void main(String[] args) throws Exception {
+        String[] to = {&quot;a@x.in&quot;, &quot;b@x.in&quot;, &quot;bad-address&quot;, &quot;c@x.in&quot;, &quot;d@x.in&quot;, &quot;e@x.in&quot;, &quot;oops&quot;, &quot;f@x.in&quot;};
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        List&lt;Callable&lt;Boolean&gt;&gt; sends = new ArrayList&lt;&gt;();
+        for (String addr : to) sends.add(() -&gt; addr.contains(&quot;@&quot;));
+        int ok = 0;
+        for (Future&lt;Boolean&gt; f : pool.invokeAll(sends)) if (f.get()) ok++;
+        pool.shutdown();
+        System.out.println(&quot;sent &quot; + ok + &quot;, failed &quot; + (to.length - ok));
+    }
+}</code></pre><div class="output">sent 6, failed 2</div></div>
+        <p><b>How it works:</b> the pool size caps how many emails are sent at once, protecting the mail server, however many addresses there are. This is why pools are preferred over one thread per task.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P9</span><span class="prob__tag prob__tag--business">Business problem</span><h4>Seat confirmation with timeout fallback</h4></div>
+      <p>A train-booking app asks two seat servers. The first answers at once (seat "B4-32"), the second hangs. Wait up to 150 ms for each; print the answer or "no reply", and cancel the hanging task.</p>
+      <div class="prob__io"><div><small>Input</small><pre>server 1 fast, server 2 hangs</pre></div><div><small>Expected output</small><pre>seat: B4-32
+no reply, cancelled</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="java" data-file="Main.java"><pre><code>import java.util.concurrent.*;
+
+public class Main {
+    public static void main(String[] args) throws Exception {
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        Future&lt;String&gt; s1 = pool.submit(() -&gt; &quot;B4-32&quot;);
+        Future&lt;String&gt; s2 = pool.submit(() -&gt; {
+            Thread.sleep(10_000);
+            return &quot;S2-11&quot;;
+        });
+        for (Future&lt;String&gt; f : java.util.List.of(s1, s2)) {
+            try {
+                System.out.println(&quot;seat: &quot; + f.get(150, TimeUnit.MILLISECONDS));
+            } catch (TimeoutException e) {
+                f.cancel(true);
+                System.out.println(&quot;no reply, cancelled&quot;);
+            }
+        }
+        pool.shutdown();
+    }
+}</code></pre><div class="output">seat: B4-32
+no reply, cancelled</div></div>
+        <p><b>How it works:</b> each server gets its own deadline. <code>cancel(true)</code> interrupts the stuck task so the worker is freed and <code>shutdown()</code> can finish.</p>
+      </details>
+    </article>
+  </div>
+
+
+
+  <h3 id="scenarios">Real-world scenario questions (asked in company interviews)</h3>
+  <p class="scn-intro">Executors are where most production concurrency lives, so interviewers probe how you size, protect and shut them down.</p>
+  <div class="scenarios">
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Backend · resource leak</span><span class="scn__tag scn__tag--level">Fresher</span></div>
+      <h4>Thread count keeps climbing</h4>
+      <p class="scn__situation">Each time a report is requested, the code does <code>Executors.newFixedThreadPool(4)</code>, submits the work and returns. After a day the service has 20,000 threads and crashes. What's wrong?</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> pool lifecycle.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>A new pool per request is never shut down, so its 4 threads live forever.</li>
+          <li>Create one shared pool at startup and reuse it; shut it down when the application stops.</li>
+          <li>If a short-lived pool is really needed, close it in finally (or try-with-resources in Java 21).</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> calling <code>System.gc()</code>; live threads are never garbage collected.</p>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Debugging · silent failure</span><span class="scn__tag scn__tag--level">Junior</span></div>
+      <h4>Refunds that silently never happen</h4>
+      <p class="scn__situation">Refund tasks are submitted with <code>pool.submit(refundTask)</code> and the Future is ignored. Some refunds never complete and nothing appears in the logs. Why, and how do you fix it?</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> exception handling with submit().</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li><code>submit</code> captures exceptions inside the Future; if nobody calls <code>get()</code>, the failure is swallowed.</li>
+          <li>Catch and log inside the task (with refund id), or keep the Futures and check them, or use CompletableFuture with <code>exceptionally</code>/<code>whenComplete</code>.</li>
+          <li>Add retries and an alert for failed refunds.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> assuming “no error in the logs” means success.</p>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Performance · sizing</span><span class="scn__tag scn__tag--level">Mid</span></div>
+      <h4>Sizing pools for two kinds of work</h4>
+      <p class="scn__situation">An 8-core server does image compression (pure CPU) and calls a partner API (mostly waiting, ~200 ms). Both use one pool of 8 threads. API calls queue up and pages are slow. What would you change?</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> CPU-bound vs I/O-bound sizing and isolation.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>Separate the workloads into two pools, so slow API calls can't starve compression (bulkheading).</li>
+          <li>CPU pool ≈ 8 threads; I/O pool much larger (or virtual threads), since those threads mostly wait.</li>
+          <li>Add timeouts on API calls and bounded queues with a rejection policy.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> one giant pool of 500 threads for everything; CPU work would thrash.</p>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Release · shutdown</span><span class="scn__tag scn__tag--level">Mid</span></div>
+      <h4>Orders lost during deployment</h4>
+      <p class="scn__situation">During a deployment, the app is stopped while order-confirmation tasks are still in the executor's queue. Some customers never get confirmations. Design a graceful shutdown.</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> shutdown(), awaitTermination() and durability.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>On stop: stop taking new requests, call <code>shutdown()</code>, then <code>awaitTermination(30, SECONDS)</code>; only then call <code>shutdownNow()</code> and log the tasks it returns.</li>
+          <li>For anything that must not be lost, store it durably first (database or message broker) and process from there, so a restart can resume.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> relying on an in-memory queue for work that must survive a restart.</p>
+      </div></details>
+    </article>
+  </div>
+</section>
+
+<nav class="lesson-nav" id="lesson-nav" aria-label="Lesson navigation"></nav>
+<div class="ad-slot" data-slot="bottom"></div>
+</article>
+
+<aside class="lesson-side">
+  <nav class="toc" aria-label="In this lesson">
+    <h4>In this lesson</h4>
+    <ol>
+      <li><a href="#story">The story</a></li>
+      <li><a href="#definition">Definition</a></li>
+      <li><a href="#types">Types and ways to use it</a></li>
+      <li><a href="#steps">Step by step</a></li>
+      <li><a href="#animation">See it happen</a></li>
+      <li><a href="#real-world">Real-world use</a></li>
+      <li><a href="#run">Run the code</a></li>
+      <li><a href="#tracer">Line by line</a></li>
+      <li><a href="#worked">Worked examples</a></li>
+      <li><a href="#quiz">Quiz and revision</a></li>
+      <li><a href="#practice">Practice problems</a></li>
+      <li><a href="#scenarios">Industry scenarios</a></li>
+    </ol>
+  </nav>
+  <div class="ad-slot" data-slot="side"></div>
+  <div class="outline" id="outline"></div>
+</aside>
+</div>
+</main>
+
+<footer class="site-footer">
+  <div class="wrap">
+    <div><h4>MyPhatshala</h4><p>Free programming and IT lessons that show what happens behind the screen.</p></div>
+    <div><h4>Learn</h4><a href="../../../../#tracks">All courses</a><a href="../../">Core Java syllabus</a></div>
+    <div><h4>Site</h4><a href="../../../../about.html">About</a><a href="../../../../contact.html">Contact</a><a href="../../../../privacy.html">Privacy policy</a><a href="../../../../disclaimer.html">Disclaimer</a></div>
+    <div class="copyright">© MyPhatshala. All lesson content, diagrams and animations are original. Please do not copy without permission.</div>
+  </div>
+</footer>
+
+<script src="../../../../data/courses/core-java.js"></script>
+<script src="../../../../assets/js/lesson.js"></script>
+<script src="../../../../assets/js/ads.js"></script>
+<script src="../../../../assets/js/site.js"></script>
+</body>
+</html>

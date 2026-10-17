@@ -1,0 +1,255 @@
+<!--META {
+"course": "core-java", "module": "14-modern-java", "lesson": "03-stream-api",
+"title": "Stream API: filter, map, reduce", "courseTitle": "Core Java", "number": "14.3",
+"track": "#E8772E", "trackId": "programming", "trackTitle": "Programming Languages", "level": "Intermediate",
+"minutes": 25,
+"description": "The Java Stream API: creating streams, intermediate operations (filter, map, sorted, distinct, limit) and terminal operations (collect, reduce, count, forEach, findFirst, anyMatch), lazy evaluation and one-element-at-a-time processing, IntStream, Collectors.groupingBy, counting, summingInt and joining, and single-use streams. With animations, a JVM tracer, {{NPROB}} practice problems, quiz and interview scenarios.",
+"ogTitle": "Java Stream API: filter, map, reduce with animations",
+"ogDescription": "Watch orders flow through filter, map and reduce, see why streams are lazy, and solve {{NPROB}} problems.",
+"lead": "Most business code is “take a collection, keep some items, transform them, and sum or group them”. Loops can do it, but the intent gets lost in counters and temporary lists. The <b>Stream API</b> lets you write that as a pipeline: <code>filter</code>, <code>map</code>, <code>reduce</code>, <code>collect</code>. You'll learn the operations you'll use daily, why streams are lazy, and how to build reports with <code>groupingBy</code>.",
+"chips": ["Module 14 · Modern Java", "⏱ 25 min", "Intermediate", "{{NPROB}} practice problems"]
+} META-->
+<part n="1" id="story" label="The story">
+  <h2>The report hidden inside a loop</h2>
+  <div class="story">
+    <p class="narration">The canteen owner asks Riya: “What did big orders, ₹999 and above, bring in today, including GST?” Her answer is a loop with an <code>if</code>, a calculation, a running total and a temporary list. It works, but a week later even she has to read it twice.</p>
+    <div class="scene">
+      <svg viewBox="0 0 640 170" role="img" aria-label="A loop with counters on the left; on the right a pipeline of three stages, filter, map and reduce, with orders flowing through">
+        <g font-size="10.5">
+          <rect x="14" y="16" width="260" height="130" rx="10" class="s-board"/>
+          <text x="26" y="40" class="s-chalk" font-family="monospace">int total = 0;</text>
+          <text x="26" y="60" class="s-chalk" font-family="monospace">for (int a : orders) {</text>
+          <text x="26" y="80" class="s-chalk" font-family="monospace">  if (a &gt;= 999) {</text>
+          <text x="26" y="100" class="s-chalk" font-family="monospace">    total += a * 118 / 100;</text>
+          <text x="26" y="120" class="s-chalk" font-family="monospace">  }</text>
+          <text x="26" y="138" class="s-chalk" font-family="monospace">}</text>
+          <rect x="300" y="56" width="90" height="40" rx="8" class="s-soft-blue" style="stroke:var(--blue)"/><text x="345" y="81" text-anchor="middle" class="s-blue" font-weight="700">filter</text>
+          <path d="M392 76h20" style="stroke:var(--ink-3);stroke-width:1.5"/><path d="M406 70l7 6-7 6" style="fill:none;stroke:var(--ink-3);stroke-width:1.5"/>
+          <rect x="416" y="56" width="90" height="40" rx="8" class="s-soft-green" style="stroke:var(--green)"/><text x="461" y="81" text-anchor="middle" class="s-green" font-weight="700">map</text>
+          <path d="M508 76h20" style="stroke:var(--ink-3);stroke-width:1.5"/><path d="M522 70l7 6-7 6" style="fill:none;stroke:var(--ink-3);stroke-width:1.5"/>
+          <rect x="532" y="56" width="94" height="40" rx="8" class="s-soft-acc" style="stroke:var(--track)"/><text x="579" y="81" text-anchor="middle" class="s-acc" font-weight="700">reduce</text>
+          <text x="463" y="122" text-anchor="middle" class="s-ink2">keep big → add GST → add up</text>
+        </g>
+        <text x="632" y="166" text-anchor="end" class="s-wm">myphatshala.com</text>
+      </svg>
+    </div>
+    <riya>Sir, the question was one sentence. Why is my code six lines of bookkeeping?</riya>
+    <arjun>Because a loop says <i>how</i> to do it. A stream says <i>what</i> you want: keep orders ≥ 999, add GST, sum them. Three steps, three words: <code>filter</code>, <code>map</code>, <code>reduce</code>.</arjun>
+    <riya>Does it make three passes over the list?</riya>
+    <arjun>No, and that's the clever part. Let's watch the orders flow.</arjun>
+  </div>
+</part>
+
+<part n="2" id="definition" label="Definition">
+  <h2>What is the Stream API?</h2>
+  <div class="def">
+    <div class="def__formal"><small>Formal definition (write this in exams)</small>
+      <p>A <b>stream</b> (<code>java.util.stream.Stream&lt;T&gt;</code>) is a sequence of elements from a source (a collection, array, I/O channel or generator) that supports aggregate operations in a <b>pipeline</b>. A pipeline consists of a source, zero or more <b>intermediate operations</b> (such as <code>filter</code>, <code>map</code>, <code>sorted</code>), which are <b>lazy</b> and return a new stream, and one <b>terminal operation</b> (such as <code>collect</code>, <code>reduce</code>, <code>forEach</code>, <code>count</code>), which triggers processing and produces a result or side effect. Streams do not store elements, do not modify their source, and can be consumed only once. Primitive streams (<code>IntStream</code>, <code>LongStream</code>, <code>DoubleStream</code>) avoid boxing.</p></div>
+    <div class="def__simple"><small>In simple words</small>
+      <p>A stream is a conveyor belt with stations. You set up the stations (filter, map…), and nothing moves until someone at the end asks for the result.</p></div>
+  </div>
+  <h3>Words you'll meet in this lesson</h3>
+  <div class="terms">
+    <div class="term"><b>Source</b><span>Where elements come from: <code>list.stream()</code>, <code>Arrays.stream(arr)</code>.</span></div>
+    <div class="term"><b>Intermediate op</b><span>Returns a new Stream; lazy: filter, map, sorted, distinct, limit.</span></div>
+    <div class="term"><b>Terminal op</b><span>Produces a result and starts the work: collect, reduce, count.</span></div>
+    <div class="term"><b>Lazy</b><span>Nothing happens until it's needed.</span></div>
+    <div class="term"><b>Collector</b><span>A recipe for building a result: a list, a map, a String.</span></div>
+    <div class="term"><b>Short-circuiting</b><span>Stops early: findFirst, anyMatch, limit.</span></div>
+  </div>
+  <h3>Loop vs stream</h3>
+  <div class="table-wrap">
+  <table class="compare" style="min-width:560px">
+    <thead><tr><th></th><th>for loop</th><th>Stream pipeline</th></tr></thead>
+    <tbody>
+      <tr><td>Style</td><td>How: counters, ifs, temp variables</td><td>What: filter, map, collect</td></tr>
+      <tr><td>Modifies source?</td><td>Can</td><td>Never</td></tr>
+      <tr><td>Reusable?</td><td>Run the loop again</td><td>Make a new stream; one use each</td></tr>
+      <tr><td>Early exit</td><td><code>break</code></td><td><code>findFirst</code>, <code>anyMatch</code>, <code>limit</code></td></tr>
+      <tr><td>Parallel</td><td>Write thread code yourself</td><td><code>parallelStream()</code> (with care)</td></tr>
+      <tr><td>Best for</td><td>Complex control flow, early returns, index math</td><td>Filtering, transforming, aggregating</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <exam><b>Exam tip:</b> “Intermediate operations are lazy and return a Stream; a terminal operation triggers execution and returns a non-stream result. A stream cannot be reused after a terminal operation (<code>IllegalStateException</code>), and it does not modify its source.”</exam>
+</part>
+
+{{AD}}
+
+<part n="3" id="types" label="Types and ways to use it">
+  <h2>The operations you'll use</h2>
+  {{CODE_OPS}}
+  <div class="cards">
+    <div class="card"><svg class="ic" viewBox="0 0 40 40" fill="none" stroke="var(--blue)" stroke-width="2"><path d="M8 10h24l-9 11v9l-6-3v-6z"/></svg><h4>filter</h4><p>Keep elements that match a Predicate. The stream may get shorter.</p><span class="tag">Predicate</span></div>
+    <div class="card"><svg class="ic" viewBox="0 0 40 40" fill="none" stroke="var(--green)" stroke-width="2"><path d="M8 20h24M26 14l6 6-6 6"/></svg><h4>map</h4><p>Turn each element into another value (or type) with a Function. Same length.</p><span class="tag">Function</span></div>
+    <div class="card"><svg class="ic" viewBox="0 0 40 40" fill="none" stroke="var(--track)" stroke-width="2"><path d="M10 12l10 16 10-16"/></svg><h4>reduce</h4><p>Combine all elements into one value: sum, max, product. Needs an identity (0 for sums).</p><span class="tag">BinaryOperator</span></div>
+    <div class="card"><svg class="ic" viewBox="0 0 40 40" fill="none" stroke="var(--ink-3)" stroke-width="2"><rect x="8" y="10" width="10" height="20" rx="2"/><rect x="22" y="10" width="10" height="20" rx="2"/></svg><h4>collect</h4><p>Build a List, Set, Map or String with Collectors: <code>toList</code>, <code>groupingBy</code>, <code>joining</code>.</p><span class="tag">Collector</span></div>
+  </div>
+  <h3>See the laziness</h3>
+  {{CODE_LAZY}}
+  <p>“pipeline built” is printed first: building the pipeline ran nothing. Then each order goes through filter <i>and</i> map before the next order starts.</p>
+  <warn><b>Keep lambdas in a stream free of side effects.</b> Don't add to an outside list or change shared variables inside <code>map</code> or <code>filter</code>; collect the result instead. Side effects make streams hard to read and break completely with <code>parallelStream()</code>.</warn>
+</part>
+
+<part n="4" id="steps" label="Step by step">
+  <h2>Building and running a pipeline</h2>
+  <ol class="stepper">
+    <li><h4>Get a stream from a source</h4>
+      <div class="code" data-lang="java" data-file="Main.java"><pre><code>orders.stream()</code></pre></div>
+      <span class="behind">A Stream object linked to the list. No elements are read yet.</span></li>
+    <li><h4>Add intermediate operations</h4>
+      <div class="code" data-lang="java" data-file="Main.java"><pre><code>    .filter(a -&gt; a &gt;= 999)
+    .map(a -&gt; a * 118 / 100)</code></pre></div>
+      <span class="behind">Each call returns a new Stream stage that remembers its lambda and the previous stage. Still nothing runs.</span></li>
+    <li><h4>Call a terminal operation</h4>
+      <div class="code" data-lang="java" data-file="Main.java"><pre><code>    .reduce(0, Integer::sum);</code></pre></div>
+      <span class="behind">Now the source is asked for elements, one at a time.</span></li>
+    <li><h4>Each element flows through every stage</h4>
+      <span class="behind">450: filter says no, so the next element starts. 1200: filter yes, map gives 1416, reduce adds it. Stateful steps like <code>sorted</code> are the exception: they must collect all elements first.</span></li>
+    <li><h4>The result, and the end of the stream</h4>
+      <span class="behind">The terminal operation returns its result. The stream is now consumed; build a new one for another query.</span></li>
+  </ol>
+</part>
+
+<part n="5" id="animation" label="See it happen">
+  <h2>filter, map, reduce: both views</h2>
+  <p>Left: orders moving through the stations. Right: what really happens in time: nothing until the terminal operation, then one order at a time through all stations.</p>
+  {{ANIM}}
+</part>
+
+<part n="6" id="real-world" label="Real-world use">
+  <h2>Streams in real systems</h2>
+  <p>Wherever Java code produces reports, dashboards or API responses from collections, you'll find stream pipelines.</p>
+  {{ANIM2}}
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="18" y="50" width="16" height="22" class="s-soft-blue"/><rect x="40" y="36" width="16" height="36" class="s-soft-blue"/><rect x="62" y="24" width="16" height="48" class="s-soft-blue"/><rect x="84" y="42" width="16" height="30" class="s-soft-blue"/></svg></div>
+    <div><h4>1. Dashboards and reports</h4><p>Sales per city, top products, orders per hour: groupingBy and summing collectors build the numbers behind the charts.</p>
+      <div class="uc-flow"><span>orders</span><i>→</i><span class="java">groupingBy(city, summingInt)</span><i>→</i><span>bar chart</span></div></div>
+  </div>
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="22" y="18" width="76" height="54" rx="6" class="s-card" style="stroke:var(--line)"/><text x="60" y="50" text-anchor="middle" class="s-ink" font-family="monospace" font-size="11">[{…},{…}]</text></svg></div>
+    <div><h4>2. API responses</h4><p>Services map database entities to response objects: <code>products.stream().map(ProductDto::from).toList()</code>.</p>
+      <div class="uc-flow"><span>entities</span><i>→</i><span class="java">map(Dto::from)</span><i>→</i><span>JSON list</span></div></div>
+  </div>
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="20" y="16" width="80" height="58" rx="6" class="s-board"/><path d="M30 30h52M30 42h60M30 54h40" style="stroke:var(--chalk);stroke-width:2"/></svg></div>
+    <div><h4>3. File and log processing</h4><p><code>Files.lines(path)</code> is a lazy stream of lines: filter errors, map to fields, count, without loading the whole file.</p>
+      <div class="uc-flow"><span>app.log</span><i>→</i><span class="java">lines().filter(...).count()</span><i>→</i><span>error rate</span></div></div>
+  </div>
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><circle cx="60" cy="45" r="26" class="s-soft-green" style="stroke:var(--green)"/><path d="M48 45l8 8 16-18" style="fill:none;stroke:var(--green);stroke-width:3"/></svg></div>
+    <div><h4>4. Validation</h4><p><code>allMatch</code>, <code>anyMatch</code> and <code>noneMatch</code> answer “are all items in stock?” or “is any field empty?” in one line.</p>
+      <div class="uc-flow"><span>cart</span><i>→</i><span class="java">allMatch(i -&gt; i.inStock())</span><i>→</i><span>allow checkout</span></div></div>
+  </div>
+  <p class="muted">Simplified: very large datasets are usually aggregated in the database (SQL GROUP BY) or a data platform; streams shine for data already in memory.</p>
+</part>
+
+{{AD}}
+
+<part n="7" id="run" label="Run the code">
+  <h2>A canteen report in three pipelines</h2>
+  {{CODE_RUN}}
+  <ul class="anno">
+    <li><code>mapToInt(...).sum()</code><span>Turn each order into its price (an int) and add them.</span></li>
+    <li><code>filter → map → distinct → sorted → toList()</code><span>Names of dishes costing ₹100+, without repeats, A–Z.</span></li>
+    <li><code>groupingBy(d -&gt; d, TreeMap::new, counting())</code><span>How many times each dish was ordered, sorted by name.</span></li>
+    <li>three <code>orders.stream()</code> calls<span>Each query needs its own stream; the list can be streamed any number of times.</span></li>
+  </ul>
+  {{RUNNER}}
+</part>
+
+<part n="8" id="tracer" label="Line by line">
+  <h2>A pipeline, one element at a time</h2>
+  <p>Recorded from the real JVM. Line 6 is one statement, but watch the lambda frames: filter 450, filter 1200, map 1200, filter 80… Each order goes through before the next starts.</p>
+  {{TRACER}}
+
+{{WORKED}}
+</part>
+
+<part n="9" id="quiz" label="Quiz and revision">
+  <h2>Check yourself</h2>
+  {{QUIZ}}
+  <h3>Quick revision</h3>
+  <div class="revision">
+    <h3>Lesson 14.3 in one screen</h3>
+    <ul>
+      <li>Pipeline = source → intermediate ops (lazy) → one terminal op.</li>
+      <li>filter (Predicate), map (Function), sorted, distinct, limit, skip are intermediate.</li>
+      <li>collect/toList, reduce, count, sum, forEach, findFirst, anyMatch are terminal.</li>
+      <li>Nothing runs until the terminal op; then elements flow one at a time through all stages.</li>
+      <li>Streams never modify the source and can be used once.</li>
+      <li>IntStream (<code>mapToInt</code>, <code>range</code>) for numbers: sum, average, max.</li>
+      <li>Collectors: <code>toList</code>, <code>joining</code>, <code>groupingBy</code> + <code>counting</code>/<code>summingInt</code>.</li>
+    </ul>
+  </div>
+  <h3>Interview and viva questions</h3>
+  <div class="faq">
+    <details><summary>What is the difference between intermediate and terminal operations?</summary><p>Intermediate operations (filter, map, sorted…) return a new stream and are lazy; they only describe the pipeline. Terminal operations (collect, reduce, forEach, count…) produce a result or side effect and trigger the processing. A pipeline has exactly one terminal operation.</p></details>
+    <details><summary>What does “streams are lazy” mean, and why is it useful?</summary><p>Elements are processed only when a terminal operation needs them, one at a time through the whole pipeline. This avoids intermediate collections, allows short-circuiting (findFirst stops at the first match) and even works on infinite streams with <code>limit</code>.</p></details>
+    <details><summary>map vs flatMap?</summary><p><code>map</code> turns each element into exactly one new element. <code>flatMap</code> turns each element into a stream of elements and flattens them into one stream, e.g. orders → their line items: <code>orders.stream().flatMap(o -&gt; o.items().stream())</code>.</p></details>
+    <details><summary>Collection vs Stream?</summary><p>A collection stores elements in memory and can be iterated many times; a stream stores nothing, computes elements on demand from a source, and can be consumed once. Collections are about data; streams are about computation on data.</p></details>
+    <details><summary>When should you not use parallelStream()?</summary><p>For small collections, I/O-bound work, operations with side effects or shared mutable state, or when order matters and you'd need costly ordering. Parallel streams use the common ForkJoinPool; measure before using them.</p></details>
+  </div>
+
+{{PRACTICE}}
+
+  <h3 id="scenarios">Real-world scenario questions (asked in company interviews)</h3>
+  <p class="scn-intro">Stream questions in interviews are usually about correctness and performance traps, not syntax.</p>
+  <div class="scenarios">
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Code review · side effects</span><span class="scn__tag scn__tag--level">Fresher</span></div>
+      <h4>Adding to a list inside forEach</h4>
+      <p class="scn__situation">A teammate writes <code>List&lt;String&gt; out = new ArrayList&lt;&gt;(); names.stream().filter(...).forEach(n -&gt; out.add(n.trim()));</code>. It works. What would you suggest?</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> idiomatic, side-effect-free streams.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>Use the stream's result instead of mutating an outside list: <code>List&lt;String&gt; out = names.stream().filter(...).map(String::trim).toList();</code></li>
+          <li>The side-effect version breaks (lost elements, exceptions) if someone later switches to <code>parallelStream()</code>, because ArrayList isn't thread-safe.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> “forEach is the stream version of a for loop”; collect is.</p>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Performance · order</span><span class="scn__tag scn__tag--level">Junior</span></div>
+      <h4>Sorting 10 lakh items to show 5</h4>
+      <p class="scn__situation">A product page runs <code>products.stream().sorted(byPrice).filter(p -&gt; p.inStock()).limit(5)</code> on 10 lakh products. It's slow. How would you reorder or rewrite it?</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> operation order and stateful operations.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li><code>sorted</code> must see every element before passing any on, so it sorts all 10 lakh, including out-of-stock ones.</li>
+          <li>Filter first: <code>filter(inStock).sorted(byPrice).limit(5)</code> sorts fewer items.</li>
+          <li>Better still, let the database do <code>WHERE in_stock ORDER BY price LIMIT 5</code> with an index.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> switching to <code>parallelStream()</code> before fixing the order.</p>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Bug · duplicate keys</span><span class="scn__tag scn__tag--level">Junior</span></div>
+      <h4>IllegalStateException: Duplicate key</h4>
+      <p class="scn__situation">Building a map of customers by phone with <code>Collectors.toMap(Customer::phone, c -&gt; c)</code> crashes in production with “Duplicate key 98xxxxxx10”. Explain and fix.</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> collector behaviour with real data.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li><code>toMap</code> throws when two elements produce the same key; two customers share a phone number (family accounts, data errors).</li>
+          <li>Decide the business rule: keep the latest with a merge function <code>toMap(k, v, (a, b) -&gt; b)</code>, or keep all with <code>groupingBy(Customer::phone)</code>.</li>
+          <li>Log or report duplicates so data quality can be fixed.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> catching the exception and returning an empty map.</p>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Performance · parallel</span><span class="scn__tag scn__tag--level">Mid</span></div>
+      <h4>parallelStream made the API slower</h4>
+      <p class="scn__situation">To speed up a product-details API, a developer changed <code>ids.stream().map(this::fetchFromDb)</code> to <code>parallelStream()</code>. Under load the whole server got slower. Why?</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> parallel streams and the common pool.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>Parallel streams run on the shared ForkJoinPool (about one thread per core). Blocking DB calls tie up those few threads, and every request in the JVM competes for them.</li>
+          <li>For I/O, fetch in one batched query (<code>WHERE id IN (...)</code>), or use a dedicated executor / virtual threads with CompletableFuture.</li>
+          <li>Keep parallel streams for CPU-heavy work on large in-memory data, and measure.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> “parallel is always faster”.</p>
+      </div></details>
+    </article>
+  </div>
+</part>

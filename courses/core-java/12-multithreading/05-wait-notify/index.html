@@ -1,0 +1,1043 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Inter-thread communication: wait() and notify() | MyPhatshala</title>
+<meta name="description" content="Inter-thread communication in Java: wait(), notify() and notifyAll(), the monitor&#x27;s wait set, why wait must be in a while loop, IllegalMonitorStateException, the producer-consumer pattern, BlockingQueue and CountDownLatch. With animations, a JVM tracer, 9 practice problems, quiz and interview scenarios.">
+<meta name="mp:minutes" content="25">
+<link rel="canonical" href="https://myphatshala.com/courses/core-java/12-multithreading/05-wait-notify/">
+<meta property="og:title" content="wait() and notify() in Java: producer and consumer · MyPhatshala">
+<meta property="og:description" content="Watch a chef and a waiter coordinate through one counter, see the monitor&#x27;s wait set, and solve 9 problems.">
+<link rel="icon" href="../../../../assets/img/logo.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Fraunces:ital,opsz,wght@0,9..144,600;0,9..144,700;1,9..144,600&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../../../../assets/css/style.css">
+<link rel="stylesheet" href="../../../../assets/css/lesson.css">
+<script src="../../../../assets/js/config.js"></script>
+<script>try { const t = localStorage.getItem("mp-theme"); if (t) document.documentElement.dataset.theme = t; } catch (e) {}</script>
+<script type="application/ld+json">{"@context": "https://schema.org", "@type": "LearningResource", "name": "Inter-thread communication: wait() and notify()", "learningResourceType": "Lesson", "educationalLevel": "Intermediate", "isAccessibleForFree": true, "inLanguage": "en", "isPartOf": {"@type": "Course", "name": "Core Java", "provider": {"@type": "Organization", "name": "MyPhatshala"}}}</script>
+</head>
+<body style="--track:#E8772E" data-lesson="12-multithreading/05-wait-notify" data-course-root="../../">
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="site-header">
+  <div class="wrap">
+    <a class="brand" href="../../../../" aria-label="MyPhatshala home"><img src="../../../../assets/img/logo.svg" width="34" height="34" alt=""><span>My<b>Phatshala</b></span></a>
+    <nav class="nav" aria-label="Main">
+      <a href="../../../../#tracks">All courses</a>
+      <a href="../../">Core Java syllabus</a>
+      <button class="theme-btn" id="theme-btn" aria-label="Toggle dark mode"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg></button>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+<section class="lesson-hero">
+  <div class="wrap">
+    <nav class="crumbs" aria-label="Breadcrumb"><a href="../../../../">Home</a><span>›</span><a href="../../../../#track-programming">Programming Languages</a><span>›</span><a href="../../">Core Java</a><span>›</span><b>Lesson 12.5</b></nav>
+    <h1>Inter-thread communication: wait() and notify()</h1>
+    <p class="lead">Locks stop threads from clashing. But often one thread must <b>wait for another</b>: the waiter waits for the chef, the order waits for payment, the dispatcher waits for messages. Checking a flag in a loop wastes a whole CPU core. Java's answer is <code>wait()</code> and <code>notify()</code>. You'll see exactly how they release and re-acquire a lock, write the classic producer–consumer, and then meet <code>BlockingQueue</code>, which does it all for you.</p>
+    <div class="lesson-meta"><span>Module 12 · Multithreading</span><span>⏱ 25 min</span><span>Intermediate</span><span>9 practice problems</span></div>
+  </div>
+</section>
+
+<div class="wrap lesson-layout">
+<article class="lesson-main">
+<!-- ======================= PART 1: THE STORY ======================= -->
+<section class="part" id="story">
+  <span class="part-label"><b>1</b> The story</span>
+  <h2>The waiter who kept asking</h2>
+  <div class="story">
+    <p class="narration">In Riya's canteen simulation, the waiter thread checks the counter in a loop: “Is the dosa ready? Is it ready now? Now?” Millions of times a second. Her laptop fan starts screaming, and the chef thread runs slower because the waiter hogs the CPU.</p>
+    <div class="scene">
+      <svg viewBox="0 0 640 170" role="img" aria-label="Left: a waiter asking again and again at an empty counter. Right: the waiter resting until the chef rings a bell">
+        <g font-size="10.5">
+          <text x="14" y="24" font-weight="700" class="s-red">Busy waiting</text>
+          <rect x="14" y="40" width="90" height="50" rx="8" class="s-card2" style="stroke:var(--line)"/><text x="59" y="70" text-anchor="middle" class="s-ink" font-weight="700">waiter</text>
+          <rect x="170" y="40" width="110" height="50" rx="8" class="s-soft-blue" style="stroke:var(--blue)"/><text x="225" y="70" text-anchor="middle" class="s-ink2">counter: empty</text>
+          <text x="110" y="52" class="s-red">ready?</text><text x="114" y="68" class="s-red">ready?</text><text x="118" y="84" class="s-red">ready?</text>
+          <text x="14" y="120" class="s-red">CPU 100%, doing nothing useful</text>
+          <path d="M318 20v130" style="stroke:var(--line);stroke-width:1;stroke-dasharray:4 4"/>
+          <text x="340" y="24" font-weight="700" class="s-green">wait() and notify()</text>
+          <rect x="340" y="40" width="90" height="50" rx="8" class="s-card2" style="stroke:var(--line)"/><text x="385" y="64" text-anchor="middle" class="s-ink" font-weight="700">waiter</text><text x="385" y="80" text-anchor="middle" class="s-blue">resting</text>
+          <rect x="520" y="40" width="100" height="50" rx="8" class="s-soft-acc" style="stroke:var(--track)"/><text x="570" y="64" text-anchor="middle" class="s-ink" font-weight="700">chef</text><text x="570" y="80" text-anchor="middle" class="s-acc">dosa ready!</text>
+          <path d="M518 65h-84" style="stroke:var(--green);stroke-width:1.6"/><path d="M440 59l-8 6 8 6" style="fill:none;stroke:var(--green);stroke-width:1.6"/>
+          <text x="475" y="56" text-anchor="middle" class="s-green">notify()</text>
+          <text x="340" y="120" class="s-green">CPU idle until there's real work</text>
+        </g>
+        <text x="632" y="166" text-anchor="end" class="s-wm">myphatshala.com</text>
+      </svg>
+    </div>
+    <div class="panel">
+      <div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#FCE6D6"/><path d="M14 64c2-12 9-18 18-18s16 6 18 18z" fill="#2E5AAC"/><circle cx="32" cy="29" r="12" fill="#C68B5E"/><path d="M19 29c0-10 6-15 13-15s13 5 13 15c-3-5-7-8-13-8s-10 3-13 8z" fill="#2A1B14"/><path d="M43 27c3 6 3 14 0 20" stroke="#2A1B14" stroke-width="4" fill="none" stroke-linecap="round"/><circle cx="27.5" cy="30" r="1.5" fill="#2A1B14"/><circle cx="36.5" cy="30" r="1.5" fill="#2A1B14"/><path d="M28 35q4 3 8 0" stroke="#2A1B14" stroke-width="1.6" fill="none" stroke-linecap="round"/><circle cx="32" cy="24" r="1.2" fill="#D64545"/></svg></div>
+      <div class="bubble"><b class="who">Riya</b><p>Sir, how can the waiter wait without checking all the time?</p></div>
+    </div>
+    <div class="panel panel--right">
+      <div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#DDEFE6"/><path d="M12 64c2-12 10-18 20-18s18 6 20 18z" fill="#F4F1EA"/><path d="M28 46l4 8 4-8" fill="#2F7D5B"/><circle cx="32" cy="28" r="12" fill="#B57A50"/><path d="M20 26c0-8 5-13 12-13s12 5 12 13c-2-3-6-5-12-5s-10 2-12 5z" fill="#5A5A5A"/><path d="M22 32c1 8 5 11 10 11s9-3 10-11c-2 3-6 4-10 4s-8-1-10-4z" fill="#5A5A5A"/><circle cx="27" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><circle cx="37" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><path d="M30.4 29h3.2" stroke="#1B2433" stroke-width="1.4"/><circle cx="27" cy="29" r="1.1" fill="#1B2433"/><circle cx="37" cy="29" r="1.1" fill="#1B2433"/></svg></div>
+      <div class="bubble"><b class="who">Arjun Sir</b><p>He goes to sleep on the counter's lock with <code>wait()</code>. When the chef puts a dish, the chef rings the bell: <code>notify()</code>. The waiter wakes only when something changed.</p></div>
+    </div>
+    <div class="panel">
+      <div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#FCE6D6"/><path d="M14 64c2-12 9-18 18-18s16 6 18 18z" fill="#2E5AAC"/><circle cx="32" cy="29" r="12" fill="#C68B5E"/><path d="M19 29c0-10 6-15 13-15s13 5 13 15c-3-5-7-8-13-8s-10 3-13 8z" fill="#2A1B14"/><path d="M43 27c3 6 3 14 0 20" stroke="#2A1B14" stroke-width="4" fill="none" stroke-linecap="round"/><circle cx="27.5" cy="30" r="1.5" fill="#2A1B14"/><circle cx="36.5" cy="30" r="1.5" fill="#2A1B14"/><path d="M28 35q4 3 8 0" stroke="#2A1B14" stroke-width="1.6" fill="none" stroke-linecap="round"/><circle cx="32" cy="24" r="1.2" fill="#D64545"/></svg></div>
+      <div class="bubble"><b class="who">Riya</b><p>But the counter is locked with <code>synchronized</code>. If the waiter sleeps inside, how does the chef get in?</p></div>
+    </div>
+    <div class="panel panel--right">
+      <div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#DDEFE6"/><path d="M12 64c2-12 10-18 20-18s18 6 20 18z" fill="#F4F1EA"/><path d="M28 46l4 8 4-8" fill="#2F7D5B"/><circle cx="32" cy="28" r="12" fill="#B57A50"/><path d="M20 26c0-8 5-13 12-13s12 5 12 13c-2-3-6-5-12-5s-10 2-12 5z" fill="#5A5A5A"/><path d="M22 32c1 8 5 11 10 11s9-3 10-11c-2 3-6 4-10 4s-8-1-10-4z" fill="#5A5A5A"/><circle cx="27" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><circle cx="37" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><path d="M30.4 29h3.2" stroke="#1B2433" stroke-width="1.4"/><circle cx="27" cy="29" r="1.1" fill="#1B2433"/><circle cx="37" cy="29" r="1.1" fill="#1B2433"/></svg></div>
+      <div class="bubble"><b class="who">Arjun Sir</b><p>That's the clever part: <code>wait()</code> <b>gives up the lock</b> while it sleeps, and takes it back before it returns. Let's watch it inside the monitor.</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- ======================= PART 2: DEFINITION ======================= -->
+<section class="part" id="definition">
+  <span class="part-label"><b>2</b> Definition</span>
+  <h2>What is inter-thread communication?</h2>
+  <div class="def">
+    <div class="def__formal"><small>Formal definition (write this in exams)</small>
+      <p><b>Inter-thread communication</b> is the coordination of threads so that one thread waits until a condition becomes true and another thread signals when it changes. In Java it is done with the <code>Object</code> methods <code>wait()</code>, <code>notify()</code> and <code>notifyAll()</code>, which must be called while holding the object's monitor. <code>wait()</code> releases the monitor and suspends the thread in the object's <b>wait set</b> until it is notified, interrupted or times out; it then re-acquires the monitor before returning. <code>notify()</code> wakes one thread from the wait set, <code>notifyAll()</code> wakes all of them.</p></div>
+    <div class="def__simple"><small>In simple words</small>
+      <p><code>wait()</code> = “wake me when something changes” (and let others use the room meanwhile). <code>notifyAll()</code> = “something changed, everyone check again”.</p></div>
+  </div>
+  <h3>Words you'll meet in this lesson</h3>
+  <div class="terms">
+    <div class="term"><b>Condition</b><span>What a thread is waiting for: “counter not empty”, “payment confirmed”.</span></div>
+    <div class="term"><b>Wait set</b><span>Threads that called <code>wait()</code> on this object (state WAITING).</span></div>
+    <div class="term"><b>Entry set</b><span>Threads trying to get this object's lock (state BLOCKED).</span></div>
+    <div class="term"><b>Producer–consumer</b><span>One thread makes items, another uses them, through a shared buffer.</span></div>
+    <div class="term"><b>Spurious wakeup</b><span>Waking up without a notify. Rare, but allowed, hence the loop.</span></div>
+    <div class="term"><b>BlockingQueue</b><span>A thread-safe queue whose <code>put</code>/<code>take</code> wait for space/items.</span></div>
+  </div>
+  <h3>wait() vs sleep()</h3>
+  <div class="table-wrap">
+  <table class="compare" style="min-width:560px">
+    <thead><tr><th></th><th><code>obj.wait()</code></th><th><code>Thread.sleep(ms)</code></th></tr></thead>
+    <tbody>
+      <tr><td>Defined in</td><td><code>Object</code></td><td><code>Thread</code> (static)</td></tr>
+      <tr><td>Must hold the lock?</td><td>Yes, of <code>obj</code></td><td>No</td></tr>
+      <tr><td>Releases the lock?</td><td><b>Yes</b></td><td>No: keeps any locks held</td></tr>
+      <tr><td>Wakes up when</td><td>notified, interrupted, or timeout</td><td>time is up, or interrupted</td></tr>
+      <tr><td>Purpose</td><td>Wait for a condition</td><td>Pause for a time</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <div class="callout callout--exam"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19V5a2 2 0 0 1 2-2h12v18H6a2 2 0 0 1-2-2zm0 0a2 2 0 0 1 2-2h12"/></svg><p><b>Exam tip:</b> three rules to write in every answer: (1) call wait/notify <b>inside synchronized</b> on the same object, else <code>IllegalMonitorStateException</code>; (2) <b>wait releases the lock</b>, sleep doesn't; (3) always call wait <b>in a while loop</b> that re-checks the condition.</p></div>
+</section>
+
+<div class="ad-slot" data-slot="mid"></div>
+
+<!-- ======================= PART 3: TYPES AND WAYS TO USE IT ======================= -->
+<section class="part" id="types">
+  <span class="part-label"><b>3</b> Types and ways to use it</span>
+  <h2>The pattern, and the tools built on it</h2>
+  <h3>The one pattern to memorise</h3>
+  <div class="code" data-lang="java" data-file="Main.java"><pre><code>synchronized (lock) {
+    while (!condition) {      // ALWAYS a loop, never just "if"
+        lock.wait();          // releases lock, waits, re-acquires before returning
+    }
+    // condition is true and we hold the lock: act on it
+}
+
+synchronized (lock) {
+    changeTheCondition();
+    lock.notifyAll();         // wake the waiters so they re-check
+}</code></pre></div>
+  <h3>Forget the lock and Java stops you</h3>
+  <div class="code" data-lang="java" data-file="Main.java"><pre><code>public class Main {
+    public static void main(String[] args) {
+        Object lock = new Object();
+        try {
+            lock.notify();
+        } catch (IllegalMonitorStateException e) {
+            System.out.println(e);
+        }
+    }
+}</code></pre><div class="output">java.lang.IllegalMonitorStateException: current thread is not owner</div></div>
+
+  <h3>Ways to make threads wait for each other</h3>
+  <div class="cards">
+    <div class="card"><svg class="ic" viewBox="0 0 40 40" fill="none" stroke="var(--blue)" stroke-width="2"><rect x="11" y="18" width="18" height="13" rx="2"/><path d="M15 18v-4a5 5 0 0110 0v4"/></svg><h4>wait / notifyAll</h4><p>The low-level tool every Java object supports. Know it for exams and interviews.</p><span class="tag">built in</span></div>
+    <div class="card"><svg class="ic" viewBox="0 0 40 40" fill="none" stroke="var(--green)" stroke-width="2"><rect x="8" y="14" width="24" height="12" rx="3"/><path d="M16 14v12M24 14v12"/></svg><h4>BlockingQueue</h4><p><code>ArrayBlockingQueue</code>, <code>LinkedBlockingQueue</code>: producer–consumer ready-made.</p><span class="tag">use in real code</span></div>
+    <div class="card"><svg class="ic" viewBox="0 0 40 40" fill="none" stroke="var(--track)" stroke-width="2"><path d="M12 28V12M20 28V16M28 28V20"/></svg><h4>CountDownLatch</h4><p>Wait until N events have happened (“all 3 services started”).</p><span class="tag">one-time gate</span></div>
+    <div class="card"><svg class="ic" viewBox="0 0 40 40" fill="none" stroke="var(--ink-3)" stroke-width="2"><circle cx="20" cy="20" r="11"/><path d="M20 13v7h6"/></svg><h4>join()</h4><p>Wait until a thread has finished: the simplest coordination of all (Lesson 12.3).</p><span class="tag">wait for the end</span></div>
+  </div>
+  <div class="callout callout--warn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3 2 21h20L12 3z"/><path d="M12 10v5M12 18v.5"/></svg><p><b>Notify without a condition is a lost signal.</b> If <code>notify()</code> runs before the other thread calls <code>wait()</code>, nobody hears it and the waiter may sleep forever. Always pair the signal with a shared variable (a flag, a count, a buffer) that the waiter checks first.</p></div>
+</section>
+
+<!-- ======================= PART 4: STEP BY STEP ======================= -->
+<section class="part" id="steps">
+  <span class="part-label"><b>4</b> Step by step</span>
+  <h2>One wait() and one notify(), in order</h2>
+  <ol class="stepper">
+    <li><h4>The consumer takes the lock and checks</h4>
+      <span class="behind">Inside <code>synchronized take()</code> the waiter sees <code>dish == null</code>. It can't proceed.</span></li>
+    <li><h4>wait(): release and sleep</h4>
+      <span class="behind">The JVM releases the monitor and moves the thread to the object's wait set (WAITING). The lock is now free for others.</span></li>
+    <li><h4>The producer changes the state</h4>
+      <span class="behind">The chef enters <code>synchronized put()</code>, sets <code>dish</code> and calls <code>notifyAll()</code>. The waiter moves from the wait set to the entry set (BLOCKED): it still needs the lock.</span></li>
+    <li><h4>The producer leaves</h4>
+      <span class="behind">When <code>put()</code> returns, the monitor is released. The waiter acquires it and <code>wait()</code> finally returns.</span></li>
+    <li><h4>Re-check, then act</h4>
+      <span class="behind">The <code>while</code> loop checks again (another consumer might have taken the dish first). The condition is true, so the waiter takes the dish and notifies in turn.</span></li>
+  </ol>
+</section>
+
+<!-- ======================= PART 5: SEE IT HAPPEN ======================= -->
+<section class="part" id="animation">
+  <span class="part-label"><b>5</b> See it happen</span>
+  <h2>Chef, waiter and the monitor: both views</h2>
+  <p>Left: the kitchen as you'd describe it. Right: inside the counter object's monitor, with its owner, entry set and wait set.</p>
+  <div class="anim" data-frames="6">
+    <div class="anim__title">wait() and notify(), both views <span>6 steps</span></div>
+    <div class="anim__views">
+      <div class="view view--see">
+        <span class="view__tag">What you see</span>
+        <svg viewBox="0 0 360 250" role="img" aria-label="A chef and a waiter share a one-dish counter; each waits when it can&#x27;t proceed and notifies the other">
+          <rect x="120" y="60" width="120" height="60" rx="8" class="s-soft-blue" style="stroke:var(--blue);stroke-width:1.5"/>
+          <text x="180" y="78" font-size="9" text-anchor="middle" font-weight="700" class="s-blue">counter (1 slot)</text>
+          <text data-on="2" x="180" y="104" font-size="12" text-anchor="middle" font-weight="700" class="s-ink mono">dosa</text>
+          <text data-on="3" x="180" y="104" font-size="12" text-anchor="middle" font-weight="700" class="s-ink mono">dosa</text>
+          <text data-on="4" x="180" y="104" font-size="12" text-anchor="middle" font-weight="700" class="s-ink mono">idli</text>
+          <text data-on="6" x="180" y="104" font-size="12" text-anchor="middle" font-weight="700" class="s-ink mono">vada</text>
+          <text data-on="1" x="180" y="104" font-size="10.5" text-anchor="middle" class="s-ink3">empty</text>
+          <text data-on="5" x="180" y="104" font-size="10.5" text-anchor="middle" class="s-ink3">empty</text>
+          <rect x="8" y="60" width="96" height="60" rx="8" class="s-card2" style="stroke:var(--line);stroke-width:1.5"/>
+          <text x="18" y="78" font-size="10.5" font-weight="700" class="s-ink">chef</text>
+          <rect x="256" y="60" width="96" height="60" rx="8" class="s-card2" style="stroke:var(--line);stroke-width:1.5"/>
+          <text x="266" y="78" font-size="10.5" font-weight="700" class="s-ink">waiter</text>
+          <text data-on="1" x="266" y="100" font-size="8.8" class="s-blue mono">empty → wait()</text>
+          <text data-on="1" x="266" y="114" font-size="9" font-weight="700" class="s-blue mono">WAITING</text>
+          <text data-on="2" x="266" y="100" font-size="9" font-weight="700" class="s-blue mono">WAITING</text>
+          <text data-on="2" x="18" y="100" font-size="9" class="s-ink mono">put dosa</text>
+          <text data-on="2" x="18" y="114" font-size="9" class="s-green mono">notify()</text>
+          <g data-on="2"><path d="M104 118 Q180 148 256 118" style="stroke:var(--green);stroke-width:2;fill:none"/><path d="M246.9 116.8 L256 118 L250.2 125.1" style="stroke:var(--green);stroke-width:2;fill:none;stroke-linecap:round;stroke-linejoin:round"/></g>
+          <text data-on="3" x="266" y="100" font-size="9" class="s-green mono">took dosa</text>
+          <text data-on="4" x="18" y="100" font-size="8.8" class="s-blue mono">full → wait()</text>
+          <text data-on="4" x="18" y="114" font-size="9" font-weight="700" class="s-blue mono">WAITING</text>
+          <text data-on="5" x="266" y="100" font-size="9" class="s-green mono">took idli</text>
+          <text data-on="5" x="266" y="114" font-size="9" class="s-green mono">notify()</text>
+          <g data-on="5"><path d="M256 118 Q180 148 104 118" style="stroke:var(--green);stroke-width:2;fill:none"/><path d="M109.8 125.1 L104 118 L113.1 116.8" style="stroke:var(--green);stroke-width:2;fill:none;stroke-linecap:round;stroke-linejoin:round"/></g>
+          <text data-on="6" x="18" y="100" font-size="9" class="s-ink mono">put vada</text>
+          <rect x="8" y="150" width="344" height="56" rx="8" class="s-board" style="stroke:board;stroke-width:1.5"/>
+          <text data-on="1" x="18" y="182" font-size="9.6" class="s-chalk mono">while (counter empty) wait();</text>
+          <text data-on="2" x="18" y="182" font-size="9.6" class="s-chalk mono">counter = dish; notify();</text>
+          <text data-on="3" x="18" y="182" font-size="9.6" class="s-chalk mono">dish = counter; counter = null;</text>
+          <text data-on="4" x="18" y="182" font-size="9.6" class="s-chalk mono">while (counter full) wait();</text>
+          <text data-on="5" x="18" y="182" font-size="9.6" class="s-chalk mono">take; notify();  // wake the chef</text>
+          <text data-on="6" x="18" y="182" font-size="9.6" class="s-chalk mono">chef wakes, re-checks, puts</text>
+          <text data-on="1" x="180" y="236" font-size="10.5" text-anchor="middle" class="s-ink2">Nothing to serve: the waiter waits.</text>
+          <text data-on="2" x="180" y="236" font-size="10.5" text-anchor="middle" class="s-ink2">Chef puts a dish and notifies.</text>
+          <text data-on="3" x="180" y="236" font-size="10.5" text-anchor="middle" class="s-ink2">Waiter wakes and takes it.</text>
+          <text data-on="4" x="180" y="236" font-size="10.5" text-anchor="middle" class="s-ink2">Counter full: the chef waits.</text>
+          <text data-on="5" x="180" y="236" font-size="10.5" text-anchor="middle" class="s-ink2">Waiter takes it and notifies.</text>
+          <text data-on="6" x="180" y="236" font-size="10.5" text-anchor="middle" class="s-ink2">Chef continues.</text>
+          <text x="354" y="245" text-anchor="end" class="s-wm">myphatshala.com</text>
+        </svg>
+        <ol class="caps" hidden>
+          <li>The waiter thread finds the counter empty. Instead of checking again and again, it calls <code>wait()</code> and sleeps: state <b>WAITING</b>, no CPU used.</li>
+          <li>The chef thread puts a dosa on the counter and calls <code>notify()</code> to wake one waiting thread.</li>
+          <li>The waiter wakes up, re-checks the condition (the counter now has food) and takes the dosa.</li>
+          <li>Later the chef has an idli ready but the counter is still full, so now the <b>chef</b> waits.</li>
+          <li>The waiter takes the idli and calls <code>notify()</code>, waking the chef.</li>
+          <li>The chef re-checks: the counter is free, so it puts the vada. Each side waits only when it can't continue. This is the <b>producer–consumer</b> pattern.</li>
+        </ol>
+      </div>
+      <div class="view view--behind">
+        <span class="view__tag">Behind the screen</span>
+        <svg viewBox="0 0 360 250" role="img" aria-label="Inside the counter object&#x27;s monitor: the owner, the entry set of blocked threads and the wait set of waiting threads">
+          <rect x="6" y="6" width="348" height="200" rx="8" class="s-card" style="stroke:var(--line);stroke-width:1.5"/>
+          <text x="16" y="24" font-size="10" font-weight="700" class="s-ink2">monitor of the counter object</text>
+          <rect x="16" y="36" width="100" height="70" rx="8" class="s-soft-green" style="stroke:var(--green);stroke-width:1.5"/>
+          <text x="26" y="54" font-size="9.5" font-weight="700" class="s-green">owner</text>
+          <text data-on="1" x="26" y="80" font-size="11" font-weight="700" class="s-ink mono">waiter</text>
+          <text data-on="2" x="26" y="80" font-size="11" font-weight="700" class="s-ink mono">chef</text>
+          <text data-on="3" x="26" y="80" font-size="11" font-weight="700" class="s-ink mono">waiter</text>
+          <text data-on="4" x="26" y="80" font-size="11" font-weight="700" class="s-ink mono">chef</text>
+          <text data-on="5" x="26" y="80" font-size="11" font-weight="700" class="s-ink mono">waiter</text>
+          <text data-on="6" x="26" y="80" font-size="11" font-weight="700" class="s-ink mono">chef</text>
+          <rect x="130" y="36" width="100" height="70" rx="8" class="s-soft-acc" style="stroke:var(--track);stroke-width:1.5"/>
+          <text x="140" y="54" font-size="9.5" font-weight="700" class="s-acc">entry set</text>
+          <text x="140" y="72" font-size="8.4" class="s-ink3">(BLOCKED)</text>
+          <text data-on="2" x="140" y="92" font-size="10" class="s-ink mono">waiter</text>
+          <text data-on="5" x="140" y="92" font-size="10" class="s-ink mono">chef</text>
+          <rect x="244" y="36" width="100" height="70" rx="8" class="s-soft-blue" style="stroke:var(--blue);stroke-width:1.5"/>
+          <text x="254" y="54" font-size="9.5" font-weight="700" class="s-blue">wait set</text>
+          <text x="254" y="72" font-size="8.4" class="s-ink3">(WAITING)</text>
+          <text data-on="1" x="254" y="92" font-size="10" class="s-ink mono">waiter</text>
+          <text data-on="4" x="254" y="92" font-size="10" class="s-ink mono">chef</text>
+          <g data-on="2"><path d="M244 96 L222 96" style="stroke:var(--green);stroke-width:2;fill:none"/><path d="M230.0 100.5 L222 96 L230.0 91.5" style="stroke:var(--green);stroke-width:2;fill:none;stroke-linecap:round;stroke-linejoin:round"/></g>
+          <g data-on="5"><path d="M244 96 L222 96" style="stroke:var(--green);stroke-width:2;fill:none"/><path d="M230.0 100.5 L222 96 L230.0 91.5" style="stroke:var(--green);stroke-width:2;fill:none;stroke-linecap:round;stroke-linejoin:round"/></g>
+          <text data-on="1" x="16" y="136" font-size="9.6" class="s-ink">wait(): give up the lock, join the wait set</text>
+          <text data-on="2" x="16" y="136" font-size="9.6" class="s-ink">notify(): move one waiter to the entry set</text>
+          <text data-on="3" x="16" y="136" font-size="9.6" class="s-ink">lock free: waiter re-acquires it, returns from wait()</text>
+          <text data-on="4" x="16" y="136" font-size="9.6" class="s-ink">chef calls wait(): releases the lock</text>
+          <text data-on="5" x="16" y="136" font-size="9.6" class="s-ink">notify(): chef moves to the entry set</text>
+          <text data-on="6" x="16" y="136" font-size="9.6" class="s-ink">chef gets the lock back, loop re-checks</text>
+          <text x="16" y="162" font-size="9.2" class="s-ink2">wait/notify must be called while owning</text>
+          <text x="16" y="178" font-size="9.2" class="s-ink2">this monitor (inside synchronized)</text>
+          <text data-on="1" x="180" y="236" font-size="10.5" text-anchor="middle" class="s-ink2">Waiter parks in the wait set.</text>
+          <text data-on="2" x="180" y="236" font-size="10.5" text-anchor="middle" class="s-ink2">Chef notifies: waiter must re-lock.</text>
+          <text data-on="3" x="180" y="236" font-size="10.5" text-anchor="middle" class="s-ink2">Waiter owns the lock again.</text>
+          <text data-on="4" x="180" y="236" font-size="10.5" text-anchor="middle" class="s-ink2">Chef parks in the wait set.</text>
+          <text data-on="5" x="180" y="236" font-size="10.5" text-anchor="middle" class="s-ink2">Waiter notifies the chef.</text>
+          <text data-on="6" x="180" y="236" font-size="10.5" text-anchor="middle" class="s-ink2">Chef owns the lock again.</text>
+          <text x="354" y="245" text-anchor="end" class="s-wm">myphatshala.com</text>
+        </svg>
+        <ol class="caps" hidden>
+          <li>Every object's monitor has an owner, an <b>entry set</b> (threads BLOCKED trying to get the lock) and a <b>wait set</b> (threads that called <code>wait()</code>). Calling <code>wait()</code> <b>releases the lock</b> and puts the waiter in the wait set.</li>
+          <li>Because the lock was released, the chef can enter and own it. <code>notify()</code> moves one thread from the wait set to the entry set. It doesn't run yet: the chef still owns the lock.</li>
+          <li>When the chef leaves the synchronized method, the waiter re-acquires the lock and only then returns from <code>wait()</code>.</li>
+          <li>Same mechanism the other way: the chef can't continue, so it waits and releases the lock.</li>
+          <li>The waiter takes the dish and notifies; the chef moves to the entry set.</li>
+          <li>The chef gets the lock back and, because the call sits in a <code>while</code> loop, re-checks the condition before acting. Always wait in a loop: a thread can wake up when the condition is still false.</li>
+        </ol>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ======================= PART 6: REAL-WORLD USE ======================= -->
+<section class="part" id="real-world">
+  <span class="part-label"><b>6</b> Real-world use</span>
+  <h2>Producers and consumers everywhere</h2>
+  <p>Most back-end systems are chains of producers and consumers connected by queues.</p>
+  <!--ANIM2-->
+  <h3 id="animated-example">Watch it with an example: restaurant orders and delivery riders</h3>
+  <p class="anim-intro">A food app's restaurant thread produces orders into a queue that holds at most 2. A rider thread takes them. BlockingQueue does all the waiting and notifying for you.</p>
+  <div class="anim anim--one" data-frames="6" data-delay="4600">
+    <div class="anim__title">Orders through a BlockingQueue (capacity 2) <span>6 steps</span></div>
+    <div class="anim__views">
+      <div class="view view--story">
+        <span class="view__tag">Animated example</span>
+        <svg viewBox="0 0 360 230" role="img" aria-label="A producer puts orders into a bounded queue and blocks when it is full; a consumer takes them and blocks when it is empty">
+          <rect x="8" y="40" width="96" height="70" rx="8" class="s-soft-acc" style="stroke:var(--track);stroke-width:1.5"/>
+          <text x="18" y="58" font-size="10" font-weight="700" class="s-ink">restaurant</text>
+          <text x="18" y="76" font-size="9.5" class="s-ink mono">put()</text>
+          <rect x="256" y="40" width="96" height="70" rx="8" class="s-soft-green" style="stroke:var(--green);stroke-width:1.5"/>
+          <text x="266" y="58" font-size="10" font-weight="700" class="s-ink">rider</text>
+          <text x="266" y="76" font-size="9.5" class="s-ink mono">take()</text>
+          <rect x="118" y="40" width="124" height="70" rx="8" class="s-card2" style="stroke:var(--line);stroke-width:1.5"/>
+          <text x="180" y="34" font-size="9" text-anchor="middle" class="s-ink2">queue (max 2)</text>
+          <g data-on="1"><rect x="128" y="56" width="48" height="38" rx="8" class="s-soft-blue" style="stroke:var(--blue);stroke-width:1.5"/><text x="152" y="78.96" font-size="11" text-anchor="middle" font-weight="700" class="s-ink mono">#1</text></g>
+          <g data-on="2"><rect x="128" y="56" width="48" height="38" rx="8" class="s-soft-blue" style="stroke:var(--blue);stroke-width:1.5"/><text x="152" y="78.96" font-size="11" text-anchor="middle" font-weight="700" class="s-ink mono">#1</text></g>
+          <g data-on="2"><rect x="184" y="56" width="48" height="38" rx="8" class="s-soft-blue" style="stroke:var(--blue);stroke-width:1.5"/><text x="208" y="78.96" font-size="11" text-anchor="middle" font-weight="700" class="s-ink mono">#2</text></g>
+          <g data-on="3"><rect x="128" y="56" width="48" height="38" rx="8" class="s-soft-blue" style="stroke:var(--blue);stroke-width:1.5"/><text x="152" y="78.96" font-size="11" text-anchor="middle" font-weight="700" class="s-ink mono">#1</text></g>
+          <g data-on="3"><rect x="184" y="56" width="48" height="38" rx="8" class="s-soft-blue" style="stroke:var(--blue);stroke-width:1.5"/><text x="208" y="78.96" font-size="11" text-anchor="middle" font-weight="700" class="s-ink mono">#2</text></g>
+          <g data-on="4"><rect x="128" y="56" width="48" height="38" rx="8" class="s-soft-blue" style="stroke:var(--blue);stroke-width:1.5"/><text x="152" y="78.96" font-size="11" text-anchor="middle" font-weight="700" class="s-ink mono">#2</text></g>
+          <g data-on="4"><rect x="184" y="56" width="48" height="38" rx="8" class="s-soft-blue" style="stroke:var(--blue);stroke-width:1.5"/><text x="208" y="78.96" font-size="11" text-anchor="middle" font-weight="700" class="s-ink mono">#3</text></g>
+          <g data-on="5"><rect x="128" y="56" width="48" height="38" rx="8" class="s-soft-blue" style="stroke:var(--blue);stroke-width:1.5"/><text x="152" y="78.96" font-size="11" text-anchor="middle" font-weight="700" class="s-ink mono">#3</text></g>
+          <text data-on="3" x="18" y="98" font-size="9" font-weight="700" class="s-red mono">WAITING</text>
+          <text data-on="6" x="266" y="98" font-size="9" font-weight="700" class="s-red mono">WAITING</text>
+          <text data-on="4" x="266" y="98" font-size="9" class="s-green mono">got #1</text>
+          <text data-on="5" x="266" y="98" font-size="9" class="s-green mono">got #2</text>
+          <text data-on="3" x="180" y="140" font-size="10.5" text-anchor="middle" font-weight="700" class="s-red">queue full: put() blocks</text>
+          <text data-on="4" x="180" y="140" font-size="10.5" text-anchor="middle" font-weight="700" class="s-green">space freed: #3 goes in</text>
+          <text data-on="6" x="180" y="140" font-size="10.5" text-anchor="middle" font-weight="700" class="s-red">queue empty: take() blocks</text>
+          <text data-on="1" x="180" y="204" font-size="10.5" text-anchor="middle" class="s-ink2">Order #1 queued.</text>
+          <text data-on="2" x="180" y="204" font-size="10.5" text-anchor="middle" class="s-ink2">Order #2 queued: full.</text>
+          <text data-on="3" x="180" y="204" font-size="10.5" text-anchor="middle" class="s-ink2">#3 must wait for space.</text>
+          <text data-on="4" x="180" y="204" font-size="10.5" text-anchor="middle" class="s-ink2">Rider takes #1; #3 goes in.</text>
+          <text data-on="5" x="180" y="204" font-size="10.5" text-anchor="middle" class="s-ink2">Rider takes #2.</text>
+          <text data-on="6" x="180" y="204" font-size="10.5" text-anchor="middle" class="s-ink2">Rider takes #3; next take waits.</text>
+          <text x="354" y="225" text-anchor="end" class="s-wm">myphatshala.com</text>
+        </svg>
+        <ol class="caps" hidden>
+          <li>The restaurant thread calls <code>queue.put(order1)</code>.</li>
+          <li>Order #2 goes in too. The queue's capacity is 2, so it is now full.</li>
+          <li><code>put(order3)</code> can't proceed: the restaurant thread waits inside <code>put()</code> (no busy loop, no CPU). This <b>back-pressure</b> stops a fast producer from flooding memory.</li>
+          <li>The rider calls <code>take()</code>, gets #1, and the queue signals the waiting producer, which adds #3.</li>
+          <li>The rider takes #2.</li>
+          <li>After #3 the queue is empty, so the rider's next <code>take()</code> waits until a new order arrives. Inside, BlockingQueue uses a lock and conditions: the same idea as wait/notify, already written and tested.</li>
+        </ol>
+      </div>
+    </div>
+  </div>
+  <!--/ANIM2-->
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="14" y="34" width="26" height="22" rx="4" class="s-soft-acc" style="stroke:var(--track)"/><rect x="47" y="34" width="26" height="22" rx="4" class="s-soft-blue" style="stroke:var(--blue)"/><rect x="80" y="34" width="26" height="22" rx="4" class="s-soft-green" style="stroke:var(--green)"/></svg></div>
+    <div><h4>1. Order and notification pipelines</h4><p>Checkout produces events; email, SMS and invoice workers consume them from queues at their own pace.</p>
+      <div class="uc-flow"><span>order placed</span><i>→</i><span class="java">BlockingQueue</span><i>→</i><span>SMS worker</span></div></div>
+  </div>
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="22" y="20" width="76" height="50" rx="6" class="s-board"/><path d="M32 34h56M32 46h40M32 58h48" style="stroke:var(--chalk);stroke-width:2"/></svg></div>
+    <div><h4>2. Logging</h4><p>Request threads put log lines into an in-memory queue; one background writer thread takes them and writes to disk, so requests never wait for the disk.</p>
+      <div class="uc-flow"><span>200 request threads</span><i>→</i><span class="java">log queue</span><i>→</i><span>1 writer</span></div></div>
+  </div>
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><circle cx="60" cy="45" r="24" class="s-soft-green" style="stroke:var(--green)"/><path d="M50 45l7 7 14-14" style="fill:none;stroke:var(--green);stroke-width:3"/></svg></div>
+    <div><h4>3. Startup and readiness</h4><p>A server waits until its database pool, caches and configs are ready (a latch) before accepting traffic.</p>
+      <div class="uc-flow"><span>3 services</span><i>→</i><span class="java">CountDownLatch(3)</span><i>→</i><span>open for traffic</span></div></div>
+  </div>
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="30" y="18" width="60" height="54" rx="6" class="s-card" style="stroke:var(--line)"/><path d="M50 28h20l-10 17 10 17H50l10-17z" style="fill:none;stroke:var(--track);stroke-width:2.5"/></svg></div>
+    <div><h4>4. Waiting for confirmations</h4><p>Payment flows, OTP verification and seat holds wait for an external event, always with a timeout so nothing waits forever.</p>
+      <div class="uc-flow"><span>payment sent</span><i>→</i><span class="java">wait(timeout) in a loop</span><i>→</i><span>ship or release</span></div></div>
+  </div>
+  <p class="muted">Simplified. Large systems connect services with message brokers (such as Kafka or RabbitMQ), which apply the same producer–consumer idea between machines.</p>
+</section>
+
+<div class="ad-slot" data-slot="mid"></div>
+
+<!-- ======================= PART 7: RUN THE CODE ======================= -->
+<section class="part" id="run">
+  <span class="part-label"><b>7</b> Run the code</span>
+  <h2>Chef and waiter, four dishes</h2>
+  <div class="code" data-lang="java" data-file="Main.java"><pre><code>class Counter {
+    private String dish;
+
+    synchronized void put(String d) throws InterruptedException {
+        while (dish != null) wait();
+        dish = d;
+        System.out.println("chef put " + d);
+        notifyAll();
+    }
+
+    synchronized String take() throws InterruptedException {
+        while (dish == null) wait();
+        String d = dish;
+        dish = null;
+        System.out.println("waiter took " + d);
+        notifyAll();
+        return d;
+    }
+}
+
+public class Main {
+    public static void main(String[] args) throws InterruptedException {
+        Counter counter = new Counter();
+        Thread chef = new Thread(() -&gt; {
+            try {
+                for (String d : new String[]{"dosa", "idli", "vada", "upma"}) counter.put(d);
+            } catch (InterruptedException e) { }
+        });
+        Thread waiter = new Thread(() -&gt; {
+            try {
+                for (int i = 0; i &lt; 4; i++) counter.take();
+            } catch (InterruptedException e) { }
+        });
+        chef.start();
+        waiter.start();
+        chef.join();
+        waiter.join();
+    }
+}</code></pre><div class="output">chef put dosa
+waiter took dosa
+chef put idli
+waiter took idli
+chef put vada
+waiter took vada
+chef put upma
+waiter took upma</div></div>
+  <ul class="anno">
+    <li><code>while (dish != null) wait();</code><span>The chef waits while the counter is full, releasing the lock.</span></li>
+    <li><code>while (dish == null) wait();</code><span>The waiter waits while it's empty.</span></li>
+    <li><code>notifyAll()</code><span>After every change, wake the other side so it re-checks.</span></li>
+    <li>printing inside the methods<span>Prints happen while holding the lock, in the true order of puts and takes, so the output is the same every run.</span></li>
+  </ul>
+  <div class="runner">
+    <script type="application/json">{
+ "lang": "java",
+ "file": "Main.java",
+ "tasks": [
+  {
+   "label": "1 · Chef and waiter",
+   "hint": "Press <b>Run</b>: put and take always alternate. Then remove both <code>notifyAll()</code> calls and run again: both threads wait forever (the runner will time out).",
+   "code": "class Counter {\n    private String dish;\n\n    synchronized void put(String d) throws InterruptedException {\n        while (dish != null) wait();\n        dish = d;\n        System.out.println(\"chef put \" + d);\n        notifyAll();\n    }\n\n    synchronized String take() throws InterruptedException {\n        while (dish == null) wait();\n        String d = dish;\n        dish = null;\n        System.out.println(\"waiter took \" + d);\n        notifyAll();\n        return d;\n    }\n}\n\npublic class Main {\n    public static void main(String[] args) throws InterruptedException {\n        Counter counter = new Counter();\n        Thread chef = new Thread(() -> {\n            try {\n                for (String d : new String[]{\"dosa\", \"idli\", \"vada\", \"upma\"}) counter.put(d);\n            } catch (InterruptedException e) { }\n        });\n        Thread waiter = new Thread(() -> {\n            try {\n                for (int i = 0; i < 4; i++) counter.take();\n            } catch (InterruptedException e) { }\n        });\n        chef.start();\n        waiter.start();\n        chef.join();\n        waiter.join();\n    }\n}\n"
+  },
+  {
+   "label": "2 · Predict: does wait() release the lock?",
+   "hint": "<b>Predict first:</b> the helper waits <i>inside</i> a synchronized block. Can main enter a block on the same lock while it waits?",
+   "code": "public class Main {\n    static final Object LOCK = new Object();\n\n    public static void main(String[] args) throws InterruptedException {\n        Thread helper = new Thread(() -> {\n            synchronized (LOCK) {\n                try { LOCK.wait(); } catch (InterruptedException e) { }\n                System.out.println(\"helper: woken up\");\n            }\n        });\n        helper.start();\n        while (helper.getState() != Thread.State.WAITING) Thread.onSpinWait();\n        synchronized (LOCK) {\n            System.out.println(\"main: I got the lock while helper waits\");\n            LOCK.notifyAll();\n        }\n        helper.join();\n    }\n}\n"
+  },
+  {
+   "label": "3 · Predict: a notify nobody heard",
+   "hint": "<b>Predict first:</b> main notifies <i>before</i> the helper waits. How long does the helper wait? Then fix it with a boolean flag checked in a while loop.",
+   "code": "public class Main {\n    static final Object LOCK = new Object();\n\n    public static void main(String[] args) throws InterruptedException {\n        synchronized (LOCK) {\n            LOCK.notifyAll();\n            System.out.println(\"main: signal sent\");\n        }\n        Thread helper = new Thread(() -> {\n            long t0 = System.currentTimeMillis();\n            synchronized (LOCK) {\n                try { LOCK.wait(1000); } catch (InterruptedException e) { }\n            }\n            System.out.println(\"helper waited about \" + (System.currentTimeMillis() - t0) / 100 * 100 + \" ms\");\n        });\n        helper.start();\n        helper.join();\n    }\n}\n"
+  },
+  {
+   "label": "4 · Crash: notify without the lock",
+   "hint": "<code>notifyAll()</code> must be called while holding the lock. Wrap it in <code>synchronized (LOCK) { … }</code>.",
+   "code": "public class Main {\n    static final Object LOCK = new Object();\n    static boolean ready = false;\n\n    public static void main(String[] args) {\n        ready = true;\n        LOCK.notifyAll();\n        System.out.println(\"signalled\");\n    }\n}\n",
+   "_expect": "exception"
+  },
+  {
+   "label": "5 · Spot the error",
+   "hint": "<code>wait()</code> throws the checked <code>InterruptedException</code>. Declare it with <code>throws</code> or catch it.",
+   "code": "public class Main {\n    static final Object LOCK = new Object();\n\n    public static void main(String[] args) {\n        synchronized (LOCK) {\n            LOCK.wait(100);\n        }\n        System.out.println(\"done waiting\");\n    }\n}\n",
+   "_expect": "compile-error"
+  }
+ ]
+}</script>
+  </div>
+</section>
+
+<!-- ======================= PART 8: LINE BY LINE ======================= -->
+<section class="part" id="tracer">
+  <span class="part-label"><b>8</b> Line by line</span>
+  <h2>main waits for the chef's dish</h2>
+  <p>Recorded from the real JVM, following <b>main</b>, which plays the waiter. Watch it enter <code>take()</code>, find nothing, and wait; when <code>wait()</code> returns, the dish set by the chef thread is in the shared object.</p>
+  <div class="tracer">
+    <script type="application/json">{"lang": "java", "code": ["class Counter {", "    private String dish;", "", "    synchronized void put(String d) {", "        dish = d;", "        notify();", "    }", "", "    synchronized String take() throws InterruptedException {", "        while (dish == null) {", "            wait();", "        }", "        String d = dish;", "        dish = null;", "        return d;", "    }", "}", "", "public class Main {", "    public static void main(String[] args) throws InterruptedException {", "        Counter counter = new Counter();", "        Thread chef = new Thread(() -> {", "            try { Thread.sleep(500); } catch (InterruptedException e) { return; }", "            counter.put(\"masala dosa\");", "        }, \"chef\");", "        chef.start();", "        String served = counter.take();", "        chef.join();", "        System.out.println(\"waiter (main) served \" + served);", "    }", "}"], "steps": [{"line": 21, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "new Counter()", "vars": [["this", "→ #1 Counter"]]}], "heap": ["<b>#1</b> Counter {dish=null}", "<b>#2</b> String[0] (args, empty)"], "newVar": "this", "phase": "Shared counter", "note": "One Counter object on the heap, <code>dish = null</code>. Its monitor will coordinate the two threads."}, {"line": 1, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}], "heap": ["<b>#2</b> String[0] (args, empty)"], "phase": "Return", "note": "<code>new Counter()</code> returns and its frame is popped."}, {"line": 21, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["counter", "→ #1 Counter"]]}], "heap": ["<b>#1</b> Counter {dish=null}", "<b>#2</b> String[0] (args, empty)"], "newVar": "counter", "phase": "Shared counter", "note": "One Counter object on the heap, <code>dish = null</code>. Its monitor will coordinate the two threads."}, {"line": 22, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["counter", "→ #1 Counter"], ["chef", "→ #3 Thread"]]}], "heap": ["<b>#1</b> Counter {dish=null}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Thread &quot;chef&quot; (NEW)"], "newVar": "chef", "phase": "The chef", "note": "A thread that cooks for half a second, then puts the dish. Now <code>chef</code> = → #3 Thread. New object <b>#3</b> on the heap: Thread &quot;chef&quot; (NEW)."}, {"line": 26, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["counter", "→ #1 Counter"], ["chef", "→ #3 Thread"]]}], "heap": ["<b>#1</b> Counter {dish=null}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Thread &quot;chef&quot; (RUNNABLE)"], "phase": "Start", "note": "The chef starts and goes to sleep (cooking)."}, {"line": 27, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["counter", "→ #1 Counter"], ["chef", "→ #3 Thread"]]}, {"frame": "Counter.take()", "vars": [["this", "→ #1 Counter"]]}], "heap": ["<b>#1</b> Counter {dish=null}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Thread &quot;chef&quot; (RUNNABLE)"], "newVar": "this", "phase": "Take", "note": "main (acting as the waiter) calls <code>take()</code> and takes the counter's lock. <code>Counter.take()</code> is called: a new frame is pushed with <code>this</code> = → #1 Counter."}, {"line": 10, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["counter", "→ #1 Counter"], ["chef", "→ #3 Thread"]]}, {"frame": "Counter.take()", "vars": [["this", "→ #1 Counter"]]}], "heap": ["<b>#1</b> Counter {dish=null}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Thread &quot;chef&quot; (RUNNABLE)"], "phase": "Check", "note": "The dish is still null: nothing to serve yet."}, {"line": 11, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["counter", "→ #1 Counter"], ["chef", "→ #3 Thread"]]}, {"frame": "Counter.take()", "vars": [["this", "→ #1 Counter"]]}], "heap": ["<b>#1</b> Counter {dish=&quot;masala dosa&quot;}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Thread &quot;chef&quot; (RUNNABLE)", "<b>#4</b> String &quot;masala dosa&quot;"], "phase": "wait()", "note": "main releases the lock and waits. The chef wakes after 500 ms, enters <code>put</code>, stores the dish and calls <code>notify()</code>. main re-acquires the lock and returns from <code>wait()</code>."}, {"line": 10, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["counter", "→ #1 Counter"], ["chef", "→ #3 Thread"]]}, {"frame": "Counter.take()", "vars": [["this", "→ #1 Counter"]]}], "heap": ["<b>#1</b> Counter {dish=&quot;masala dosa&quot;}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Thread &quot;chef&quot; (TERMINATED)", "<b>#4</b> String &quot;masala dosa&quot;"], "phase": "Check", "note": "The dish is still null: nothing to serve yet."}, {"line": 13, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["counter", "→ #1 Counter"], ["chef", "→ #3 Thread"]]}, {"frame": "Counter.take()", "vars": [["this", "→ #1 Counter"], ["d", "→ #4 \"masala dosa\""]]}], "heap": ["<b>#1</b> Counter {dish=&quot;masala dosa&quot;}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Thread &quot;chef&quot; (TERMINATED)", "<b>#4</b> String &quot;masala dosa&quot;"], "newVar": "d", "phase": "Take it", "note": "The loop checked again: the dish is there. Now <code>d</code> = → #4 &quot;masala dosa&quot;."}, {"line": 14, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["counter", "→ #1 Counter"], ["chef", "→ #3 Thread"]]}, {"frame": "Counter.take()", "vars": [["this", "→ #1 Counter"], ["d", "→ #4 \"masala dosa\""]]}], "heap": ["<b>#1</b> Counter {dish=null}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Thread &quot;chef&quot; (TERMINATED)", "<b>#4</b> String &quot;masala dosa&quot;"], "phase": "Clear", "note": "The counter is empty again, ready for the next dish. Object <b>#1</b> changes: Counter {dish=null}."}, {"line": 15, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["counter", "→ #1 Counter"], ["chef", "→ #3 Thread"]]}], "heap": ["<b>#1</b> Counter {dish=null}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Thread &quot;chef&quot; (TERMINATED)"], "phase": "Return", "note": "<code>Counter.take()</code> returns and its frame is popped."}, {"line": 27, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["counter", "→ #1 Counter"], ["chef", "→ #3 Thread"], ["served", "→ #4 \"masala dosa\""]]}], "heap": ["<b>#1</b> Counter {dish=null}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Thread &quot;chef&quot; (TERMINATED)", "<b>#4</b> String &quot;masala dosa&quot;"], "newVar": "served", "phase": "Take", "note": "main (acting as the waiter) calls <code>take()</code> and takes the counter's lock. Now <code>served</code> = → #4 &quot;masala dosa&quot;."}, {"line": 28, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["counter", "→ #1 Counter"], ["chef", "→ #3 Thread"], ["served", "→ #4 \"masala dosa\""]]}], "heap": ["<b>#1</b> Counter {dish=null}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Thread &quot;chef&quot; (TERMINATED)", "<b>#4</b> String &quot;masala dosa&quot;"], "phase": "Join", "note": "The chef thread has finished."}, {"line": 29, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["counter", "→ #1 Counter"], ["chef", "→ #3 Thread"], ["served", "→ #4 \"masala dosa\""]]}], "heap": ["<b>#1</b> Counter {dish=null}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Thread &quot;chef&quot; (TERMINATED)", "<b>#4</b> String &quot;masala dosa&quot;"], "out": "waiter (main) served masala dosa\n", "phase": "Served", "note": "main got the value the chef produced. Prints <code>waiter (main) served masala dosa</code>."}, {"line": 30, "phase": "Program ends", "note": "<code>main</code> returns, its frame is popped and the program ends.", "stack": [], "heap": []}]}</script>
+  </div>
+
+<h3 id="worked">Worked examples: real problems, solved and traced in memory</h3>
+  <p class="wx-intro">Three coordination problems from real apps: a one-slot hand-off, waiting for a confirmation, and a message queue. Notice that every <code>wait()</code> sits inside a <code>while</code> loop and a synchronized method.</p>
+  <article class="wx">
+    <div class="wx__head"><span class="wx__num">Example 1</span><span class="wx__tag">Restaurant · kitchen</span></div>
+    <h4>Chef and waiter with a one-dish counter</h4>
+    <div class="wx__problem"><p class="wx__label">Problem statement</p><p>A chef cooks 3 dishes and a waiter serves them through a counter that holds one dish. The chef must wait if the counter is full; the waiter must wait if it's empty. Print each put and take.</p></div>
+    <div class="prob__io"><div><small>Input</small><pre>dishes: dosa, idli, vada</pre></div><div><small>Expected output</small><pre>chef put dosa
+waiter took dosa
+chef put idli
+waiter took idli
+chef put vada
+waiter took vada
+all dishes served</pre></div></div>
+    <div class="wx__approach"><p class="wx__label">Approach</p><ol><li>A <code>Counter</code> class with synchronized <code>put</code> and <code>take</code>.</li><li><code>put</code> waits while full; <code>take</code> waits while empty. Each calls <code>notifyAll()</code> after changing the counter.</li><li>Print inside the synchronized methods so the order of lines is always put, take, put, take…</li></ol></div>
+    <p class="wx__label">Solution: run it live</p>
+    <div class="runner">
+    <script type="application/json">{"lang": "java", "file": "Main.java", "tasks": [{"label": "Run · Chef and waiter with a one-dish counter", "hint": "Press <b>Run</b>. Then change both <code>while</code> to <code>if</code>; with one chef and one waiter it still works, but add a second waiter thread and it can break. That's why the rule is “always wait in a loop”.", "code": "class Counter {\n    private String dish;\n\n    synchronized void put(String d) throws InterruptedException {\n        while (dish != null) wait();\n        dish = d;\n        System.out.println(\"chef put \" + d);\n        notifyAll();\n    }\n\n    synchronized String take() throws InterruptedException {\n        while (dish == null) wait();\n        String d = dish;\n        dish = null;\n        System.out.println(\"waiter took \" + d);\n        notifyAll();\n        return d;\n    }\n}\n\npublic class Main {\n    public static void main(String[] args) throws InterruptedException {\n        Counter counter = new Counter();\n        String[] menu = {\"dosa\", \"idli\", \"vada\"};\n        Thread chef = new Thread(() -> {\n            try {\n                for (String d : menu) counter.put(d);\n            } catch (InterruptedException e) { }\n        }, \"chef\");\n        Thread waiter = new Thread(() -> {\n            try {\n                for (int i = 0; i < menu.length; i++) counter.take();\n            } catch (InterruptedException e) { }\n        }, \"waiter\");\n        chef.start();\n        waiter.start();\n        chef.join();\n        waiter.join();\n        System.out.println(\"all dishes served\");\n    }\n}\n"}]}</script>
+    </div>
+    <p class="wx__label">What happens in memory, step by step</p>
+    <p class="wx__how">Recorded from the real JVM: press <b>Next</b> to execute one line at a time. Watch method calls push and pop frames on the stack, and objects (numbered #1, #2 …) appear on the heap.</p>
+    <div class="tracer">
+    <script type="application/json">{"lang": "java", "code": ["class Counter {", "    private String dish;", "", "    synchronized void put(String d) throws InterruptedException {", "        while (dish != null) wait();", "        dish = d;", "        System.out.println(\"chef put \" + d);", "        notifyAll();", "    }", "", "    synchronized String take() throws InterruptedException {", "        while (dish == null) wait();", "        String d = dish;", "        dish = null;", "        System.out.println(\"waiter took \" + d);", "        notifyAll();", "        return d;", "    }", "}", "", "public class Main {", "    public static void main(String[] args) throws InterruptedException {", "        Counter counter = new Counter();", "        String[] menu = {\"dosa\", \"idli\", \"vada\"};", "        Thread chef = new Thread(() -> {", "            try {", "                for (String d : menu) counter.put(d);", "            } catch (InterruptedException e) { }", "        }, \"chef\");", "        Thread waiter = new Thread(() -> {", "            try {", "                for (int i = 0; i < menu.length; i++) counter.take();", "            } catch (InterruptedException e) { }", "        }, \"waiter\");", "        chef.start();", "        waiter.start();", "        chef.join();", "        waiter.join();", "        System.out.println(\"all dishes served\");", "    }", "}"], "steps": [{"line": 23, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "new Counter()", "vars": [["this", "→ #1 Counter"]]}], "heap": ["<b>#1</b> Counter {dish=null}", "<b>#2</b> String[0] (args, empty)"], "newVar": "this", "phase": "Shared counter", "note": "One Counter object; both threads will use its monitor. <code>new Counter()</code> is called: a new frame is pushed with <code>this</code> = → #1 Counter. New object <b>#1</b> on the heap: Counter {dish=null}."}, {"line": 1, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}], "heap": ["<b>#2</b> String[0] (args, empty)"], "phase": "Return", "note": "<code>new Counter()</code> returns and its frame is popped."}, {"line": 23, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["counter", "→ #1 Counter"]]}], "heap": ["<b>#1</b> Counter {dish=null}", "<b>#2</b> String[0] (args, empty)"], "newVar": "counter", "phase": "Shared counter", "note": "One Counter object; both threads will use its monitor. Now <code>counter</code> = → #1 Counter."}, {"line": 24, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["counter", "→ #1 Counter"], ["menu", "→ #3 String[3]"]]}], "heap": ["<b>#1</b> Counter {dish=null}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> String[3] {&quot;dosa&quot;, &quot;idli&quot;, &quot;vada&quot;}", "<b>#4</b> String &quot;dosa&quot;", "<b>#5</b> String &quot;idli&quot;", "<b>#6</b> String &quot;vada&quot;"], "newVar": "menu", "phase": "Assign", "note": "Now <code>menu</code> = → #3 String[3]. New object <b>#3</b> on the heap: String[3] {&quot;dosa&quot;, &quot;idli&quot;, &quot;vada&quot;}. New object <b>#4</b> on the heap: String &quot;dosa&quot;. New object <b>#5</b> on the heap: String &quot;idli&quot;."}, {"line": 25, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["counter", "→ #1 Counter"], ["menu", "→ #3 String[3]"], ["chef", "→ #7 Thread"]]}], "heap": ["<b>#1</b> Counter {dish=null}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> String[3] {&quot;dosa&quot;, &quot;idli&quot;, &quot;vada&quot;}", "<b>#4</b> String &quot;dosa&quot;", "<b>#5</b> String &quot;idli&quot;", "<b>#6</b> String &quot;vada&quot;", "<b>#7</b> Thread &quot;chef&quot; (NEW)"], "newVar": "chef", "phase": "Chef", "note": "The producer thread: three <code>put</code> calls. Now <code>chef</code> = → #7 Thread. New object <b>#7</b> on the heap: Thread &quot;chef&quot; (NEW)."}, {"line": 30, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["counter", "→ #1 Counter"], ["menu", "→ #3 String[3]"], ["chef", "→ #7 Thread"], ["waiter", "→ #8 Thread"]]}], "heap": ["<b>#1</b> Counter {dish=null}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> String[3] {&quot;dosa&quot;, &quot;idli&quot;, &quot;vada&quot;}", "<b>#4</b> String &quot;dosa&quot;", "<b>#5</b> String &quot;idli&quot;", "<b>#6</b> String &quot;vada&quot;", "<b>#7</b> Thread &quot;chef&quot; (NEW)", "<b>#8</b> Thread &quot;waiter&quot; (NEW)"], "newVar": "waiter", "phase": "Waiter", "note": "The consumer thread: three <code>take</code> calls. Now <code>waiter</code> = → #8 Thread. New object <b>#8</b> on the heap: Thread &quot;waiter&quot; (NEW)."}, {"line": 35, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["counter", "→ #1 Counter"], ["menu", "→ #3 String[3]"], ["chef", "→ #7 Thread"], ["waiter", "→ #8 Thread"]]}], "heap": ["<b>#1</b> Counter {dish=null}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> String[3] {&quot;dosa&quot;, &quot;idli&quot;, &quot;vada&quot;}", "<b>#4</b> String &quot;dosa&quot;", "<b>#5</b> String &quot;idli&quot;", "<b>#6</b> String &quot;vada&quot;", "<b>#7</b> Thread &quot;chef&quot; (RUNNABLE)", "<b>#8</b> Thread &quot;waiter&quot; (NEW)"], "phase": "Start chef", "note": "The chef puts dosa. Its next put finds the counter full and waits."}, {"line": 36, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["counter", "→ #1 Counter"], ["menu", "→ #3 String[3]"], ["chef", "→ #7 Thread"], ["waiter", "→ #8 Thread"]]}], "heap": ["<b>#1</b> Counter {dish=&quot;dosa&quot;}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> String[3] {&quot;dosa&quot;, &quot;idli&quot;, &quot;vada&quot;}", "<b>#4</b> String &quot;dosa&quot;", "<b>#5</b> String &quot;idli&quot;", "<b>#6</b> String &quot;vada&quot;", "<b>#7</b> Thread &quot;chef&quot; (RUNNABLE)", "<b>#8</b> Thread &quot;waiter&quot; (BLOCKED)"], "phase": "Start waiter", "note": "The waiter takes dosa and notifies the chef, and so on: put and take strictly alternate."}, {"line": 37, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["counter", "→ #1 Counter"], ["menu", "→ #3 String[3]"], ["chef", "→ #7 Thread"], ["waiter", "→ #8 Thread"]]}], "heap": ["<b>#1</b> Counter {dish=null}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> String[3] {&quot;dosa&quot;, &quot;idli&quot;, &quot;vada&quot;}", "<b>#4</b> String &quot;dosa&quot;", "<b>#5</b> String &quot;idli&quot;", "<b>#6</b> String &quot;vada&quot;", "<b>#7</b> Thread &quot;chef&quot; (TERMINATED)", "<b>#8</b> Thread &quot;waiter&quot; (RUNNABLE)"], "out": "chef put dosa\nwaiter took dosa\nchef put idli\nwaiter took idli\nchef put vada\n", "phase": "Update", "note": "Object <b>#1</b> changes: Counter {dish=null}. Object <b>#7</b> changes: Thread &quot;chef&quot; (TERMINATED). Prints <code>chef put dosa ⏎ waiter took dosa ⏎ chef put idli ⏎ waiter took idli ⏎ chef put vada</code>."}, {"line": 38, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["counter", "→ #1 Counter"], ["menu", "→ #3 String[3]"], ["chef", "→ #7 Thread"], ["waiter", "→ #8 Thread"]]}], "heap": ["<b>#1</b> Counter {dish=null}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> String[3] {&quot;dosa&quot;, &quot;idli&quot;, &quot;vada&quot;}", "<b>#4</b> String &quot;dosa&quot;", "<b>#5</b> String &quot;idli&quot;", "<b>#6</b> String &quot;vada&quot;", "<b>#7</b> Thread &quot;chef&quot; (TERMINATED)", "<b>#8</b> Thread &quot;waiter&quot; (TERMINATED)"], "out": "waiter took vada\n", "phase": "Both done", "note": "Three puts and three takes have happened."}, {"line": 39, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["counter", "→ #1 Counter"], ["menu", "→ #3 String[3]"], ["chef", "→ #7 Thread"], ["waiter", "→ #8 Thread"]]}], "heap": ["<b>#1</b> Counter {dish=null}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> String[3] {&quot;dosa&quot;, &quot;idli&quot;, &quot;vada&quot;}", "<b>#4</b> String &quot;dosa&quot;", "<b>#5</b> String &quot;idli&quot;", "<b>#6</b> String &quot;vada&quot;", "<b>#7</b> Thread &quot;chef&quot; (TERMINATED)", "<b>#8</b> Thread &quot;waiter&quot; (TERMINATED)"], "out": "all dishes served\n", "phase": "Finish", "note": "Same six lines, same order, every run. Prints <code>all dishes served</code>."}, {"line": 40, "phase": "Program ends", "note": "<code>main</code> returns, its frame is popped and the program ends.", "stack": [], "heap": []}]}</script>
+  </div>
+  </article>
+  <article class="wx">
+    <div class="wx__head"><span class="wx__num">Example 2</span><span class="wx__tag">Payments · confirmation</span></div>
+    <h4>Wait until the gateway confirms</h4>
+    <div class="wx__problem"><p class="wx__label">Problem statement</p><p>After a customer pays, the order thread must not ship until the payment gateway confirms. The gateway runs on its own thread and confirms after a short delay. Use a lock object, a flag, <code>wait()</code> and <code>notifyAll()</code>.</p></div>
+    <div class="prob__io"><div><small>Input</small><pre>payment id PAY-551; gateway answers after 100 ms</pre></div><div><small>Expected output</small><pre>order: waiting for payment
+gateway: PAY-551 confirmed
+order: shipping now</pre></div></div>
+    <div class="wx__approach"><p class="wx__label">Approach</p><ol><li>A small <code>Payment</code> class with a <code>confirmed</code> flag.</li><li><code>awaitConfirmation()</code> waits in a loop while the flag is false.</li><li><code>confirm()</code> sets the flag and calls <code>notifyAll()</code>.</li></ol></div>
+    <p class="wx__label">Solution: run it live</p>
+    <div class="runner">
+    <script type="application/json">{"lang": "java", "file": "Main.java", "tasks": [{"label": "Run · Wait until the gateway confirms", "hint": "Press <b>Run</b>. Then change <code>wait()</code> to <code>wait(50)</code>: the loop wakes every 50 ms, re-checks, and keeps waiting, so the result is the same. Timed waits are useful as a safety net.", "code": "class Payment {\n    private boolean confirmed = false;\n\n    synchronized void confirm() {\n        confirmed = true;\n        notifyAll();\n    }\n\n    synchronized void awaitConfirmation() throws InterruptedException {\n        while (!confirmed) {\n            wait();\n        }\n    }\n}\n\npublic class Main {\n    public static void main(String[] args) throws InterruptedException {\n        Payment pay = new Payment();\n        Thread gateway = new Thread(() -> {\n            try { Thread.sleep(100); } catch (InterruptedException e) { return; }\n            System.out.println(\"gateway: PAY-551 confirmed\");\n            pay.confirm();\n        }, \"gateway\");\n        gateway.start();\n        System.out.println(\"order: waiting for payment\");\n        pay.awaitConfirmation();\n        System.out.println(\"order: shipping now\");\n        gateway.join();\n    }\n}\n"}]}</script>
+    </div>
+    <p class="wx__label">What happens in memory, step by step</p>
+    <p class="wx__how">Recorded from the real JVM: press <b>Next</b> to execute one line at a time. Watch method calls push and pop frames on the stack, and objects (numbered #1, #2 …) appear on the heap.</p>
+    <div class="tracer">
+    <script type="application/json">{"lang": "java", "code": ["class Payment {", "    private boolean confirmed = false;", "", "    synchronized void confirm() {", "        confirmed = true;", "        notifyAll();", "    }", "", "    synchronized void awaitConfirmation() throws InterruptedException {", "        while (!confirmed) {", "            wait();", "        }", "    }", "}", "", "public class Main {", "    public static void main(String[] args) throws InterruptedException {", "        Payment pay = new Payment();", "        Thread gateway = new Thread(() -> {", "            try { Thread.sleep(100); } catch (InterruptedException e) { return; }", "            System.out.println(\"gateway: PAY-551 confirmed\");", "            pay.confirm();", "        }, \"gateway\");", "        gateway.start();", "        System.out.println(\"order: waiting for payment\");", "        pay.awaitConfirmation();", "        System.out.println(\"order: shipping now\");", "        gateway.join();", "    }", "}"], "steps": [{"line": 18, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "new Payment()", "vars": [["this", "→ #1 Payment"]]}], "heap": ["<b>#1</b> Payment {confirmed=false}", "<b>#2</b> String[0] (args, empty)"], "newVar": "this", "phase": "Payment object", "note": "<code>confirmed</code> starts false. <code>new Payment()</code> is called: a new frame is pushed with <code>this</code> = → #1 Payment. New object <b>#1</b> on the heap: Payment {confirmed=false}."}, {"line": 1, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}, {"frame": "new Payment()", "vars": [["this", "→ #1 Payment"]]}], "heap": ["<b>#1</b> Payment {confirmed=false}", "<b>#2</b> String[0] (args, empty)"], "phase": "Step", "note": "This line runs; nothing visible changes."}, {"line": 2, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"]]}], "heap": ["<b>#2</b> String[0] (args, empty)"], "phase": "Return", "note": "<code>new Payment()</code> returns and its frame is popped."}, {"line": 18, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["pay", "→ #1 Payment"]]}], "heap": ["<b>#1</b> Payment {confirmed=false}", "<b>#2</b> String[0] (args, empty)"], "newVar": "pay", "phase": "Payment object", "note": "<code>confirmed</code> starts false. Now <code>pay</code> = → #1 Payment."}, {"line": 19, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["pay", "→ #1 Payment"], ["gateway", "→ #3 Thread"]]}], "heap": ["<b>#1</b> Payment {confirmed=false}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Thread &quot;gateway&quot; (NEW)"], "newVar": "gateway", "phase": "Gateway", "note": "A thread that answers after 100 ms. Now <code>gateway</code> = → #3 Thread. New object <b>#3</b> on the heap: Thread &quot;gateway&quot; (NEW)."}, {"line": 24, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["pay", "→ #1 Payment"], ["gateway", "→ #3 Thread"]]}], "heap": ["<b>#1</b> Payment {confirmed=false}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Thread &quot;gateway&quot; (TIMED_WAITING (sleeping))"], "phase": "Start", "note": "The gateway is busy (sleeping) for now."}, {"line": 25, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["pay", "→ #1 Payment"], ["gateway", "→ #3 Thread"]]}], "heap": ["<b>#1</b> Payment {confirmed=false}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Thread &quot;gateway&quot; (TIMED_WAITING (sleeping))"], "out": "order: waiting for payment\n", "phase": "Message", "note": "main announces it's waiting. Prints <code>order: waiting for payment</code>."}, {"line": 26, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["pay", "→ #1 Payment"], ["gateway", "→ #3 Thread"]]}, {"frame": "Payment.awaitConfirmation()", "vars": [["this", "→ #1 Payment"]]}], "heap": ["<b>#1</b> Payment {confirmed=false}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Thread &quot;gateway&quot; (TIMED_WAITING (sleeping))"], "newVar": "this", "phase": "Wait", "note": "main waits inside <code>awaitConfirmation()</code>, releasing the lock. The gateway confirms and notifies; main re-checks the flag and returns."}, {"line": 10, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["pay", "→ #1 Payment"], ["gateway", "→ #3 Thread"]]}, {"frame": "Payment.awaitConfirmation()", "vars": [["this", "→ #1 Payment"]]}], "heap": ["<b>#1</b> Payment {confirmed=false}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Thread &quot;gateway&quot; (TIMED_WAITING (sleeping))"], "phase": "Check", "note": "The condition <code>!confirmed</code> is checked: <b>true</b>, so the block runs."}, {"line": 11, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["pay", "→ #1 Payment"], ["gateway", "→ #3 Thread"]]}, {"frame": "Payment.awaitConfirmation()", "vars": [["this", "→ #1 Payment"]]}], "heap": ["<b>#1</b> Payment {confirmed=true}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Thread &quot;gateway&quot; (RUNNABLE)"], "out": "gateway: PAY-551 confirmed\n", "phase": "Update", "note": "Object <b>#1</b> changes: Payment {confirmed=true}. Object <b>#3</b> changes: Thread &quot;gateway&quot; (RUNNABLE). Prints <code>gateway: PAY-551 confirmed</code>."}, {"line": 10, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["pay", "→ #1 Payment"], ["gateway", "→ #3 Thread"]]}, {"frame": "Payment.awaitConfirmation()", "vars": [["this", "→ #1 Payment"]]}], "heap": ["<b>#1</b> Payment {confirmed=true}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Thread &quot;gateway&quot; (RUNNABLE)"], "phase": "Check", "note": "The condition <code>!confirmed</code> is checked: <b>false</b>, so the loop ends."}, {"line": 13, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["pay", "→ #1 Payment"], ["gateway", "→ #3 Thread"]]}], "heap": ["<b>#1</b> Payment {confirmed=true}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Thread &quot;gateway&quot; (TERMINATED)"], "phase": "Return", "note": "<code>Payment.awaitConfirmation()</code> returns and its frame is popped. Object <b>#3</b> changes: Thread &quot;gateway&quot; (TERMINATED)."}, {"line": 27, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["pay", "→ #1 Payment"], ["gateway", "→ #3 Thread"]]}], "heap": ["<b>#1</b> Payment {confirmed=true}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Thread &quot;gateway&quot; (TERMINATED)"], "out": "order: shipping now\n", "phase": "Ship", "note": "This line can only run after the confirmation. Prints <code>order: shipping now</code>."}, {"line": 28, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["pay", "→ #1 Payment"], ["gateway", "→ #3 Thread"]]}], "heap": ["<b>#1</b> Payment {confirmed=true}", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Thread &quot;gateway&quot; (TERMINATED)"], "phase": "Tidy up", "note": "Wait for the gateway thread to end."}, {"line": 29, "phase": "Program ends", "note": "<code>main</code> returns, its frame is popped and the program ends.", "stack": [], "heap": []}]}</script>
+  </div>
+  </article>
+  <article class="wx">
+    <div class="wx__head"><span class="wx__num">Example 3</span><span class="wx__tag">Messaging · SMS</span></div>
+    <h4>An SMS dispatcher with a BlockingQueue</h4>
+    <div class="wx__problem"><p class="wx__label">Problem statement</p><p>A notification service queues SMS messages; a dispatcher thread sends them one by one. To shut down, the producer puts a special <b>STOP</b> message (a “poison pill”). Use <code>ArrayBlockingQueue</code> instead of writing wait/notify yourself.</p></div>
+    <div class="prob__io"><div><small>Input</small><pre>messages: OTP 4821, Order shipped, Refund done, then STOP</pre></div><div><small>Expected output</small><pre>sent: OTP 4821
+sent: Order shipped
+sent: Refund done
+dispatcher stopped</pre></div></div>
+    <div class="wx__approach"><p class="wx__label">Approach</p><ol><li>Create an <code>ArrayBlockingQueue&lt;String&gt;</code> with capacity 2.</li><li>The dispatcher loops on <code>take()</code> and stops when it receives STOP.</li><li>main <code>put</code>s the messages and then STOP, and joins the dispatcher.</li></ol></div>
+    <p class="wx__label">Solution: run it live</p>
+    <div class="runner">
+    <script type="application/json">{"lang": "java", "file": "Main.java", "tasks": [{"label": "Run · An SMS dispatcher with a BlockingQueue", "hint": "Press <b>Run</b>. Then add five more messages before STOP: with capacity 2, main regularly waits inside <code>put</code>, yet nothing is lost and the order is kept.", "code": "import java.util.concurrent.*;\n\npublic class Main {\n    public static void main(String[] args) throws InterruptedException {\n        BlockingQueue<String> outbox = new ArrayBlockingQueue<>(2);\n        Thread dispatcher = new Thread(() -> {\n            try {\n                while (true) {\n                    String sms = outbox.take();\n                    if (sms.equals(\"STOP\")) break;\n                    System.out.println(\"sent: \" + sms);\n                }\n            } catch (InterruptedException e) { }\n            System.out.println(\"dispatcher stopped\");\n        }, \"dispatcher\");\n        dispatcher.start();\n        outbox.put(\"OTP 4821\");\n        outbox.put(\"Order shipped\");\n        outbox.put(\"Refund done\");\n        outbox.put(\"STOP\");\n        dispatcher.join();\n    }\n}\n"}]}</script>
+    </div>
+    <p class="wx__label">What happens in memory, step by step</p>
+    <p class="wx__how">Recorded from the real JVM: press <b>Next</b> to execute one line at a time. Watch method calls push and pop frames on the stack, and objects (numbered #1, #2 …) appear on the heap.</p>
+    <div class="tracer">
+    <script type="application/json">{"lang": "java", "code": ["import java.util.concurrent.*;", "", "public class Main {", "    public static void main(String[] args) throws InterruptedException {", "        BlockingQueue<String> outbox = new ArrayBlockingQueue<>(2);", "        Thread dispatcher = new Thread(() -> {", "            try {", "                while (true) {", "                    String sms = outbox.take();", "                    if (sms.equals(\"STOP\")) break;", "                    System.out.println(\"sent: \" + sms);", "                }", "            } catch (InterruptedException e) { }", "            System.out.println(\"dispatcher stopped\");", "        }, \"dispatcher\");", "        dispatcher.start();", "        outbox.put(\"OTP 4821\");", "        outbox.put(\"Order shipped\");", "        outbox.put(\"Refund done\");", "        outbox.put(\"STOP\");", "        dispatcher.join();", "    }", "}"], "steps": [{"line": 5, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["outbox", "→ #1 ArrayBlockingQueue"]]}], "heap": ["<b>#1</b> ArrayBlockingQueue", "<b>#2</b> String[0] (args, empty)"], "newVar": "outbox", "phase": "Queue", "note": "An ArrayBlockingQueue with room for 2 messages. It has its own internal lock and two conditions (not empty, not full)."}, {"line": 6, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["outbox", "→ #1 ArrayBlockingQueue"], ["dispatcher", "→ #3 Thread"]]}], "heap": ["<b>#1</b> ArrayBlockingQueue", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Thread &quot;dispatcher&quot; (NEW)"], "newVar": "dispatcher", "phase": "Dispatcher", "note": "The consumer thread. Now <code>dispatcher</code> = → #3 Thread. New object <b>#3</b> on the heap: Thread &quot;dispatcher&quot; (NEW)."}, {"line": 16, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["outbox", "→ #1 ArrayBlockingQueue"], ["dispatcher", "→ #3 Thread"]]}], "heap": ["<b>#1</b> ArrayBlockingQueue", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Thread &quot;dispatcher&quot; (RUNNABLE)"], "phase": "Start", "note": "The dispatcher calls <code>take()</code> on an empty queue and waits."}, {"line": 17, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["outbox", "→ #1 ArrayBlockingQueue"], ["dispatcher", "→ #3 Thread"]]}], "heap": ["<b>#1</b> ArrayBlockingQueue", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Thread &quot;dispatcher&quot; (RUNNABLE)"], "phase": "Put 1", "note": "The OTP goes in; the dispatcher wakes and sends it."}, {"line": 18, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["outbox", "→ #1 ArrayBlockingQueue"], ["dispatcher", "→ #3 Thread"]]}], "heap": ["<b>#1</b> ArrayBlockingQueue", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Thread &quot;dispatcher&quot; (RUNNABLE)"], "phase": "Step", "note": "This line runs; nothing visible changes."}, {"line": 19, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["outbox", "→ #1 ArrayBlockingQueue"], ["dispatcher", "→ #3 Thread"]]}], "heap": ["<b>#1</b> ArrayBlockingQueue", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Thread &quot;dispatcher&quot; (RUNNABLE)"], "phase": "Put 3", "note": "If the queue is full at this moment, <code>put</code> makes main wait until there's room."}, {"line": 20, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["outbox", "→ #1 ArrayBlockingQueue"], ["dispatcher", "→ #3 Thread"]]}], "heap": ["<b>#1</b> ArrayBlockingQueue", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Thread &quot;dispatcher&quot; (RUNNABLE)"], "out": "sent: OTP 4821\nsent: Order shipped\nsent: Refund done\n", "phase": "Poison pill", "note": "STOP tells the dispatcher to leave its loop."}, {"line": 21, "stack": [{"frame": "main(String[] args)", "vars": [["args", "→ String[0]"], ["outbox", "→ #1 ArrayBlockingQueue"], ["dispatcher", "→ #3 Thread"]]}], "heap": ["<b>#1</b> ArrayBlockingQueue", "<b>#2</b> String[0] (args, empty)", "<b>#3</b> Thread &quot;dispatcher&quot; (TERMINATED)"], "out": "dispatcher stopped\n", "phase": "Join", "note": "All three messages are sent and the dispatcher has stopped."}, {"line": 22, "phase": "Program ends", "note": "<code>main</code> returns, its frame is popped and the program ends.", "stack": [], "heap": []}]}</script>
+  </div>
+  </article>
+
+</section>
+
+<!-- ======================= PART 9: QUIZ AND REVISION ======================= -->
+<section class="part" id="quiz">
+  <span class="part-label"><b>9</b> Quiz and revision</span>
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <script type="application/json">[
+ {
+  "q": "wait(), notify() and notifyAll() are methods of…",
+  "options": [
+   "Thread",
+   "Object",
+   "Runnable",
+   "System"
+  ],
+  "answer": 1,
+  "why": "Every object has a monitor, so the methods are in Object."
+ },
+ {
+  "q": "What happens to the lock when a thread calls wait()?",
+  "options": [
+   "It keeps it",
+   "It releases it, and re-acquires it before wait() returns",
+   "It's destroyed",
+   "It passes to main"
+  ],
+  "answer": 1,
+  "why": "That's the key difference from sleep(), which keeps any locks."
+ },
+ {
+  "q": "Calling notify() without holding the object's lock throws…",
+  "options": [
+   "InterruptedException",
+   "IllegalMonitorStateException",
+   "NullPointerException",
+   "Nothing"
+  ],
+  "answer": 1,
+  "why": "The calling thread must own the monitor."
+ },
+ {
+  "q": "Why must wait() be called in a while loop?",
+  "options": [
+   "Style only",
+   "The thread may wake when the condition is still false (spurious wakeup or another thread got there first)",
+   "It's faster",
+   "Java requires it at compile time"
+  ],
+  "answer": 1,
+  "why": "Always re-check the condition after waking."
+ },
+ {
+  "q": "notify() vs notifyAll()?",
+  "options": [
+   "Same thing",
+   "notify wakes one waiting thread; notifyAll wakes all of them",
+   "notifyAll is deprecated",
+   "notify wakes all"
+  ],
+  "answer": 1,
+  "why": "With several waiters for different conditions, notifyAll is safer."
+ },
+ {
+  "q": "After notify(), when does the woken thread continue?",
+  "options": [
+   "Immediately",
+   "After the notifying thread releases the lock and the woken thread re-acquires it",
+   "Never",
+   "After 1 second"
+  ],
+  "answer": 1,
+  "why": "It moves to the entry set and must win the lock first."
+ },
+ {
+  "q": "A thread inside wait() (no timeout) is in state…",
+  "options": [
+   "BLOCKED",
+   "WAITING",
+   "TIMED_WAITING",
+   "RUNNABLE"
+  ],
+  "answer": 1,
+  "why": "Untimed wait = WAITING; wait(ms) = TIMED_WAITING."
+ },
+ {
+  "q": "Which class gives producer–consumer without writing wait/notify?",
+  "options": [
+   "ArrayList",
+   "ArrayBlockingQueue",
+   "HashMap",
+   "StringBuilder"
+  ],
+  "answer": 1,
+  "why": "put() waits when full and take() waits when empty."
+ }
+]</script>
+  </div>
+  <h3>Quick revision</h3>
+  <div class="revision">
+    <h3>Lesson 12.5 in one screen</h3>
+    <ul>
+      <li><code>wait</code>/<code>notify</code>/<code>notifyAll</code> are <code>Object</code> methods; call them while holding that object's lock.</li>
+      <li>Otherwise: <code>IllegalMonitorStateException: current thread is not owner</code>.</li>
+      <li><code>wait()</code> releases the lock, waits in the wait set, and re-acquires the lock before returning.</li>
+      <li>Always <code>while (!condition) wait();</code>: never <code>if</code>.</li>
+      <li>Signal with a shared condition variable, then <code>notifyAll()</code>; a bare notify can be lost.</li>
+      <li><code>wait()</code> → WAITING; <code>wait(ms)</code> → TIMED_WAITING; both throw <code>InterruptedException</code>.</li>
+      <li>In real code prefer <code>BlockingQueue</code>, <code>CountDownLatch</code> and friends.</li>
+    </ul>
+  </div>
+  <h3>Interview and viva questions</h3>
+  <div class="faq">
+    <details><summary>Why are wait() and notify() in Object and not in Thread?</summary><p>Because threads wait on a condition associated with a <b>lock</b>, and every object can be a lock (monitor). The method is called on the object whose monitor you hold, not on a thread.</p></details>
+    <details><summary>Why must wait() be called from a synchronized context?</summary><p>The check of the condition and the decision to wait must be atomic with respect to the thread that changes it; otherwise a notify could slip in between and be lost. Requiring the lock enforces this, and the JVM throws <code>IllegalMonitorStateException</code> if you don't hold it.</p></details>
+    <details><summary>Why use while instead of if around wait()?</summary><p>After waking, the condition may no longer be true: another thread may have consumed the item, notifyAll may have woken threads waiting for different conditions, or a spurious wakeup may occur. The loop re-checks before acting.</p></details>
+    <details><summary>Difference between notify() and notifyAll()?</summary><p><code>notify()</code> wakes one arbitrary thread from the wait set; <code>notifyAll()</code> wakes them all, and each competes for the lock and re-checks. notify is a small optimisation that is only safe when all waiters wait for the same condition and any one of them can handle it.</p></details>
+    <details><summary>How would you implement producer–consumer?</summary><p>With a bounded buffer whose <code>put</code> waits while full and <code>take</code> waits while empty, both synchronized, each calling <code>notifyAll()</code> after changing the buffer. In production, use <code>ArrayBlockingQueue</code> or <code>LinkedBlockingQueue</code>, which provide exactly this.</p></details>
+  </div>
+
+  <h3 id="practice">Practice problems</h3>
+  <p class="prob-intro">Coordinate threads with <code>wait</code>/<code>notifyAll</code>, then with the ready-made tools in <code>java.util.concurrent</code>. Outputs are fixed because every print happens in a guaranteed order. The last three are business tasks.</p>
+  <div class="probs">
+    <article class="prob"><div class="prob__head"><span class="prob__num">P1</span><span class="prob__tag prob__tag--easy">Easy</span><h4>wait() outside synchronized</h4></div>
+      <p>Call <code>wait()</code> on an object without holding its lock, catch the exception and print it.</p>
+      <div class="prob__io"><div><small>Input</small><pre>(none)</pre></div><div><small>Expected output</small><pre>error: current thread is not owner</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="java" data-file="Main.java"><pre><code>public class Main {
+    public static void main(String[] args) throws InterruptedException {
+        Object lock = new Object();
+        try {
+            lock.wait();
+        } catch (IllegalMonitorStateException e) {
+            System.out.println(&quot;error: &quot; + e.getMessage());
+        }
+    }
+}</code></pre><div class="output">error: current thread is not owner</div></div>
+        <p><b>How it works:</b> <code>wait</code>, <code>notify</code> and <code>notifyAll</code> must be called by the thread that owns the object's monitor, i.e. inside <code>synchronized (lock)</code>. Otherwise the JVM throws <code>IllegalMonitorStateException</code>.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P2</span><span class="prob__tag prob__tag--easy">Easy</span><h4>Wake a waiting thread</h4></div>
+      <p>A thread waits until <code>ready</code> becomes true. main sets it and calls <code>notifyAll()</code>. The thread then prints <code>got the signal</code>.</p>
+      <div class="prob__io"><div><small>Input</small><pre>(none)</pre></div><div><small>Expected output</small><pre>got the signal</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="java" data-file="Main.java"><pre><code>public class Main {
+    static boolean ready = false;
+    static final Object LOCK = new Object();
+
+    public static void main(String[] args) throws InterruptedException {
+        Thread t = new Thread(() -&gt; {
+            synchronized (LOCK) {
+                while (!ready) {
+                    try { LOCK.wait(); } catch (InterruptedException e) { return; }
+                }
+                System.out.println(&quot;got the signal&quot;);
+            }
+        });
+        t.start();
+        synchronized (LOCK) {
+            ready = true;
+            LOCK.notifyAll();
+        }
+        t.join();
+    }
+}</code></pre><div class="output">got the signal</div></div>
+        <p><b>How it works:</b> the flag makes it safe even if main signals <i>before</i> the thread starts waiting: the thread checks <code>ready</code> first and doesn't wait at all. A notify with no flag would be lost.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P3</span><span class="prob__tag prob__tag--easy">Easy</span><h4>A bounded queue refuses extras</h4></div>
+      <p>Create an <code>ArrayBlockingQueue</code> of capacity 2, <code>offer</code> three items, and print the results and the queue.</p>
+      <div class="prob__io"><div><small>Input</small><pre>a, b, c</pre></div><div><small>Expected output</small><pre>true true false
+[a, b]</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="java" data-file="Main.java"><pre><code>import java.util.concurrent.ArrayBlockingQueue;
+
+public class Main {
+    public static void main(String[] args) {
+        ArrayBlockingQueue&lt;String&gt; q = new ArrayBlockingQueue&lt;&gt;(2);
+        System.out.println(q.offer(&quot;a&quot;) + &quot; &quot; + q.offer(&quot;b&quot;) + &quot; &quot; + q.offer(&quot;c&quot;));
+        System.out.println(q);
+    }
+}</code></pre><div class="output">true true false
+[a, b]</div></div>
+        <p><b>How it works:</b> <code>offer</code> returns false at once when full; <code>put</code> would wait instead; <code>add</code> would throw. Pick the method that matches what should happen when the system is overloaded.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P4</span><span class="prob__tag prob__tag--medium">Medium</span><h4>Ping-pong in turns</h4></div>
+      <p>Two threads print <code>ping</code> and <code>pong</code> alternately, 3 times each, starting with ping. Use a shared turn flag with wait/notifyAll.</p>
+      <div class="prob__io"><div><small>Input</small><pre>(none)</pre></div><div><small>Expected output</small><pre>ping
+pong
+ping
+pong
+ping
+pong</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="java" data-file="Main.java"><pre><code>public class Main {
+    static boolean pingTurn = true;
+    static final Object LOCK = new Object();
+
+    static void play(String word, boolean mine, int times) {
+        for (int i = 0; i &lt; times; i++) {
+            synchronized (LOCK) {
+                while (pingTurn != mine) {
+                    try { LOCK.wait(); } catch (InterruptedException e) { return; }
+                }
+                System.out.println(word);
+                pingTurn = !pingTurn;
+                LOCK.notifyAll();
+            }
+        }
+    }
+
+    public static void main(String[] args) throws InterruptedException {
+        Thread ping = new Thread(() -&gt; play(&quot;ping&quot;, true, 3));
+        Thread pong = new Thread(() -&gt; play(&quot;pong&quot;, false, 3));
+        pong.start();
+        ping.start();
+        ping.join();
+        pong.join();
+    }
+}</code></pre><div class="output">ping
+pong
+ping
+pong
+ping
+pong</div></div>
+        <p><b>How it works:</b> each thread waits until it's its turn, prints, flips the flag and wakes the other. Even though pong starts first, it waits for ping.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P5</span><span class="prob__tag prob__tag--medium">Medium</span><h4>notifyAll wakes everyone</h4></div>
+      <p>Three threads wait for a <code>gateOpen</code> flag. main opens the gate with one <code>notifyAll()</code>. Count how many threads passed.</p>
+      <div class="prob__io"><div><small>Input</small><pre>3 waiting threads</pre></div><div><small>Expected output</small><pre>fans through the gate: 3</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="java" data-file="Main.java"><pre><code>import java.util.concurrent.atomic.AtomicInteger;
+
+public class Main {
+    static boolean gateOpen = false;
+    static final Object GATE = new Object();
+
+    public static void main(String[] args) throws InterruptedException {
+        AtomicInteger passed = new AtomicInteger();
+        Thread[] fans = new Thread[3];
+        for (int i = 0; i &lt; 3; i++) {
+            fans[i] = new Thread(() -&gt; {
+                synchronized (GATE) {
+                    while (!gateOpen) {
+                        try { GATE.wait(); } catch (InterruptedException e) { return; }
+                    }
+                }
+                passed.incrementAndGet();
+            });
+            fans[i].start();
+        }
+        synchronized (GATE) {
+            gateOpen = true;
+            GATE.notifyAll();
+        }
+        for (Thread f : fans) f.join();
+        System.out.println(&quot;fans through the gate: &quot; + passed.get());
+    }
+}</code></pre><div class="output">fans through the gate: 3</div></div>
+        <p><b>How it works:</b> <code>notify()</code> wakes only one waiting thread; <code>notifyAll()</code> wakes all, and each re-checks the condition. When several threads may be waiting, notifyAll is the safe default.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P6</span><span class="prob__tag prob__tag--medium">Medium</span><h4>Wait for three services with CountDownLatch</h4></div>
+      <p>An app starts only when the database, cache and payment services are ready. Each starts on its own thread and counts down a latch. main waits on the latch.</p>
+      <div class="prob__io"><div><small>Input</small><pre>3 services</pre></div><div><small>Expected output</small><pre>all 3 services ready, latch = 0</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="java" data-file="Main.java"><pre><code>import java.util.concurrent.CountDownLatch;
+
+public class Main {
+    public static void main(String[] args) throws InterruptedException {
+        String[] services = {&quot;database&quot;, &quot;cache&quot;, &quot;payments&quot;};
+        CountDownLatch ready = new CountDownLatch(services.length);
+        for (String s : services) {
+            new Thread(() -&gt; ready.countDown(), s).start();
+        }
+        ready.await();
+        System.out.println(&quot;all &quot; + services.length + &quot; services ready, latch = &quot; + ready.getCount());
+    }
+}</code></pre><div class="output">all 3 services ready, latch = 0</div></div>
+        <p><b>How it works:</b> <code>await()</code> waits until the count reaches 0. It's a ready-made “wait until N things have happened”, built on the same waiting machinery as wait/notify.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P7</span><span class="prob__tag prob__tag--business">Business problem</span><h4>Odd and even invoice numbers</h4></div>
+      <p>Two printers share the invoice numbers 1–10: one prints odd numbers, the other even, strictly in order. Use wait/notifyAll on a shared counter.</p>
+      <div class="prob__io"><div><small>Input</small><pre>1..10</pre></div><div><small>Expected output</small><pre>printer-A: INV-1
+printer-B: INV-2
+printer-A: INV-3
+printer-B: INV-4
+printer-A: INV-5
+printer-B: INV-6
+printer-A: INV-7
+printer-B: INV-8
+printer-A: INV-9
+printer-B: INV-10</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="java" data-file="Main.java"><pre><code>public class Main {
+    static int next = 1;
+    static final Object LOCK = new Object();
+
+    static void printer(String name, int parity) {
+        while (true) {
+            synchronized (LOCK) {
+                while (next &lt;= 10 &amp;&amp; next % 2 != parity) {
+                    try { LOCK.wait(); } catch (InterruptedException e) { return; }
+                }
+                if (next &gt; 10) {
+                    LOCK.notifyAll();
+                    return;
+                }
+                System.out.println(name + &quot;: INV-&quot; + next);
+                next++;
+                LOCK.notifyAll();
+            }
+        }
+    }
+
+    public static void main(String[] args) throws InterruptedException {
+        Thread odd = new Thread(() -&gt; printer(&quot;printer-A&quot;, 1));
+        Thread even = new Thread(() -&gt; printer(&quot;printer-B&quot;, 0));
+        odd.start();
+        even.start();
+        odd.join();
+        even.join();
+    }
+}</code></pre><div class="output">printer-A: INV-1
+printer-B: INV-2
+printer-A: INV-3
+printer-B: INV-4
+printer-A: INV-5
+printer-B: INV-6
+printer-A: INV-7
+printer-B: INV-8
+printer-A: INV-9
+printer-B: INV-10</div></div>
+        <p><b>How it works:</b> each printer waits until the next number has its parity. The <code>next &gt; 10</code> check lets both threads finish; without the final notifyAll one of them could wait forever.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P8</span><span class="prob__tag prob__tag--business">Business problem</span><h4>Order pipeline with a BlockingQueue</h4></div>
+      <p>A restaurant thread produces 5 orders with ids 101–105 into a queue of capacity 2. A rider thread takes exactly 5 orders and adds up their bill amounts (id × 2). Print the total.</p>
+      <div class="prob__io"><div><small>Input</small><pre>orders 101..105</pre></div><div><small>Expected output</small><pre>delivered 5 orders, bills total Rs 1030</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="java" data-file="Main.java"><pre><code>import java.util.concurrent.*;
+
+public class Main {
+    public static void main(String[] args) throws InterruptedException {
+        BlockingQueue&lt;Integer&gt; orders = new ArrayBlockingQueue&lt;&gt;(2);
+        int[] total = {0};
+        Thread restaurant = new Thread(() -&gt; {
+            try {
+                for (int id = 101; id &lt;= 105; id++) orders.put(id);
+            } catch (InterruptedException e) { }
+        });
+        Thread rider = new Thread(() -&gt; {
+            try {
+                for (int i = 0; i &lt; 5; i++) total[0] += orders.take() * 2;
+            } catch (InterruptedException e) { }
+        });
+        restaurant.start();
+        rider.start();
+        restaurant.join();
+        rider.join();
+        System.out.println(&quot;delivered 5 orders, bills total Rs &quot; + total[0]);
+    }
+}</code></pre><div class="output">delivered 5 orders, bills total Rs 1030</div></div>
+        <p><b>How it works:</b> the queue's capacity limits how far the restaurant can get ahead of the rider. <code>total</code> is written only by the rider and read after <code>join()</code>, so no lock is needed for it.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P9</span><span class="prob__tag prob__tag--business">Business problem</span><h4>Seat hold that expires</h4></div>
+      <p>A cinema holds a seat while the customer pays, but for at most 200 ms. The payment never arrives. Use <code>wait(timeout)</code> in a loop with a deadline, then release the seat.</p>
+      <div class="prob__io"><div><small>Input</small><pre>hold 200 ms, no payment</pre></div><div><small>Expected output</small><pre>hold expired, seat released</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="java" data-file="Main.java"><pre><code>public class Main {
+    static boolean paid = false;
+    static final Object LOCK = new Object();
+
+    public static void main(String[] args) throws InterruptedException {
+        long deadline = System.currentTimeMillis() + 200;
+        synchronized (LOCK) {
+            long left;
+            while (!paid &amp;&amp; (left = deadline - System.currentTimeMillis()) &gt; 0) {
+                LOCK.wait(left);
+            }
+            System.out.println(paid ? &quot;seat confirmed&quot; : &quot;hold expired, seat released&quot;);
+        }
+    }
+}</code></pre><div class="output">hold expired, seat released</div></div>
+        <p><b>How it works:</b> <code>wait(ms)</code> returns on notify, on timeout, or spuriously, so the loop recomputes the time left and re-checks the flag. This is the correct pattern for “wait for a condition, but not forever”.</p>
+      </details>
+    </article>
+  </div>
+
+
+
+  <h3 id="scenarios">Real-world scenario questions (asked in company interviews)</h3>
+  <p class="scn-intro">Coordination bugs freeze systems silently, so interviewers like to see you reason about who waits for whom.</p>
+  <div class="scenarios">
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Code review · CPU</span><span class="scn__tag scn__tag--level">Fresher</span></div>
+      <h4>The worker that eats a CPU core</h4>
+      <p class="scn__situation">A report worker waits for jobs with <code>while (jobs.isEmpty()) { }</code>. The server shows one core at 100% even when there are no jobs. How would you rewrite it?</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> busy waiting vs blocking.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>The empty loop spins constantly. Replace the list with a <code>BlockingQueue</code> and call <code>take()</code>, which waits without using CPU.</li>
+          <li>If a plain list must stay, guard it with a lock and use <code>while (jobs.isEmpty()) lock.wait();</code> with <code>notifyAll()</code> when adding.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> <code>Thread.sleep(10)</code> in the loop as the solution: it still wastes wakeups and adds latency.</p>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Production · hang</span><span class="scn__tag scn__tag--level">Junior</span></div>
+      <h4>Occasionally, the consumer never wakes up</h4>
+      <p class="scn__situation">Once in a few thousand runs, a consumer thread stays WAITING forever although an item was added. The producer does <code>buffer.add(x); synchronized (lock) { lock.notify(); }</code>, and the consumer does <code>synchronized (lock) { lock.wait(); } item = buffer.poll();</code>. What's wrong?</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> lost notifications and the guarded-wait pattern.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>The consumer waits without checking a condition. If the notify happens before the consumer reaches <code>wait()</code>, it is lost.</li>
+          <li>Fix: update the buffer and check it under the same lock: <code>synchronized (lock) { while (buffer.isEmpty()) lock.wait(); item = buffer.poll(); }</code>, and the producer adds and notifies inside the lock.</li>
+          <li>Or replace it all with a BlockingQueue.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> adding a sleep before wait to “make the timing work”.</p>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Backend · memory</span><span class="scn__tag scn__tag--level">Junior</span></div>
+      <h4>OutOfMemoryError during a sale</h4>
+      <p class="scn__situation">Order events go into an unbounded <code>LinkedBlockingQueue</code> consumed by an email worker. During a sale, producers add 5,000 events/s, the worker sends 300 emails/s, and after an hour the JVM runs out of memory. Fix the design.</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> back-pressure and bounded queues.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>The queue grows without limit because consumers are slower than producers.</li>
+          <li>Use a bounded queue (<code>new ArrayBlockingQueue&lt;&gt;(10_000)</code>) so producers slow down, or use <code>offer</code> with a timeout and handle rejection (store for later, drop low-priority events).</li>
+          <li>Add more consumer threads if the email provider allows it, and monitor queue length.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> just increasing the heap; it only delays the crash.</p>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Design · shutdown</span><span class="scn__tag scn__tag--level">Mid</span></div>
+      <h4>Stopping consumers cleanly</h4>
+      <p class="scn__situation">Four consumer threads loop on <code>queue.take()</code>. At shutdown the app must finish processing everything already queued, then stop all four. How?</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> poison pills and interruption.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>After the last real item, put one “poison pill” per consumer (4 STOP messages). Each consumer exits when it takes one, so all real items are processed first.</li>
+          <li>Alternatively stop producers, wait until the queue is empty, then interrupt the consumers; <code>take()</code> throws <code>InterruptedException</code> and they exit.</li>
+          <li>With an <code>ExecutorService</code>, use <code>shutdown()</code> + <code>awaitTermination()</code> (Lesson 12.6).</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> daemon consumers that are killed with work still in the queue.</p>
+      </div></details>
+    </article>
+  </div>
+</section>
+
+<nav class="lesson-nav" id="lesson-nav" aria-label="Lesson navigation"></nav>
+<div class="ad-slot" data-slot="bottom"></div>
+</article>
+
+<aside class="lesson-side">
+  <nav class="toc" aria-label="In this lesson">
+    <h4>In this lesson</h4>
+    <ol>
+      <li><a href="#story">The story</a></li>
+      <li><a href="#definition">Definition</a></li>
+      <li><a href="#types">Types and ways to use it</a></li>
+      <li><a href="#steps">Step by step</a></li>
+      <li><a href="#animation">See it happen</a></li>
+      <li><a href="#real-world">Real-world use</a></li>
+      <li><a href="#run">Run the code</a></li>
+      <li><a href="#tracer">Line by line</a></li>
+      <li><a href="#worked">Worked examples</a></li>
+      <li><a href="#quiz">Quiz and revision</a></li>
+      <li><a href="#practice">Practice problems</a></li>
+      <li><a href="#scenarios">Industry scenarios</a></li>
+    </ol>
+  </nav>
+  <div class="ad-slot" data-slot="side"></div>
+  <div class="outline" id="outline"></div>
+</aside>
+</div>
+</main>
+
+<footer class="site-footer">
+  <div class="wrap">
+    <div><h4>MyPhatshala</h4><p>Free programming and IT lessons that show what happens behind the screen.</p></div>
+    <div><h4>Learn</h4><a href="../../../../#tracks">All courses</a><a href="../../">Core Java syllabus</a></div>
+    <div><h4>Site</h4><a href="../../../../about.html">About</a><a href="../../../../contact.html">Contact</a><a href="../../../../privacy.html">Privacy policy</a><a href="../../../../disclaimer.html">Disclaimer</a></div>
+    <div class="copyright">© MyPhatshala. All lesson content, diagrams and animations are original. Please do not copy without permission.</div>
+  </div>
+</footer>
+
+<script src="../../../../data/courses/core-java.js"></script>
+<script src="../../../../assets/js/lesson.js"></script>
+<script src="../../../../assets/js/ads.js"></script>
+<script src="../../../../assets/js/site.js"></script>
+</body>
+</html>

@@ -1,0 +1,256 @@
+<!--META {
+"course": "core-java", "module": "12-multithreading", "lesson": "04-synchronization",
+"title": "Synchronization and race conditions", "courseTitle": "Core Java", "number": "12.4",
+"track": "#E8772E", "trackId": "programming", "trackTitle": "Programming Languages", "level": "Intermediate",
+"minutes": 25,
+"description": "Race conditions and synchronization in Java: why count++ loses updates, critical sections, synchronized methods and blocks, monitor locks, static synchronized, volatile, AtomicInteger and deadlock. With animations, a JVM tracer, {{NPROB}} practice problems, quiz and interview scenarios.",
+"ogTitle": "Synchronization in Java: race conditions and locks",
+"ogDescription": "Watch count++ lose an update, see a monitor lock make threads take turns, and solve {{NPROB}} problems.",
+"lead": "Threads share the heap, and that's both their power and their danger. When two threads change the same data at the same time, updates get lost and balances go negative. You'll see a race condition happen in real code, understand exactly why at the bytecode level, and fix it with <code>synchronized</code>, atomic classes and <code>volatile</code>, while avoiding the classic trap: deadlock.",
+"chips": ["Module 12 · Multithreading", "⏱ 25 min", "Intermediate", "{{NPROB}} practice problems"]
+} META-->
+<part n="1" id="story" label="The story">
+  <h2>The likes counter that couldn't count</h2>
+  <div class="story">
+    <p class="narration">Riya's canteen app has a “like” button for dishes. In testing, two phones tap Like 100,000 times each. The counter should say 200,000. It says 148,870. Run again: 169,997.</p>
+    <div class="scene">
+      <svg viewBox="0 0 640 170" role="img" aria-label="Two hands reach for the same counter at the same time; one of the updates is lost">
+        <g font-size="10.5">
+          <rect x="250" y="30" width="140" height="70" rx="10" class="s-soft-blue" style="stroke:var(--blue)"/>
+          <text x="320" y="56" text-anchor="middle" class="s-blue" font-weight="700">likes</text>
+          <text x="320" y="84" text-anchor="middle" class="s-ink" font-weight="700" font-size="18">148,870</text>
+          <rect x="30" y="40" width="130" height="50" rx="8" class="s-card2" style="stroke:var(--line)"/><text x="95" y="62" text-anchor="middle" class="s-ink" font-weight="700">Phone A</text><text x="95" y="80" text-anchor="middle" class="s-ink2">100,000 taps</text>
+          <rect x="480" y="40" width="130" height="50" rx="8" class="s-card2" style="stroke:var(--line)"/><text x="545" y="62" text-anchor="middle" class="s-ink" font-weight="700">Phone B</text><text x="545" y="80" text-anchor="middle" class="s-ink2">100,000 taps</text>
+          <path d="M162 65h84" style="stroke:var(--track);stroke-width:1.6"/><path d="M240 59l8 6-8 6" style="fill:none;stroke:var(--track);stroke-width:1.6"/>
+          <path d="M478 65h-84" style="stroke:var(--track);stroke-width:1.6"/><path d="M400 59l-8 6 8 6" style="fill:none;stroke:var(--track);stroke-width:1.6"/>
+          <text x="320" y="128" text-anchor="middle" class="s-red" font-weight="700">expected 200,000: about 51,000 likes lost</text>
+          <text x="320" y="148" text-anchor="middle" class="s-ink2">(numbers from a real run; yours will differ)</text>
+        </g>
+        <text x="632" y="166" text-anchor="end" class="s-wm">myphatshala.com</text>
+      </svg>
+    </div>
+    <riya>Sir, the code is just <code>likes++</code>. How can Java lose a plus-one?</riya>
+    <arjun><code>likes++</code> is three steps: read, add, write. If both threads read the same old value, one write overwrites the other. That's a <b>race condition</b>.</arjun>
+    <riya>So threads sharing data is dangerous?</riya>
+    <arjun>Unprotected sharing is. The fix is to make the read-add-write happen as one indivisible step, one thread at a time. That's what <code>synchronized</code> does.</arjun>
+  </div>
+</part>
+
+<part n="2" id="definition" label="Definition">
+  <h2>What are race conditions and synchronization?</h2>
+  <div class="def">
+    <div class="def__formal"><small>Formal definition (write this in exams)</small>
+      <p>A <b>race condition</b> occurs when the result of a program depends on the timing or interleaving of threads that access shared mutable data, at least one of them writing. The code that accesses such data is a <b>critical section</b>. <b>Synchronization</b> ensures <b>mutual exclusion</b> (only one thread executes a critical section at a time) and <b>visibility</b> (changes made by one thread are seen by others). In Java, every object has an intrinsic lock (<b>monitor</b>); a <code>synchronized</code> method or block acquires that lock on entry and releases it on exit, and a thread that cannot acquire it is BLOCKED.</p></div>
+    <div class="def__simple"><small>In simple words</small>
+      <p>Shared data is a single-person changing room. <code>synchronized</code> is the lock on the door: one person inside at a time, the rest wait in line.</p></div>
+  </div>
+  <h3>Words you'll meet in this lesson</h3>
+  <div class="terms">
+    <div class="term"><b>Race condition</b><span>Wrong results that depend on which thread runs when.</span></div>
+    <div class="term"><b>Critical section</b><span>Code that reads or writes shared data and must not interleave.</span></div>
+    <div class="term"><b>Monitor / intrinsic lock</b><span>The lock every Java object has; one owner at a time.</span></div>
+    <div class="term"><b>Atomic</b><span>Happens as one indivisible step: no other thread sees it half-done.</span></div>
+    <div class="term"><b>Visibility</b><span>Whether one thread's write is seen by another thread.</span></div>
+    <div class="term"><b>Deadlock</b><span>Threads waiting for each other's locks forever.</span></div>
+  </div>
+  <h3>Your three tools</h3>
+  <div class="table-wrap">
+  <table class="compare" style="min-width:580px">
+    <thead><tr><th></th><th><code>synchronized</code></th><th>Atomic classes</th><th><code>volatile</code></th></tr></thead>
+    <tbody>
+      <tr><td>Mutual exclusion</td><td>Yes</td><td>For one variable's update</td><td>No</td></tr>
+      <tr><td>Visibility</td><td>Yes</td><td>Yes</td><td>Yes</td></tr>
+      <tr><td>Makes <code>x++</code> safe</td><td>Yes</td><td>Yes (<code>incrementAndGet</code>)</td><td>No</td></tr>
+      <tr><td>Protects several fields together</td><td>Yes</td><td>No</td><td>No</td></tr>
+      <tr><td>Can block threads</td><td>Yes</td><td>No (lock-free)</td><td>No</td></tr>
+      <tr><td>Typical use</td><td>Balance check + debit</td><td>Counters, IDs</td><td>Stop flags, status</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <exam><b>Exam tip:</b> “<code>volatile</code> guarantees visibility but <b>not atomicity</b>.” A <code>volatile int</code> with <code>count++</code> still loses updates. Also: a synchronized <b>instance</b> method locks <code>this</code>; a <b>static</b> synchronized method locks <code>ClassName.class</code>.</exam>
+</part>
+
+{{AD}}
+
+<part n="3" id="types" label="Types and ways to use it">
+  <h2>See the race, then fix it</h2>
+  <h3>The race</h3>
+  {{CODE_RACE}}
+  <p class="muted">This output is from one real run. Yours will be different, and different each time; that's what makes race conditions so hard to catch in testing.</p>
+  <h3>The fix: a synchronized method</h3>
+  {{CODE_FIXED}}
+
+  <h3>The ways to synchronize</h3>
+  <div class="cards">
+    <div class="card"><svg class="ic" viewBox="0 0 40 40" fill="none" stroke="var(--green)" stroke-width="2"><rect x="11" y="18" width="18" height="13" rx="2"/><path d="M15 18v-4a5 5 0 0110 0v4"/></svg><h4>synchronized method</h4><p>The whole method is the critical section. Locks <code>this</code> (or the class, if static).</p><span class="tag">simplest</span></div>
+    <div class="card"><svg class="ic" viewBox="0 0 40 40" fill="none" stroke="var(--blue)" stroke-width="2"><path d="M12 10h16v20H12z"/><path d="M12 18h16M12 24h16"/></svg><h4>synchronized block</h4><p>Lock only the lines that touch shared data, on a lock object you choose.</p><span class="tag">fine-grained</span></div>
+    <div class="card"><svg class="ic" viewBox="0 0 40 40" fill="none" stroke="var(--track)" stroke-width="2"><circle cx="20" cy="20" r="11"/><path d="M15 20h10M20 15v10"/></svg><h4>Atomic classes</h4><p><code>AtomicInteger</code>, <code>AtomicLong</code>, <code>LongAdder</code>: safe single-variable updates without locks.</p><span class="tag">counters</span></div>
+    <div class="card"><svg class="ic" viewBox="0 0 40 40" fill="none" stroke="var(--ink-3)" stroke-width="2"><path d="M10 20h20"/><path d="M24 14l6 6-6 6"/><path d="M16 14l-6 6 6 6"/></svg><h4>volatile</h4><p>Every thread always sees the latest value. For flags one thread writes and others read.</p><span class="tag">visibility</span></div>
+  </div>
+  {{CODE_FORMS}}
+
+  <h3>The trap: deadlock</h3>
+  {{CODE_DEADLOCK}}
+  <warn><b>Always take multiple locks in the same order.</b> If every thread locks account A before account B (for example, by smaller account id first), the circular wait above can never happen. And keep locked sections short: never call a slow network service while holding a lock.</warn>
+</part>
+
+<part n="4" id="steps" label="Step by step">
+  <h2>What happens at a synchronized block</h2>
+  <ol class="stepper">
+    <li><h4>A thread reaches the block</h4>
+      <div class="code" data-lang="java" data-file="Main.java"><pre><code>synchronized (account) {
+    if (account.balance &gt;= amt) account.balance -= amt;
+}</code></pre></div>
+      <span class="behind">The JVM runs <code>monitorenter</code> on the <code>account</code> object's monitor.</span></li>
+    <li><h4>Lock free? Take it</h4>
+      <span class="behind">If no one owns the monitor, this thread becomes the owner and enters. It also sees every write made by the previous owner before it released the lock.</span></li>
+    <li><h4>Lock taken? Wait</h4>
+      <span class="behind">If another thread owns it, this thread joins the monitor's entry set and is <b>BLOCKED</b>. It uses no CPU while waiting.</span></li>
+    <li><h4>Leave the block</h4>
+      <span class="behind"><code>monitorexit</code> releases the lock, even if an exception is thrown inside (the compiler adds a hidden finally). All writes made inside become visible to the next owner.</span></li>
+    <li><h4>Next in line</h4>
+      <span class="behind">One BLOCKED thread acquires the lock and becomes RUNNABLE. Which one is not guaranteed. The same thread may re-enter a lock it already owns (locks are <b>re-entrant</b>).</span></li>
+  </ol>
+</part>
+
+<part n="5" id="animation" label="See it happen">
+  <h2>A lost update, and the lock that prevents it</h2>
+  <p>Left: two threads and one shared <code>count</code>. Right: the bytecode steps of <code>count++</code>, each thread's private operand stack, and the monitor.</p>
+  {{ANIM}}
+</part>
+
+<part n="6" id="real-world" label="Real-world use">
+  <h2>Where races cost real money</h2>
+  <p>Race conditions are behind overselling in flash sales, double payouts, duplicate order numbers and corrupted caches.</p>
+  {{ANIM2}}
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="30" y="20" width="60" height="50" rx="6" class="s-soft-green" style="stroke:var(--green)"/><text x="60" y="52" text-anchor="middle" class="s-green" font-size="18" font-weight="700">₹</text></svg></div>
+    <div><h4>1. Balances and wallets</h4><p>Debit must check and update the balance as one step, or two parallel payments can overdraw it.</p>
+      <div class="uc-flow"><span>2 payments at once</span><i>→</i><span class="java">synchronized debit()</span><i>→</i><span>never negative</span></div></div>
+  </div>
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="20" y="30" width="22" height="30" rx="3" class="s-soft-acc" style="stroke:var(--track)"/><rect x="50" y="30" width="22" height="30" rx="3" class="s-soft-acc" style="stroke:var(--track)"/><rect x="80" y="30" width="22" height="30" rx="3" class="s-card2" style="stroke:var(--line)"/></svg></div>
+    <div><h4>2. Inventory in flash sales</h4><p>Thousands of buyers hit “Buy” for 100 units. Reservation must be atomic so exactly 100 orders succeed.</p>
+      <div class="uc-flow"><span>10,000 clicks</span><i>→</i><span class="java">atomic reserve</span><i>→</i><span>100 orders</span></div></div>
+  </div>
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="30" y="24" width="60" height="42" rx="6" class="s-board"/><text x="60" y="51" text-anchor="middle" class="s-chalk" font-size="13" font-family="monospace">#1042</text></svg></div>
+    <div><h4>3. IDs and counters</h4><p>Order numbers, page views and rate-limit counters use <code>AtomicLong</code> or <code>LongAdder</code> so no two orders get the same number.</p>
+      <div class="uc-flow"><span>new order</span><i>→</i><span class="java">ids.incrementAndGet()</span><i>→</i><span>unique id</span></div></div>
+  </div>
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><circle cx="40" cy="45" r="16" class="s-soft-blue" style="stroke:var(--blue)"/><circle cx="80" cy="45" r="16" class="s-soft-blue" style="stroke:var(--blue)"/><path d="M56 40h8M64 50h-8" style="stroke:var(--red);stroke-width:2"/></svg></div>
+    <div><h4>4. Shared caches and config</h4><p>Concurrent maps (<code>ConcurrentHashMap</code>) and <code>volatile</code> references let many request threads read config and cached data safely while one thread refreshes it.</p>
+      <div class="uc-flow"><span>refresh thread</span><i>→</i><span class="java">volatile config</span><i>→</i><span>all threads see it</span></div></div>
+  </div>
+  <p class="muted">Simplified: real banking systems also rely on database transactions and row locks, because many servers (not just many threads) share the data.</p>
+</part>
+
+{{AD}}
+
+<part n="7" id="run" label="Run the code">
+  <h2>The same race, fixed with a block</h2>
+  {{CODE_RUN}}
+  <ul class="anno">
+    <li><code>synchronized (Main.class)</code><span>Both threads lock the same object (the Class object of Main), so only one is inside at a time.</span></li>
+    <li><code>count++</code><span>Now the read-add-write can't interleave with the other thread's.</span></li>
+    <li><code>a.join(); b.join();</code><span>join also guarantees main sees both threads' final writes.</span></li>
+  </ul>
+  {{RUNNER}}
+</part>
+
+<part n="8" id="tracer" label="Line by line">
+  <h2>A synchronized counter shared by two threads</h2>
+  <p>Recorded from the real JVM, following <b>main</b>. Watch the single Counter object on the heap: both threads update it, and the result is right every time.</p>
+  {{TRACER}}
+
+{{WORKED}}
+</part>
+
+<part n="9" id="quiz" label="Quiz and revision">
+  <h2>Check yourself</h2>
+  {{QUIZ}}
+  <h3>Quick revision</h3>
+  <div class="revision">
+    <h3>Lesson 12.4 in one screen</h3>
+    <ul>
+      <li>Race condition: result depends on thread timing; needs shared mutable data and at least one writer.</li>
+      <li><code>x++</code> is read-add-write, not atomic. Check-then-act (<code>if (bal &gt;= amt) bal -= amt</code>) is also a race.</li>
+      <li><code>synchronized</code> = mutual exclusion + visibility, using an object's monitor. Instance method → <code>this</code>; static → <code>Class</code>.</li>
+      <li>Threads must lock the <b>same</b> object to exclude each other.</li>
+      <li><code>volatile</code> = visibility only. Atomic classes = lock-free safe updates of one variable.</li>
+      <li>Deadlock: circular wait for locks. Prevent with a fixed lock order and short critical sections.</li>
+      <li>Locks are re-entrant and released even when an exception is thrown.</li>
+    </ul>
+  </div>
+  <h3>Interview and viva questions</h3>
+  <div class="faq">
+    <details><summary>What is a race condition? Give an example.</summary><p>A bug where the outcome depends on the interleaving of threads accessing shared mutable data. Example: two threads run <code>count++</code> on a shared int; both read the same value and one increment is lost. Another: two withdrawals both pass a balance check before either debits.</p></details>
+    <details><summary>Difference between a synchronized method and a synchronized block?</summary><p>A synchronized method locks the whole method on <code>this</code> (or the Class for static methods). A block locks only its statements, on any object you choose. Blocks keep critical sections smaller and let you use private lock objects that outside code can't interfere with.</p></details>
+    <details><summary>What is the difference between volatile and synchronized?</summary><p><code>volatile</code> ensures reads and writes of one variable go to main memory and aren't reordered, giving visibility. It doesn't make compound actions atomic. <code>synchronized</code> provides both mutual exclusion and visibility for any block of code, at the cost of possible blocking.</p></details>
+    <details><summary>What is a deadlock and how do you prevent it?</summary><p>Two or more threads each hold a lock and wait for a lock held by another, forever. Prevent it by acquiring locks in a consistent global order, holding locks briefly, avoiding calling unknown code while holding a lock, or using <code>ReentrantLock.tryLock</code> with a timeout.</p></details>
+    <details><summary>How does AtomicInteger work without locks?</summary><p>It uses a CPU compare-and-swap (CAS) instruction: read the value, compute the new one, and write it only if the value is still what was read; otherwise retry. No thread blocks, so there's no deadlock risk, though heavy contention can cause retries (LongAdder reduces that).</p></details>
+  </div>
+
+{{PRACTICE}}
+
+  <h3 id="scenarios">Real-world scenario questions (asked in company interviews)</h3>
+  <p class="scn-intro">Concurrency bugs are favourite interview topics because they are expensive in production and invisible in simple tests.</p>
+  <div class="scenarios">
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">E-commerce · overselling</span><span class="scn__tag scn__tag--level">Fresher</span></div>
+      <h4>103 orders for 100 phones</h4>
+      <p class="scn__situation">During a flash sale, 100 units were listed but 103 orders were confirmed. The code does <code>if (stock &gt; 0) { createOrder(); stock--; }</code> in a request handler. Explain and fix.</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> check-then-act races.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>Several request threads passed the <code>stock &gt; 0</code> check before any of them decremented: a check-then-act race.</li>
+          <li>Make the check and decrement one atomic step: a synchronized method, an <code>AtomicInteger</code> with <code>compareAndSet</code>/<code>getAndUpdate</code>, or (across servers) a conditional database update <code>UPDATE … SET stock = stock - 1 WHERE stock &gt; 0</code>.</li>
+          <li>Create the order only after the reservation succeeds.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> “add a small sleep” or “it only happens under load”. That's exactly when it matters.</p>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Code review · locks</span><span class="scn__tag scn__tag--level">Junior</span></div>
+      <h4>Synchronized, yet still wrong</h4>
+      <p class="scn__situation">A colleague wrote <code>synchronized (new Object()) { total += amount; }</code> and says the method is now thread-safe. Tests still show wrong totals. Why?</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> that exclusion requires a shared lock.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>Every call locks a brand-new object, so no two threads ever compete for the same lock: no exclusion at all.</li>
+          <li>Use one shared, final lock object (<code>private final Object lock = new Object();</code>) or <code>synchronized (this)</code>, or an atomic type.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> locking on strings or boxed Integers: they may be shared or replaced unexpectedly.</p>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Payments · deadlock</span><span class="scn__tag scn__tag--level">Mid</span></div>
+      <h4>Transfers freeze at month end</h4>
+      <p class="scn__situation">The transfer service locks the sender account, then the receiver. On salary day it sometimes freezes completely; a thread dump shows two threads BLOCKED, each holding the lock the other needs. Fix it.</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> deadlock diagnosis and lock ordering.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>A→B and B→A transfers ran at once: thread 1 holds A and wants B; thread 2 holds B and wants A. A circular wait.</li>
+          <li>Lock by a global order (e.g. smaller account id first), whatever the transfer direction.</li>
+          <li>Alternatively use <code>tryLock</code> with a timeout and retry, and alert on long lock waits.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> restarting the server as the fix. The deadlock will return on the next busy day.</p>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Performance · contention</span><span class="scn__tag scn__tag--level">Mid</span></div>
+      <h4>Thread-safe, but now slow</h4>
+      <p class="scn__situation">To fix a race, someone made the whole <code>handleRequest()</code> method synchronized, including a 300 ms database call. Throughput dropped from 800 to 3 requests per second. What would you do?</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> minimal critical sections.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>The lock serialises every request, so all requests queue behind the slow call.</li>
+          <li>Identify the actual shared state, and lock only the few lines that touch it; do I/O outside the lock.</li>
+          <li>Use concurrent data structures (<code>ConcurrentHashMap</code>, atomics) where they fit, so most code needs no lock.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> removing synchronization entirely to regain speed; the race comes back.</p>
+      </div></details>
+    </article>
+  </div>
+</part>
