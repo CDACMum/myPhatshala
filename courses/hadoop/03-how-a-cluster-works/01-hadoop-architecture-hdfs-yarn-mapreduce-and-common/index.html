@@ -1,0 +1,2942 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hadoop architecture: HDFS, YARN, MapReduce and Common | MyPhatshala</title>
+<meta name="description" content="Hadoop&#x27;s layered architecture daemon by daemon: NameNode, DataNode, Secondary NameNode, JournalNodes, ZKFC, ResourceManager, NodeManager, ApplicationMaster and JobHistory Server, where each runs, how they talk, their Hadoop 3 default ports, and the four configuration files. With a start-up animation, a playground, Python you can run, quiz and interview scenarios.">
+<meta name="mp:minutes" content="26">
+<link rel="canonical" href="https://myphatshala.in/courses/hadoop/03-how-a-cluster-works/01-hadoop-architecture-hdfs-yarn-mapreduce-and-common/">
+<meta property="og:title" content="Hadoop architecture: HDFS, YARN, MapReduce and Common · MyPhatshala">
+<meta property="og:description" content="Hadoop is a team of Java daemons. Meet each one, its job, its port and the config file that controls it.">
+<link rel="icon" href="../../../../assets/img/logo.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Fraunces:ital,opsz,wght@0,9..144,600;0,9..144,700;1,9..144,600&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../../../../assets/css/style.css">
+<link rel="stylesheet" href="../../../../assets/css/lesson.css">
+<link rel="stylesheet" href="../../../../assets/css/cluster-sim.css">
+<script src="../../../../assets/js/config.js"></script>
+<script>try { const t = localStorage.getItem("mp-theme"); if (t) document.documentElement.dataset.theme = t; } catch (e) {}</script>
+<script type="application/ld+json">{"@context": "https://schema.org", "@type": "LearningResource", "name": "Hadoop architecture: HDFS, YARN, MapReduce and Common", "learningResourceType": "Lesson", "educationalLevel": "Beginner → Advanced", "isAccessibleForFree": true, "inLanguage": "en", "isPartOf": {"@type": "Course", "name": "Apache Hadoop", "provider": {"@type": "Organization", "name": "MyPhatshala"}}}</script>
+</head>
+<body style="--track:#B45309" data-lesson="03-how-a-cluster-works/01-hadoop-architecture-hdfs-yarn-mapreduce-and-common" data-course-root="../../">
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="site-header">
+  <div class="wrap">
+    <a class="brand" href="../../../../" aria-label="MyPhatshala home"><img src="../../../../assets/img/logo.svg" width="34" height="34" alt=""><span>My<b>Phatshala</b></span></a>
+    <nav class="nav" aria-label="Main">
+      <a href="../../../../#tracks">All courses</a>
+      <a href="../../">Apache Hadoop syllabus</a>
+      <button class="theme-btn" id="theme-btn" aria-label="Toggle dark mode"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg></button>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+<section class="lesson-hero">
+  <div class="wrap">
+    <nav class="crumbs" aria-label="Breadcrumb"><a href="../../../../">Home</a><span>›</span><a href="../../../../#track-big-data">Big Data Engineering</a><span>›</span><a href="../../">Apache Hadoop</a><span>›</span><b>Lesson 3.1</b></nav>
+    <h1>Hadoop architecture: HDFS, YARN, MapReduce and Common</h1>
+    <p class="lead">Hadoop is not one program. It is a team of long-running Java processes, called daemons, spread across master and worker machines, held together by four XML configuration files. This lesson opens up a real cluster layer by layer: which daemon runs where, what it does, how it talks to the others and on which port, so that the output of <code>jps</code> and the web UIs make sense at a glance.</p>
+    <div class="lesson-meta"><span>Module 3 · How one Hadoop cluster works</span><span>⏱ 26 min</span><span>Beginner → Advanced</span><span>Daemon and port table</span><span>Cluster Playground</span><span>Runs in your browser (Python)</span><span>8 practice problems</span></div>
+  </div>
+</section>
+
+<div class="wrap lesson-layout">
+<article class="lesson-main">
+<!-- ======================= PART 1: THE STORY ======================= -->
+<section class="part" id="story">
+  <span class="part-label"><b>1</b> The story</span>
+  <h2>“What is actually running on these machines?”</h2>
+  <div class="story">
+    <p class="narration">Kabir's team lead gives him login access to the company's Hadoop cluster and one task: “Find out what is running on each machine, and on which port.” Kabir logs in to the first server, types <code>jps</code>, and sees a short list of strange names: <code>NameNode</code>, <code>ResourceManager</code>, <code>JournalNode</code>. On the next server: <code>DataNode</code>, <code>NodeManager</code>. He calls Riya: “It's like a zoo of Java programs.”</p>
+
+    <div class="scene">
+      <svg viewBox="0 0 640 190" role="img" aria-label="A layered diagram: applications at the top, then YARN for resources, then HDFS for storage, then Hadoop Common, all on top of Java and Linux on many servers.">
+        <g font-size="10">
+          <rect x="20" y="10" width="600" height="30" rx="6" class="s-soft-blue" style="stroke:var(--blue)"/>
+          <text x="320" y="30" text-anchor="middle" font-weight="700" class="s-blue">Applications: MapReduce · Spark · Hive (Tez) · your jobs</text>
+          <rect x="20" y="48" width="600" height="30" rx="6" class="s-soft-acc" style="stroke:var(--track)"/>
+          <text x="320" y="68" text-anchor="middle" font-weight="700" class="s-acc">YARN: ResourceManager + NodeManagers (who gets CPU and memory)</text>
+          <rect x="20" y="86" width="600" height="30" rx="6" class="s-soft-green" style="stroke:var(--green)"/>
+          <text x="320" y="106" text-anchor="middle" font-weight="700" class="s-green">HDFS: NameNode + DataNodes (where the bytes live)</text>
+          <rect x="20" y="124" width="600" height="26" rx="6" class="s-board"/>
+          <text x="320" y="141" text-anchor="middle" font-weight="700" class="s-chalk">Hadoop Common: configuration, RPC, security, file-system API, tools</text>
+          <rect x="20" y="156" width="600" height="20" rx="5" class="s-card2"/>
+          <text x="320" y="170" text-anchor="middle" font-size="9" class="s-ink2">Java (JVM) · Linux · many servers in racks</text>
+        </g>
+        <text x="632" y="186" text-anchor="end" class="s-wm">myphatshala.in</text>
+      </svg>
+    </div>
+
+    <div class="panel"><div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#FCE6D6"/><path d="M14 64c2-12 9-18 18-18s16 6 18 18z" fill="#2E5AAC"/><circle cx="32" cy="29" r="12" fill="#C68B5E"/><path d="M19 29c0-10 6-15 13-15s13 5 13 15c-3-5-7-8-13-8s-10 3-13 8z" fill="#2A1B14"/><path d="M43 27c3 6 3 14 0 20" stroke="#2A1B14" stroke-width="4" fill="none" stroke-linecap="round"/><circle cx="27.5" cy="30" r="1.5" fill="#2A1B14"/><circle cx="36.5" cy="30" r="1.5" fill="#2A1B14"/><path d="M28 35q4 3 8 0" stroke="#2A1B14" stroke-width="1.6" fill="none" stroke-linecap="round"/><circle cx="32" cy="24" r="1.2" fill="#D64545"/></svg></div><div class="bubble"><b class="who">Riya</b><p>A zoo? I thought Hadoop was one program.</p></div></div>
+    <div class="panel panel--right"><div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#DDEFE6"/><path d="M12 64c2-12 10-18 20-18s18 6 20 18z" fill="#F4F1EA"/><path d="M28 46l4 8 4-8" fill="#2F7D5B"/><circle cx="32" cy="28" r="12" fill="#B57A50"/><path d="M20 26c0-8 5-13 12-13s12 5 12 13c-2-3-6-5-12-5s-10 2-12 5z" fill="#5A5A5A"/><path d="M22 32c1 8 5 11 10 11s9-3 10-11c-2 3-6 4-10 4s-8-1-10-4z" fill="#5A5A5A"/><circle cx="27" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><circle cx="37" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><path d="M30.4 29h3.2" stroke="#1B2433" stroke-width="1.4"/><circle cx="27" cy="29" r="1.1" fill="#1B2433"/><circle cx="37" cy="29" r="1.1" fill="#1B2433"/></svg></div><div class="bubble"><b class="who">Arjun Sir</b><p>That's the most common mistake, Riya. Hadoop is a <b>set of long-running Java programs</b>, called <b>daemons</b>, spread over the cluster. Each one has one job. Some run on one or two master machines; others run on every worker.</p></div></div>
+    <div class="panel"><div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#E1E9F7"/><path d="M12 64c2-12 10-18 20-18s18 6 20 18z" fill="#B45309"/><circle cx="32" cy="29" r="12" fill="#A9714A"/><path d="M19 27c0-9 6-14 13-14s13 5 13 14c-2-4-5-6-8-6-3 3-9 4-13 3-2 1-4 2-5 3z" fill="#1E1A17"/><circle cx="27.5" cy="30" r="1.5" fill="#1E1A17"/><circle cx="36.5" cy="30" r="1.5" fill="#1E1A17"/><path d="M27 35.5q5 3.5 10 0" stroke="#1E1A17" stroke-width="1.6" fill="none" stroke-linecap="round"/><rect x="41" y="40" width="10" height="7" rx="1.5" fill="#2E5AAC"/></svg></div><div class="bubble"><b class="who">Kabir</b><p>So the <code>NameNode</code> on server 1 is the HDFS master, and the <code>DataNode</code>s on the other servers are the HDFS workers?</p></div></div>
+    <div class="panel panel--right"><div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#DDEFE6"/><path d="M12 64c2-12 10-18 20-18s18 6 20 18z" fill="#F4F1EA"/><path d="M28 46l4 8 4-8" fill="#2F7D5B"/><circle cx="32" cy="28" r="12" fill="#B57A50"/><path d="M20 26c0-8 5-13 12-13s12 5 12 13c-2-3-6-5-12-5s-10 2-12 5z" fill="#5A5A5A"/><path d="M22 32c1 8 5 11 10 11s9-3 10-11c-2 3-6 4-10 4s-8-1-10-4z" fill="#5A5A5A"/><circle cx="27" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><circle cx="37" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><path d="M30.4 29h3.2" stroke="#1B2433" stroke-width="1.4"/><circle cx="27" cy="29" r="1.1" fill="#1B2433"/><circle cx="37" cy="29" r="1.1" fill="#1B2433"/></svg></div><div class="bubble"><b class="who">Arjun Sir</b><p>Yes. Same for YARN: one <code>ResourceManager</code>, a <code>NodeManager</code> on every worker. And there are helpers: JournalNodes, the JobHistory server, ZooKeeper.</p></div></div>
+    <div class="panel"><div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#FCE6D6"/><path d="M14 64c2-12 9-18 18-18s16 6 18 18z" fill="#2E5AAC"/><circle cx="32" cy="29" r="12" fill="#C68B5E"/><path d="M19 29c0-10 6-15 13-15s13 5 13 15c-3-5-7-8-13-8s-10 3-13 8z" fill="#2A1B14"/><path d="M43 27c3 6 3 14 0 20" stroke="#2A1B14" stroke-width="4" fill="none" stroke-linecap="round"/><circle cx="27.5" cy="30" r="1.5" fill="#2A1B14"/><circle cx="36.5" cy="30" r="1.5" fill="#2A1B14"/><path d="M28 35q4 3 8 0" stroke="#2A1B14" stroke-width="1.6" fill="none" stroke-linecap="round"/><circle cx="32" cy="24" r="1.2" fill="#D64545"/></svg></div><div class="bubble"><b class="who">Riya</b><p>And how do they know about each other?</p></div></div>
+    <div class="panel panel--right"><div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#DDEFE6"/><path d="M12 64c2-12 10-18 20-18s18 6 20 18z" fill="#F4F1EA"/><path d="M28 46l4 8 4-8" fill="#2F7D5B"/><circle cx="32" cy="28" r="12" fill="#B57A50"/><path d="M20 26c0-8 5-13 12-13s12 5 12 13c-2-3-6-5-12-5s-10 2-12 5z" fill="#5A5A5A"/><path d="M22 32c1 8 5 11 10 11s9-3 10-11c-2 3-6 4-10 4s-8-1-10-4z" fill="#5A5A5A"/><circle cx="27" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><circle cx="37" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><path d="M30.4 29h3.2" stroke="#1B2433" stroke-width="1.4"/><circle cx="27" cy="29" r="1.1" fill="#1B2433"/><circle cx="37" cy="29" r="1.1" fill="#1B2433"/></svg></div><div class="bubble"><b class="who">Arjun Sir</b><p>Through a handful of XML configuration files that every node shares. Today we'll open up a real cluster layer by layer: which daemon runs where, what it does, which port it listens on, and which configuration file controls it. After this lesson, <code>jps</code> output will read like a sentence to you.</p></div></div>
+  </div>
+</section>
+
+<!-- ======================= PART 2: DEFINITION ======================= -->
+<section class="part" id="definition">
+  <span class="part-label"><b>2</b> Definition</span>
+  <h2>Hadoop's architecture, daemon by daemon</h2>
+  <div class="def">
+    <div class="def__formal"><small>Formal definition (write this in exams)</small>
+      <p>A Hadoop cluster is a <b>layered, master–worker system</b> of long-running Java processes (<b>daemons</b>). The <b>storage layer</b> (HDFS) consists of a <b>NameNode</b>, which manages the namespace and block map, and <b>DataNodes</b>, which store blocks; with High Availability it adds a standby NameNode, <b>JournalNodes</b> and <b>ZKFailoverControllers</b>. The <b>resource layer</b> (YARN) consists of a <b>ResourceManager</b>, which allocates containers cluster-wide, and <b>NodeManagers</b>, which launch and monitor containers on each worker. The <b>processing layer</b> consists of applications such as MapReduce, each run by its own <b>ApplicationMaster</b>; the <b>JobHistory Server</b> keeps records of finished MapReduce jobs. <b>Hadoop Common</b> provides the shared libraries, RPC, configuration and security on which all daemons are built. Daemons communicate through RPC and periodic heartbeats and are configured through <code>core-site.xml</code>, <code>hdfs-site.xml</code>, <code>yarn-site.xml</code> and <code>mapred-site.xml</code>.</p></div>
+    <div class="def__simple"><small>In simple words</small>
+      <p>Hadoop is not one program but a team of programs. On the master machines run the “managers”: the NameNode (knows where every file block is) and the ResourceManager (decides who gets CPU and memory). On every worker run two “staff members”: a DataNode (stores blocks) and a NodeManager (runs tasks). They talk to each other all the time, and four XML files tell each of them where the others are.</p></div>
+  </div>
+
+  <h3>Words you'll meet in this lesson</h3>
+  <div class="terms">
+    <div class="term"><b>Daemon</b><span>A program that runs in the background all the time, like a service. Every Hadoop component is a Java daemon.</span></div>
+    <div class="term"><b>jps</b><span>A JDK command that lists running Java processes. The quickest way to see which Hadoop daemons are up on a machine.</span></div>
+    <div class="term"><b>RPC</b><span>Remote procedure call: one daemon calling a function on another over the network.</span></div>
+    <div class="term"><b>fs.defaultFS</b><span>The setting in <code>core-site.xml</code> that tells every client and daemon where the NameNode is, e.g. <code>hdfs://nn1:8020</code>.</span></div>
+    <div class="term"><b>JobHistory Server</b><span>Daemon that keeps the logs and counters of finished MapReduce jobs (web UI on port 19888).</span></div>
+    <div class="term"><b>JournalNode</b><span>HA helper that stores the NameNode's edit log so the standby can follow it.</span></div>
+    <div class="term"><b>ZKFC</b><span>ZooKeeper Failover Controller: watches a NameNode's health and triggers automatic failover.</span></div>
+    <div class="term"><b>Aux service</b><span>A plug-in that runs inside each NodeManager. MapReduce's shuffle handler is one; it serves map outputs to reducers.</span></div>
+  </div>
+
+  <h3>Every daemon, where it runs, and its default ports (Hadoop 3)</h3>
+  <div class="table-wrap">
+  <table class="compare" style="min-width:620px">
+    <thead><tr><th>Daemon</th><th>Layer</th><th>Runs on</th><th>Main job</th><th>Ports</th></tr></thead>
+    <tbody>
+      <tr><td><b>NameNode</b></td><td>HDFS</td><td>Master (1 active)</td><td>Namespace + block locations</td><td>8020 RPC · 9870 web UI</td></tr>
+      <tr><td><b>DataNode</b></td><td>HDFS</td><td>Every worker</td><td>Store and serve blocks</td><td>9866 data · 9867 IPC · 9864 web</td></tr>
+      <tr><td><b>Secondary NameNode</b></td><td>HDFS</td><td>A master (non-HA only)</td><td>Checkpoints fsimage</td><td>9868 web</td></tr>
+      <tr><td><b>JournalNode</b></td><td>HDFS (HA)</td><td>3 or 5 masters</td><td>Shared edit log</td><td>8485 RPC · 8480 web</td></tr>
+      <tr><td><b>ZKFC</b></td><td>HDFS (HA)</td><td>Next to each NameNode</td><td>Automatic failover</td><td>8019</td></tr>
+      <tr><td><b>ResourceManager</b></td><td>YARN</td><td>Master</td><td>Allocate containers</td><td>8032 clients · 8030 AMs · 8031 NMs · 8088 web</td></tr>
+      <tr><td><b>NodeManager</b></td><td>YARN</td><td>Every worker</td><td>Launch and watch containers</td><td>8042 web · 13562 shuffle</td></tr>
+      <tr><td><b>JobHistory Server</b></td><td>MapReduce</td><td>A master or utility node</td><td>History of finished jobs</td><td>10020 IPC · 19888 web</td></tr>
+      <tr><td><b>ZooKeeper</b></td><td>Coordination (separate project)</td><td>3 or 5 nodes</td><td>Leader election for HA</td><td>2181</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <p class="muted">These are Apache Hadoop 3 defaults. Distributions and companies often change them; always check the cluster's configuration files.</p>
+
+  <h3 id="levels">The architecture at three levels</h3>
+  <div class="modlab levels"><div class="modlab__bar"><b>Pick your level. New to this? Start at Beginner and climb.</b><button type="button" data-mod="b">Beginner</button><button type="button" data-mod="i">Intermediate</button><button type="button" data-mod="a">Advanced</button></div>
+    <div class="modlab__panel" data-mod="b"><h4><span class="lvl lvl--b">Beginner</span> A hospital</h4>
+      <ul>
+        <li><b>The records office (NameNode)</b> knows which file is in which cupboard, but holds no files itself.</li>
+        <li><b>The cupboards in every ward (DataNodes)</b> hold the actual files, with copies in other wards.</li>
+        <li><b>The bed manager (ResourceManager)</b> decides which patient gets which bed and how many nurses.</li>
+        <li><b>Each ward's in-charge (NodeManager)</b> sets up the beds the bed manager approved and reports back.</li>
+        <li><b>Each patient's doctor (ApplicationMaster)</b> plans that one patient's treatment and asks for beds as needed.</li>
+        <li>The <b>hospital rule book</b> (Common + config files) is the same in every ward.</li>
+      </ul>
+
+    </div>
+    <div class="modlab__panel" data-mod="i"><h4><span class="lvl lvl--i">Intermediate</span> How the daemons talk to each other</h4>
+      <ul>
+        <li><b>DataNode → NameNode:</b> registration, heartbeats every 3 s, block reports. The NameNode answers with commands (copy, delete).</li>
+        <li><b>NodeManager → ResourceManager:</b> heartbeats with free memory/CPU and container status. The RM answers with containers to start or kill.</li>
+        <li><b>Client → NameNode:</b> “create this file”, “where are the blocks of that file?”. <b>Client → DataNodes:</b> the actual bytes. The NameNode never carries file data.</li>
+        <li><b>Client → ResourceManager:</b> submit an application. <b>ApplicationMaster → RM:</b> ask for containers. <b>AM → NodeManagers:</b> start containers.</li>
+        <li><b>Reducers → NodeManagers' shuffle service:</b> fetch map outputs over HTTP.</li>
+      </ul>
+
+    </div>
+    <div class="modlab__panel" data-mod="a"><h4><span class="lvl lvl--a">Advanced</span> Design details that matter in production</h4>
+      <ul>
+        <li><b>Masters are out of the data path:</b> clients read and write blocks directly from DataNodes, so the NameNode handles only small metadata calls. That's how one NameNode serves thousands of nodes.</li>
+        <li><b>Control vs data traffic:</b> RPC (small, frequent) and data transfer (large, streaming) use different ports and can be tuned separately.</li>
+        <li><b>Co-location:</b> DataNode and NodeManager on the same worker make data locality possible. Separating them (compute-only nodes) is possible but loses locality.</li>
+        <li><b>Same configuration everywhere:</b> the XML files are usually managed centrally (Ambari, Cloudera Manager, Ansible) and pushed to every node; a mismatch is a classic source of strange errors.</li>
+        <li><b>Each daemon has its own log</b> under <code>$HADOOP_HOME/logs</code> (for example <code>hadoop-&lt;user&gt;-namenode-&lt;host&gt;.log</code>), which is the first place to look when something fails.</li>
+      </ul>
+
+    </div>
+  </div>
+  <div class="callout callout--exam"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19V5a2 2 0 0 1 2-2h12v18H6a2 2 0 0 1-2-2zm0 0a2 2 0 0 1 2-2h12"/></svg><p><b>Exam tip:</b> For “Explain the architecture of Hadoop with a neat diagram”, draw two master–worker pairs: <b>NameNode ↔ DataNodes</b> (HDFS) and <b>ResourceManager ↔ NodeManagers</b> (YARN), show a client talking to the NameNode for metadata but to DataNodes for data, add one ApplicationMaster inside a NodeManager, and label heartbeats. Mention Hadoop Common underneath.</p></div>
+</section>
+
+<!-- ======================= PART 3: TYPES AND WAYS TO USE IT ======================= -->
+<section class="part" id="types">
+  <span class="part-label"><b>3</b> Types and ways to use it</span>
+  <h2>The four modules, their daemons and their configuration files</h2>
+  <div class="cards">
+    <div class="card"><h4>Hadoop Common</h4><p>No daemon of its own. Libraries used by all others: the <code>FileSystem</code> API, RPC, security (Kerberos), metrics, the <code>hadoop</code> command.</p><span class="tag">core-site.xml</span></div>
+    <div class="card"><h4>HDFS</h4><p>NameNode, DataNodes, plus Secondary NameNode (non-HA) or JournalNodes + ZKFCs (HA). Commands: <code>hdfs dfs</code>, <code>hdfs dfsadmin</code>.</p><span class="tag">hdfs-site.xml</span></div>
+    <div class="card"><h4>YARN</h4><p>ResourceManager, NodeManagers (and optionally a Timeline Server). Commands: <code>yarn application</code>, <code>yarn node</code>.</p><span class="tag">yarn-site.xml</span></div>
+    <div class="card"><h4>MapReduce</h4><p>No permanent daemon per job: each job's MRAppMaster runs in a container. The JobHistory Server keeps finished-job records. Command: <code>mapred</code>.</p><span class="tag">mapred-site.xml</span></div>
+  </div>
+
+  <h3>The most important settings in each file</h3>
+  <div class="table-wrap">
+  <table class="compare" style="min-width:600px">
+    <thead><tr><th>File</th><th>Key property</th><th>Example value</th><th>Meaning</th></tr></thead>
+    <tbody>
+      <tr><td><code>core-site.xml</code></td><td><code>fs.defaultFS</code></td><td><code>hdfs://nn1:8020</code></td><td>Where the default file system (NameNode) is</td></tr>
+      <tr><td><code>hdfs-site.xml</code></td><td><code>dfs.replication</code></td><td><code>3</code></td><td>Copies of each block</td></tr>
+      <tr><td><code>hdfs-site.xml</code></td><td><code>dfs.namenode.name.dir</code></td><td><code>/data/nn</code></td><td>Where the NameNode saves its metadata</td></tr>
+      <tr><td><code>hdfs-site.xml</code></td><td><code>dfs.datanode.data.dir</code></td><td><code>/data/1/dn,/data/2/dn</code></td><td>Disks where a DataNode stores blocks</td></tr>
+      <tr><td><code>yarn-site.xml</code></td><td><code>yarn.resourcemanager.hostname</code></td><td><code>rm1</code></td><td>Where the ResourceManager is</td></tr>
+      <tr><td><code>yarn-site.xml</code></td><td><code>yarn.nodemanager.aux-services</code></td><td><code>mapreduce_shuffle</code></td><td>Turns on the shuffle service for MapReduce</td></tr>
+      <tr><td><code>yarn-site.xml</code></td><td><code>yarn.nodemanager.resource.memory-mb</code></td><td><code>196608</code></td><td>Memory a node offers to containers</td></tr>
+      <tr><td><code>mapred-site.xml</code></td><td><code>mapreduce.framework.name</code></td><td><code>yarn</code></td><td>Run MapReduce jobs on YARN</td></tr>
+      <tr><td><code>workers</code></td><td>(plain list)</td><td>one host per line</td><td>Where start scripts launch DataNodes and NodeManagers (called <code>slaves</code> in Hadoop 2)</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <div class="callout callout--tip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18h6M10 22h4M12 2a7 7 0 0 0-4 12.7V17h8v-2.3A7 7 0 0 0 12 2z"/></svg><p>When a client says “Connection refused” to <code>localhost:8020</code> or similar, check <code>fs.defaultFS</code> first. Half of all beginner Hadoop errors are a wrong host name or port in <code>core-site.xml</code>, or a daemon that is simply not running (check with <code>jps</code>).</p></div>
+</section>
+
+<!-- ======================= PART 4: STEP BY STEP ======================= -->
+<section class="part" id="steps">
+  <span class="part-label"><b>4</b> Step by step</span>
+  <h2>Bringing a cluster up, daemon by daemon</h2>
+  <ol class="stepper">
+    <li><h4>Every node gets the same configuration</h4>
+      <div class="code" data-lang="python" data-file="read_conf.py"><pre><code>import xml.etree.ElementTree as ET
+xml = """&lt;configuration&gt;&lt;property&gt;&lt;name&gt;fs.defaultFS&lt;/name&gt;
+&lt;value&gt;hdfs://nn1:8020&lt;/value&gt;&lt;/property&gt;&lt;/configuration&gt;"""
+for p in ET.fromstring(xml).iter("property"):
+    print(p.findtext("name"), "=", p.findtext("value"))</code></pre><div class="output">fs.defaultFS = hdfs://nn1:8020</div></div>
+      <span class="behind">Every Hadoop configuration file is a list of <code>&lt;property&gt;</code> name–value pairs. Every daemon and client reads them at start-up, so they all agree on where the masters are.</span></li>
+    <li><h4>Start HDFS: the NameNode first</h4>
+      <p>The admin runs <code>start-dfs.sh</code>. The NameNode loads its saved metadata (fsimage + edit log) and waits in <b>safe mode</b>.</p>
+      <span class="behind">The NameNode knows the files and their blocks, but not yet <i>where</i> the blocks are. That information is never saved; it comes fresh from the DataNodes.</span></li>
+    <li><h4>DataNodes start and report</h4>
+      <p>On each worker a DataNode starts, registers with the NameNode and sends a <b>block report</b>.</p>
+      <span class="behind">When enough blocks have been reported (99.9% by default), the NameNode leaves safe mode and allows writes. Module 5 explains safe mode in detail.</span></li>
+    <li><h4>Start YARN</h4>
+      <p>The admin runs <code>start-yarn.sh</code>. The ResourceManager starts; each NodeManager registers with how much memory and how many vcores it offers.</p>
+      <span class="behind">The RM now knows total cluster capacity, for example 40 nodes × 192 GB. Its web UI on port 8088 shows it.</span></li>
+    <li><h4>Start the JobHistory Server, then check</h4>
+      <div class="code" data-lang="bash" data-file="Terminal"><pre><code>mapred --daemon start historyserver
+jps</code></pre></div>
+      <span class="behind">On a single-machine (pseudo-distributed) test cluster, <code>jps</code> should list NameNode, DataNode, SecondaryNameNode, ResourceManager, NodeManager and JobHistoryServer. If one is missing, its log file says why. You'll do this yourself in Module 4.</span></li>
+  </ol>
+</section>
+
+<!-- ======================= PART 5: SEE IT HAPPEN ======================= -->
+<section class="part" id="animation">
+  <span class="part-label"><b>5</b> See it happen</span>
+  <h2>A cluster starting up: what the admin sees, and which daemons appear</h2>
+  <p>Follow a small cluster (one master, three workers) from power-on to ready. Left: the admin's terminal. Right: the daemons on each machine.</p>
+  <div class="anim" data-frames="6">
+    <div class="anim__title">From power-on to ready <span>6 steps</span></div>
+    <div class="anim__views">
+      <div class="view view--see">
+        <span class="view__tag">What you see</span>
+        <svg viewBox="0 0 360 250" role="img" aria-label="Admin terminal while starting the cluster">
+          <rect x="14" y="14" width="332" height="206" rx="8" class="s-board"/>
+          <text x="26" y="32" font-size="9" class="mono" style="fill:#7F8C86">admin@master1 : ~ (illustrative output)</text>
+          <g data-on="1"><text x="26" y="56" font-size="9" class="mono" style="fill:#7F8C86">$ jps</text><text x="26" y="74" font-size="9" class="mono" style="fill:#9FD3B8">4410 Jps</text><text x="180" y="190" text-anchor="middle" font-size="10" class="s-chalk">Nothing running yet.</text></g>
+          <g data-on="2"><text x="26" y="56" font-size="9" class="mono" style="fill:#7F8C86">$ start-dfs.sh</text><text x="26" y="74" font-size="9" class="mono" style="fill:#9FD3B8">Starting namenodes on [master1]</text><text x="26" y="90" font-size="9" class="mono" style="fill:#9FD3B8">Starting datanodes</text><text x="26" y="106" font-size="9" class="mono" style="fill:#9FD3B8">Starting secondary namenodes [master1]</text></g>
+          <g data-on="3"><text x="26" y="56" font-size="9" class="mono" style="fill:#7F8C86">$ hdfs dfsadmin -safemode get</text><text x="26" y="74" font-size="9" class="mono" style="fill:#F5C77E">Safe mode is ON</text><text x="26" y="98" font-size="9" class="mono" style="fill:#7F8C86">(a few seconds later)</text><text x="26" y="116" font-size="9" class="mono" style="fill:#9FD3B8">Safe mode is OFF</text></g>
+          <g data-on="4"><text x="26" y="56" font-size="9" class="mono" style="fill:#7F8C86">$ start-yarn.sh</text><text x="26" y="74" font-size="9" class="mono" style="fill:#9FD3B8">Starting resourcemanager</text><text x="26" y="90" font-size="9" class="mono" style="fill:#9FD3B8">Starting nodemanagers</text></g>
+          <g data-on="5"><text x="26" y="56" font-size="9" class="mono" style="fill:#7F8C86">$ mapred --daemon start historyserver</text><text x="26" y="80" font-size="9" class="mono" style="fill:#7F8C86">$ jps</text><text x="26" y="98" font-size="9" class="mono" style="fill:#9FD3B8">5121 NameNode</text><text x="26" y="114" font-size="9" class="mono" style="fill:#9FD3B8">5410 SecondaryNameNode</text><text x="26" y="130" font-size="9" class="mono" style="fill:#9FD3B8">5702 ResourceManager</text><text x="26" y="146" font-size="9" class="mono" style="fill:#9FD3B8">6015 JobHistoryServer</text><text x="26" y="162" font-size="9" class="mono" style="fill:#9FD3B8">6102 Jps</text></g>
+          <g data-on="6"><text x="26" y="56" font-size="9" class="mono" style="fill:#7F8C86">open http://master1:9870  (HDFS)</text><text x="26" y="72" font-size="9" class="mono" style="fill:#7F8C86">open http://master1:8088  (YARN)</text><text x="26" y="96" font-size="9" class="mono" style="fill:#9FD3B8">Live DataNodes: 3</text><text x="26" y="112" font-size="9" class="mono" style="fill:#9FD3B8">Active NodeManagers: 3</text><text x="180" y="190" text-anchor="middle" font-size="10" class="s-chalk">The cluster is ready for jobs.</text></g>
+          <text x="352" y="244" text-anchor="end" class="s-wm">myphatshala.in</text>
+        </svg>
+        <ol class="caps" hidden>
+          <li>Before start-up, <code>jps</code> shows only itself: no Hadoop daemons are running.</li>
+          <li><code>start-dfs.sh</code> starts the NameNode on the master, a DataNode on each host in the <code>workers</code> file, and the Secondary NameNode.</li>
+          <li>The NameNode starts in <b>safe mode</b> (read-only) until enough DataNodes have reported their blocks, then leaves it.</li>
+          <li><code>start-yarn.sh</code> starts the ResourceManager and a NodeManager on every worker.</li>
+          <li>The JobHistory Server starts. <code>jps</code> on the master now lists all master daemons (PIDs differ on every machine).</li>
+          <li>The web UIs confirm 3 live DataNodes and 3 active NodeManagers. Jobs can run.</li>
+        </ol>
+      </div>
+
+      <div class="view view--behind">
+        <span class="view__tag">Behind the screen</span>
+        <svg viewBox="0 0 360 250" role="img" aria-label="Daemons appearing on master and worker machines">
+          <rect x="110" y="12" width="140" height="92" rx="8" class="s-board"/>
+          <text x="180" y="28" text-anchor="middle" font-size="9" font-weight="700" class="s-chalk">master1</text>
+          <g data-on="2-"><rect x="120" y="34" width="120" height="13" rx="3" class="s-green"/><text x="180" y="44" text-anchor="middle" font-size="7.6" font-weight="700" style="fill:#fff">NameNode</text>
+            <rect x="120" y="50" width="120" height="13" rx="3" style="fill:#4A6B5E"/><text x="180" y="60" text-anchor="middle" font-size="7.6" font-weight="700" style="fill:#fff">SecondaryNameNode</text></g>
+          <g data-on="4-"><rect x="120" y="66" width="120" height="13" rx="3" style="fill:var(--track)"/><text x="180" y="76" text-anchor="middle" font-size="7.6" font-weight="700" style="fill:#fff">ResourceManager</text></g>
+          <g data-on="5-"><rect x="120" y="82" width="120" height="13" rx="3" style="fill:#8B5CF6"/><text x="180" y="92" text-anchor="middle" font-size="7.6" font-weight="700" style="fill:#fff">JobHistoryServer</text></g>
+          <path d="M180 104v14M60 118h240M60 118v12M180 118v12M300 118v12" class="s-wire"/>
+          <g><rect x="14" y="130" width="92" height="76" rx="8" class="s-card2"/><rect x="134" y="130" width="92" height="76" rx="8" class="s-card2"/><rect x="254" y="130" width="92" height="76" rx="8" class="s-card2"/>
+            <text x="60" y="146" text-anchor="middle" font-size="8.6" font-weight="700" class="s-ink">worker1</text><text x="180" y="146" text-anchor="middle" font-size="8.6" font-weight="700" class="s-ink">worker2</text><text x="300" y="146" text-anchor="middle" font-size="8.6" font-weight="700" class="s-ink">worker3</text></g>
+          <g data-on="2-"><rect x="22" y="154" width="76" height="14" rx="3" class="s-green"/><rect x="142" y="154" width="76" height="14" rx="3" class="s-green"/><rect x="262" y="154" width="76" height="14" rx="3" class="s-green"/>
+            <text x="60" y="164" text-anchor="middle" font-size="7.6" font-weight="700" style="fill:#fff">DataNode</text><text x="180" y="164" text-anchor="middle" font-size="7.6" font-weight="700" style="fill:#fff">DataNode</text><text x="300" y="164" text-anchor="middle" font-size="7.6" font-weight="700" style="fill:#fff">DataNode</text></g>
+          <g data-on="4-"><rect x="22" y="172" width="76" height="14" rx="3" style="fill:var(--track)"/><rect x="142" y="172" width="76" height="14" rx="3" style="fill:var(--track)"/><rect x="262" y="172" width="76" height="14" rx="3" style="fill:var(--track)"/>
+            <text x="60" y="182" text-anchor="middle" font-size="7.6" font-weight="700" style="fill:#fff">NodeManager</text><text x="180" y="182" text-anchor="middle" font-size="7.6" font-weight="700" style="fill:#fff">NodeManager</text><text x="300" y="182" text-anchor="middle" font-size="7.6" font-weight="700" style="fill:#fff">NodeManager</text></g>
+          <g data-on="3"><path d="M60 154V124M180 154v-36M300 154V124" style="fill:none;stroke:#E05A8A;stroke-width:2;stroke-dasharray:4 3"/><text x="180" y="228" text-anchor="middle" font-size="9" font-weight="700" style="fill:#E05A8A">block reports → NameNode</text></g>
+          <g data-on="4"><text x="180" y="228" text-anchor="middle" font-size="9" font-weight="700" class="s-acc">NodeManagers register their memory + vcores</text></g>
+          <g data-on="1"><text x="180" y="228" text-anchor="middle" font-size="9" class="s-ink2">4 machines, no daemons</text></g>
+          <g data-on="2"><text x="180" y="228" text-anchor="middle" font-size="9" class="s-green" font-weight="700">HDFS daemons start</text></g>
+          <g data-on="5"><text x="180" y="228" text-anchor="middle" font-size="9" class="s-ink2">master: 4 daemons · each worker: 2</text></g>
+          <g data-on="6"><text x="180" y="228" text-anchor="middle" font-size="9" class="s-green" font-weight="700">storage layer + resource layer up</text></g>
+          <text x="352" y="246" text-anchor="end" class="s-wm">myphatshala.in</text>
+        </svg>
+        <ol class="caps" hidden>
+          <li>Four machines are powered on, but no Hadoop daemon is running yet.</li>
+          <li>HDFS starts: the NameNode and Secondary NameNode on the master, one DataNode per worker.</li>
+          <li>Each DataNode registers and sends a <b>block report</b>. The NameNode builds its map of block locations in memory.</li>
+          <li>YARN starts: the ResourceManager on the master and a NodeManager next to each DataNode. Each NodeManager tells the RM how much memory and CPU it can offer.</li>
+          <li>The JobHistory Server joins the master. Typical small layout: 4 daemons on the master, 2 on each worker.</li>
+          <li>Both layers are running. Clients can now store files and submit jobs.</li>
+        </ol>
+      </div>
+    </div>
+  </div>
+
+  <h3 id="playground">Try it yourself: find each daemon in the playground</h3>
+  <p>The playground shows the same architecture: masters at the top, DataNodes (with their NodeManager containers) below.</p>
+  <div class="csim"><script type="application/json">{"title": "Spot the daemons", "intro": "<p>The boxes at the top are master daemons; each DataNode box is a worker that also runs a NodeManager (its two container bars).<\/p>", "racks": 2, "nodes": 3, "features": ["upload", "job", "ha"], "preload": [{"name": "app_logs.json", "sizeMB": 1024}], "try": [{"text": "Find the <b>NameNode<\/b> (HDFS master) and the <b>ResourceManager<\/b> (YARN master). Which one shows the file count?"}, {"text": "Upload a file: the client talks to the NameNode for <i>where<\/i>, but the data packets go straight to DataNodes.", "on": "upload-done"}, {"text": "Run the job: containers (green bars) appear inside the workers' NodeManagers.", "on": "job-done"}, {"text": "Stop the active NameNode: the ZKFC + standby pair takes over.", "on": "nn-failover"}]}</script></div>
+</section>
+
+<!-- ======================= PART 6: REAL-WORLD USE ======================= -->
+<section class="part" id="real-world">
+  <span class="part-label"><b>6</b> Real-world use</span>
+  <h2>Architecture knowledge in daily work</h2>
+
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="18" y="16" width="84" height="58" rx="6" class="s-board"/><text x="28" y="36" font-size="8.6" class="mono" style="fill:#9FD3B8">$ jps</text><text x="28" y="52" font-size="8.6" class="mono" style="fill:#9FD3B8">DataNode</text><text x="28" y="66" font-size="8.6" class="mono" style="fill:#FF8A80">NodeManager?</text></svg></div>
+    <div><h4>1. First check in any incident</h4>
+      <p>When jobs fail on one node, an engineer logs in and runs <code>jps</code>. If the NodeManager is missing, the node offers no containers; if the DataNode is missing, its blocks are unavailable. The daemon's log file then explains why.</p>
+      <div class="uc-flow"><span>Alert</span><i>→</i><span class="java">jps + daemon log</span><i>→</i><span>Restart or fix</span></div></div>
+  </div>
+
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="20" y="18" width="80" height="54" rx="6" class="s-card2"/><text x="60" y="40" text-anchor="middle" font-size="9" font-weight="700" class="s-ink mono">:9870</text><text x="60" y="58" text-anchor="middle" font-size="9" font-weight="700" class="s-ink mono">:8088</text></svg></div>
+    <div><h4>2. Firewall and security reviews</h4>
+      <p>Security teams ask exactly which ports each node needs open. The daemon-and-port table in this lesson is what platform engineers hand them, with web UIs restricted to admin networks.</p>
+      <div class="uc-flow"><span>Port list</span><i>→</i><span class="java">Firewall rules</span><i>→</i><span>Only needed ports open</span></div></div>
+  </div>
+
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="16" y="20" width="88" height="50" rx="6" class="s-soft-blue" style="stroke:var(--blue)"/><text x="60" y="42" text-anchor="middle" font-size="8.6" font-weight="700" class="s-blue">Ambari /</text><text x="60" y="56" text-anchor="middle" font-size="8.6" font-weight="700" class="s-blue">Cloudera Manager</text></svg></div>
+    <div><h4>3. Cluster managers show the same picture</h4>
+      <p>Management tools like Apache Ambari or Cloudera Manager display every host with its roles (NameNode, DataNode, NodeManager…), their health and their configuration, the same architecture you learned today with a dashboard on top.</p>
+      <div class="uc-flow"><span>Hosts</span><i>→</i><span class="java">Roles per host</span><i>→</i><span>Health + config</span></div></div>
+  </div>
+
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="18" y="18" width="84" height="54" rx="6" class="s-card2"/><text x="60" y="40" text-anchor="middle" font-size="8.6" class="mono s-ink">&lt;property&gt;</text><text x="60" y="56" text-anchor="middle" font-size="8.6" class="mono s-acc">fs.defaultFS</text></svg></div>
+    <div><h4>4. Connecting tools to the cluster</h4>
+      <p>Spark, Hive, Airflow and BI tools need the cluster's <code>core-site.xml</code> and <code>hdfs-site.xml</code> (and <code>yarn-site.xml</code> to submit jobs). Copying these files to an edge node is how new tools are connected.</p>
+      <div class="uc-flow"><span>Config files</span><i>→</i><span class="java">Client tool</span><i>→</i><span>Reads HDFS, submits to YARN</span></div></div>
+  </div>
+
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><path d="M20 66h80" class="s-line"/><rect x="26" y="34" width="18" height="32" rx="3" class="s-green"/><rect x="51" y="24" width="18" height="42" rx="3" style="fill:var(--track)"/><rect x="76" y="40" width="18" height="26" rx="3" style="fill:#8B5CF6"/></svg></div>
+    <div><h4>5. Capacity and health dashboards</h4>
+      <p>Monitoring systems scrape metrics from each daemon (NameNode heap, DataNode disk, NodeManager memory) and graph them per layer, so teams see whether storage or compute is running out.</p>
+      <div class="uc-flow"><span>Daemon metrics</span><i>→</i><span class="java">Monitoring</span><i>→</i><span>Alerts per layer</span></div></div>
+  </div>
+  <p class="muted">Examples are simplified. Port numbers are Apache defaults; distributions may differ.</p>
+</section>
+
+
+<div class="ad-slot" data-slot="mid"></div>
+
+<section class="part" id="run">
+  <span class="part-label"><b>7</b> Run the code</span>
+  <h2>Read a Hadoop configuration file</h2>
+  <p>Every Hadoop setting lives in XML files like this <code>hdfs-site.xml</code>. This program reads it the way Hadoop does and turns it into a dictionary. Then try the challenges: find the NameNode, plan which daemons go on which host, and catch a configuration mistake.</p>
+  <div class="code" data-lang="python" data-file="main.py"><pre><code>import xml.etree.ElementTree as ET
+
+hdfs_site = &quot;&quot;&quot;&lt;configuration&gt;
+  &lt;property&gt;&lt;name&gt;dfs.replication&lt;/name&gt;&lt;value&gt;3&lt;/value&gt;&lt;/property&gt;
+  &lt;property&gt;&lt;name&gt;dfs.namenode.name.dir&lt;/name&gt;&lt;value&gt;/data/nn&lt;/value&gt;&lt;/property&gt;
+  &lt;property&gt;&lt;name&gt;dfs.datanode.data.dir&lt;/name&gt;&lt;value&gt;/data/1/dn,/data/2/dn&lt;/value&gt;&lt;/property&gt;
+  &lt;property&gt;&lt;name&gt;dfs.blocksize&lt;/name&gt;&lt;value&gt;134217728&lt;/value&gt;&lt;/property&gt;
+&lt;/configuration&gt;&quot;&quot;&quot;
+
+conf = {p.findtext(&quot;name&quot;): p.findtext(&quot;value&quot;)
+        for p in ET.fromstring(hdfs_site).iter(&quot;property&quot;)}
+
+print(&quot;Replication :&quot;, conf[&quot;dfs.replication&quot;])
+print(&quot;Block size  :&quot;, int(conf[&quot;dfs.blocksize&quot;]) // 1024 // 1024, &quot;MB&quot;)
+print(&quot;DataNode disks:&quot;, conf[&quot;dfs.datanode.data.dir&quot;].split(&quot;,&quot;))</code></pre><div class="output">Replication : 3
+Block size  : 128 MB
+DataNode disks: [&#x27;/data/1/dn&#x27;, &#x27;/data/2/dn&#x27;]</div></div>
+  <ul class="anno"><li><code>ET.fromstring(hdfs_site).iter(&quot;property&quot;)</code><span>Parse the XML and visit every <code>&lt;property&gt;</code> element, as Hadoop's <code>Configuration</code> class does.</span></li><li><code>conf = {p.findtext(&quot;name&quot;): p.findtext(&quot;value&quot;) ...}</code><span>A dictionary comprehension: property name → value. All values are strings.</span></li><li><code>int(conf[&quot;dfs.blocksize&quot;]) // 1024 // 1024</code><span>134217728 bytes = 128 MB, the Hadoop 2/3 default.</span></li></ul>
+  <div class="runner">
+    <script type="application/json">{
+ "lang": "python",
+ "file": "main.py",
+ "tasks": [
+  {
+   "label": "1 · Read hdfs-site.xml",
+   "hint": "Press <b>Run<\/b>. Then change the replication to 2 and add a third data directory.",
+   "code": "import xml.etree.ElementTree as ET\n\nhdfs_site = \"\"\"<configuration>\n  <property><name>dfs.replication<\/name><value>3<\/value><\/property>\n  <property><name>dfs.namenode.name.dir<\/name><value>/data/nn<\/value><\/property>\n  <property><name>dfs.datanode.data.dir<\/name><value>/data/1/dn,/data/2/dn<\/value><\/property>\n  <property><name>dfs.blocksize<\/name><value>134217728<\/value><\/property>\n<\/configuration>\"\"\"\n\nconf = {p.findtext(\"name\"): p.findtext(\"value\")\n        for p in ET.fromstring(hdfs_site).iter(\"property\")}\n\nprint(\"Replication :\", conf[\"dfs.replication\"])\nprint(\"Block size  :\", int(conf[\"dfs.blocksize\"]) // 1024 // 1024, \"MB\")\nprint(\"DataNode disks:\", conf[\"dfs.datanode.data.dir\"].split(\",\"))\n"
+  },
+  {
+   "label": "2 · Where is the NameNode?",
+   "hint": "<b>Predict first:<\/b> what host and port does this <code>fs.defaultFS<\/code> point to? Change it to <code>hdfs://localhost:9000<\/code> (common in tutorials).",
+   "code": "from urllib.parse import urlparse\ndefault_fs = \"hdfs://nn1.tiffingo.in:8020\"\nu = urlparse(default_fs)\nprint(\"scheme:\", u.scheme, \"| NameNode host:\", u.hostname, \"| RPC port:\", u.port)\n"
+  },
+  {
+   "label": "3 · Which daemons on which host?",
+   "hint": "Build the expected <code>jps<\/code> list for each host from its roles. Add an HA master with \"journalnode\".",
+   "code": "daemons = {\"hdfs-master\": [\"NameNode\", \"SecondaryNameNode\"],\n           \"yarn-master\": [\"ResourceManager\"], \"history\": [\"JobHistoryServer\"],\n           \"worker\": [\"DataNode\", \"NodeManager\"]}\nhosts = {\"master1\": [\"hdfs-master\", \"yarn-master\", \"history\"],\n         \"w1\": [\"worker\"], \"w2\": [\"worker\"]}\nfor host, roles in hosts.items():\n    print(host, \"->\", [d for r in roles for d in daemons[r]])\n"
+  },
+  {
+   "label": "4 · Is anything missing?",
+   "hint": "Compare what should run with what <code>jps<\/code> shows on each worker. Then make w3 healthy.",
+   "code": "expected = {\"DataNode\", \"NodeManager\"}\njps = {\"w1\": {\"DataNode\", \"NodeManager\"}, \"w2\": {\"DataNode\"}, \"w3\": set()}\nfor host, running in jps.items():\n    missing = expected - running\n    print(host, \"OK\" if not missing else f\"MISSING {sorted(missing)}\")\n"
+  },
+  {
+   "label": "5 · Spot the error",
+   "hint": "This tries to compute the block size in MB but crashes. All configuration values are strings. Fix it.",
+   "code": "conf = {\"dfs.blocksize\": \"134217728\", \"dfs.replication\": \"3\"}\nprint(conf[\"dfs.blocksize\"] / 1024 / 1024, \"MB\")\n"
+  }
+ ]
+}</script>
+  </div>
+</section>
+
+<section class="part" id="tracer">
+  <span class="part-label"><b>8</b> Line by line</span>
+  <h2>Merging configuration files, one line at a time</h2>
+  <p>Hadoop loads default settings first and then the site files, so later files override earlier ones. Watch the <code>conf</code> dictionary change as each layer is applied.</p>
+  <div class="tracer">
+    <script type="application/json">{
+ "lang": "python",
+ "code": [
+  "defaults = {\"dfs.replication\": \"3\", \"dfs.blocksize\": \"134217728\"}",
+  "site = {\"dfs.replication\": \"2\"}",
+  "job = {\"dfs.blocksize\": \"268435456\"}",
+  "",
+  "conf = {}",
+  "for layer in [defaults, site, job]:",
+  "    conf.update(layer)",
+  "print(conf)"
+ ],
+ "steps": [
+  {
+   "line": 1,
+   "phase": "Defaults",
+   "note": "Built into Hadoop (hdfs-default.xml). <code>defaults<\/code> is created: → dict #1.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "defaults",
+       "→ dict #1"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (2)<\/b> {&#x27;dfs.replication&#x27;: &#x27;3&#x27;, &#x27;dfs.blocksize&#x27;: &#x27;134217728&#x27;}"
+   ],
+   "newVar": "defaults"
+  },
+  {
+   "line": 2,
+   "phase": "Site",
+   "note": "The cluster's own hdfs-site.xml. <code>site<\/code> is created: → dict #2. A new dict object (#2) is created: {&#x27;dfs.replication&#x27;: &#x27;2&#x27;}",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "defaults",
+       "→ dict #1"
+      ],
+      [
+       "site",
+       "→ dict #2"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (2)<\/b> {&#x27;dfs.replication&#x27;: &#x27;3&#x27;, &#x27;dfs.blocksize&#x27;: &#x27;134217728&#x27;}",
+    "<b>#2 dict (1)<\/b> {&#x27;dfs.replication&#x27;: &#x27;2&#x27;}"
+   ],
+   "newVar": "site"
+  },
+  {
+   "line": 3,
+   "phase": "Job",
+   "note": "A setting passed for one job, e.g. <code>-D dfs.blocksize=…<\/code>. <code>job<\/code> is created: → dict #3. A new dict object (#3) is created: {&#x27;dfs.blocksize&#x27;: &#x27;268435456&#x27;}",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "defaults",
+       "→ dict #1"
+      ],
+      [
+       "site",
+       "→ dict #2"
+      ],
+      [
+       "job",
+       "→ dict #3"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (2)<\/b> {&#x27;dfs.replication&#x27;: &#x27;3&#x27;, &#x27;dfs.blocksize&#x27;: &#x27;134217728&#x27;}",
+    "<b>#2 dict (1)<\/b> {&#x27;dfs.replication&#x27;: &#x27;2&#x27;}",
+    "<b>#3 dict (1)<\/b> {&#x27;dfs.blocksize&#x27;: &#x27;268435456&#x27;}"
+   ],
+   "newVar": "job"
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "<code>conf<\/code> is created: → dict #4. A new dict object (#4) is created: {}",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "defaults",
+       "→ dict #1"
+      ],
+      [
+       "site",
+       "→ dict #2"
+      ],
+      [
+       "job",
+       "→ dict #3"
+      ],
+      [
+       "conf",
+       "→ dict #4"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (2)<\/b> {&#x27;dfs.replication&#x27;: &#x27;3&#x27;, &#x27;dfs.blocksize&#x27;: &#x27;134217728&#x27;}",
+    "<b>#2 dict (1)<\/b> {&#x27;dfs.replication&#x27;: &#x27;2&#x27;}",
+    "<b>#3 dict (1)<\/b> {&#x27;dfs.blocksize&#x27;: &#x27;268435456&#x27;}",
+    "<b>#4 dict (0)<\/b> {}"
+   ],
+   "newVar": "conf"
+  },
+  {
+   "line": 6,
+   "phase": "Python",
+   "note": "<code>layer<\/code> is created: → dict #1.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "defaults",
+       "→ dict #1"
+      ],
+      [
+       "site",
+       "→ dict #2"
+      ],
+      [
+       "job",
+       "→ dict #3"
+      ],
+      [
+       "conf",
+       "→ dict #4"
+      ],
+      [
+       "layer",
+       "→ dict #1"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (2)<\/b> {&#x27;dfs.replication&#x27;: &#x27;3&#x27;, &#x27;dfs.blocksize&#x27;: &#x27;134217728&#x27;}",
+    "<b>#2 dict (1)<\/b> {&#x27;dfs.replication&#x27;: &#x27;2&#x27;}",
+    "<b>#3 dict (1)<\/b> {&#x27;dfs.blocksize&#x27;: &#x27;268435456&#x27;}",
+    "<b>#4 dict (0)<\/b> {}"
+   ],
+   "newVar": "layer"
+  },
+  {
+   "line": 7,
+   "phase": "Python",
+   "note": "Object #4 dict now holds {&#x27;dfs.replication&#x27;: &#x27;3&#x27;, &#x27;dfs.blocksize&#x27;: &#x27;134217728&#x27;}",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "defaults",
+       "→ dict #1"
+      ],
+      [
+       "site",
+       "→ dict #2"
+      ],
+      [
+       "job",
+       "→ dict #3"
+      ],
+      [
+       "conf",
+       "→ dict #4"
+      ],
+      [
+       "layer",
+       "→ dict #1"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (2)<\/b> {&#x27;dfs.replication&#x27;: &#x27;3&#x27;, &#x27;dfs.blocksize&#x27;: &#x27;134217728&#x27;}",
+    "<b>#2 dict (1)<\/b> {&#x27;dfs.replication&#x27;: &#x27;2&#x27;}",
+    "<b>#3 dict (1)<\/b> {&#x27;dfs.blocksize&#x27;: &#x27;268435456&#x27;}",
+    "<b>#4 dict (2)<\/b> {&#x27;dfs.replication&#x27;: &#x27;3&#x27;, &#x27;dfs.blocksize&#x27;: &#x27;134217728&#x27;}"
+   ]
+  },
+  {
+   "line": 6,
+   "phase": "Python",
+   "note": "<code>layer<\/code> changes to → dict #2.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "defaults",
+       "→ dict #1"
+      ],
+      [
+       "site",
+       "→ dict #2"
+      ],
+      [
+       "job",
+       "→ dict #3"
+      ],
+      [
+       "conf",
+       "→ dict #4"
+      ],
+      [
+       "layer",
+       "→ dict #2"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (2)<\/b> {&#x27;dfs.replication&#x27;: &#x27;3&#x27;, &#x27;dfs.blocksize&#x27;: &#x27;134217728&#x27;}",
+    "<b>#2 dict (1)<\/b> {&#x27;dfs.replication&#x27;: &#x27;2&#x27;}",
+    "<b>#3 dict (1)<\/b> {&#x27;dfs.blocksize&#x27;: &#x27;268435456&#x27;}",
+    "<b>#4 dict (2)<\/b> {&#x27;dfs.replication&#x27;: &#x27;3&#x27;, &#x27;dfs.blocksize&#x27;: &#x27;134217728&#x27;}"
+   ],
+   "newVar": "layer"
+  },
+  {
+   "line": 7,
+   "phase": "Python",
+   "note": "Object #4 dict now holds {&#x27;dfs.replication&#x27;: &#x27;2&#x27;, &#x27;dfs.blocksize&#x27;: &#x27;134217728&#x27;}",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "defaults",
+       "→ dict #1"
+      ],
+      [
+       "site",
+       "→ dict #2"
+      ],
+      [
+       "job",
+       "→ dict #3"
+      ],
+      [
+       "conf",
+       "→ dict #4"
+      ],
+      [
+       "layer",
+       "→ dict #2"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (2)<\/b> {&#x27;dfs.replication&#x27;: &#x27;3&#x27;, &#x27;dfs.blocksize&#x27;: &#x27;134217728&#x27;}",
+    "<b>#2 dict (1)<\/b> {&#x27;dfs.replication&#x27;: &#x27;2&#x27;}",
+    "<b>#3 dict (1)<\/b> {&#x27;dfs.blocksize&#x27;: &#x27;268435456&#x27;}",
+    "<b>#4 dict (2)<\/b> {&#x27;dfs.replication&#x27;: &#x27;2&#x27;, &#x27;dfs.blocksize&#x27;: &#x27;134217728&#x27;}"
+   ]
+  },
+  {
+   "line": 6,
+   "phase": "Python",
+   "note": "<code>layer<\/code> changes to → dict #3.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "defaults",
+       "→ dict #1"
+      ],
+      [
+       "site",
+       "→ dict #2"
+      ],
+      [
+       "job",
+       "→ dict #3"
+      ],
+      [
+       "conf",
+       "→ dict #4"
+      ],
+      [
+       "layer",
+       "→ dict #3"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (2)<\/b> {&#x27;dfs.replication&#x27;: &#x27;3&#x27;, &#x27;dfs.blocksize&#x27;: &#x27;134217728&#x27;}",
+    "<b>#2 dict (1)<\/b> {&#x27;dfs.replication&#x27;: &#x27;2&#x27;}",
+    "<b>#3 dict (1)<\/b> {&#x27;dfs.blocksize&#x27;: &#x27;268435456&#x27;}",
+    "<b>#4 dict (2)<\/b> {&#x27;dfs.replication&#x27;: &#x27;2&#x27;, &#x27;dfs.blocksize&#x27;: &#x27;134217728&#x27;}"
+   ],
+   "newVar": "layer"
+  },
+  {
+   "line": 7,
+   "phase": "Python",
+   "note": "Object #4 dict now holds {&#x27;dfs.replication&#x27;: &#x27;2&#x27;, &#x27;dfs.blocksize&#x27;: &#x27;268435456&#x27;}",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "defaults",
+       "→ dict #1"
+      ],
+      [
+       "site",
+       "→ dict #2"
+      ],
+      [
+       "job",
+       "→ dict #3"
+      ],
+      [
+       "conf",
+       "→ dict #4"
+      ],
+      [
+       "layer",
+       "→ dict #3"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (2)<\/b> {&#x27;dfs.replication&#x27;: &#x27;3&#x27;, &#x27;dfs.blocksize&#x27;: &#x27;134217728&#x27;}",
+    "<b>#2 dict (1)<\/b> {&#x27;dfs.replication&#x27;: &#x27;2&#x27;}",
+    "<b>#3 dict (1)<\/b> {&#x27;dfs.blocksize&#x27;: &#x27;268435456&#x27;}",
+    "<b>#4 dict (2)<\/b> {&#x27;dfs.replication&#x27;: &#x27;2&#x27;, &#x27;dfs.blocksize&#x27;: &#x27;268435456&#x27;}"
+   ]
+  },
+  {
+   "line": 6,
+   "phase": "Python",
+   "note": "Nothing is left to loop over, so the loop ends and Python moves on.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "defaults",
+       "→ dict #1"
+      ],
+      [
+       "site",
+       "→ dict #2"
+      ],
+      [
+       "job",
+       "→ dict #3"
+      ],
+      [
+       "conf",
+       "→ dict #4"
+      ],
+      [
+       "layer",
+       "→ dict #3"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (2)<\/b> {&#x27;dfs.replication&#x27;: &#x27;3&#x27;, &#x27;dfs.blocksize&#x27;: &#x27;134217728&#x27;}",
+    "<b>#2 dict (1)<\/b> {&#x27;dfs.replication&#x27;: &#x27;2&#x27;}",
+    "<b>#3 dict (1)<\/b> {&#x27;dfs.blocksize&#x27;: &#x27;268435456&#x27;}",
+    "<b>#4 dict (2)<\/b> {&#x27;dfs.replication&#x27;: &#x27;2&#x27;, &#x27;dfs.blocksize&#x27;: &#x27;268435456&#x27;}"
+   ]
+  },
+  {
+   "line": 8,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "defaults",
+       "→ dict #1"
+      ],
+      [
+       "site",
+       "→ dict #2"
+      ],
+      [
+       "job",
+       "→ dict #3"
+      ],
+      [
+       "conf",
+       "→ dict #4"
+      ],
+      [
+       "layer",
+       "→ dict #3"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (2)<\/b> {&#x27;dfs.replication&#x27;: &#x27;3&#x27;, &#x27;dfs.blocksize&#x27;: &#x27;134217728&#x27;}",
+    "<b>#2 dict (1)<\/b> {&#x27;dfs.replication&#x27;: &#x27;2&#x27;}",
+    "<b>#3 dict (1)<\/b> {&#x27;dfs.blocksize&#x27;: &#x27;268435456&#x27;}",
+    "<b>#4 dict (2)<\/b> {&#x27;dfs.replication&#x27;: &#x27;2&#x27;, &#x27;dfs.blocksize&#x27;: &#x27;268435456&#x27;}"
+   ],
+   "out": "{'dfs.replication': '2', 'dfs.blocksize': '268435456'}\n"
+  }
+ ]
+}</script>
+  </div>
+
+<h3 id="worked">Worked examples: real problems, solved and traced in memory</h3>
+  <p class="wx-intro">Three tasks a new platform engineer is given in the first week: audit which daemons run where, check a cluster's port plan, and size the master's memory. Each runs live and is traced in memory.</p>
+  <article class="wx">
+    <div class="wx__head"><span class="wx__num">Example 1</span><span class="lvl lvl--b">Beginner</span><span class="wx__tag">Operations · health check</span></div>
+    <h4>Which nodes are missing a daemon?</h4>
+    <div class="wx__problem"><p class="wx__label">Problem statement</p><p>A script collects <code>jps</code> output from every node. Masters must run NameNode and ResourceManager; workers must run DataNode and NodeManager. Print each node's missing daemons.</p></div>
+    <div class="prob__io"><div><small>Input</small><pre>master1: NameNode, ResourceManager · w1: DataNode, NodeManager · w2: DataNode · w3: NodeManager</pre></div><div><small>Expected output</small><pre>w2 missing [&#x27;NodeManager&#x27;]
+w3 missing [&#x27;DataNode&#x27;]</pre></div></div>
+    <div class="wx__approach"><p class="wx__label">Approach</p><ol><li>Store the expected daemons per role as sets.</li><li>For each node, subtract what is running from what is expected.</li><li>Print the node only if something is missing.</li></ol></div>
+    <p class="wx__label">Solution: run it live</p>
+    <div class="runner">
+    <script type="application/json">{
+ "lang": "python",
+ "file": "main.py",
+ "tasks": [
+  {
+   "label": "Solution",
+   "hint": "w2 has no NodeManager: it stores data but runs no tasks, so jobs reading its blocks lose locality. w3 has no DataNode: its blocks are unavailable. Which is more urgent?",
+   "code": "expected = {\"master\": {\"NameNode\", \"ResourceManager\"}, \"worker\": {\"DataNode\", \"NodeManager\"}}\nnodes = {\"master1\": (\"master\", {\"NameNode\", \"ResourceManager\"}),\n         \"w1\": (\"worker\", {\"DataNode\", \"NodeManager\"}),\n         \"w2\": (\"worker\", {\"DataNode\"}),\n         \"w3\": (\"worker\", {\"NodeManager\"})}\nfor name, (role, running) in nodes.items():\n    missing = expected[role] - running\n    if missing:\n        print(name, \"missing\", sorted(missing))\n"
+  }
+ ]
+}</script>
+    </div>
+    <p class="wx__label">What happens in memory, step by step</p>
+    <p class="wx__how">Recorded from a real Python run: press <b>Next</b> to execute one line at a time. Watch variables change in each frame, and lists and dictionaries (numbered #1, #2 …) fill up as objects.</p>
+    <div class="tracer">
+    <script type="application/json">{
+ "lang": "python",
+ "code": [
+  "expected = {\"master\": {\"NameNode\", \"ResourceManager\"}, \"worker\": {\"DataNode\", \"NodeManager\"}}",
+  "nodes = {\"master1\": (\"master\", {\"NameNode\", \"ResourceManager\"}),",
+  "         \"w1\": (\"worker\", {\"DataNode\", \"NodeManager\"}),",
+  "         \"w2\": (\"worker\", {\"DataNode\"}),",
+  "         \"w3\": (\"worker\", {\"NodeManager\"})}",
+  "for name, (role, running) in nodes.items():",
+  "    missing = expected[role] - running",
+  "    if missing:",
+  "        print(name, \"missing\", sorted(missing))"
+ ],
+ "steps": [
+  {
+   "line": 1,
+   "phase": "Python",
+   "note": "<code>expected<\/code> is created: → dict #1.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "expected",
+       "→ dict #1"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (2)<\/b> {&#x27;master&#x27;: → set #2, &#x27;worker&#x27;: → set #3}",
+    "<b>#2 set (2)<\/b> {&#x27;NameNode&#x27;, &#x27;ResourceManager&#x27;}",
+    "<b>#3 set (2)<\/b> {&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;}"
+   ],
+   "newVar": "expected"
+  },
+  {
+   "line": 2,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "expected",
+       "→ dict #1"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (2)<\/b> {&#x27;master&#x27;: → set #2, &#x27;worker&#x27;: → set #3}",
+    "<b>#2 set (2)<\/b> {&#x27;NameNode&#x27;, &#x27;ResourceManager&#x27;}",
+    "<b>#3 set (2)<\/b> {&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;}"
+   ]
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "expected",
+       "→ dict #1"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (2)<\/b> {&#x27;master&#x27;: → set #2, &#x27;worker&#x27;: → set #3}",
+    "<b>#2 set (2)<\/b> {&#x27;NameNode&#x27;, &#x27;ResourceManager&#x27;}",
+    "<b>#3 set (2)<\/b> {&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;}"
+   ]
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "expected",
+       "→ dict #1"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (2)<\/b> {&#x27;master&#x27;: → set #2, &#x27;worker&#x27;: → set #3}",
+    "<b>#2 set (2)<\/b> {&#x27;NameNode&#x27;, &#x27;ResourceManager&#x27;}",
+    "<b>#3 set (2)<\/b> {&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;}"
+   ]
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "expected",
+       "→ dict #1"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (2)<\/b> {&#x27;master&#x27;: → set #2, &#x27;worker&#x27;: → set #3}",
+    "<b>#2 set (2)<\/b> {&#x27;NameNode&#x27;, &#x27;ResourceManager&#x27;}",
+    "<b>#3 set (2)<\/b> {&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;}"
+   ]
+  },
+  {
+   "line": 2,
+   "phase": "Python",
+   "note": "<code>nodes<\/code> is created: → dict #4. A new dict object (#4) is created: {&#x27;master1&#x27;: → tuple #5, &#x27;w1&#x27;: → tuple #6, &#x27;w2&#x27;: → tuple #7, &#x27;w3&#x27;: → tuple #8} A new tuple object (#5) is created: (&#x27;master&#x27;, → set #9) A new tuple object (#6) is created: (&#x27;worker&#x27;, → set #10) A new tuple object (#7) is created: (&#x27;worker&#x27;, → set #11) A new tuple object (#8) is created: (&#x27;worker&#x27;, → set #12) A new set object (#9) is created: {&#x27;NameNode&#x27;, &#x27;ResourceManager&#x27;} A new set object (#10) is created: {&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;} A new set object (#11) is created: {&#x27;DataNode&#x27;} A new set object (#12) is created: {&#x27;NodeManager&#x27;}",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "expected",
+       "→ dict #1"
+      ],
+      [
+       "nodes",
+       "→ dict #4"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (2)<\/b> {&#x27;master&#x27;: → set #2, &#x27;worker&#x27;: → set #3}",
+    "<b>#2 set (2)<\/b> {&#x27;NameNode&#x27;, &#x27;ResourceManager&#x27;}",
+    "<b>#3 set (2)<\/b> {&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;}",
+    "<b>#4 dict (4)<\/b> {&#x27;master1&#x27;: → tuple #5, &#x27;w1&#x27;: → tuple #6, &#x27;w2&#x27;: → tuple #7, &#x27;w3&#x27;: → tuple #8}",
+    "<b>#5 tuple (2)<\/b> (&#x27;master&#x27;, → set #9)",
+    "<b>#6 tuple (2)<\/b> (&#x27;worker&#x27;, → set #10)",
+    "<b>#7 tuple (2)<\/b> (&#x27;worker&#x27;, → set #11)",
+    "<b>#8 tuple (2)<\/b> (&#x27;worker&#x27;, → set #12)",
+    "<b>#9 set (2)<\/b> {&#x27;NameNode&#x27;, &#x27;ResourceManager&#x27;}",
+    "<b>#10 set (2)<\/b> {&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;}",
+    "<b>#11 set (1)<\/b> {&#x27;DataNode&#x27;}",
+    "<b>#12 set (1)<\/b> {&#x27;NodeManager&#x27;}"
+   ],
+   "newVar": "nodes"
+  },
+  {
+   "line": 6,
+   "phase": "Python",
+   "note": "<code>name<\/code> is created: &#x27;master1&#x27;. <code>role<\/code> is created: &#x27;master&#x27;. <code>running<\/code> is created: → set #9.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "expected",
+       "→ dict #1"
+      ],
+      [
+       "nodes",
+       "→ dict #4"
+      ],
+      [
+       "name",
+       "'master1'"
+      ],
+      [
+       "role",
+       "'master'"
+      ],
+      [
+       "running",
+       "→ set #9"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (2)<\/b> {&#x27;master&#x27;: → set #2, &#x27;worker&#x27;: → set #3}",
+    "<b>#2 set (2)<\/b> {&#x27;NameNode&#x27;, &#x27;ResourceManager&#x27;}",
+    "<b>#3 set (2)<\/b> {&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;}",
+    "<b>#4 dict (4)<\/b> {&#x27;master1&#x27;: → tuple #5, &#x27;w1&#x27;: → tuple #6, &#x27;w2&#x27;: → tuple #7, &#x27;w3&#x27;: → tuple #8}",
+    "<b>#5 tuple (2)<\/b> (&#x27;master&#x27;, → set #9)",
+    "<b>#6 tuple (2)<\/b> (&#x27;worker&#x27;, → set #10)",
+    "<b>#7 tuple (2)<\/b> (&#x27;worker&#x27;, → set #11)",
+    "<b>#8 tuple (2)<\/b> (&#x27;worker&#x27;, → set #12)",
+    "<b>#9 set (2)<\/b> {&#x27;NameNode&#x27;, &#x27;ResourceManager&#x27;}",
+    "<b>#10 set (2)<\/b> {&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;}",
+    "<b>#11 set (1)<\/b> {&#x27;DataNode&#x27;}",
+    "<b>#12 set (1)<\/b> {&#x27;NodeManager&#x27;}"
+   ],
+   "newVar": "running"
+  },
+  {
+   "line": 7,
+   "phase": "Check",
+   "note": "Set difference: expected minus running. <code>missing<\/code> is created: → set #13. A new set object (#13) is created: {}",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "expected",
+       "→ dict #1"
+      ],
+      [
+       "nodes",
+       "→ dict #4"
+      ],
+      [
+       "name",
+       "'master1'"
+      ],
+      [
+       "role",
+       "'master'"
+      ],
+      [
+       "running",
+       "→ set #9"
+      ],
+      [
+       "missing",
+       "→ set #13"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (2)<\/b> {&#x27;master&#x27;: → set #2, &#x27;worker&#x27;: → set #3}",
+    "<b>#2 set (2)<\/b> {&#x27;NameNode&#x27;, &#x27;ResourceManager&#x27;}",
+    "<b>#3 set (2)<\/b> {&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;}",
+    "<b>#4 dict (4)<\/b> {&#x27;master1&#x27;: → tuple #5, &#x27;w1&#x27;: → tuple #6, &#x27;w2&#x27;: → tuple #7, &#x27;w3&#x27;: → tuple #8}",
+    "<b>#5 tuple (2)<\/b> (&#x27;master&#x27;, → set #9)",
+    "<b>#6 tuple (2)<\/b> (&#x27;worker&#x27;, → set #10)",
+    "<b>#7 tuple (2)<\/b> (&#x27;worker&#x27;, → set #11)",
+    "<b>#8 tuple (2)<\/b> (&#x27;worker&#x27;, → set #12)",
+    "<b>#9 set (2)<\/b> {&#x27;NameNode&#x27;, &#x27;ResourceManager&#x27;}",
+    "<b>#10 set (2)<\/b> {&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;}",
+    "<b>#11 set (1)<\/b> {&#x27;DataNode&#x27;}",
+    "<b>#12 set (1)<\/b> {&#x27;NodeManager&#x27;}",
+    "<b>#13 set (0)<\/b> {}"
+   ],
+   "newVar": "missing"
+  },
+  {
+   "line": 8,
+   "phase": "Python",
+   "note": "The condition is <b>False<\/b>, so the indented block is skipped.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "expected",
+       "→ dict #1"
+      ],
+      [
+       "nodes",
+       "→ dict #4"
+      ],
+      [
+       "name",
+       "'master1'"
+      ],
+      [
+       "role",
+       "'master'"
+      ],
+      [
+       "running",
+       "→ set #9"
+      ],
+      [
+       "missing",
+       "→ set #13"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (2)<\/b> {&#x27;master&#x27;: → set #2, &#x27;worker&#x27;: → set #3}",
+    "<b>#2 set (2)<\/b> {&#x27;NameNode&#x27;, &#x27;ResourceManager&#x27;}",
+    "<b>#3 set (2)<\/b> {&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;}",
+    "<b>#4 dict (4)<\/b> {&#x27;master1&#x27;: → tuple #5, &#x27;w1&#x27;: → tuple #6, &#x27;w2&#x27;: → tuple #7, &#x27;w3&#x27;: → tuple #8}",
+    "<b>#5 tuple (2)<\/b> (&#x27;master&#x27;, → set #9)",
+    "<b>#6 tuple (2)<\/b> (&#x27;worker&#x27;, → set #10)",
+    "<b>#7 tuple (2)<\/b> (&#x27;worker&#x27;, → set #11)",
+    "<b>#8 tuple (2)<\/b> (&#x27;worker&#x27;, → set #12)",
+    "<b>#9 set (2)<\/b> {&#x27;NameNode&#x27;, &#x27;ResourceManager&#x27;}",
+    "<b>#10 set (2)<\/b> {&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;}",
+    "<b>#11 set (1)<\/b> {&#x27;DataNode&#x27;}",
+    "<b>#12 set (1)<\/b> {&#x27;NodeManager&#x27;}",
+    "<b>#13 set (0)<\/b> {}"
+   ]
+  },
+  {
+   "line": 6,
+   "phase": "Python",
+   "note": "<code>name<\/code> changes to &#x27;w1&#x27;. <code>role<\/code> changes to &#x27;worker&#x27;. <code>running<\/code> changes to → set #10.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "expected",
+       "→ dict #1"
+      ],
+      [
+       "nodes",
+       "→ dict #4"
+      ],
+      [
+       "name",
+       "'w1'"
+      ],
+      [
+       "role",
+       "'worker'"
+      ],
+      [
+       "running",
+       "→ set #10"
+      ],
+      [
+       "missing",
+       "→ set #13"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (2)<\/b> {&#x27;master&#x27;: → set #2, &#x27;worker&#x27;: → set #3}",
+    "<b>#2 set (2)<\/b> {&#x27;NameNode&#x27;, &#x27;ResourceManager&#x27;}",
+    "<b>#3 set (2)<\/b> {&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;}",
+    "<b>#4 dict (4)<\/b> {&#x27;master1&#x27;: → tuple #5, &#x27;w1&#x27;: → tuple #6, &#x27;w2&#x27;: → tuple #7, &#x27;w3&#x27;: → tuple #8}",
+    "<b>#5 tuple (2)<\/b> (&#x27;master&#x27;, → set #9)",
+    "<b>#6 tuple (2)<\/b> (&#x27;worker&#x27;, → set #10)",
+    "<b>#7 tuple (2)<\/b> (&#x27;worker&#x27;, → set #11)",
+    "<b>#8 tuple (2)<\/b> (&#x27;worker&#x27;, → set #12)",
+    "<b>#9 set (2)<\/b> {&#x27;NameNode&#x27;, &#x27;ResourceManager&#x27;}",
+    "<b>#10 set (2)<\/b> {&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;}",
+    "<b>#11 set (1)<\/b> {&#x27;DataNode&#x27;}",
+    "<b>#12 set (1)<\/b> {&#x27;NodeManager&#x27;}",
+    "<b>#13 set (0)<\/b> {}"
+   ],
+   "newVar": "running"
+  },
+  {
+   "line": 7,
+   "phase": "Python",
+   "note": "<code>missing<\/code> changes to → set #14. A new set object (#14) is created: {}",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "expected",
+       "→ dict #1"
+      ],
+      [
+       "nodes",
+       "→ dict #4"
+      ],
+      [
+       "name",
+       "'w1'"
+      ],
+      [
+       "role",
+       "'worker'"
+      ],
+      [
+       "running",
+       "→ set #10"
+      ],
+      [
+       "missing",
+       "→ set #14"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (2)<\/b> {&#x27;master&#x27;: → set #2, &#x27;worker&#x27;: → set #3}",
+    "<b>#2 set (2)<\/b> {&#x27;NameNode&#x27;, &#x27;ResourceManager&#x27;}",
+    "<b>#3 set (2)<\/b> {&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;}",
+    "<b>#4 dict (4)<\/b> {&#x27;master1&#x27;: → tuple #5, &#x27;w1&#x27;: → tuple #6, &#x27;w2&#x27;: → tuple #7, &#x27;w3&#x27;: → tuple #8}",
+    "<b>#5 tuple (2)<\/b> (&#x27;master&#x27;, → set #9)",
+    "<b>#6 tuple (2)<\/b> (&#x27;worker&#x27;, → set #10)",
+    "<b>#7 tuple (2)<\/b> (&#x27;worker&#x27;, → set #11)",
+    "<b>#8 tuple (2)<\/b> (&#x27;worker&#x27;, → set #12)",
+    "<b>#9 set (2)<\/b> {&#x27;NameNode&#x27;, &#x27;ResourceManager&#x27;}",
+    "<b>#10 set (2)<\/b> {&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;}",
+    "<b>#11 set (1)<\/b> {&#x27;DataNode&#x27;}",
+    "<b>#12 set (1)<\/b> {&#x27;NodeManager&#x27;}",
+    "<b>#14 set (0)<\/b> {}"
+   ],
+   "newVar": "missing"
+  },
+  {
+   "line": 8,
+   "phase": "Python",
+   "note": "The condition is <b>False<\/b>, so the indented block is skipped.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "expected",
+       "→ dict #1"
+      ],
+      [
+       "nodes",
+       "→ dict #4"
+      ],
+      [
+       "name",
+       "'w1'"
+      ],
+      [
+       "role",
+       "'worker'"
+      ],
+      [
+       "running",
+       "→ set #10"
+      ],
+      [
+       "missing",
+       "→ set #14"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (2)<\/b> {&#x27;master&#x27;: → set #2, &#x27;worker&#x27;: → set #3}",
+    "<b>#2 set (2)<\/b> {&#x27;NameNode&#x27;, &#x27;ResourceManager&#x27;}",
+    "<b>#3 set (2)<\/b> {&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;}",
+    "<b>#4 dict (4)<\/b> {&#x27;master1&#x27;: → tuple #5, &#x27;w1&#x27;: → tuple #6, &#x27;w2&#x27;: → tuple #7, &#x27;w3&#x27;: → tuple #8}",
+    "<b>#5 tuple (2)<\/b> (&#x27;master&#x27;, → set #9)",
+    "<b>#6 tuple (2)<\/b> (&#x27;worker&#x27;, → set #10)",
+    "<b>#7 tuple (2)<\/b> (&#x27;worker&#x27;, → set #11)",
+    "<b>#8 tuple (2)<\/b> (&#x27;worker&#x27;, → set #12)",
+    "<b>#9 set (2)<\/b> {&#x27;NameNode&#x27;, &#x27;ResourceManager&#x27;}",
+    "<b>#10 set (2)<\/b> {&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;}",
+    "<b>#11 set (1)<\/b> {&#x27;DataNode&#x27;}",
+    "<b>#12 set (1)<\/b> {&#x27;NodeManager&#x27;}",
+    "<b>#14 set (0)<\/b> {}"
+   ]
+  },
+  {
+   "line": 6,
+   "phase": "Python",
+   "note": "<code>name<\/code> changes to &#x27;w2&#x27;. <code>running<\/code> changes to → set #11.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "expected",
+       "→ dict #1"
+      ],
+      [
+       "nodes",
+       "→ dict #4"
+      ],
+      [
+       "name",
+       "'w2'"
+      ],
+      [
+       "role",
+       "'worker'"
+      ],
+      [
+       "running",
+       "→ set #11"
+      ],
+      [
+       "missing",
+       "→ set #14"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (2)<\/b> {&#x27;master&#x27;: → set #2, &#x27;worker&#x27;: → set #3}",
+    "<b>#2 set (2)<\/b> {&#x27;NameNode&#x27;, &#x27;ResourceManager&#x27;}",
+    "<b>#3 set (2)<\/b> {&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;}",
+    "<b>#4 dict (4)<\/b> {&#x27;master1&#x27;: → tuple #5, &#x27;w1&#x27;: → tuple #6, &#x27;w2&#x27;: → tuple #7, &#x27;w3&#x27;: → tuple #8}",
+    "<b>#5 tuple (2)<\/b> (&#x27;master&#x27;, → set #9)",
+    "<b>#6 tuple (2)<\/b> (&#x27;worker&#x27;, → set #10)",
+    "<b>#7 tuple (2)<\/b> (&#x27;worker&#x27;, → set #11)",
+    "<b>#8 tuple (2)<\/b> (&#x27;worker&#x27;, → set #12)",
+    "<b>#9 set (2)<\/b> {&#x27;NameNode&#x27;, &#x27;ResourceManager&#x27;}",
+    "<b>#10 set (2)<\/b> {&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;}",
+    "<b>#11 set (1)<\/b> {&#x27;DataNode&#x27;}",
+    "<b>#12 set (1)<\/b> {&#x27;NodeManager&#x27;}",
+    "<b>#14 set (0)<\/b> {}"
+   ],
+   "newVar": "running"
+  },
+  {
+   "line": 7,
+   "phase": "Python",
+   "note": "<code>missing<\/code> changes to → set #15. A new set object (#15) is created: {&#x27;NodeManager&#x27;}",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "expected",
+       "→ dict #1"
+      ],
+      [
+       "nodes",
+       "→ dict #4"
+      ],
+      [
+       "name",
+       "'w2'"
+      ],
+      [
+       "role",
+       "'worker'"
+      ],
+      [
+       "running",
+       "→ set #11"
+      ],
+      [
+       "missing",
+       "→ set #15"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (2)<\/b> {&#x27;master&#x27;: → set #2, &#x27;worker&#x27;: → set #3}",
+    "<b>#2 set (2)<\/b> {&#x27;NameNode&#x27;, &#x27;ResourceManager&#x27;}",
+    "<b>#3 set (2)<\/b> {&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;}",
+    "<b>#4 dict (4)<\/b> {&#x27;master1&#x27;: → tuple #5, &#x27;w1&#x27;: → tuple #6, &#x27;w2&#x27;: → tuple #7, &#x27;w3&#x27;: → tuple #8}",
+    "<b>#5 tuple (2)<\/b> (&#x27;master&#x27;, → set #9)",
+    "<b>#6 tuple (2)<\/b> (&#x27;worker&#x27;, → set #10)",
+    "<b>#7 tuple (2)<\/b> (&#x27;worker&#x27;, → set #11)",
+    "<b>#8 tuple (2)<\/b> (&#x27;worker&#x27;, → set #12)",
+    "<b>#9 set (2)<\/b> {&#x27;NameNode&#x27;, &#x27;ResourceManager&#x27;}",
+    "<b>#10 set (2)<\/b> {&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;}",
+    "<b>#11 set (1)<\/b> {&#x27;DataNode&#x27;}",
+    "<b>#12 set (1)<\/b> {&#x27;NodeManager&#x27;}",
+    "<b>#15 set (1)<\/b> {&#x27;NodeManager&#x27;}"
+   ],
+   "newVar": "missing"
+  },
+  {
+   "line": 8,
+   "phase": "Python",
+   "note": "The condition is <b>True<\/b>, so the indented block runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "expected",
+       "→ dict #1"
+      ],
+      [
+       "nodes",
+       "→ dict #4"
+      ],
+      [
+       "name",
+       "'w2'"
+      ],
+      [
+       "role",
+       "'worker'"
+      ],
+      [
+       "running",
+       "→ set #11"
+      ],
+      [
+       "missing",
+       "→ set #15"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (2)<\/b> {&#x27;master&#x27;: → set #2, &#x27;worker&#x27;: → set #3}",
+    "<b>#2 set (2)<\/b> {&#x27;NameNode&#x27;, &#x27;ResourceManager&#x27;}",
+    "<b>#3 set (2)<\/b> {&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;}",
+    "<b>#4 dict (4)<\/b> {&#x27;master1&#x27;: → tuple #5, &#x27;w1&#x27;: → tuple #6, &#x27;w2&#x27;: → tuple #7, &#x27;w3&#x27;: → tuple #8}",
+    "<b>#5 tuple (2)<\/b> (&#x27;master&#x27;, → set #9)",
+    "<b>#6 tuple (2)<\/b> (&#x27;worker&#x27;, → set #10)",
+    "<b>#7 tuple (2)<\/b> (&#x27;worker&#x27;, → set #11)",
+    "<b>#8 tuple (2)<\/b> (&#x27;worker&#x27;, → set #12)",
+    "<b>#9 set (2)<\/b> {&#x27;NameNode&#x27;, &#x27;ResourceManager&#x27;}",
+    "<b>#10 set (2)<\/b> {&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;}",
+    "<b>#11 set (1)<\/b> {&#x27;DataNode&#x27;}",
+    "<b>#12 set (1)<\/b> {&#x27;NodeManager&#x27;}",
+    "<b>#15 set (1)<\/b> {&#x27;NodeManager&#x27;}"
+   ]
+  },
+  {
+   "line": 9,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "expected",
+       "→ dict #1"
+      ],
+      [
+       "nodes",
+       "→ dict #4"
+      ],
+      [
+       "name",
+       "'w2'"
+      ],
+      [
+       "role",
+       "'worker'"
+      ],
+      [
+       "running",
+       "→ set #11"
+      ],
+      [
+       "missing",
+       "→ set #15"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (2)<\/b> {&#x27;master&#x27;: → set #2, &#x27;worker&#x27;: → set #3}",
+    "<b>#2 set (2)<\/b> {&#x27;NameNode&#x27;, &#x27;ResourceManager&#x27;}",
+    "<b>#3 set (2)<\/b> {&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;}",
+    "<b>#4 dict (4)<\/b> {&#x27;master1&#x27;: → tuple #5, &#x27;w1&#x27;: → tuple #6, &#x27;w2&#x27;: → tuple #7, &#x27;w3&#x27;: → tuple #8}",
+    "<b>#5 tuple (2)<\/b> (&#x27;master&#x27;, → set #9)",
+    "<b>#6 tuple (2)<\/b> (&#x27;worker&#x27;, → set #10)",
+    "<b>#7 tuple (2)<\/b> (&#x27;worker&#x27;, → set #11)",
+    "<b>#8 tuple (2)<\/b> (&#x27;worker&#x27;, → set #12)",
+    "<b>#9 set (2)<\/b> {&#x27;NameNode&#x27;, &#x27;ResourceManager&#x27;}",
+    "<b>#10 set (2)<\/b> {&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;}",
+    "<b>#11 set (1)<\/b> {&#x27;DataNode&#x27;}",
+    "<b>#12 set (1)<\/b> {&#x27;NodeManager&#x27;}",
+    "<b>#15 set (1)<\/b> {&#x27;NodeManager&#x27;}"
+   ],
+   "out": "w2 missing ['NodeManager']\n"
+  },
+  {
+   "line": 6,
+   "phase": "Python",
+   "note": "<code>name<\/code> changes to &#x27;w3&#x27;. <code>running<\/code> changes to → set #12.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "expected",
+       "→ dict #1"
+      ],
+      [
+       "nodes",
+       "→ dict #4"
+      ],
+      [
+       "name",
+       "'w3'"
+      ],
+      [
+       "role",
+       "'worker'"
+      ],
+      [
+       "running",
+       "→ set #12"
+      ],
+      [
+       "missing",
+       "→ set #15"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (2)<\/b> {&#x27;master&#x27;: → set #2, &#x27;worker&#x27;: → set #3}",
+    "<b>#2 set (2)<\/b> {&#x27;NameNode&#x27;, &#x27;ResourceManager&#x27;}",
+    "<b>#3 set (2)<\/b> {&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;}",
+    "<b>#4 dict (4)<\/b> {&#x27;master1&#x27;: → tuple #5, &#x27;w1&#x27;: → tuple #6, &#x27;w2&#x27;: → tuple #7, &#x27;w3&#x27;: → tuple #8}",
+    "<b>#5 tuple (2)<\/b> (&#x27;master&#x27;, → set #9)",
+    "<b>#6 tuple (2)<\/b> (&#x27;worker&#x27;, → set #10)",
+    "<b>#7 tuple (2)<\/b> (&#x27;worker&#x27;, → set #11)",
+    "<b>#8 tuple (2)<\/b> (&#x27;worker&#x27;, → set #12)",
+    "<b>#9 set (2)<\/b> {&#x27;NameNode&#x27;, &#x27;ResourceManager&#x27;}",
+    "<b>#10 set (2)<\/b> {&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;}",
+    "<b>#11 set (1)<\/b> {&#x27;DataNode&#x27;}",
+    "<b>#12 set (1)<\/b> {&#x27;NodeManager&#x27;}",
+    "<b>#15 set (1)<\/b> {&#x27;NodeManager&#x27;}"
+   ],
+   "newVar": "running"
+  },
+  {
+   "line": 7,
+   "phase": "Python",
+   "note": "<code>missing<\/code> changes to → set #16. A new set object (#16) is created: {&#x27;DataNode&#x27;}",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "expected",
+       "→ dict #1"
+      ],
+      [
+       "nodes",
+       "→ dict #4"
+      ],
+      [
+       "name",
+       "'w3'"
+      ],
+      [
+       "role",
+       "'worker'"
+      ],
+      [
+       "running",
+       "→ set #12"
+      ],
+      [
+       "missing",
+       "→ set #16"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (2)<\/b> {&#x27;master&#x27;: → set #2, &#x27;worker&#x27;: → set #3}",
+    "<b>#2 set (2)<\/b> {&#x27;NameNode&#x27;, &#x27;ResourceManager&#x27;}",
+    "<b>#3 set (2)<\/b> {&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;}",
+    "<b>#4 dict (4)<\/b> {&#x27;master1&#x27;: → tuple #5, &#x27;w1&#x27;: → tuple #6, &#x27;w2&#x27;: → tuple #7, &#x27;w3&#x27;: → tuple #8}",
+    "<b>#5 tuple (2)<\/b> (&#x27;master&#x27;, → set #9)",
+    "<b>#6 tuple (2)<\/b> (&#x27;worker&#x27;, → set #10)",
+    "<b>#7 tuple (2)<\/b> (&#x27;worker&#x27;, → set #11)",
+    "<b>#8 tuple (2)<\/b> (&#x27;worker&#x27;, → set #12)",
+    "<b>#9 set (2)<\/b> {&#x27;NameNode&#x27;, &#x27;ResourceManager&#x27;}",
+    "<b>#10 set (2)<\/b> {&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;}",
+    "<b>#11 set (1)<\/b> {&#x27;DataNode&#x27;}",
+    "<b>#12 set (1)<\/b> {&#x27;NodeManager&#x27;}",
+    "<b>#16 set (1)<\/b> {&#x27;DataNode&#x27;}"
+   ],
+   "newVar": "missing"
+  },
+  {
+   "line": 8,
+   "phase": "Python",
+   "note": "The condition is <b>True<\/b>, so the indented block runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "expected",
+       "→ dict #1"
+      ],
+      [
+       "nodes",
+       "→ dict #4"
+      ],
+      [
+       "name",
+       "'w3'"
+      ],
+      [
+       "role",
+       "'worker'"
+      ],
+      [
+       "running",
+       "→ set #12"
+      ],
+      [
+       "missing",
+       "→ set #16"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (2)<\/b> {&#x27;master&#x27;: → set #2, &#x27;worker&#x27;: → set #3}",
+    "<b>#2 set (2)<\/b> {&#x27;NameNode&#x27;, &#x27;ResourceManager&#x27;}",
+    "<b>#3 set (2)<\/b> {&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;}",
+    "<b>#4 dict (4)<\/b> {&#x27;master1&#x27;: → tuple #5, &#x27;w1&#x27;: → tuple #6, &#x27;w2&#x27;: → tuple #7, &#x27;w3&#x27;: → tuple #8}",
+    "<b>#5 tuple (2)<\/b> (&#x27;master&#x27;, → set #9)",
+    "<b>#6 tuple (2)<\/b> (&#x27;worker&#x27;, → set #10)",
+    "<b>#7 tuple (2)<\/b> (&#x27;worker&#x27;, → set #11)",
+    "<b>#8 tuple (2)<\/b> (&#x27;worker&#x27;, → set #12)",
+    "<b>#9 set (2)<\/b> {&#x27;NameNode&#x27;, &#x27;ResourceManager&#x27;}",
+    "<b>#10 set (2)<\/b> {&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;}",
+    "<b>#11 set (1)<\/b> {&#x27;DataNode&#x27;}",
+    "<b>#12 set (1)<\/b> {&#x27;NodeManager&#x27;}",
+    "<b>#16 set (1)<\/b> {&#x27;DataNode&#x27;}"
+   ]
+  },
+  {
+   "line": 9,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "expected",
+       "→ dict #1"
+      ],
+      [
+       "nodes",
+       "→ dict #4"
+      ],
+      [
+       "name",
+       "'w3'"
+      ],
+      [
+       "role",
+       "'worker'"
+      ],
+      [
+       "running",
+       "→ set #12"
+      ],
+      [
+       "missing",
+       "→ set #16"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (2)<\/b> {&#x27;master&#x27;: → set #2, &#x27;worker&#x27;: → set #3}",
+    "<b>#2 set (2)<\/b> {&#x27;NameNode&#x27;, &#x27;ResourceManager&#x27;}",
+    "<b>#3 set (2)<\/b> {&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;}",
+    "<b>#4 dict (4)<\/b> {&#x27;master1&#x27;: → tuple #5, &#x27;w1&#x27;: → tuple #6, &#x27;w2&#x27;: → tuple #7, &#x27;w3&#x27;: → tuple #8}",
+    "<b>#5 tuple (2)<\/b> (&#x27;master&#x27;, → set #9)",
+    "<b>#6 tuple (2)<\/b> (&#x27;worker&#x27;, → set #10)",
+    "<b>#7 tuple (2)<\/b> (&#x27;worker&#x27;, → set #11)",
+    "<b>#8 tuple (2)<\/b> (&#x27;worker&#x27;, → set #12)",
+    "<b>#9 set (2)<\/b> {&#x27;NameNode&#x27;, &#x27;ResourceManager&#x27;}",
+    "<b>#10 set (2)<\/b> {&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;}",
+    "<b>#11 set (1)<\/b> {&#x27;DataNode&#x27;}",
+    "<b>#12 set (1)<\/b> {&#x27;NodeManager&#x27;}",
+    "<b>#16 set (1)<\/b> {&#x27;DataNode&#x27;}"
+   ],
+   "out": "w3 missing ['DataNode']\n"
+  },
+  {
+   "line": 6,
+   "phase": "Python",
+   "note": "Nothing is left to loop over, so the loop ends and Python moves on.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "expected",
+       "→ dict #1"
+      ],
+      [
+       "nodes",
+       "→ dict #4"
+      ],
+      [
+       "name",
+       "'w3'"
+      ],
+      [
+       "role",
+       "'worker'"
+      ],
+      [
+       "running",
+       "→ set #12"
+      ],
+      [
+       "missing",
+       "→ set #16"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (2)<\/b> {&#x27;master&#x27;: → set #2, &#x27;worker&#x27;: → set #3}",
+    "<b>#2 set (2)<\/b> {&#x27;NameNode&#x27;, &#x27;ResourceManager&#x27;}",
+    "<b>#3 set (2)<\/b> {&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;}",
+    "<b>#4 dict (4)<\/b> {&#x27;master1&#x27;: → tuple #5, &#x27;w1&#x27;: → tuple #6, &#x27;w2&#x27;: → tuple #7, &#x27;w3&#x27;: → tuple #8}",
+    "<b>#5 tuple (2)<\/b> (&#x27;master&#x27;, → set #9)",
+    "<b>#6 tuple (2)<\/b> (&#x27;worker&#x27;, → set #10)",
+    "<b>#7 tuple (2)<\/b> (&#x27;worker&#x27;, → set #11)",
+    "<b>#8 tuple (2)<\/b> (&#x27;worker&#x27;, → set #12)",
+    "<b>#9 set (2)<\/b> {&#x27;NameNode&#x27;, &#x27;ResourceManager&#x27;}",
+    "<b>#10 set (2)<\/b> {&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;}",
+    "<b>#11 set (1)<\/b> {&#x27;DataNode&#x27;}",
+    "<b>#12 set (1)<\/b> {&#x27;NodeManager&#x27;}",
+    "<b>#16 set (1)<\/b> {&#x27;DataNode&#x27;}"
+   ]
+  }
+ ]
+}</script>
+    </div>
+  </article>
+  <article class="wx">
+    <div class="wx__head"><span class="wx__num">Example 2</span><span class="lvl lvl--i">Intermediate</span><span class="wx__tag">Security · firewall plan</span></div>
+    <h4>Which ports must be open on each kind of node?</h4>
+    <div class="wx__problem"><p class="wx__label">Problem statement</p><p>Using the Hadoop 3 default ports, print the ports each kind of node must open: an HDFS+YARN master and a worker. Mark web UIs separately so security can restrict them to the admin network.</p></div>
+    <div class="prob__io"><div><small>Input</small><pre>master daemons: NameNode, ResourceManager · worker daemons: DataNode, NodeManager</pre></div><div><small>Expected output</small><pre>master: service [8020, 8030, 8031, 8032] | web UI [8088, 9870]
+worker: service [9866, 9867, 13562] | web UI [8042, 9864]</pre></div></div>
+    <div class="wx__approach"><p class="wx__label">Approach</p><ol><li>Map each daemon to its ports, tagging web UIs.</li><li>For each node type, collect the ports of its daemons.</li><li>Print service ports and web UI ports separately.</li></ol></div>
+    <p class="wx__label">Solution: run it live</p>
+    <div class="runner">
+    <script type="application/json">{
+ "lang": "python",
+ "file": "main.py",
+ "tasks": [
+  {
+   "label": "Solution",
+   "hint": "Add the JournalNode (8485 rpc, 8480 web) to the master list for an HA cluster.",
+   "code": "ports = {\"NameNode\": [(8020, \"rpc\"), (9870, \"web\")],\n         \"ResourceManager\": [(8030, \"rpc\"), (8031, \"rpc\"), (8032, \"rpc\"), (8088, \"web\")],\n         \"DataNode\": [(9866, \"data\"), (9867, \"rpc\"), (9864, \"web\")],\n         \"NodeManager\": [(8042, \"web\"), (13562, \"shuffle\")]}\nfor node, ds in {\"master\": [\"NameNode\", \"ResourceManager\"], \"worker\": [\"DataNode\", \"NodeManager\"]}.items():\n    svc = sorted(p for d in ds for p, kind in ports[d] if kind != \"web\")\n    web = sorted(p for d in ds for p, kind in ports[d] if kind == \"web\")\n    print(f\"{node:6}: service {svc} | web UI {web}\")\n"
+  }
+ ]
+}</script>
+    </div>
+    <p class="wx__label">What happens in memory, step by step</p>
+    <p class="wx__how">Recorded from a real Python run: press <b>Next</b> to execute one line at a time. Watch variables change in each frame, and lists and dictionaries (numbered #1, #2 …) fill up as objects.</p>
+    <div class="tracer">
+    <script type="application/json">{
+ "lang": "python",
+ "code": [
+  "ports = {\"NameNode\": [(8020, \"rpc\"), (9870, \"web\")],",
+  "         \"ResourceManager\": [(8030, \"rpc\"), (8031, \"rpc\"), (8032, \"rpc\"), (8088, \"web\")],",
+  "         \"DataNode\": [(9866, \"data\"), (9867, \"rpc\"), (9864, \"web\")],",
+  "         \"NodeManager\": [(8042, \"web\"), (13562, \"shuffle\")]}",
+  "for node, ds in {\"master\": [\"NameNode\", \"ResourceManager\"], \"worker\": [\"DataNode\", \"NodeManager\"]}.items():",
+  "    svc = sorted(p for d in ds for p, kind in ports[d] if kind != \"web\")",
+  "    web = sorted(p for d in ds for p, kind in ports[d] if kind == \"web\")",
+  "    print(f\"{node:6}: service {svc} | web UI {web}\")"
+ ],
+ "steps": [
+  {
+   "line": 1,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": []
+    }
+   ],
+   "heap": []
+  },
+  {
+   "line": 2,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": []
+    }
+   ],
+   "heap": []
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": []
+    }
+   ],
+   "heap": []
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": []
+    }
+   ],
+   "heap": []
+  },
+  {
+   "line": 1,
+   "phase": "Python",
+   "note": "<code>ports<\/code> is created: → dict #1. A new dict object (#1) is created: {&#x27;NameNode&#x27;: → list #2, &#x27;ResourceManager&#x27;: → list #3, &#x27;DataNode&#x27;: → list #4, &#x27;NodeManager… A new list object (#2) is created: [→ tuple #6, → tuple #7] A new list object (#3) is created: [→ tuple #8, → tuple #9, → tuple #10, → tuple #11] A new list object (#4) is created: [→ tuple #12, → tuple #13, → tuple #14] A new list object (#5) is created: [→ tuple #15, → tuple #16] A new tuple object (#6) is created: (8020, &#x27;rpc&#x27;) A new tuple object (#7) is created: (9870, &#x27;web&#x27;) A new tuple object (#8) is created: (8030, &#x27;rpc&#x27;) A new tuple object (#9) is created: (8031, &#x27;rpc&#x27;) A new tuple object (#10) is created: (8032, &#x27;rpc&#x27;) A new tuple object (#11) is created: (8088, &#x27;web&#x27;) A new tuple object (#12) is created: (9866, &#x27;data&#x27;) A new tuple object (#13) is created: (9867, &#x27;rpc&#x27;) A new tuple object (#14) is created: (9864, &#x27;web&#x27;) A new tuple object (#15) is created: (8042, &#x27;web&#x27;) A new tuple object (#16) is created: (13562, &#x27;shuffle&#x27;)",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "ports",
+       "→ dict #1"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (4)<\/b> {&#x27;NameNode&#x27;: → list #2, &#x27;ResourceManager&#x27;: → list #3, &#x27;DataNode&#x27;: → list #4, &#x27;NodeManager…",
+    "<b>#2 list (2)<\/b> [→ tuple #6, → tuple #7]",
+    "<b>#3 list (4)<\/b> [→ tuple #8, → tuple #9, → tuple #10, → tuple #11]",
+    "<b>#4 list (3)<\/b> [→ tuple #12, → tuple #13, → tuple #14]",
+    "<b>#5 list (2)<\/b> [→ tuple #15, → tuple #16]",
+    "<b>#6 tuple (2)<\/b> (8020, &#x27;rpc&#x27;)",
+    "<b>#7 tuple (2)<\/b> (9870, &#x27;web&#x27;)",
+    "<b>#8 tuple (2)<\/b> (8030, &#x27;rpc&#x27;)",
+    "<b>#9 tuple (2)<\/b> (8031, &#x27;rpc&#x27;)",
+    "<b>#10 tuple (2)<\/b> (8032, &#x27;rpc&#x27;)",
+    "<b>#11 tuple (2)<\/b> (8088, &#x27;web&#x27;)",
+    "<b>#12 tuple (2)<\/b> (9866, &#x27;data&#x27;)",
+    "<b>#13 tuple (2)<\/b> (9867, &#x27;rpc&#x27;)",
+    "<b>#14 tuple (2)<\/b> (9864, &#x27;web&#x27;)",
+    "<b>#15 tuple (2)<\/b> (8042, &#x27;web&#x27;)",
+    "<b>#16 tuple (2)<\/b> (13562, &#x27;shuffle&#x27;)"
+   ],
+   "newVar": "ports"
+  },
+  {
+   "line": 5,
+   "phase": "Plan",
+   "note": "One line per node type. <code>node<\/code> is created: &#x27;master&#x27;. <code>ds<\/code> is created: → list #17. A new list object (#17) is created: [&#x27;NameNode&#x27;, &#x27;ResourceManager&#x27;]",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "ports",
+       "→ dict #1"
+      ],
+      [
+       "node",
+       "'master'"
+      ],
+      [
+       "ds",
+       "→ list #17"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (4)<\/b> {&#x27;NameNode&#x27;: → list #2, &#x27;ResourceManager&#x27;: → list #3, &#x27;DataNode&#x27;: → list #4, &#x27;NodeManager…",
+    "<b>#2 list (2)<\/b> [→ tuple #6, → tuple #7]",
+    "<b>#3 list (4)<\/b> [→ tuple #8, → tuple #9, → tuple #10, → tuple #11]",
+    "<b>#4 list (3)<\/b> [→ tuple #12, → tuple #13, → tuple #14]",
+    "<b>#5 list (2)<\/b> [→ tuple #15, → tuple #16]",
+    "<b>#6 tuple (2)<\/b> (8020, &#x27;rpc&#x27;)",
+    "<b>#7 tuple (2)<\/b> (9870, &#x27;web&#x27;)",
+    "<b>#8 tuple (2)<\/b> (8030, &#x27;rpc&#x27;)",
+    "<b>#9 tuple (2)<\/b> (8031, &#x27;rpc&#x27;)",
+    "<b>#10 tuple (2)<\/b> (8032, &#x27;rpc&#x27;)",
+    "<b>#11 tuple (2)<\/b> (8088, &#x27;web&#x27;)",
+    "<b>#12 tuple (2)<\/b> (9866, &#x27;data&#x27;)",
+    "<b>#13 tuple (2)<\/b> (9867, &#x27;rpc&#x27;)",
+    "<b>#14 tuple (2)<\/b> (9864, &#x27;web&#x27;)",
+    "<b>#15 tuple (2)<\/b> (8042, &#x27;web&#x27;)",
+    "<b>#16 tuple (2)<\/b> (13562, &#x27;shuffle&#x27;)",
+    "<b>#17 list (2)<\/b> [&#x27;NameNode&#x27;, &#x27;ResourceManager&#x27;]"
+   ],
+   "newVar": "ds"
+  },
+  {
+   "line": 6,
+   "phase": "Python",
+   "note": "<code>svc<\/code> is created: → list #18. A new list object (#18) is created: [8020, 8030, 8031, 8032]",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "ports",
+       "→ dict #1"
+      ],
+      [
+       "node",
+       "'master'"
+      ],
+      [
+       "ds",
+       "→ list #17"
+      ],
+      [
+       "svc",
+       "→ list #18"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (4)<\/b> {&#x27;NameNode&#x27;: → list #2, &#x27;ResourceManager&#x27;: → list #3, &#x27;DataNode&#x27;: → list #4, &#x27;NodeManager…",
+    "<b>#2 list (2)<\/b> [→ tuple #6, → tuple #7]",
+    "<b>#3 list (4)<\/b> [→ tuple #8, → tuple #9, → tuple #10, → tuple #11]",
+    "<b>#4 list (3)<\/b> [→ tuple #12, → tuple #13, → tuple #14]",
+    "<b>#5 list (2)<\/b> [→ tuple #15, → tuple #16]",
+    "<b>#6 tuple (2)<\/b> (8020, &#x27;rpc&#x27;)",
+    "<b>#7 tuple (2)<\/b> (9870, &#x27;web&#x27;)",
+    "<b>#8 tuple (2)<\/b> (8030, &#x27;rpc&#x27;)",
+    "<b>#9 tuple (2)<\/b> (8031, &#x27;rpc&#x27;)",
+    "<b>#10 tuple (2)<\/b> (8032, &#x27;rpc&#x27;)",
+    "<b>#11 tuple (2)<\/b> (8088, &#x27;web&#x27;)",
+    "<b>#12 tuple (2)<\/b> (9866, &#x27;data&#x27;)",
+    "<b>#13 tuple (2)<\/b> (9867, &#x27;rpc&#x27;)",
+    "<b>#14 tuple (2)<\/b> (9864, &#x27;web&#x27;)",
+    "<b>#15 tuple (2)<\/b> (8042, &#x27;web&#x27;)",
+    "<b>#16 tuple (2)<\/b> (13562, &#x27;shuffle&#x27;)",
+    "<b>#17 list (2)<\/b> [&#x27;NameNode&#x27;, &#x27;ResourceManager&#x27;]",
+    "<b>#18 list (4)<\/b> [8020, 8030, 8031, 8032]"
+   ],
+   "newVar": "svc"
+  },
+  {
+   "line": 7,
+   "phase": "Python",
+   "note": "<code>web<\/code> is created: → list #19. A new list object (#19) is created: [8088, 9870]",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "ports",
+       "→ dict #1"
+      ],
+      [
+       "node",
+       "'master'"
+      ],
+      [
+       "ds",
+       "→ list #17"
+      ],
+      [
+       "svc",
+       "→ list #18"
+      ],
+      [
+       "web",
+       "→ list #19"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (4)<\/b> {&#x27;NameNode&#x27;: → list #2, &#x27;ResourceManager&#x27;: → list #3, &#x27;DataNode&#x27;: → list #4, &#x27;NodeManager…",
+    "<b>#2 list (2)<\/b> [→ tuple #6, → tuple #7]",
+    "<b>#3 list (4)<\/b> [→ tuple #8, → tuple #9, → tuple #10, → tuple #11]",
+    "<b>#4 list (3)<\/b> [→ tuple #12, → tuple #13, → tuple #14]",
+    "<b>#5 list (2)<\/b> [→ tuple #15, → tuple #16]",
+    "<b>#6 tuple (2)<\/b> (8020, &#x27;rpc&#x27;)",
+    "<b>#7 tuple (2)<\/b> (9870, &#x27;web&#x27;)",
+    "<b>#8 tuple (2)<\/b> (8030, &#x27;rpc&#x27;)",
+    "<b>#9 tuple (2)<\/b> (8031, &#x27;rpc&#x27;)",
+    "<b>#10 tuple (2)<\/b> (8032, &#x27;rpc&#x27;)",
+    "<b>#11 tuple (2)<\/b> (8088, &#x27;web&#x27;)",
+    "<b>#12 tuple (2)<\/b> (9866, &#x27;data&#x27;)",
+    "<b>#13 tuple (2)<\/b> (9867, &#x27;rpc&#x27;)",
+    "<b>#14 tuple (2)<\/b> (9864, &#x27;web&#x27;)",
+    "<b>#15 tuple (2)<\/b> (8042, &#x27;web&#x27;)",
+    "<b>#16 tuple (2)<\/b> (13562, &#x27;shuffle&#x27;)",
+    "<b>#17 list (2)<\/b> [&#x27;NameNode&#x27;, &#x27;ResourceManager&#x27;]",
+    "<b>#18 list (4)<\/b> [8020, 8030, 8031, 8032]",
+    "<b>#19 list (2)<\/b> [8088, 9870]"
+   ],
+   "newVar": "web"
+  },
+  {
+   "line": 8,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "ports",
+       "→ dict #1"
+      ],
+      [
+       "node",
+       "'master'"
+      ],
+      [
+       "ds",
+       "→ list #17"
+      ],
+      [
+       "svc",
+       "→ list #18"
+      ],
+      [
+       "web",
+       "→ list #19"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (4)<\/b> {&#x27;NameNode&#x27;: → list #2, &#x27;ResourceManager&#x27;: → list #3, &#x27;DataNode&#x27;: → list #4, &#x27;NodeManager…",
+    "<b>#2 list (2)<\/b> [→ tuple #6, → tuple #7]",
+    "<b>#3 list (4)<\/b> [→ tuple #8, → tuple #9, → tuple #10, → tuple #11]",
+    "<b>#4 list (3)<\/b> [→ tuple #12, → tuple #13, → tuple #14]",
+    "<b>#5 list (2)<\/b> [→ tuple #15, → tuple #16]",
+    "<b>#6 tuple (2)<\/b> (8020, &#x27;rpc&#x27;)",
+    "<b>#7 tuple (2)<\/b> (9870, &#x27;web&#x27;)",
+    "<b>#8 tuple (2)<\/b> (8030, &#x27;rpc&#x27;)",
+    "<b>#9 tuple (2)<\/b> (8031, &#x27;rpc&#x27;)",
+    "<b>#10 tuple (2)<\/b> (8032, &#x27;rpc&#x27;)",
+    "<b>#11 tuple (2)<\/b> (8088, &#x27;web&#x27;)",
+    "<b>#12 tuple (2)<\/b> (9866, &#x27;data&#x27;)",
+    "<b>#13 tuple (2)<\/b> (9867, &#x27;rpc&#x27;)",
+    "<b>#14 tuple (2)<\/b> (9864, &#x27;web&#x27;)",
+    "<b>#15 tuple (2)<\/b> (8042, &#x27;web&#x27;)",
+    "<b>#16 tuple (2)<\/b> (13562, &#x27;shuffle&#x27;)",
+    "<b>#17 list (2)<\/b> [&#x27;NameNode&#x27;, &#x27;ResourceManager&#x27;]",
+    "<b>#18 list (4)<\/b> [8020, 8030, 8031, 8032]",
+    "<b>#19 list (2)<\/b> [8088, 9870]"
+   ],
+   "out": "master: service [8020, 8030, 8031, 8032] | web UI [8088, 9870]\n"
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "<code>node<\/code> changes to &#x27;worker&#x27;. <code>ds<\/code> changes to → list #20. A new list object (#20) is created: [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "ports",
+       "→ dict #1"
+      ],
+      [
+       "node",
+       "'worker'"
+      ],
+      [
+       "ds",
+       "→ list #20"
+      ],
+      [
+       "svc",
+       "→ list #18"
+      ],
+      [
+       "web",
+       "→ list #19"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (4)<\/b> {&#x27;NameNode&#x27;: → list #2, &#x27;ResourceManager&#x27;: → list #3, &#x27;DataNode&#x27;: → list #4, &#x27;NodeManager…",
+    "<b>#2 list (2)<\/b> [→ tuple #6, → tuple #7]",
+    "<b>#3 list (4)<\/b> [→ tuple #8, → tuple #9, → tuple #10, → tuple #11]",
+    "<b>#4 list (3)<\/b> [→ tuple #12, → tuple #13, → tuple #14]",
+    "<b>#5 list (2)<\/b> [→ tuple #15, → tuple #16]",
+    "<b>#6 tuple (2)<\/b> (8020, &#x27;rpc&#x27;)",
+    "<b>#7 tuple (2)<\/b> (9870, &#x27;web&#x27;)",
+    "<b>#8 tuple (2)<\/b> (8030, &#x27;rpc&#x27;)",
+    "<b>#9 tuple (2)<\/b> (8031, &#x27;rpc&#x27;)",
+    "<b>#10 tuple (2)<\/b> (8032, &#x27;rpc&#x27;)",
+    "<b>#11 tuple (2)<\/b> (8088, &#x27;web&#x27;)",
+    "<b>#12 tuple (2)<\/b> (9866, &#x27;data&#x27;)",
+    "<b>#13 tuple (2)<\/b> (9867, &#x27;rpc&#x27;)",
+    "<b>#14 tuple (2)<\/b> (9864, &#x27;web&#x27;)",
+    "<b>#15 tuple (2)<\/b> (8042, &#x27;web&#x27;)",
+    "<b>#16 tuple (2)<\/b> (13562, &#x27;shuffle&#x27;)",
+    "<b>#18 list (4)<\/b> [8020, 8030, 8031, 8032]",
+    "<b>#19 list (2)<\/b> [8088, 9870]",
+    "<b>#20 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]"
+   ],
+   "newVar": "ds"
+  },
+  {
+   "line": 6,
+   "phase": "Python",
+   "note": "<code>svc<\/code> changes to → list #21. A new list object (#21) is created: [9866, 9867, 13562]",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "ports",
+       "→ dict #1"
+      ],
+      [
+       "node",
+       "'worker'"
+      ],
+      [
+       "ds",
+       "→ list #20"
+      ],
+      [
+       "svc",
+       "→ list #21"
+      ],
+      [
+       "web",
+       "→ list #19"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (4)<\/b> {&#x27;NameNode&#x27;: → list #2, &#x27;ResourceManager&#x27;: → list #3, &#x27;DataNode&#x27;: → list #4, &#x27;NodeManager…",
+    "<b>#2 list (2)<\/b> [→ tuple #6, → tuple #7]",
+    "<b>#3 list (4)<\/b> [→ tuple #8, → tuple #9, → tuple #10, → tuple #11]",
+    "<b>#4 list (3)<\/b> [→ tuple #12, → tuple #13, → tuple #14]",
+    "<b>#5 list (2)<\/b> [→ tuple #15, → tuple #16]",
+    "<b>#6 tuple (2)<\/b> (8020, &#x27;rpc&#x27;)",
+    "<b>#7 tuple (2)<\/b> (9870, &#x27;web&#x27;)",
+    "<b>#8 tuple (2)<\/b> (8030, &#x27;rpc&#x27;)",
+    "<b>#9 tuple (2)<\/b> (8031, &#x27;rpc&#x27;)",
+    "<b>#10 tuple (2)<\/b> (8032, &#x27;rpc&#x27;)",
+    "<b>#11 tuple (2)<\/b> (8088, &#x27;web&#x27;)",
+    "<b>#12 tuple (2)<\/b> (9866, &#x27;data&#x27;)",
+    "<b>#13 tuple (2)<\/b> (9867, &#x27;rpc&#x27;)",
+    "<b>#14 tuple (2)<\/b> (9864, &#x27;web&#x27;)",
+    "<b>#15 tuple (2)<\/b> (8042, &#x27;web&#x27;)",
+    "<b>#16 tuple (2)<\/b> (13562, &#x27;shuffle&#x27;)",
+    "<b>#19 list (2)<\/b> [8088, 9870]",
+    "<b>#20 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#21 list (3)<\/b> [9866, 9867, 13562]"
+   ],
+   "newVar": "svc"
+  },
+  {
+   "line": 7,
+   "phase": "Python",
+   "note": "<code>web<\/code> changes to → list #22. A new list object (#22) is created: [8042, 9864]",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "ports",
+       "→ dict #1"
+      ],
+      [
+       "node",
+       "'worker'"
+      ],
+      [
+       "ds",
+       "→ list #20"
+      ],
+      [
+       "svc",
+       "→ list #21"
+      ],
+      [
+       "web",
+       "→ list #22"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (4)<\/b> {&#x27;NameNode&#x27;: → list #2, &#x27;ResourceManager&#x27;: → list #3, &#x27;DataNode&#x27;: → list #4, &#x27;NodeManager…",
+    "<b>#2 list (2)<\/b> [→ tuple #6, → tuple #7]",
+    "<b>#3 list (4)<\/b> [→ tuple #8, → tuple #9, → tuple #10, → tuple #11]",
+    "<b>#4 list (3)<\/b> [→ tuple #12, → tuple #13, → tuple #14]",
+    "<b>#5 list (2)<\/b> [→ tuple #15, → tuple #16]",
+    "<b>#6 tuple (2)<\/b> (8020, &#x27;rpc&#x27;)",
+    "<b>#7 tuple (2)<\/b> (9870, &#x27;web&#x27;)",
+    "<b>#8 tuple (2)<\/b> (8030, &#x27;rpc&#x27;)",
+    "<b>#9 tuple (2)<\/b> (8031, &#x27;rpc&#x27;)",
+    "<b>#10 tuple (2)<\/b> (8032, &#x27;rpc&#x27;)",
+    "<b>#11 tuple (2)<\/b> (8088, &#x27;web&#x27;)",
+    "<b>#12 tuple (2)<\/b> (9866, &#x27;data&#x27;)",
+    "<b>#13 tuple (2)<\/b> (9867, &#x27;rpc&#x27;)",
+    "<b>#14 tuple (2)<\/b> (9864, &#x27;web&#x27;)",
+    "<b>#15 tuple (2)<\/b> (8042, &#x27;web&#x27;)",
+    "<b>#16 tuple (2)<\/b> (13562, &#x27;shuffle&#x27;)",
+    "<b>#20 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#21 list (3)<\/b> [9866, 9867, 13562]",
+    "<b>#22 list (2)<\/b> [8042, 9864]"
+   ],
+   "newVar": "web"
+  },
+  {
+   "line": 8,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "ports",
+       "→ dict #1"
+      ],
+      [
+       "node",
+       "'worker'"
+      ],
+      [
+       "ds",
+       "→ list #20"
+      ],
+      [
+       "svc",
+       "→ list #21"
+      ],
+      [
+       "web",
+       "→ list #22"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (4)<\/b> {&#x27;NameNode&#x27;: → list #2, &#x27;ResourceManager&#x27;: → list #3, &#x27;DataNode&#x27;: → list #4, &#x27;NodeManager…",
+    "<b>#2 list (2)<\/b> [→ tuple #6, → tuple #7]",
+    "<b>#3 list (4)<\/b> [→ tuple #8, → tuple #9, → tuple #10, → tuple #11]",
+    "<b>#4 list (3)<\/b> [→ tuple #12, → tuple #13, → tuple #14]",
+    "<b>#5 list (2)<\/b> [→ tuple #15, → tuple #16]",
+    "<b>#6 tuple (2)<\/b> (8020, &#x27;rpc&#x27;)",
+    "<b>#7 tuple (2)<\/b> (9870, &#x27;web&#x27;)",
+    "<b>#8 tuple (2)<\/b> (8030, &#x27;rpc&#x27;)",
+    "<b>#9 tuple (2)<\/b> (8031, &#x27;rpc&#x27;)",
+    "<b>#10 tuple (2)<\/b> (8032, &#x27;rpc&#x27;)",
+    "<b>#11 tuple (2)<\/b> (8088, &#x27;web&#x27;)",
+    "<b>#12 tuple (2)<\/b> (9866, &#x27;data&#x27;)",
+    "<b>#13 tuple (2)<\/b> (9867, &#x27;rpc&#x27;)",
+    "<b>#14 tuple (2)<\/b> (9864, &#x27;web&#x27;)",
+    "<b>#15 tuple (2)<\/b> (8042, &#x27;web&#x27;)",
+    "<b>#16 tuple (2)<\/b> (13562, &#x27;shuffle&#x27;)",
+    "<b>#20 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#21 list (3)<\/b> [9866, 9867, 13562]",
+    "<b>#22 list (2)<\/b> [8042, 9864]"
+   ],
+   "out": "worker: service [9866, 9867, 13562] | web UI [8042, 9864]\n"
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "Nothing is left to loop over, so the loop ends and Python moves on.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "ports",
+       "→ dict #1"
+      ],
+      [
+       "node",
+       "'worker'"
+      ],
+      [
+       "ds",
+       "→ list #20"
+      ],
+      [
+       "svc",
+       "→ list #21"
+      ],
+      [
+       "web",
+       "→ list #22"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (4)<\/b> {&#x27;NameNode&#x27;: → list #2, &#x27;ResourceManager&#x27;: → list #3, &#x27;DataNode&#x27;: → list #4, &#x27;NodeManager…",
+    "<b>#2 list (2)<\/b> [→ tuple #6, → tuple #7]",
+    "<b>#3 list (4)<\/b> [→ tuple #8, → tuple #9, → tuple #10, → tuple #11]",
+    "<b>#4 list (3)<\/b> [→ tuple #12, → tuple #13, → tuple #14]",
+    "<b>#5 list (2)<\/b> [→ tuple #15, → tuple #16]",
+    "<b>#6 tuple (2)<\/b> (8020, &#x27;rpc&#x27;)",
+    "<b>#7 tuple (2)<\/b> (9870, &#x27;web&#x27;)",
+    "<b>#8 tuple (2)<\/b> (8030, &#x27;rpc&#x27;)",
+    "<b>#9 tuple (2)<\/b> (8031, &#x27;rpc&#x27;)",
+    "<b>#10 tuple (2)<\/b> (8032, &#x27;rpc&#x27;)",
+    "<b>#11 tuple (2)<\/b> (8088, &#x27;web&#x27;)",
+    "<b>#12 tuple (2)<\/b> (9866, &#x27;data&#x27;)",
+    "<b>#13 tuple (2)<\/b> (9867, &#x27;rpc&#x27;)",
+    "<b>#14 tuple (2)<\/b> (9864, &#x27;web&#x27;)",
+    "<b>#15 tuple (2)<\/b> (8042, &#x27;web&#x27;)",
+    "<b>#16 tuple (2)<\/b> (13562, &#x27;shuffle&#x27;)",
+    "<b>#20 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#21 list (3)<\/b> [9866, 9867, 13562]",
+    "<b>#22 list (2)<\/b> [8042, 9864]"
+   ]
+  }
+ ]
+}</script>
+    </div>
+  </article>
+  <article class="wx">
+    <div class="wx__head"><span class="wx__num">Example 3</span><span class="lvl lvl--a">Advanced</span><span class="wx__tag">Capacity · NameNode</span></div>
+    <h4>How much heap does the NameNode need?</h4>
+    <div class="wx__problem"><p class="wx__label">Problem statement</p><p>A common rule of thumb is that the NameNode needs roughly <b>1 GB of heap per million</b> files, directories and blocks, plus headroom. A cluster has <b>40 million files</b> averaging <b>1.5 blocks</b> each and <b>3 million directories</b>. Estimate the heap, add 30% headroom, and round up to the next 8 GB.</p></div>
+    <div class="prob__io"><div><small>Input</small><pre>40 M files × 1.5 blocks · 3 M directories · ~1 GB per million objects · +30%</pre></div><div><small>Expected output</small><pre>Objects: 103 million
+Heap with headroom: 134 GB -&gt; set 136 GB</pre></div></div>
+    <div class="wx__approach"><p class="wx__label">Approach</p><ol><li>Objects = files + blocks + directories.</li><li>Heap ≈ objects in millions × 1 GB.</li><li>Add 30%, then round up to a multiple of 8 GB.</li></ol></div>
+    <p class="wx__label">Solution: run it live</p>
+    <div class="runner">
+    <script type="application/json">{
+ "lang": "python",
+ "file": "main.py",
+ "tasks": [
+  {
+   "label": "Solution",
+   "hint": "If the same data were stored in files 10 times bigger (4 million files), how much heap would be needed? This is why the small-files problem is really a NameNode-memory problem.",
+   "code": "import math\nfiles, dirs = 40_000_000, 3_000_000\nblocks = files * 1.5\nobjects_m = (files + blocks + dirs) / 1e6\nheap = objects_m * 1.0 * 1.3\nprint(f\"Objects: {objects_m:.0f} million\")\nprint(f\"Heap with headroom: {heap:.0f} GB -> set {math.ceil(heap / 8) * 8} GB\")\n"
+  }
+ ]
+}</script>
+    </div>
+    <p class="wx__label">What happens in memory, step by step</p>
+    <p class="wx__how">Recorded from a real Python run: press <b>Next</b> to execute one line at a time. Watch variables change in each frame, and lists and dictionaries (numbered #1, #2 …) fill up as objects.</p>
+    <div class="tracer">
+    <script type="application/json">{
+ "lang": "python",
+ "code": [
+  "import math",
+  "files, dirs = 40_000_000, 3_000_000",
+  "blocks = files * 1.5",
+  "objects_m = (files + blocks + dirs) / 1e6",
+  "heap = objects_m * 1.0 * 1.3",
+  "print(f\"Objects: {objects_m:.0f} million\")",
+  "print(f\"Heap with headroom: {heap:.0f} GB -> set {math.ceil(heap / 8) * 8} GB\")"
+ ],
+ "steps": [
+  {
+   "line": 1,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": []
+    }
+   ],
+   "heap": []
+  },
+  {
+   "line": 2,
+   "phase": "Python",
+   "note": "<code>files<\/code> is created: 40000000. <code>dirs<\/code> is created: 3000000.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "files",
+       "40000000"
+      ],
+      [
+       "dirs",
+       "3000000"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "dirs"
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "<code>blocks<\/code> is created: 60000000.0.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "files",
+       "40000000"
+      ],
+      [
+       "dirs",
+       "3000000"
+      ],
+      [
+       "blocks",
+       "60000000.0"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "blocks"
+  },
+  {
+   "line": 4,
+   "phase": "Objects",
+   "note": "Every file, directory and block is an object in NameNode memory. <code>objects_m<\/code> is created: 103.0.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "files",
+       "40000000"
+      ],
+      [
+       "dirs",
+       "3000000"
+      ],
+      [
+       "blocks",
+       "60000000.0"
+      ],
+      [
+       "objects_m",
+       "103.0"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "objects_m"
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "<code>heap<\/code> is created: 133.9.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "files",
+       "40000000"
+      ],
+      [
+       "dirs",
+       "3000000"
+      ],
+      [
+       "blocks",
+       "60000000.0"
+      ],
+      [
+       "objects_m",
+       "103.0"
+      ],
+      [
+       "heap",
+       "133.9"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "heap"
+  },
+  {
+   "line": 6,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "files",
+       "40000000"
+      ],
+      [
+       "dirs",
+       "3000000"
+      ],
+      [
+       "blocks",
+       "60000000.0"
+      ],
+      [
+       "objects_m",
+       "103.0"
+      ],
+      [
+       "heap",
+       "133.9"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "out": "Objects: 103 million\n"
+  },
+  {
+   "line": 7,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "files",
+       "40000000"
+      ],
+      [
+       "dirs",
+       "3000000"
+      ],
+      [
+       "blocks",
+       "60000000.0"
+      ],
+      [
+       "objects_m",
+       "103.0"
+      ],
+      [
+       "heap",
+       "133.9"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "out": "Heap with headroom: 134 GB -> set 136 GB\n"
+  }
+ ]
+}</script>
+    </div>
+  </article>
+</section>
+
+<section class="part" id="quiz">
+  <span class="part-label"><b>9</b> Quiz and revision</span>
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <script type="application/json">[
+ {
+  "q": "Which daemon stores the HDFS namespace and the location of every block?",
+  "options": [
+   "DataNode",
+   "NodeManager",
+   "NameNode",
+   "JobHistory Server"
+  ],
+  "answer": 2,
+  "why": "The <b>NameNode<\/b> holds all file-system metadata in memory. DataNodes store the blocks themselves."
+ },
+ {
+  "q": "Which two daemons normally run on every worker node?",
+  "options": [
+   "NameNode and ResourceManager",
+   "DataNode and NodeManager",
+   "JournalNode and ZKFC",
+   "JobHistory Server and ZooKeeper"
+  ],
+  "answer": 1,
+  "why": "A worker stores blocks (<b>DataNode<\/b>) and runs containers (<b>NodeManager<\/b>), which makes data locality possible."
+ },
+ {
+  "q": "Which configuration property tells clients where the NameNode is?",
+  "options": [
+   "fs.defaultFS in core-site.xml",
+   "dfs.replication",
+   "yarn.resourcemanager.hostname",
+   "mapreduce.framework.name"
+  ],
+  "answer": 0,
+  "why": "<code>fs.defaultFS<\/code>, for example <code>hdfs://nn1:8020<\/code>, sets the default file system for every client and daemon."
+ },
+ {
+  "q": "When a client reads a file from HDFS, where does the data come from?",
+  "options": [
+   "Through the NameNode",
+   "From the ResourceManager",
+   "From ZooKeeper",
+   "Directly from the DataNodes that hold the blocks"
+  ],
+  "answer": 3,
+  "why": "The NameNode only returns block locations; the bytes come straight from DataNodes. Masters stay out of the data path."
+ },
+ {
+  "q": "On Hadoop 3, the YARN ResourceManager web UI is by default on port:",
+  "options": [
+   "9870",
+   "50070",
+   "8088",
+   "19888"
+  ],
+  "answer": 2,
+  "why": "<b>8088<\/b> (unchanged since Hadoop 2). 9870 is the NameNode UI, 19888 the JobHistory UI."
+ },
+ {
+  "q": "What does the JobHistory Server do?",
+  "options": [
+   "Runs MapReduce tasks",
+   "Keeps counters, logs and details of finished MapReduce jobs",
+   "Stores HDFS blocks",
+   "Elects the active NameNode"
+  ],
+  "answer": 1,
+  "why": "Once a job's ApplicationMaster exits, the <b>JobHistory Server<\/b> is where you see its history (web UI on 19888)."
+ },
+ {
+  "q": "Which setting enables the MapReduce shuffle service inside each NodeManager?",
+  "options": [
+   "yarn.nodemanager.aux-services = mapreduce_shuffle",
+   "dfs.replication",
+   "fs.defaultFS",
+   "mapreduce.job.reduces"
+  ],
+  "answer": 0,
+  "why": "Without the <code>mapreduce_shuffle<\/code> aux service, reducers cannot fetch map outputs and MapReduce jobs fail."
+ },
+ {
+  "q": "Which command lists the Hadoop daemons running on the current machine?",
+  "options": [
+   "hdfs dfs -ls",
+   "yarn top",
+   "hadoop version",
+   "jps"
+  ],
+  "answer": 3,
+  "why": "<code>jps<\/code> (from the JDK) lists running Java processes by class name: NameNode, DataNode, NodeManager…"
+ }
+]</script>
+  </div>
+
+  <h3>Quick revision</h3>
+  <div class="revision">
+    <h3>Lesson 3.1 in one screen</h3>
+    <ul><li>Hadoop = a team of Java <b>daemons</b>, not one program.</li><li>HDFS: <b>NameNode</b> (metadata, 8020 RPC, 9870 UI) + <b>DataNodes</b> (blocks, 9866/9867/9864).</li><li>HA helpers: <b>JournalNodes</b> (8485), <b>ZKFC</b> (8019), <b>ZooKeeper</b> (2181). Non-HA: Secondary NameNode (9868).</li><li>YARN: <b>ResourceManager</b> (8032/8030/8031, UI 8088) + <b>NodeManagers</b> (UI 8042, shuffle 13562).</li><li>MapReduce: one <b>ApplicationMaster</b> per job in a container; <b>JobHistory Server</b> (19888) for finished jobs.</li><li>Worker = DataNode + NodeManager (locality). Masters stay out of the data path.</li><li>Config: <code>core-site.xml</code> (fs.defaultFS), <code>hdfs-site.xml</code>, <code>yarn-site.xml</code>, <code>mapred-site.xml</code>, <code>workers</code>.</li><li>Start order: <code>start-dfs.sh</code> → safe mode exit → <code>start-yarn.sh</code> → history server. Check with <code>jps</code>.</li></ul>
+  </div>
+
+  <h3>Interview and viva questions</h3>
+  <div class="faq">
+    <details><summary>What are the daemons in a Hadoop cluster?</summary><p>HDFS: NameNode, DataNodes, and either a Secondary NameNode (non-HA) or a standby NameNode with JournalNodes and ZKFailoverControllers (HA). YARN: ResourceManager and NodeManagers (optionally a Timeline Server). MapReduce: a per-job MRAppMaster running in a container and the JobHistory Server. ZooKeeper is a separate service used for HA.</p></details>
+    <details><summary>Why does the NameNode not handle file data?</summary><p>Keeping the master out of the data path means it only answers small metadata requests (open, create, block locations), while the large data transfers happen directly between clients and DataNodes in parallel. This lets one NameNode serve thousands of DataNodes without becoming a bandwidth bottleneck.</p></details>
+    <details><summary>What is in core-site.xml, hdfs-site.xml, yarn-site.xml and mapred-site.xml?</summary><p>core-site.xml: settings shared by all components, most importantly fs.defaultFS. hdfs-site.xml: HDFS settings such as dfs.replication, dfs.blocksize, NameNode and DataNode directories, HA settings. yarn-site.xml: ResourceManager address, NodeManager resources, aux-services, scheduler. mapred-site.xml: mapreduce.framework.name=yarn and MapReduce tuning such as memory and the number of reducers.</p></details>
+    <details><summary>How do you check whether Hadoop daemons are running?</summary><p>Run jps on each node to see the Java processes; use hdfs dfsadmin -report for live and dead DataNodes; yarn node -list for NodeManagers; and open the web UIs (NameNode 9870, ResourceManager 8088). If a daemon is missing, read its log in $HADOOP_HOME/logs.</p></details>
+    <details><summary>Why do DataNode and NodeManager run on the same machine?</summary><p>So that tasks launched by the NodeManager can read blocks stored by the local DataNode. This co-location is what makes data locality, and therefore Hadoop's performance, possible.</p></details>
+    
+  </div>
+
+  <h3 id="practice">Practice problems</h3>
+  <p class="prob-intro">Small programs about daemons, ports and configuration: the things you check every day on a real cluster.</p>
+  <div class="probs">
+    <article class="prob"><div class="prob__head"><span class="prob__num">P1</span><span class="prob__tag prob__tag--easy">Easy</span><h4>Port to service</h4></div>
+      <p>Given a port number, print which Hadoop 3 service uses it. Test with 9870, 8088 and 19888.</p>
+      <div class="prob__io"><div><small>Input</small><pre>[9870, 8088, 19888]</pre></div><div><small>Expected output</small><pre>9870 -&gt; NameNode web UI
+8088 -&gt; ResourceManager web UI
+19888 -&gt; JobHistory web UI</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>service = {9870: &quot;NameNode web UI&quot;, 8088: &quot;ResourceManager web UI&quot;, 19888: &quot;JobHistory web UI&quot;,
+           8020: &quot;NameNode RPC&quot;, 9864: &quot;DataNode web UI&quot;}
+for p in [9870, 8088, 19888]:
+    print(p, &quot;-&gt;&quot;, service[p])</code></pre><div class="output">9870 -&gt; NameNode web UI
+8088 -&gt; ResourceManager web UI
+19888 -&gt; JobHistory web UI</div></div>
+        <p><b>How it works:</b> Memorise these five ports: they come up in every installation and troubleshooting session.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P2</span><span class="prob__tag prob__tag--easy">Easy</span><h4>Count daemons in a cluster</h4></div>
+      <p>A cluster has 2 master nodes (each running 3 daemons) and 40 workers (each running 2). How many daemon processes in total?</p>
+      <div class="prob__io"><div><small>Input</small><pre>2 × 3 + 40 × 2</pre></div><div><small>Expected output</small><pre>86 daemons</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>print(2 * 3 + 40 * 2, &quot;daemons&quot;)</code></pre><div class="output">86 daemons</div></div>
+        <p><b>How it works:</b> 86 long-running processes, each with its own log file and memory settings.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P3</span><span class="prob__tag prob__tag--easy">Easy</span><h4>Block size from bytes</h4></div>
+      <p>Convert the dfs.blocksize values 134217728 and 268435456 to MB.</p>
+      <div class="prob__io"><div><small>Input</small><pre>[&quot;134217728&quot;, &quot;268435456&quot;]</pre></div><div><small>Expected output</small><pre>134217728 = 128 MB
+268435456 = 256 MB</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>for v in [&quot;134217728&quot;, &quot;268435456&quot;]:
+    print(v, &quot;=&quot;, int(v) // (1024 * 1024), &quot;MB&quot;)</code></pre><div class="output">134217728 = 128 MB
+268435456 = 256 MB</div></div>
+        <p><b>How it works:</b> 128 MB and 256 MB. Hadoop also accepts values like <code>128m</code> or <code>256m</code> in configuration.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P4</span><span class="prob__tag prob__tag--medium">Medium</span><h4>Parse fs.defaultFS</h4></div>
+      <p>From these fs.defaultFS values, print host and port. If no port is given, HDFS uses 8020.</p>
+      <div class="prob__io"><div><small>Input</small><pre>[&quot;hdfs://nn1:8020&quot;, &quot;hdfs://localhost:9000&quot;, &quot;hdfs://mycluster&quot;]</pre></div><div><small>Expected output</small><pre>hdfs://nn1:8020 -&gt; nn1 8020
+hdfs://localhost:9000 -&gt; localhost 9000
+hdfs://mycluster -&gt; mycluster 8020</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>from urllib.parse import urlparse
+for v in [&quot;hdfs://nn1:8020&quot;, &quot;hdfs://localhost:9000&quot;, &quot;hdfs://mycluster&quot;]:
+    u = urlparse(v)
+    print(v, &quot;-&gt;&quot;, u.hostname, u.port or 8020)</code></pre><div class="output">hdfs://nn1:8020 -&gt; nn1 8020
+hdfs://localhost:9000 -&gt; localhost 9000
+hdfs://mycluster -&gt; mycluster 8020</div></div>
+        <p><b>How it works:</b> <code>hdfs://mycluster</code> with no port is how HA clusters are addressed: <code>mycluster</code> is a logical name that maps to both NameNodes in hdfs-site.xml.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P5</span><span class="prob__tag prob__tag--medium">Medium</span><h4>Override order</h4></div>
+      <p>Apply configuration layers in order (defaults, site, job) and print the final replication and block size.</p>
+      <div class="prob__io"><div><small>Input</small><pre>defaults {repl 3, block 128m} · site {repl 2} · job {block 256m}</pre></div><div><small>Expected output</small><pre>{&#x27;dfs.replication&#x27;: &#x27;2&#x27;, &#x27;dfs.blocksize&#x27;: &#x27;256m&#x27;}</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>layers = [{&quot;dfs.replication&quot;: &quot;3&quot;, &quot;dfs.blocksize&quot;: &quot;128m&quot;},
+          {&quot;dfs.replication&quot;: &quot;2&quot;},
+          {&quot;dfs.blocksize&quot;: &quot;256m&quot;}]
+conf = {}
+for layer in layers:
+    conf.update(layer)
+print(conf)</code></pre><div class="output">{&#x27;dfs.replication&#x27;: &#x27;2&#x27;, &#x27;dfs.blocksize&#x27;: &#x27;256m&#x27;}</div></div>
+        <p><b>How it works:</b> Later layers win. Administrators can mark a property <code>&lt;final&gt;true&lt;/final&gt;</code> in site files so jobs cannot override it.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P6</span><span class="prob__tag prob__tag--medium">Medium</span><h4>Live vs dead DataNodes</h4></div>
+      <p>Given each DataNode's seconds since last heartbeat, print live and dead counts using the 630-second rule.</p>
+      <div class="prob__io"><div><small>Input</small><pre>{dn1: 2, dn2: 700, dn3: 1, dn4: 640, dn5: 3}</pre></div><div><small>Expected output</small><pre>Live: 3 | Dead: 2 [&#x27;dn2&#x27;, &#x27;dn4&#x27;]</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>last = {&quot;dn1&quot;: 2, &quot;dn2&quot;: 700, &quot;dn3&quot;: 1, &quot;dn4&quot;: 640, &quot;dn5&quot;: 3}
+dead = [n for n, s in last.items() if s &gt; 630]
+print(&quot;Live:&quot;, len(last) - len(dead), &quot;| Dead:&quot;, len(dead), dead)</code></pre><div class="output">Live: 3 | Dead: 2 [&#x27;dn2&#x27;, &#x27;dn4&#x27;]</div></div>
+        <p><b>How it works:</b> This is the number at the top of the NameNode web UI and of <code>hdfs dfsadmin -report</code>.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P7</span><span class="prob__tag prob__tag--business">Business problem</span><h4>Memory budget for a worker</h4></div>
+      <p>A worker has 256 GB RAM. Reserve 8 GB for the OS, 4 GB for the DataNode and 2 GB for the NodeManager. How much can YARN offer to containers, and how many 4 GB containers fit?</p>
+      <div class="prob__io"><div><small>Input</small><pre>256 GB · OS 8 · DN 4 · NM 2 · containers 4 GB</pre></div><div><small>Expected output</small><pre>yarn.nodemanager.resource.memory-mb = 247808
+4 GB containers per node: 60</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>total, os_gb, dn, nm = 256, 8, 4, 2
+yarn_gb = total - os_gb - dn - nm
+print(&quot;yarn.nodemanager.resource.memory-mb =&quot;, yarn_gb * 1024)
+print(&quot;4 GB containers per node:&quot;, yarn_gb // 4)</code></pre><div class="output">yarn.nodemanager.resource.memory-mb = 247808
+4 GB containers per node: 60</div></div>
+        <p><b>How it works:</b> 242 GB for YARN, 60 containers of 4 GB. Giving YARN all the memory starves the daemons and the OS; Module 11 covers tuning.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P8</span><span class="prob__tag prob__tag--business">Business problem</span><h4>Master heap budget</h4></div>
+      <p>The NameNode needs about 1 GB per million objects. The cluster has 120 million objects and grows 25% a year. What heap is needed now and in 2 years (with 30% headroom)?</p>
+      <div class="prob__io"><div><small>Input</small><pre>120 M objects · +25%/year · +30%</pre></div><div><small>Expected output</small><pre>Year 0: ~156 GB NameNode heap
+Year 2: ~244 GB NameNode heap</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>objects_m = 120
+for year in [0, 2]:
+    need = objects_m * 1.25 ** year * 1.3
+    print(f&quot;Year {year}: ~{need:.0f} GB NameNode heap&quot;)</code></pre><div class="output">Year 0: ~156 GB NameNode heap
+Year 2: ~244 GB NameNode heap</div></div>
+        <p><b>How it works:</b> About 156 GB now and 244 GB in two years. Very large heaps make Java garbage collection pauses longer, one reason teams use federation or compact small files.</p>
+      </details>
+    </article>
+  </div>
+
+  <h3 id="scenarios">Real-world scenario questions (asked in company interviews)</h3>
+  <p class="scn-intro">Architecture questions in interviews are usually practical: what runs where, how they talk, and what you check when something breaks.</p>
+  <div class="scenarios">
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Operations · troubleshooting</span><span class="scn__tag scn__tag--level">Fresher</span></div>
+      <h4>Jobs never use one of the workers</h4>
+      <p class="scn__situation">The HDFS UI shows 10 live DataNodes, but the YARN UI shows only 9 active NodeManagers. Jobs never run tasks on worker <code>w7</code>.</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> do you know that storage and compute are separate daemons on the same node?</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ol>
+          <li>On <code>w7</code>, run <code>jps</code>: the DataNode is running but the NodeManager isn't (or it is unhealthy).</li>
+          <li>Read the NodeManager log under <code>$HADOOP_HOME/logs</code>: common causes are a wrong <code>yarn.resourcemanager.hostname</code>, a full local disk (marked unhealthy), or a memory setting larger than the machine.</li>
+          <li>Fix and start it: <code>yarn --daemon start nodemanager</code>, then confirm with <code>yarn node -list</code>.</li>
+        </ol>
+        <p class="scn__avoid"><b>Avoid:</b> restarting the whole cluster for one missing daemon.</p>
+      </div></details>
+    </article>
+
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Any company · concepts</span><span class="scn__tag scn__tag--level">Fresher</span></div>
+      <h4>“Does all data go through the NameNode?”</h4>
+      <p class="scn__situation">The interviewer says: “If the NameNode is the master, surely every byte you read passes through it, right?”</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> do you understand why masters stay out of the data path?</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>No. The client asks the NameNode only for <b>metadata</b>: which blocks make up the file and which DataNodes hold them.</li>
+          <li>The client then reads (or writes) the bytes <b>directly</b> from the DataNodes, choosing the closest replica.</li>
+          <li>This keeps the NameNode's work small and lets thousands of clients transfer data in parallel. The same is true of YARN: the ResourceManager hands out containers but never touches job data.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> drawing data arrows through the NameNode in an architecture diagram.</p>
+      </div></details>
+    </article>
+
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Platform team · configuration</span><span class="scn__tag scn__tag--level">1–3 years</span></div>
+      <h4>Spark on the edge node can't find HDFS</h4>
+      <p class="scn__situation">A data scientist installs Spark on a new edge node. <code>spark.read.csv("/data/sales")</code> fails with “File does not exist” even though <code>hdfs dfs -ls /data/sales</code> works on other nodes.</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> do you know how clients find the cluster?</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>Spark doesn't know the cluster: without <code>core-site.xml</code>, the default file system is the local disk (<code>file:///</code>), so <code>/data/sales</code> is looked up locally.</li>
+          <li>Copy the cluster's <code>core-site.xml</code>, <code>hdfs-site.xml</code> and <code>yarn-site.xml</code> to the edge node and point <code>HADOOP_CONF_DIR</code> (and Spark) at them, or use a full URI like <code>hdfs://nn1:8020/data/sales</code>.</li>
+          <li>In a managed cluster, add the node as a “gateway” host so the manager keeps the client configuration in sync.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> copying the data to the edge node.</p>
+      </div></details>
+    </article>
+
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Infrastructure · design</span><span class="scn__tag scn__tag--level">1–3 years</span></div>
+      <h4>Put the NameNode and ResourceManager on one server?</h4>
+      <p class="scn__situation">To save money on a new 30-node cluster, someone proposes running the NameNode, ResourceManager, JobHistory Server and also a DataNode on one master server.</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> do you understand the resource needs and failure impact of master daemons?</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>For small clusters, NameNode + ResourceManager + JobHistory on one well-equipped master is common and acceptable.</li>
+          <li>But <b>not a DataNode/NodeManager on the master</b>: tasks would compete with the NameNode for memory and disk, and a runaway task could slow or crash the master.</li>
+          <li>Separate the masters as the cluster grows (NameNode heap needs grow with files), and add HA (a second master, JournalNodes on three machines) when uptime matters.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> treating master servers like ordinary workers.</p>
+      </div></details>
+    </article>
+  </div>
+</section>
+
+<nav class="lesson-nav" id="lesson-nav" aria-label="Lesson navigation"></nav>
+<div class="ad-slot" data-slot="bottom"></div>
+</article>
+
+<aside class="lesson-side">
+  <nav class="toc" aria-label="In this lesson">
+    <h4>In this lesson</h4>
+    <ol>
+      <li><a href="#story">The story</a></li>
+      <li><a href="#definition">Definition</a></li><li><a href="#levels">Beginner → Advanced</a></li>
+      <li><a href="#types">Types and ways to use it</a></li>
+      <li><a href="#steps">Step by step</a></li>
+      <li><a href="#animation">See it happen</a></li>
+      <li><a href="#real-world">Real-world use</a></li>
+      <li><a href="#run">Run the code</a></li>
+      <li><a href="#tracer">Line by line</a></li>
+      <li><a href="#worked">Worked examples</a></li>
+      <li><a href="#quiz">Quiz and revision</a></li>
+      <li><a href="#practice">Practice problems</a></li>
+      <li><a href="#scenarios">Industry scenarios</a></li>
+    </ol>
+  </nav>
+  <div class="ad-slot" data-slot="side"></div>
+  <div class="outline" id="outline"></div>
+</aside>
+</div>
+</main>
+
+<footer class="site-footer">
+  <div class="wrap">
+    <div><h4>MyPhatshala</h4><p>Free programming and IT lessons that show what happens behind the screen.</p></div>
+    <div><h4>Learn</h4><a href="../../../../#tracks">All courses</a><a href="../../">Apache Hadoop syllabus</a></div>
+    <div><h4>Site</h4><a href="../../../../about.html">About</a><a href="../../../../contact.html">Contact</a><a href="../../../../privacy.html">Privacy policy</a><a href="../../../../disclaimer.html">Disclaimer</a></div>
+    <div class="copyright">© MyPhatshala. All lesson content, diagrams and animations are original. Please do not copy without permission.</div>
+  </div>
+</footer>
+
+<script src="../../../../data/courses/hadoop.js"></script>
+<script src="../../../../assets/js/lesson.js"></script>
+<script src="../../../../assets/js/cluster-sim.js"></script>
+<script src="../../../../assets/js/ads.js"></script>
+<script src="../../../../assets/js/site.js"></script>
+</body>
+</html>

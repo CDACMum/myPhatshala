@@ -1,0 +1,2739 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>fsimage, edit log and checkpointing | MyPhatshala</title>
+<meta name="description" content="How the NameNode makes its in-memory namespace durable: the fsimage snapshot, the edit log of transactions (OP_MKDIR, OP_ADD, OP_CLOSE, OP_RENAME, OP_DELETE), seen_txid, and checkpoints by the SecondaryNameNode, Standby NameNode or saveNamespace. Real Hadoop 3.5.0 output: metadata folder timeline, a SecondaryNameNode checkpoint log, hdfs oev and hdfs oiv dumps, image retention. Python checkpoint simulator, restart-time calculations, quiz and interview scenarios.">
+<meta name="mp:minutes" content="26">
+<link rel="canonical" href="https://myphatshala.in/courses/hadoop/05-hdfs-architecture/04-fsimage-edit-log-and-checkpointing/">
+<meta property="og:title" content="fsimage, edit log and checkpointing · MyPhatshala">
+<meta property="og:description" content="A photo and a diary: fsimage and the edit log. Read real NameNode metadata files and watch a checkpoint happen.">
+<link rel="icon" href="../../../../assets/img/logo.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Fraunces:ital,opsz,wght@0,9..144,600;0,9..144,700;1,9..144,600&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../../../../assets/css/style.css">
+<link rel="stylesheet" href="../../../../assets/css/lesson.css">
+<script src="../../../../assets/js/config.js"></script>
+<script>try { const t = localStorage.getItem("mp-theme"); if (t) document.documentElement.dataset.theme = t; } catch (e) {}</script>
+<script type="application/ld+json">{"@context": "https://schema.org", "@type": "LearningResource", "name": "fsimage, edit log and checkpointing", "learningResourceType": "Lesson", "educationalLevel": "Intermediate", "isAccessibleForFree": true, "inLanguage": "en", "isPartOf": {"@type": "Course", "name": "Apache Hadoop", "provider": {"@type": "Organization", "name": "MyPhatshala"}}}</script>
+</head>
+<body style="--track:#B45309" data-lesson="05-hdfs-architecture/04-fsimage-edit-log-and-checkpointing" data-course-root="../../">
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="site-header">
+  <div class="wrap">
+    <a class="brand" href="../../../../" aria-label="MyPhatshala home"><img src="../../../../assets/img/logo.svg" width="34" height="34" alt=""><span>My<b>Phatshala</b></span></a>
+    <nav class="nav" aria-label="Main">
+      <a href="../../../../#tracks">All courses</a>
+      <a href="../../">Apache Hadoop syllabus</a>
+      <button class="theme-btn" id="theme-btn" aria-label="Toggle dark mode"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg></button>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+<section class="lesson-hero">
+  <div class="wrap">
+    <nav class="crumbs" aria-label="Breadcrumb"><a href="../../../../">Home</a><span>›</span><a href="../../../../#track-big-data">Big Data Engineering</a><span>›</span><a href="../../">Apache Hadoop</a><span>›</span><b>Lesson 5.4</b></nav>
+    <h1>fsimage, edit log and checkpointing</h1>
+    <p class="lead">The NameNode answers every request from memory, yet it survives restarts without losing a single file. The trick is an fsimage snapshot plus an edit log of every change since, merged regularly by a checkpoint. In this lesson you read the real metadata files of a running cluster, decode the edit log entries of your own commands, and watch the SecondaryNameNode take a checkpoint, then learn why skipping checkpoints has caused hours-long outages.</p>
+    <div class="lesson-meta"><span>Module 5 · HDFS architecture</span><span>⏱ 26 min</span><span>Intermediate</span><span>Real metadata files</span><span>oev / oiv dumps</span><span>Runs in your browser (Python)</span><span>8 practice problems</span></div>
+  </div>
+</section>
+
+<div class="wrap lesson-layout">
+<article class="lesson-main">
+<!-- ======================= PART 1: THE STORY ======================= -->
+<section class="part" id="story">
+  <span class="part-label"><b>1</b> The story</span>
+  <h2>A photo and a diary</h2>
+  <div class="story">
+    <p class="narration">Kabir lists the NameNode's metadata folder and frowns: <code>fsimage_0000000000000000064</code>, <code>edits_0000000000000000065-0000000000000000066</code>, <code>edits_inprogress_0000000000000000067</code>… “Why so many files with long numbers? And why does it keep changing every two minutes?” Riya has heard that a NameNode once took hours to restart at a big company because “the edits were too big”. Arjun Sir draws two pictures on the board: a photograph, and a diary.</p>
+
+    <div class="scene">
+      <svg viewBox="0 0 640 190" role="img" aria-label="fsimage is a snapshot of the namespace at a transaction ID. The edit log records every change after it. A checkpoint merges them into a new fsimage.">
+        <g font-size="10">
+          <rect x="20" y="24" width="150" height="100" rx="10" class="s-soft-blue" style="stroke:var(--blue)"/>
+          <text x="95" y="48" text-anchor="middle" font-weight="700" class="s-blue">fsimage_…066</text>
+          <text x="95" y="70" text-anchor="middle" font-size="8.6" class="s-ink">photo of the whole</text><text x="95" y="84" text-anchor="middle" font-size="8.6" class="s-ink">namespace after</text><text x="95" y="98" text-anchor="middle" font-size="8.6" class="s-ink">transaction 66</text>
+          <text x="196" y="78" text-anchor="middle" font-size="18" class="s-ink2">+</text>
+          <rect x="222" y="24" width="190" height="100" rx="10" class="s-soft-acc" style="stroke:var(--track)"/>
+          <text x="317" y="48" text-anchor="middle" font-weight="700" class="s-acc">edits 67 … 73</text>
+          <g font-size="8.6" class="mono s-ink"><text x="236" y="70">68 OP_MKDIR …/edits_demo</text><text x="236" y="84">69 OP_ADD …/hello.txt</text><text x="236" y="98">71 OP_RENAME_OLD …</text></g>
+          <text x="438" y="78" text-anchor="middle" font-size="18" class="s-ink2">=</text>
+          <rect x="464" y="24" width="156" height="100" rx="10" class="s-board"/>
+          <text x="542" y="48" text-anchor="middle" font-weight="700" class="s-chalk">namespace now</text>
+          <text x="542" y="74" text-anchor="middle" font-size="8.6" class="s-chalk">in NameNode memory</text>
+          <text x="542" y="96" text-anchor="middle" font-size="8.6" style="fill:#F5C77E">checkpoint = new photo</text>
+        </g>
+        <text x="320" y="160" text-anchor="middle" font-size="10" class="s-ink2">Restart = load the newest photo, then replay the diary. A short diary means a fast restart.</text>
+        <text x="632" y="182" text-anchor="end" class="s-wm">myphatshala.in</text>
+      </svg>
+    </div>
+
+    <div class="panel panel--right"><div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#DDEFE6"/><path d="M12 64c2-12 10-18 20-18s18 6 20 18z" fill="#F4F1EA"/><path d="M28 46l4 8 4-8" fill="#2F7D5B"/><circle cx="32" cy="28" r="12" fill="#B57A50"/><path d="M20 26c0-8 5-13 12-13s12 5 12 13c-2-3-6-5-12-5s-10 2-12 5z" fill="#5A5A5A"/><path d="M22 32c1 8 5 11 10 11s9-3 10-11c-2 3-6 4-10 4s-8-1-10-4z" fill="#5A5A5A"/><circle cx="27" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><circle cx="37" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><path d="M30.4 29h3.2" stroke="#1B2433" stroke-width="1.4"/><circle cx="27" cy="29" r="1.1" fill="#1B2433"/><circle cx="37" cy="29" r="1.1" fill="#1B2433"/></svg></div><div class="bubble"><b class="who">Arjun Sir</b><p>The NameNode keeps the whole namespace in memory. To survive a restart it writes two things to disk. The <b>fsimage</b> is a photograph of the entire namespace at one moment. The <b>edit log</b> is a diary: every single change after that moment, each with a transaction number.</p></div></div>
+    <div class="panel"><div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#E1E9F7"/><path d="M12 64c2-12 10-18 20-18s18 6 20 18z" fill="#B45309"/><circle cx="32" cy="29" r="12" fill="#A9714A"/><path d="M19 27c0-9 6-14 13-14s13 5 13 14c-2-4-5-6-8-6-3 3-9 4-13 3-2 1-4 2-5 3z" fill="#1E1A17"/><circle cx="27.5" cy="30" r="1.5" fill="#1E1A17"/><circle cx="36.5" cy="30" r="1.5" fill="#1E1A17"/><path d="M27 35.5q5 3.5 10 0" stroke="#1E1A17" stroke-width="1.6" fill="none" stroke-linecap="round"/><rect x="41" y="40" width="10" height="7" rx="1.5" fill="#2E5AAC"/></svg></div><div class="bubble"><b class="who">Kabir</b><p>Why not just update the photo every time something changes?</p></div></div>
+    <div class="panel panel--right"><div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#DDEFE6"/><path d="M12 64c2-12 10-18 20-18s18 6 20 18z" fill="#F4F1EA"/><path d="M28 46l4 8 4-8" fill="#2F7D5B"/><circle cx="32" cy="28" r="12" fill="#B57A50"/><path d="M20 26c0-8 5-13 12-13s12 5 12 13c-2-3-6-5-12-5s-10 2-12 5z" fill="#5A5A5A"/><path d="M22 32c1 8 5 11 10 11s9-3 10-11c-2 3-6 4-10 4s-8-1-10-4z" fill="#5A5A5A"/><circle cx="27" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><circle cx="37" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><path d="M30.4 29h3.2" stroke="#1B2433" stroke-width="1.4"/><circle cx="27" cy="29" r="1.1" fill="#1B2433"/><circle cx="37" cy="29" r="1.1" fill="#1B2433"/></svg></div><div class="bubble"><b class="who">Arjun Sir</b><p>Because the photo can be gigabytes. Rewriting it for every <code>mkdir</code> would be far too slow. Appending one line to the diary is cheap. But the diary grows for ever, and on restart the NameNode must replay all of it. So every so often someone takes a <b>new photo</b>: loads the old photo, applies the diary, saves the result. That's a <b>checkpoint</b>, and it's the SecondaryNameNode's whole job.</p></div></div>
+    <div class="panel"><div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#FCE6D6"/><path d="M14 64c2-12 9-18 18-18s16 6 18 18z" fill="#2E5AAC"/><circle cx="32" cy="29" r="12" fill="#C68B5E"/><path d="M19 29c0-10 6-15 13-15s13 5 13 15c-3-5-7-8-13-8s-10 3-13 8z" fill="#2A1B14"/><path d="M43 27c3 6 3 14 0 20" stroke="#2A1B14" stroke-width="4" fill="none" stroke-linecap="round"/><circle cx="27.5" cy="30" r="1.5" fill="#2A1B14"/><circle cx="36.5" cy="30" r="1.5" fill="#2A1B14"/><path d="M28 35q4 3 8 0" stroke="#2A1B14" stroke-width="1.6" fill="none" stroke-linecap="round"/><circle cx="32" cy="24" r="1.2" fill="#D64545"/></svg></div><div class="bubble"><b class="who">Riya</b><p>So the SecondaryNameNode isn't a backup NameNode?</p></div></div>
+    <div class="panel panel--right"><div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#DDEFE6"/><path d="M12 64c2-12 10-18 20-18s18 6 20 18z" fill="#F4F1EA"/><path d="M28 46l4 8 4-8" fill="#2F7D5B"/><circle cx="32" cy="28" r="12" fill="#B57A50"/><path d="M20 26c0-8 5-13 12-13s12 5 12 13c-2-3-6-5-12-5s-10 2-12 5z" fill="#5A5A5A"/><path d="M22 32c1 8 5 11 10 11s9-3 10-11c-2 3-6 4-10 4s-8-1-10-4z" fill="#5A5A5A"/><circle cx="27" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><circle cx="37" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><path d="M30.4 29h3.2" stroke="#1B2433" stroke-width="1.4"/><circle cx="27" cy="29" r="1.1" fill="#1B2433"/><circle cx="37" cy="29" r="1.1" fill="#1B2433"/></svg></div><div class="bubble"><b class="who">Arjun Sir</b><p>No. Its name is the most misleading in Hadoop. Today we'll read the diary entries of our own commands and watch a real checkpoint happen.</p></div></div>
+  </div>
+</section>
+
+<!-- ======================= PART 2: DEFINITION ======================= -->
+<section class="part" id="definition">
+  <span class="part-label"><b>2</b> Definition</span>
+  <h2>fsimage, edit log and checkpointing</h2>
+  <div class="def">
+    <div class="def__formal"><small>Formal definition (write this in exams)</small>
+      <p>The NameNode persists its namespace in two kinds of files in <code>dfs.namenode.name.dir</code>. The <b>fsimage</b> (<code>fsimage_&lt;txid&gt;</code>) is a complete, checkpointed image of the namespace (inodes, directories, permissions, file-to-block lists) as of a given <b>transaction ID</b>. The <b>edit log</b> (<code>edits_&lt;start&gt;-&lt;end&gt;</code> segments and one <code>edits_inprogress_&lt;start&gt;</code>) is a write-ahead log recording every namespace-changing operation (e.g. <code>OP_MKDIR</code>, <code>OP_ADD</code>, <code>OP_CLOSE</code>, <code>OP_RENAME</code>, <code>OP_DELETE</code>) with a transaction ID; an operation is acknowledged only after it is logged. At start-up the NameNode loads the latest fsimage and replays the edits that follow it. <b>Checkpointing</b> merges the fsimage with subsequent edits into a new fsimage, keeping restart time short; it is done by the <b>SecondaryNameNode</b> (non-HA), or the <b>Standby NameNode</b> (HA), or manually with <code>hdfs dfsadmin -saveNamespace</code>. It is triggered every <code>dfs.namenode.checkpoint.period</code> (3600 s) or after <code>dfs.namenode.checkpoint.txns</code> (1,000,000) uncheckpointed transactions, whichever comes first.</p></div>
+    <div class="def__simple"><small>In simple words</small>
+      <p>fsimage = a full photo of all folders and files. Edit log = a diary of every change since that photo. Checkpoint = take a fresh photo so the diary can start again, which makes restarts fast.</p></div>
+  </div>
+
+  <h3>Words you'll meet in this lesson</h3>
+  <div class="terms">
+    <div class="term"><b>Transaction ID (txid)</b><span>A number given to every namespace change, increasing by 1 each time.</span></div>
+    <div class="term"><b>Edit log segment</b><span>A finished edits file covering a range, e.g. <code>edits_…065-…066</code>.</span></div>
+    <div class="term"><b>edits_inprogress</b><span>The segment currently being written. Exactly one at a time.</span></div>
+    <div class="term"><b>seen_txid</b><span>Start of the current segment; lets the NameNode check no edits are missing at restart.</span></div>
+    <div class="term"><b>Checkpoint</b><span>fsimage + edits → new fsimage. Old images and edits are then removed.</span></div>
+    <div class="term"><b>Roll</b><span>Closing the in-progress segment and starting a new one (done before each checkpoint).</span></div>
+    <div class="term"><b>oiv / oev</b><span>Offline Image Viewer and Offline Edits Viewer: tools to read fsimage and edits files.</span></div>
+    <div class="term"><b>saveNamespace</b><span>Manual checkpoint by the NameNode itself; requires safe mode.</span></div>
+  </div>
+
+  <h3>Checkpoint settings (Hadoop 3.5.0 defaults)</h3>
+  <table class="facts" style="table-layout:fixed;overflow-wrap:anywhere">
+    <tr><th>checkpoint.period</th><td>3600 s: at least one checkpoint per hour (our lab: 120 s)</td></tr>
+    <tr><th>checkpoint.txns</th><td>1,000,000 uncheckpointed transactions also trigger one</td></tr>
+    <tr><th>checkpoint.check.period</th><td>60 s: how often the checker looks at the transaction count</td></tr>
+    <tr><th>num.checkpoints.retained</th><td>2 fsimage files are kept (we saw the oldest removed)</td></tr>
+    <tr><th>Where</th><td><code>dfs.namenode.name.dir</code> (NameNode), <code>dfs.namenode.checkpoint.dir</code> (SecondaryNameNode: <code>…/dfs/namesecondary</code>)</td></tr>
+    <tr><th>Web UI</th><td>SecondaryNameNode 9868; the NameNode UI shows “Last Checkpoint Time”</td></tr>
+  </table>
+
+  <h3 id="levels">Checkpointing at three levels</h3>
+  <div class="modlab levels"><div class="modlab__bar"><b>Pick your level. New to this? Start at Beginner and climb.</b><button type="button" data-mod="b">Beginner</button><button type="button" data-mod="i">Intermediate</button><button type="button" data-mod="a">Advanced</button></div>
+    <div class="modlab__panel" data-mod="b"><h4><span class="lvl lvl--b">Beginner</span> A bank passbook</h4>
+      <ul>
+        <li>The bank's yearly statement is the <b>fsimage</b>: your full balance on 31 March.</li>
+        <li>Every deposit and withdrawal after that is a line in the passbook: the <b>edit log</b>.</li>
+        <li>To know today's balance, start from the statement and add every line. If the passbook has 10 lakh lines, that takes long.</li>
+        <li>So the bank prints a fresh statement now and then (a <b>checkpoint</b>) and starts a new passbook.</li>
+      </ul>
+
+    </div>
+    <div class="modlab__panel" data-mod="i"><h4><span class="lvl lvl--i">Intermediate</span> How a checkpoint works (non-HA)</h4>
+      <ul>
+        <li>The SecondaryNameNode asks the NameNode to <b>roll</b> its edit log: the current segment is closed, a new one starts.</li>
+        <li>It downloads the latest fsimage and the closed edit segments over HTTP.</li>
+        <li>It loads the fsimage into memory, applies the edits, and writes a new fsimage.</li>
+        <li>It uploads the new fsimage to the NameNode, which keeps it and deletes older images and edits beyond the retention limit.</li>
+        <li>The NameNode never stops serving clients during this.</li>
+      </ul>
+
+    </div>
+    <div class="modlab__panel" data-mod="a"><h4><span class="lvl lvl--a">Advanced</span> Production details</h4>
+      <ul>
+        <li>The SecondaryNameNode needs about as much memory as the NameNode, because it loads the whole namespace.</li>
+        <li>With HA there is no SecondaryNameNode: the Standby NameNode checkpoints, and edits go to JournalNodes (Lesson 7.1).</li>
+        <li>Write metadata to several directories (comma-separated <code>dfs.namenode.name.dir</code>) on different disks; losing all copies of the fsimage and edits loses the file system.</li>
+        <li>If checkpoints silently fail for weeks, edits pile up and the next restart can take hours. Monitor “Last Checkpoint Time” / transactions since checkpoint.</li>
+        <li>Back up the fsimage regularly (it can be fetched with <code>hdfs dfsadmin -fetchImage</code>).</li>
+      </ul>
+
+    </div>
+  </div>
+  <div class="callout callout--exam"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19V5a2 2 0 0 1 2-2h12v18H6a2 2 0 0 1-2-2zm0 0a2 2 0 0 1 2-2h12"/></svg><p><b>Exam tip:</b> “Explain the role of the SecondaryNameNode”: it is <b>not</b> a standby or backup NameNode. It performs <b>periodic checkpoints</b>: rolls the edit log, downloads fsimage + edits, merges them, and uploads a new fsimage, so that the edit log stays small and the NameNode restarts quickly. Mention the defaults: every 1 hour or 10 lakh transactions.</p></div>
+</section>
+
+<!-- ======================= PART 3: TYPES AND WAYS TO USE IT ======================= -->
+<section class="part" id="types">
+  <span class="part-label"><b>3</b> Types and ways to use it</span>
+  <h2>Who can make a checkpoint?</h2>
+  <div class="table-wrap">
+  <table class="compare" style="min-width:600px">
+    <thead><tr><th></th><th>SecondaryNameNode</th><th>Standby NameNode (HA)</th><th>saveNamespace</th><th>Checkpoint / Backup node</th></tr></thead>
+    <tbody>
+      <tr><td><b>When used</b></td><td>Clusters without HA</td><td>HA clusters</td><td>Manually, e.g. before maintenance</td><td>Rarely; older alternatives</td></tr>
+      <tr><td><b>How</b></td><td>Downloads image + edits, merges, uploads</td><td>Already has the namespace; saves and uploads</td><td>The NameNode saves its own memory to a new fsimage</td><td>Similar to Secondary</td></tr>
+      <tr><td><b>Needs</b></td><td>RAM like the NameNode</td><td>Is a full NameNode</td><td>Safe mode during the save</td><td>—</td></tr>
+      <tr><td><b>Can take over?</b></td><td>No</td><td>Yes (failover)</td><td>—</td><td>No</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <h3>Tools for metadata files</h3>
+  <div class="cards">
+    <div class="card"><h4>hdfs oiv</h4><p>Offline Image Viewer: turns an fsimage into text, XML or a delimited table of every path.</p><span class="tag">fsimage</span></div>
+    <div class="card"><h4>hdfs oev</h4><p>Offline Edits Viewer: turns an edits file into XML, one record per operation.</p><span class="tag">edits</span></div>
+    <div class="card"><h4>dfsadmin -fetchImage</h4><p>Downloads the latest fsimage from the NameNode: a simple metadata backup.</p><span class="tag">Backup</span></div>
+    <div class="card"><h4>dfsadmin -saveNamespace</h4><p>Forces a checkpoint on the NameNode (in safe mode).</p><span class="tag">Manual</span></div>
+  </div>
+  <div class="callout callout--tip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18h6M10 22h4M12 2a7 7 0 0 0-4 12.7V17h8v-2.3A7 7 0 0 0 12 2z"/></svg><p>Data teams often analyse an <code>oiv</code> dump of a copy of the fsimage (offline, so the NameNode isn't touched) to find who owns the most files, which folders hold millions of small files, and which data hasn't been read for years.</p></div>
+</section>
+
+<!-- ======================= PART 4: STEP BY STEP ======================= -->
+<section class="part" id="steps">
+  <span class="part-label"><b>4</b> Step by step</span>
+  <h2>Read the diary and watch the photos being taken</h2>
+  <p>The Module 5 lab cluster runs a SecondaryNameNode with <code>dfs.namenode.checkpoint.period=120</code>, so a checkpoint happens every 2 minutes instead of every hour.</p>
+  <ol class="stepper">
+    <li><h4>List the NameNode's metadata files</h4>
+      <div class="code" data-lang="bash" data-file="Terminal"><pre><code>docker compose exec namenode ls -l /tmp/hadoop-hadoop/dfs/name/current
+docker compose exec namenode cat /tmp/hadoop-hadoop/dfs/name/current/seen_txid</code></pre><div class="output">-rw-r--r-- 1 hadoop users    4003 Oct 21 06:49 edits_0000000000000000001-0000000000000000044
+-rw-r--r-- 1 hadoop users    1920 Oct 21 06:51 edits_0000000000000000045-0000000000000000062
+-rw-r--r-- 1 hadoop users      42 Oct 21 06:53 edits_0000000000000000063-0000000000000000064
+-rw-r--r-- 1 hadoop users      42 Oct 21 06:55 edits_0000000000000000065-0000000000000000066
+-rw-r--r-- 1 hadoop users 1048576 Oct 21 06:55 edits_inprogress_0000000000000000067
+-rw-r--r-- 1 hadoop users    1298 Oct 21 06:53 fsimage_0000000000000000064
+-rw-r--r-- 1 hadoop users      62 Oct 21 06:53 fsimage_0000000000000000064.md5
+-rw-r--r-- 1 hadoop users    1298 Oct 21 06:55 fsimage_0000000000000000066
+-rw-r--r-- 1 hadoop users      62 Oct 21 06:55 fsimage_0000000000000000066.md5
+-rw-r--r-- 1 hadoop users       3 Oct 21 06:55 seen_txid
+-rw-r--r-- 1 hadoop users     215 Oct 21 06:48 VERSION
+67</div></div>
+      <span class="behind">Read the numbers as a timeline: transactions 1–44 (our uploads and jobs), 45–62, … The newest photo is <code>fsimage_…066</code>; everything after transaction 66 is in <code>edits_inprogress_…067</code>, which is pre-allocated as a 1 MB file. A 42-byte segment holds just the start and end markers of an empty segment.</span></li>
+    <li><h4>See a checkpoint in the SecondaryNameNode log</h4>
+      <div class="code" data-lang="bash" data-file="Terminal"><pre><code>docker compose logs secondarynamenode | grep -iE "checkpoint|Downloaded file|Uploaded image"</code></pre><div class="output">INFO  TransferFsImage:177 - Downloaded file edits_tmp_0000000000000000065-0000000000000000066_0000000000000550729 size 0 bytes.
+INFO  Checkpointer:324 - Checkpointer about to load edits from 1 stream(s).
+INFO  Storage:475 - setMostRecentCheckpointInfo txid is 66, time is 1792565757250
+INFO  TransferFsImage:260 - Uploaded image with txid 66 to namenode at http://namenode:9870 in 0.014 seconds
+WARN  SecondaryNameNode:586 - Checkpoint done. New Image Size: 1298</div></div>
+      <span class="behind">Download edits → load → merge → upload <code>fsimage_…066</code> to the NameNode. (It is logged at WARN level, but it's a normal success message.)</span></li>
+    <li><h4>Make some changes, then read the edit log</h4>
+      <div class="code" data-lang="bash" data-file="Terminal"><pre><code>docker compose exec namenode hdfs dfs -mkdir data/edits_demo
+docker compose exec namenode hdfs dfs -touchz data/edits_demo/hello.txt
+docker compose exec namenode hdfs dfs -mv data/edits_demo/hello.txt data/edits_demo/namaste.txt
+docker compose exec namenode hdfs dfs -rm -r -skipTrash data/edits_demo
+docker compose exec namenode bash -c 'f=$(ls /tmp/hadoop-hadoop/dfs/name/current/edits_inprogress_*); hdfs oev -i $f -o /tmp/edits.xml; grep -o "&lt;OPCODE&gt;[A-Z_]*&lt;/OPCODE&gt;" /tmp/edits.xml | sort | uniq -c'</code></pre><div class="output">      1 &lt;OPCODE&gt;OP_ADD&lt;/OPCODE&gt;
+      1 &lt;OPCODE&gt;OP_CLOSE&lt;/OPCODE&gt;
+      1 &lt;OPCODE&gt;OP_DELETE&lt;/OPCODE&gt;
+      1 &lt;OPCODE&gt;OP_MKDIR&lt;/OPCODE&gt;
+      1 &lt;OPCODE&gt;OP_RENAME_OLD&lt;/OPCODE&gt;
+      1 &lt;OPCODE&gt;OP_START_LOG_SEGMENT&lt;/OPCODE&gt;</div></div>
+      <span class="behind">Four commands, five operations: creating a file is <code>OP_ADD</code> (open) plus <code>OP_CLOSE</code> (finished). The segment always starts with <code>OP_START_LOG_SEGMENT</code>.</span></li>
+    <li><h4>Look at one record</h4>
+      <div class="code" data-lang="bash" data-file="Terminal"><pre><code>docker compose exec namenode bash -c 'grep -A9 "OP_RENAME" /tmp/edits.xml'</code></pre><div class="output">    &lt;OPCODE&gt;OP_RENAME_OLD&lt;/OPCODE&gt;
+    &lt;DATA&gt;
+      &lt;TXID&gt;71&lt;/TXID&gt;
+      &lt;LENGTH&gt;0&lt;/LENGTH&gt;
+      &lt;SRC&gt;/user/hadoop/data/edits_demo/hello.txt&lt;/SRC&gt;
+      &lt;DST&gt;/user/hadoop/data/edits_demo/namaste.txt&lt;/DST&gt;
+      &lt;TIMESTAMP&gt;1792565829164&lt;/TIMESTAMP&gt;
+      &lt;RPC_CLIENTID&gt;52ec91db-a945-4573-8c04-3475b16572cf&lt;/RPC_CLIENTID&gt;
+      &lt;RPC_CALLID&gt;3&lt;/RPC_CALLID&gt;
+    &lt;/DATA&gt;</div></div>
+      <span class="behind">Transaction 71: rename hello.txt to namaste.txt. The client ID and call ID let the NameNode recognise a retried request after a failover and not apply it twice.</span></li>
+    <li><h4>Force a checkpoint with saveNamespace</h4>
+      <div class="code" data-lang="bash" data-file="Terminal"><pre><code>docker compose exec namenode hdfs dfsadmin -safemode enter
+docker compose exec namenode hdfs dfsadmin -saveNamespace
+docker compose exec namenode hdfs dfsadmin -safemode leave
+docker compose exec namenode ls -l /tmp/hadoop-hadoop/dfs/name/current</code></pre><div class="output">Safe mode is ON
+Save namespace successful
+Safe mode is OFF
+-rw-r--r-- 1 hadoop users    4003 Oct 21 06:49 edits_0000000000000000001-0000000000000000044
+-rw-r--r-- 1 hadoop users    1920 Oct 21 06:51 edits_0000000000000000045-0000000000000000062
+-rw-r--r-- 1 hadoop users      42 Oct 21 06:53 edits_0000000000000000063-0000000000000000064
+-rw-r--r-- 1 hadoop users      42 Oct 21 06:55 edits_0000000000000000065-0000000000000000066
+-rw-r--r-- 1 hadoop users     652 Oct 21 06:57 edits_0000000000000000067-0000000000000000073
+-rw-r--r-- 1 hadoop users 1048576 Oct 21 06:57 edits_inprogress_0000000000000000074
+-rw-r--r-- 1 hadoop users    1298 Oct 21 06:55 fsimage_0000000000000000066
+-rw-r--r-- 1 hadoop users      62 Oct 21 06:55 fsimage_0000000000000000066.md5
+-rw-r--r-- 1 hadoop users    1298 Oct 21 06:57 fsimage_0000000000000000073
+-rw-r--r-- 1 hadoop users      62 Oct 21 06:57 fsimage_0000000000000000073.md5
+-rw-r--r-- 1 hadoop users       3 Oct 21 06:57 seen_txid
+-rw-r--r-- 1 hadoop users     215 Oct 21 06:57 VERSION</div></div>
+      <span class="behind">Our 5 operations (plus segment markers) became segment 67–73, a new photo <code>fsimage_…073</code> was written, and <code>fsimage_…064</code> was deleted: only 2 images are retained. The in-progress segment restarted at 74.</span></li>
+    <li><h4>Read the photo</h4>
+      <div class="code" data-lang="bash" data-file="Terminal"><pre><code>docker compose exec namenode bash -c 'hdfs oiv -p Delimited -i /tmp/hadoop-hadoop/dfs/name/current/fsimage_0000000000000000073 -o /tmp/fsimage.tsv; cut -f1,2,4,7 /tmp/fsimage.tsv'</code></pre><div class="output">Path	Replication	AccessTime	FileSize
+/	0	1970-01-01 00:00	0
+/user	0	1970-01-01 00:00	0
+/user/hadoop	0	1970-01-01 00:00	0
+/user/hadoop/data	0	1970-01-01 00:00	0
+/user/hadoop/data/canteen_orders.csv	3	2026-10-21 06:49	4692009
+/user/hadoop/data/canteen_1mb.csv	3	2026-10-21 06:49	4692009
+/user/hadoop/out	0	1970-01-01 00:00	0
+/user/hadoop/out/wc1	0	1970-01-01 00:00	0
+/user/hadoop/out/wc1/part-r-00000	3	2026-10-21 06:49	4942122
+/user/hadoop/out/wc1/_SUCCESS	3	2026-10-21 06:49	0
+/user/hadoop/out/wc128	0	1970-01-01 00:00	0
+/user/hadoop/out/wc128/part-r-00000	3	2026-10-21 06:49	4942122
+/user/hadoop/out/wc128/_SUCCESS	3	2026-10-21 06:49	0</div></div>
+      <span class="behind">The whole namespace: 13 inodes in a 1,298-byte file. <code>edits_demo</code> is not there: it was created and deleted before the photo, so it exists only in the diary. Directories show replication 0. (The column header comes from the tool; the selected columns are path, replication, access time and size.)</span></li>
+  </ol>
+  <div class="callout callout--warn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3 2 21h20L12 3z"/><path d="M12 10v5M12 18v.5"/></svg><p>Never delete files from the NameNode's metadata folder to “save space”. The NameNode cleans up old images and edits itself. Missing edits make the namespace impossible to rebuild.</p></div>
+</section>
+
+<!-- ======================= PART 5: SEE IT HAPPEN ======================= -->
+<section class="part" id="animation">
+  <span class="part-label"><b>5</b> See it happen</span>
+  <h2>One checkpoint, step by step</h2>
+  <p>The real file names from the lab, around the checkpoint at transaction 66.</p>
+  <div class="anim" data-frames="6">
+    <div class="anim__title">SecondaryNameNode checkpoint <span>6 steps</span></div>
+    <div class="anim__views">
+      <div class="view view--see">
+        <span class="view__tag">What you see</span>
+        <svg viewBox="0 0 360 250" role="img" aria-label="Files in the NameNode folder and SecondaryNameNode log">
+          <rect x="14" y="14" width="332" height="206" rx="8" class="s-board"/>
+          <text x="26" y="32" font-size="9" class="mono" style="fill:#7F8C86">namenode : dfs/name/current</text>
+          <g font-size="8.6" class="mono">
+            <g data-on="1-2"><text x="26" y="56" style="fill:#9FD3B8">fsimage_…064</text><text x="26" y="72" style="fill:#F5C77E">edits_inprogress_…065</text><text x="200" y="72" style="fill:#7F8C86">← 65, 66 …</text></g>
+            <g data-on="2"><text x="26" y="100" style="fill:#7F8C86">(no changes in these 2 minutes:</text><text x="26" y="114" style="fill:#7F8C86"> txid 65 = start, 66 = end of segment)</text></g>
+            <g data-on="3-6"><text x="26" y="56" style="fill:#9FD3B8">fsimage_…064</text><text x="26" y="72" style="fill:#9FD3B8">edits_…065-…066</text><text x="26" y="88" style="fill:#F5C77E">edits_inprogress_…067</text></g>
+            <g data-on="3"><text x="26" y="118" style="fill:#7F8C86">2NN: rollEditLog</text></g>
+            <g data-on="4"><text x="26" y="118" style="fill:#7F8C86">2NN: Downloaded file edits_tmp_…065-…066</text><text x="26" y="134" style="fill:#7F8C86">2NN: about to load edits from 1 stream</text></g>
+            <g data-on="5-6"><text x="26" y="104" style="fill:#9FD3B8">fsimage_…066</text></g>
+            <g data-on="5"><text x="26" y="132" style="fill:#7F8C86">Uploaded image with txid 66 to namenode</text><text x="26" y="148" style="fill:#9FD3B8">Checkpoint done. New Image Size: 1298</text></g>
+            <g data-on="6"><text x="26" y="132" style="fill:#7F8C86">restart: load fsimage_…066</text><text x="26" y="148" style="fill:#7F8C86">         + replay edits from 67</text></g>
+          </g>
+          <text x="352" y="244" text-anchor="end" class="s-wm">myphatshala.in</text>
+        </svg>
+        <ol class="caps" hidden>
+          <li>The latest photo is fsimage_…064. New changes go into the in-progress segment.</li>
+          <li>Every segment begins and ends with a marker transaction. Nobody changed anything in these two minutes, so 65 and 66 are just the markers (the 42-byte file in step 1).</li>
+          <li>Checkpoint time: the SecondaryNameNode asks the NameNode to roll the log. Segment 65–66 is closed; new changes go to edits_inprogress_…067.</li>
+          <li>The SecondaryNameNode downloads the closed segment (and the fsimage if it doesn't already have it) and loads them.</li>
+          <li>It writes fsimage_…066 and uploads it. The NameNode now has a newer photo.</li>
+          <li>If the NameNode restarts now, it loads fsimage_…066 and replays only the edits from 67 onwards.</li>
+        </ol>
+      </div>
+
+      <div class="view view--behind">
+        <span class="view__tag">Behind the screen</span>
+        <svg viewBox="0 0 360 250" role="img" aria-label="NameNode and SecondaryNameNode exchanging files">
+          <rect x="14" y="20" width="150" height="150" rx="8" class="s-board"/><text x="89" y="38" text-anchor="middle" font-size="9" font-weight="700" class="s-chalk">NameNode</text>
+          <rect x="196" y="20" width="150" height="150" rx="8" class="s-card2"/><text x="271" y="38" text-anchor="middle" font-size="9" font-weight="700" class="s-ink">SecondaryNameNode</text>
+          <rect x="24" y="50" width="130" height="30" rx="5" class="s-soft-blue" style="stroke:var(--blue)"/><text x="89" y="69" text-anchor="middle" font-size="8" class="s-blue">memory: namespace</text>
+          <g data-on="1-2"><rect x="24" y="90" width="130" height="22" rx="4" class="s-soft-acc" style="stroke:var(--track)"/><text x="89" y="105" text-anchor="middle" font-size="7.6" class="s-acc">edits_inprogress 65…</text></g>
+          <g data-on="2"><text x="89" y="190" text-anchor="middle" font-size="8.6" class="s-ink2">changes (if any) logged first, then applied</text></g>
+          <g data-on="3-"><rect x="24" y="90" width="130" height="22" rx="4" class="s-card2"/><text x="89" y="105" text-anchor="middle" font-size="7.6" class="s-ink">edits 65–66 (closed)</text><rect x="24" y="118" width="130" height="22" rx="4" class="s-soft-acc" style="stroke:var(--track)"/><text x="89" y="133" text-anchor="middle" font-size="7.6" class="s-acc">edits_inprogress 67…</text></g>
+          <g data-on="3"><path d="M196 70h-32" style="stroke:var(--track);stroke-width:2"/><text x="180" y="200" text-anchor="middle" font-size="8.6" class="s-ink2">1. “roll your edit log”</text></g>
+          <g data-on="4"><path d="M164 100h32" style="stroke:var(--blue);stroke-width:2"/><rect x="206" y="50" width="130" height="22" rx="4" class="s-soft-blue" style="stroke:var(--blue)"/><text x="271" y="65" text-anchor="middle" font-size="7.6" class="s-blue">fsimage_064 + edits 65–66</text><text x="180" y="200" text-anchor="middle" font-size="8.6" class="s-ink2">2. download over HTTP, load, merge in memory</text></g>
+          <g data-on="5-"><rect x="206" y="80" width="130" height="22" rx="4" class="s-soft-green" style="stroke:var(--green)"/><text x="271" y="95" text-anchor="middle" font-size="7.6" class="s-green">fsimage_066 (new)</text></g>
+          <g data-on="5"><path d="M206 91h-42" style="stroke:var(--green);stroke-width:2"/><text x="180" y="200" text-anchor="middle" font-size="8.6" class="s-ink2">3. upload the new image to the NameNode</text></g>
+          <g data-on="5-"><rect x="24" y="146" width="130" height="18" rx="4" class="s-soft-green" style="stroke:var(--green)"/><text x="89" y="159" text-anchor="middle" font-size="7.6" class="s-green">fsimage_066</text></g>
+          <g data-on="6"><text x="180" y="200" text-anchor="middle" font-size="9" font-weight="700" class="s-green">restart = fsimage_066 + edits from 67</text><text x="180" y="216" text-anchor="middle" font-size="8.6" class="s-ink2">the diary to replay stays short</text></g>
+          <g data-on="1"><text x="180" y="200" text-anchor="middle" font-size="8.6" class="s-ink2">the SecondaryNameNode waits for its next turn</text></g>
+          <text x="352" y="246" text-anchor="end" class="s-wm">myphatshala.in</text>
+        </svg>
+        <ol class="caps" hidden>
+          <li>The NameNode serves clients from memory and appends every change to the in-progress edits.</li>
+          <li>Each operation is written to the edit log before the client gets its answer: that's what makes it durable.</li>
+          <li>The SecondaryNameNode triggers a checkpoint: the NameNode rolls the edit log.</li>
+          <li>The SecondaryNameNode fetches the fsimage and closed edits and replays them in its own memory.</li>
+          <li>It saves the result as a new fsimage and sends it back. Clients were never interrupted.</li>
+          <li>Restart now needs only the new image plus the few edits written since.</li>
+        </ol>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ======================= PART 6: REAL-WORLD USE ======================= -->
+<section class="part" id="real-world">
+  <span class="part-label"><b>6</b> Real-world use</span>
+  <h2>Metadata files in production</h2>
+
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="20" y="20" width="80" height="50" rx="6" class="s-board"/><text x="60" y="42" text-anchor="middle" font-size="8.6" class="mono" style="fill:#FF8A80">no checkpoint</text><text x="60" y="58" text-anchor="middle" font-size="8.6" class="mono" style="fill:#F5C77E">for 3 weeks</text></svg></div>
+    <div><h4>1. The slow-restart incident</h4>
+      <p>A classic outage: checkpoints fail silently (a misconfigured or dead SecondaryNameNode), edits grow to crores of transactions, and the next NameNode restart takes hours of replay. Monitoring the time since the last checkpoint prevents it.</p>
+      <div class="uc-flow"><span>Checkpoint fails</span><i>→</i><span class="java">Edits pile up</span><i>→</i><span>Hours to restart</span></div></div>
+  </div>
+
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="20" y="20" width="80" height="50" rx="6" class="s-soft-blue" style="stroke:var(--blue)"/><text x="60" y="42" text-anchor="middle" font-size="8.6" font-weight="700" class="s-blue">oiv dump</text><text x="60" y="58" text-anchor="middle" font-size="8.6" class="s-ink">who uses what</text></svg></div>
+    <div><h4>2. Storage reports from the fsimage</h4>
+      <p>Platform teams fetch the fsimage daily, convert it with <code>oiv</code>, and load it into Hive or Spark to report file counts and sizes per team, small-file hotspots and stale data, all without querying the live NameNode.</p>
+      <div class="uc-flow"><span>fetchImage</span><i>→</i><span class="java">oiv → table</span><i>→</i><span>Usage dashboard</span></div></div>
+  </div>
+
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="20" y="20" width="80" height="50" rx="6" class="s-soft-green" style="stroke:var(--green)"/><text x="60" y="42" text-anchor="middle" font-size="8.6" font-weight="700" class="s-green">2 disks + NFS</text><text x="60" y="58" text-anchor="middle" font-size="8.6" class="s-ink">name.dir</text></svg></div>
+    <div><h4>3. Several copies of the metadata</h4>
+      <p>Before HA was common, admins listed two local disks and an NFS mount in <code>dfs.namenode.name.dir</code>, so a disk failure couldn't destroy the only fsimage and edits. With HA, JournalNodes keep the edit log on several machines.</p>
+      <div class="uc-flow"><span>Every edit</span><i>→</i><span class="java">Written to all dirs</span><i>→</i><span>Survives a disk</span></div></div>
+  </div>
+
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="20" y="20" width="80" height="50" rx="6" class="s-card2"/><text x="60" y="42" text-anchor="middle" font-size="8.6" font-weight="700" class="s-ink">saveNamespace</text><text x="60" y="58" text-anchor="middle" font-size="8.6" class="s-ink2">before upgrade</text></svg></div>
+    <div><h4>4. Clean checkpoint before maintenance</h4>
+      <p>Before a planned restart or upgrade, admins enter safe mode and run <code>saveNamespace</code> so the NameNode comes back with almost nothing to replay, and they keep a copy of that fsimage as a rollback point.</p>
+      <div class="uc-flow"><span>Safe mode</span><i>→</i><span class="java">saveNamespace</span><i>→</i><span>Fast, safe restart</span></div></div>
+  </div>
+  <p class="muted">Simplified; organisations differ in tools and policies.</p>
+</section>
+
+
+<div class="ad-slot" data-slot="mid"></div>
+
+<section class="part" id="run">
+  <span class="part-label"><b>7</b> Run the code</span>
+  <h2>Rebuild a namespace from a photo and a diary</h2>
+  <p>This program does what a NameNode does at start-up: load the fsimage (a dictionary of paths), then replay each edit after it, in transaction order. The edits are the five real operations from Part 4.</p>
+  <div class="code" data-lang="python" data-file="main.py"><pre><code>fsimage_txid = 66
+fsimage = {&quot;/user/hadoop/data&quot;: &quot;dir&quot;,
+           &quot;/user/hadoop/data/canteen_orders.csv&quot;: &quot;file&quot;}
+edits = [
+    (68, &quot;OP_MKDIR&quot;, &quot;/user/hadoop/data/edits_demo&quot;, None),
+    (69, &quot;OP_ADD&quot;, &quot;/user/hadoop/data/edits_demo/hello.txt&quot;, None),
+    (70, &quot;OP_CLOSE&quot;, &quot;/user/hadoop/data/edits_demo/hello.txt&quot;, None),
+    (71, &quot;OP_RENAME_OLD&quot;, &quot;/user/hadoop/data/edits_demo/hello.txt&quot;,
+         &quot;/user/hadoop/data/edits_demo/namaste.txt&quot;),
+    (72, &quot;OP_DELETE&quot;, &quot;/user/hadoop/data/edits_demo&quot;, None),
+]
+
+ns = dict(fsimage)
+for txid, op, path, dst in edits:
+    if txid &lt;= fsimage_txid:
+        continue
+    if op == &quot;OP_MKDIR&quot;:
+        ns[path] = &quot;dir&quot;
+    elif op == &quot;OP_ADD&quot;:
+        ns[path] = &quot;file (open)&quot;
+    elif op == &quot;OP_CLOSE&quot;:
+        ns[path] = &quot;file&quot;
+    elif op == &quot;OP_RENAME_OLD&quot;:
+        ns[dst] = ns.pop(path)
+    elif op == &quot;OP_DELETE&quot;:
+        ns = {p: k for p, k in ns.items() if p != path and not p.startswith(path + &quot;/&quot;)}
+    print(f&quot;txid {txid}: {op:14} -&gt; {len(ns)} paths&quot;)
+print(sorted(ns))</code></pre><div class="output">txid 68: OP_MKDIR       -&gt; 3 paths
+txid 69: OP_ADD         -&gt; 4 paths
+txid 70: OP_CLOSE       -&gt; 4 paths
+txid 71: OP_RENAME_OLD  -&gt; 4 paths
+txid 72: OP_DELETE      -&gt; 2 paths
+[&#x27;/user/hadoop/data&#x27;, &#x27;/user/hadoop/data/canteen_orders.csv&#x27;]</div></div>
+  <ul class="anno"><li><code>if txid &lt;= fsimage_txid:</code><span>Edits already contained in the fsimage are skipped. Only transactions after the image's txid are replayed.</span></li><li><code>ns[path] = &quot;file (open)&quot;</code><span>OP_ADD creates the file while it is being written; OP_CLOSE marks it complete.</span></li><li><code>ns = {p: k for p, k in ns.items() if p != path and not p.startswith(path + &quot;/&quot;)}</code><span>Deleting a directory removes everything below it too.</span></li></ul>
+  <div class="runner">
+    <script type="application/json">{
+ "lang": "python",
+ "file": "main.py",
+ "tasks": [
+  {
+   "label": "1 · Replay the edits",
+   "hint": "Press <b>Run<\/b>. The final namespace should match the real fsimage_…073 listing: no edits_demo.",
+   "code": "fsimage_txid = 66\nfsimage = {\"/user/hadoop/data\": \"dir\",\n           \"/user/hadoop/data/canteen_orders.csv\": \"file\"}\nedits = [\n    (68, \"OP_MKDIR\", \"/user/hadoop/data/edits_demo\", None),\n    (69, \"OP_ADD\", \"/user/hadoop/data/edits_demo/hello.txt\", None),\n    (70, \"OP_CLOSE\", \"/user/hadoop/data/edits_demo/hello.txt\", None),\n    (71, \"OP_RENAME_OLD\", \"/user/hadoop/data/edits_demo/hello.txt\",\n         \"/user/hadoop/data/edits_demo/namaste.txt\"),\n    (72, \"OP_DELETE\", \"/user/hadoop/data/edits_demo\", None),\n]\n\nns = dict(fsimage)\nfor txid, op, path, dst in edits:\n    if txid <= fsimage_txid:\n        continue\n    if op == \"OP_MKDIR\":\n        ns[path] = \"dir\"\n    elif op == \"OP_ADD\":\n        ns[path] = \"file (open)\"\n    elif op == \"OP_CLOSE\":\n        ns[path] = \"file\"\n    elif op == \"OP_RENAME_OLD\":\n        ns[dst] = ns.pop(path)\n    elif op == \"OP_DELETE\":\n        ns = {p: k for p, k in ns.items() if p != path and not p.startswith(path + \"/\")}\n    print(f\"txid {txid}: {op:14} -> {len(ns)} paths\")\nprint(sorted(ns))\n"
+  },
+  {
+   "label": "2 · Restart time",
+   "hint": "<b>Predict first:<\/b> loading an fsimage takes 2 minutes, and replay runs at 50,000 edits per second. How long is a restart with 10 lakh, 1 crore and 10 crore edits since the last checkpoint?",
+   "code": "load_s, rate = 120, 50_000\nfor edits in [10_00_000, 1_00_00_000, 10_00_00_000]:\n    total = load_s + edits / rate\n    print(f\"{edits:>13,} edits -> {total / 60:5.1f} minutes\")\n"
+  },
+  {
+   "label": "3 · When is the next checkpoint?",
+   "hint": "A checkpoint happens after 3600 s or 10 lakh transactions, whichever comes first. With 400 changes per second, which trigger fires first?",
+   "code": "period_s, txns = 3600, 1_000_000\nfor per_second in [50, 400]:\n    by_count = txns / per_second\n    first = min(period_s, by_count)\n    print(f\"{per_second} tx/s: checkpoint after {first:.0f} s ({'count' if by_count < period_s else 'time'})\")\n"
+  },
+  {
+   "label": "4 · Read file names",
+   "hint": "Parse the real names from the metadata folder: which transactions does each edits file cover, and which is the newest fsimage?",
+   "code": "names = [\"edits_0000000000000000001-0000000000000000044\", \"edits_0000000000000000065-0000000000000000066\",\n         \"edits_inprogress_0000000000000000067\", \"fsimage_0000000000000000064\", \"fsimage_0000000000000000066\"]\nfor n in names:\n    parts = n.split(\"_\")\n    if n.startswith(\"edits_inprogress\"):\n        print(n[:16], \"from\", int(parts[2]), \"onwards (being written)\")\n    elif n.startswith(\"edits\"):\n        a, b = parts[1].split(\"-\")\n        print(\"edits\", int(a), \"to\", int(b))\nprint(\"newest image txid:\", max(int(n.split(\"_\")[1]) for n in names if n.startswith(\"fsimage\")))\n"
+  },
+  {
+   "label": "5 · Spot the error",
+   "hint": "This replay applies the edits in the wrong order, so the rename fails. Fix it so edits are replayed by transaction ID.",
+   "code": "ns = {}\nedits = [(71, \"rename\", \"a\", \"b\"), (69, \"add\", \"a\", None)]\nfor txid, op, path, dst in edits:\n    if op == \"add\":\n        ns[path] = \"file\"\n    elif op == \"rename\":\n        ns[dst] = ns.pop(path)\nprint(ns)\n"
+  }
+ ]
+}</script>
+  </div>
+  <h3 id="pc">Run it on your PC: watch your commands land in the edit log</h3>
+  <p>This script makes four changes in HDFS, then decodes the newest edit log segments with <code>hdfs oev</code> and prints only the transactions your commands created. Save it as <code>edit_log_report.py</code> in the <code>hdfs-lab</code> folder and run it while the cluster is up.</p>
+  <div class="pcrun"><h4>Your commands, as NameNode transactions</h4>
+  <div class="code" data-lang="bash" data-file="edit_log_report.py"><pre><code># edit_log_report.py: make a few changes in HDFS, then read them back from the NameNode&#x27;s edit log.
+# Run in the hdfs-lab folder while the cluster is up.
+import json
+import subprocess
+import xml.etree.ElementTree as ET
+
+NAME_DIR = &quot;/tmp/hadoop-hadoop/dfs/name/current&quot;
+
+def nn(*cmd):
+    return subprocess.run([&quot;docker&quot;, &quot;compose&quot;, &quot;exec&quot;, &quot;-T&quot;, &quot;namenode&quot;, *cmd],
+                          capture_output=True, text=True).stdout
+
+def last_txid():
+    url = &quot;http://namenode:9870/jmx?qry=Hadoop:service=NameNode,name=NameNodeInfo&quot;
+    info = json.loads(json.loads(nn(&quot;curl&quot;, &quot;-s&quot;, url))[&quot;beans&quot;][0][&quot;JournalTransactionInfo&quot;])
+    return int(info[&quot;LastAppliedOrWrittenTxId&quot;])
+
+before = last_txid()
+print(&quot;last transaction before our changes:&quot;, before)
+for cmd in ([&quot;hdfs&quot;, &quot;dfs&quot;, &quot;-mkdir&quot;, &quot;-p&quot;, &quot;data/demo&quot;],
+            [&quot;hdfs&quot;, &quot;dfs&quot;, &quot;-touchz&quot;, &quot;data/demo/order.txt&quot;],
+            [&quot;hdfs&quot;, &quot;dfs&quot;, &quot;-mv&quot;, &quot;data/demo/order.txt&quot;, &quot;data/demo/order_old.txt&quot;],
+            [&quot;hdfs&quot;, &quot;dfs&quot;, &quot;-rm&quot;, &quot;-r&quot;, &quot;-skipTrash&quot;, &quot;data/demo&quot;]):
+    nn(*cmd)
+
+# a checkpoint may have closed the segment meanwhile, so read the newest two edit files
+files = nn(&quot;bash&quot;, &quot;-c&quot;, f&quot;ls {NAME_DIR} | grep ^edits_ | tail -2&quot;).split()
+for f in files:
+    nn(&quot;hdfs&quot;, &quot;oev&quot;, &quot;-i&quot;, f&quot;{NAME_DIR}/{f}&quot;, &quot;-o&quot;, &quot;/tmp/edits.xml&quot;)
+    for rec in ET.fromstring(nn(&quot;cat&quot;, &quot;/tmp/edits.xml&quot;)).iter(&quot;RECORD&quot;):
+        data = rec.find(&quot;DATA&quot;)
+        txid = int(data.findtext(&quot;TXID&quot;))
+        path = data.findtext(&quot;PATH&quot;) or data.findtext(&quot;SRC&quot;) or &quot;&quot;
+        dst = data.findtext(&quot;DST&quot;)
+        if txid &gt; before and path:
+            print(f&quot;txid {txid:&gt;4}  {rec.findtext(&#x27;OPCODE&#x27;):15} {path}&quot;
+                  + (f&quot; -&gt; {dst}&quot; if dst else &quot;&quot;) + f&quot;   [{f}]&quot;)
+
+# In the hdfs-lab folder:
+#   python3 edit_log_report.py</code></pre><div class="output">last transaction before our changes: 109
+txid  110  OP_MKDIR        /user/hadoop/data/demo   [edits_inprogress_0000000000000000099]
+txid  111  OP_ADD          /user/hadoop/data/demo/order.txt   [edits_inprogress_0000000000000000099]
+txid  112  OP_CLOSE        /user/hadoop/data/demo/order.txt   [edits_inprogress_0000000000000000099]
+txid  113  OP_RENAME_OLD   /user/hadoop/data/demo/order.txt -&gt; /user/hadoop/data/demo/order_old.txt   [edits_inprogress_0000000000000000099]
+txid  114  OP_DELETE       /user/hadoop/data/demo   [edits_inprogress_0000000000000000099]</div></div>
+  <p class="muted">Real output. The script reads the last transaction ID from the NameNode's <code>/jmx</code> first, so it shows only new entries. Run it twice: the transaction numbers keep growing, and after a checkpoint the entries move from the in-progress file to a closed segment.</p></div>
+</section>
+
+<section class="part" id="tracer">
+  <span class="part-label"><b>8</b> Line by line</span>
+  <h2>A checkpoint, one line at a time</h2>
+  <p>Follow the SecondaryNameNode: it loads the old image, applies only newer edits, and produces an image with a new transaction ID.</p>
+  <div class="tracer">
+    <script type="application/json">{
+ "lang": "python",
+ "code": [
+  "image_txid, image = 64, {\"/data\"}",
+  "edits = [(65, \"start\", None), (66, \"end\", None), (67, \"start\", None),",
+  "         (68, \"mkdir\", \"/data/demo\"), (69, \"add\", \"/data/demo/a.txt\")]",
+  "rolled_at = 69",
+  "for txid, op, path in edits:",
+  "    if image_txid < txid <= rolled_at and op in (\"mkdir\", \"add\"):",
+  "        image.add(path)",
+  "image_txid = rolled_at",
+  "print(\"new fsimage txid:\", image_txid, sorted(image))"
+ ],
+ "steps": [
+  {
+   "line": 1,
+   "phase": "Python",
+   "note": "<code>image_txid<\/code> is created: 64. <code>image<\/code> is created: → set #1.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "image_txid",
+       "64"
+      ],
+      [
+       "image",
+       "→ set #1"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 set (1)<\/b> {&#x27;/data&#x27;}"
+   ],
+   "newVar": "image"
+  },
+  {
+   "line": 2,
+   "phase": "Python",
+   "note": "<code>edits<\/code> is created: → list #2. A new list object (#2) is created: [→ tuple #3, → tuple #4, → tuple #5, → tuple #6, → tuple #7] A new tuple object (#3) is created: (65, &#x27;start&#x27;, None) A new tuple object (#4) is created: (66, &#x27;end&#x27;, None) A new tuple object (#5) is created: (67, &#x27;start&#x27;, None) A new tuple object (#6) is created: (68, &#x27;mkdir&#x27;, &#x27;/data/demo&#x27;) A new tuple object (#7) is created: (69, &#x27;add&#x27;, &#x27;/data/demo/a.txt&#x27;)",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "image_txid",
+       "64"
+      ],
+      [
+       "image",
+       "→ set #1"
+      ],
+      [
+       "edits",
+       "→ list #2"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 set (1)<\/b> {&#x27;/data&#x27;}",
+    "<b>#2 list (5)<\/b> [→ tuple #3, → tuple #4, → tuple #5, → tuple #6, → tuple #7]",
+    "<b>#3 tuple (3)<\/b> (65, &#x27;start&#x27;, None)",
+    "<b>#4 tuple (3)<\/b> (66, &#x27;end&#x27;, None)",
+    "<b>#5 tuple (3)<\/b> (67, &#x27;start&#x27;, None)",
+    "<b>#6 tuple (3)<\/b> (68, &#x27;mkdir&#x27;, &#x27;/data/demo&#x27;)",
+    "<b>#7 tuple (3)<\/b> (69, &#x27;add&#x27;, &#x27;/data/demo/a.txt&#x27;)"
+   ],
+   "newVar": "edits"
+  },
+  {
+   "line": 4,
+   "phase": "Roll",
+   "note": "The NameNode closed the edit log at txid 69; later edits wait for the next checkpoint. <code>rolled_at<\/code> is created: 69.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "image_txid",
+       "64"
+      ],
+      [
+       "image",
+       "→ set #1"
+      ],
+      [
+       "edits",
+       "→ list #2"
+      ],
+      [
+       "rolled_at",
+       "69"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 set (1)<\/b> {&#x27;/data&#x27;}",
+    "<b>#2 list (5)<\/b> [→ tuple #3, → tuple #4, → tuple #5, → tuple #6, → tuple #7]",
+    "<b>#3 tuple (3)<\/b> (65, &#x27;start&#x27;, None)",
+    "<b>#4 tuple (3)<\/b> (66, &#x27;end&#x27;, None)",
+    "<b>#5 tuple (3)<\/b> (67, &#x27;start&#x27;, None)",
+    "<b>#6 tuple (3)<\/b> (68, &#x27;mkdir&#x27;, &#x27;/data/demo&#x27;)",
+    "<b>#7 tuple (3)<\/b> (69, &#x27;add&#x27;, &#x27;/data/demo/a.txt&#x27;)"
+   ],
+   "newVar": "rolled_at"
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "<code>txid<\/code> is created: 65. <code>op<\/code> is created: &#x27;start&#x27;. <code>path<\/code> is created: None.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "image_txid",
+       "64"
+      ],
+      [
+       "image",
+       "→ set #1"
+      ],
+      [
+       "edits",
+       "→ list #2"
+      ],
+      [
+       "rolled_at",
+       "69"
+      ],
+      [
+       "txid",
+       "65"
+      ],
+      [
+       "op",
+       "'start'"
+      ],
+      [
+       "path",
+       "None"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 set (1)<\/b> {&#x27;/data&#x27;}",
+    "<b>#2 list (5)<\/b> [→ tuple #3, → tuple #4, → tuple #5, → tuple #6, → tuple #7]",
+    "<b>#3 tuple (3)<\/b> (65, &#x27;start&#x27;, None)",
+    "<b>#4 tuple (3)<\/b> (66, &#x27;end&#x27;, None)",
+    "<b>#5 tuple (3)<\/b> (67, &#x27;start&#x27;, None)",
+    "<b>#6 tuple (3)<\/b> (68, &#x27;mkdir&#x27;, &#x27;/data/demo&#x27;)",
+    "<b>#7 tuple (3)<\/b> (69, &#x27;add&#x27;, &#x27;/data/demo/a.txt&#x27;)"
+   ],
+   "newVar": "path"
+  },
+  {
+   "line": 6,
+   "phase": "Merge",
+   "note": "Apply only edits after the old image and up to the roll point. The condition is <b>False<\/b>, so the indented block is skipped.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "image_txid",
+       "64"
+      ],
+      [
+       "image",
+       "→ set #1"
+      ],
+      [
+       "edits",
+       "→ list #2"
+      ],
+      [
+       "rolled_at",
+       "69"
+      ],
+      [
+       "txid",
+       "65"
+      ],
+      [
+       "op",
+       "'start'"
+      ],
+      [
+       "path",
+       "None"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 set (1)<\/b> {&#x27;/data&#x27;}",
+    "<b>#2 list (5)<\/b> [→ tuple #3, → tuple #4, → tuple #5, → tuple #6, → tuple #7]",
+    "<b>#3 tuple (3)<\/b> (65, &#x27;start&#x27;, None)",
+    "<b>#4 tuple (3)<\/b> (66, &#x27;end&#x27;, None)",
+    "<b>#5 tuple (3)<\/b> (67, &#x27;start&#x27;, None)",
+    "<b>#6 tuple (3)<\/b> (68, &#x27;mkdir&#x27;, &#x27;/data/demo&#x27;)",
+    "<b>#7 tuple (3)<\/b> (69, &#x27;add&#x27;, &#x27;/data/demo/a.txt&#x27;)"
+   ]
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "<code>txid<\/code> changes to 66. <code>op<\/code> changes to &#x27;end&#x27;.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "image_txid",
+       "64"
+      ],
+      [
+       "image",
+       "→ set #1"
+      ],
+      [
+       "edits",
+       "→ list #2"
+      ],
+      [
+       "rolled_at",
+       "69"
+      ],
+      [
+       "txid",
+       "66"
+      ],
+      [
+       "op",
+       "'end'"
+      ],
+      [
+       "path",
+       "None"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 set (1)<\/b> {&#x27;/data&#x27;}",
+    "<b>#2 list (5)<\/b> [→ tuple #3, → tuple #4, → tuple #5, → tuple #6, → tuple #7]",
+    "<b>#3 tuple (3)<\/b> (65, &#x27;start&#x27;, None)",
+    "<b>#4 tuple (3)<\/b> (66, &#x27;end&#x27;, None)",
+    "<b>#5 tuple (3)<\/b> (67, &#x27;start&#x27;, None)",
+    "<b>#6 tuple (3)<\/b> (68, &#x27;mkdir&#x27;, &#x27;/data/demo&#x27;)",
+    "<b>#7 tuple (3)<\/b> (69, &#x27;add&#x27;, &#x27;/data/demo/a.txt&#x27;)"
+   ],
+   "newVar": "op"
+  },
+  {
+   "line": 6,
+   "phase": "Python",
+   "note": "The condition is <b>False<\/b>, so the indented block is skipped.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "image_txid",
+       "64"
+      ],
+      [
+       "image",
+       "→ set #1"
+      ],
+      [
+       "edits",
+       "→ list #2"
+      ],
+      [
+       "rolled_at",
+       "69"
+      ],
+      [
+       "txid",
+       "66"
+      ],
+      [
+       "op",
+       "'end'"
+      ],
+      [
+       "path",
+       "None"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 set (1)<\/b> {&#x27;/data&#x27;}",
+    "<b>#2 list (5)<\/b> [→ tuple #3, → tuple #4, → tuple #5, → tuple #6, → tuple #7]",
+    "<b>#3 tuple (3)<\/b> (65, &#x27;start&#x27;, None)",
+    "<b>#4 tuple (3)<\/b> (66, &#x27;end&#x27;, None)",
+    "<b>#5 tuple (3)<\/b> (67, &#x27;start&#x27;, None)",
+    "<b>#6 tuple (3)<\/b> (68, &#x27;mkdir&#x27;, &#x27;/data/demo&#x27;)",
+    "<b>#7 tuple (3)<\/b> (69, &#x27;add&#x27;, &#x27;/data/demo/a.txt&#x27;)"
+   ]
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "<code>txid<\/code> changes to 67. <code>op<\/code> changes to &#x27;start&#x27;.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "image_txid",
+       "64"
+      ],
+      [
+       "image",
+       "→ set #1"
+      ],
+      [
+       "edits",
+       "→ list #2"
+      ],
+      [
+       "rolled_at",
+       "69"
+      ],
+      [
+       "txid",
+       "67"
+      ],
+      [
+       "op",
+       "'start'"
+      ],
+      [
+       "path",
+       "None"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 set (1)<\/b> {&#x27;/data&#x27;}",
+    "<b>#2 list (5)<\/b> [→ tuple #3, → tuple #4, → tuple #5, → tuple #6, → tuple #7]",
+    "<b>#3 tuple (3)<\/b> (65, &#x27;start&#x27;, None)",
+    "<b>#4 tuple (3)<\/b> (66, &#x27;end&#x27;, None)",
+    "<b>#5 tuple (3)<\/b> (67, &#x27;start&#x27;, None)",
+    "<b>#6 tuple (3)<\/b> (68, &#x27;mkdir&#x27;, &#x27;/data/demo&#x27;)",
+    "<b>#7 tuple (3)<\/b> (69, &#x27;add&#x27;, &#x27;/data/demo/a.txt&#x27;)"
+   ],
+   "newVar": "op"
+  },
+  {
+   "line": 6,
+   "phase": "Python",
+   "note": "The condition is <b>False<\/b>, so the indented block is skipped.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "image_txid",
+       "64"
+      ],
+      [
+       "image",
+       "→ set #1"
+      ],
+      [
+       "edits",
+       "→ list #2"
+      ],
+      [
+       "rolled_at",
+       "69"
+      ],
+      [
+       "txid",
+       "67"
+      ],
+      [
+       "op",
+       "'start'"
+      ],
+      [
+       "path",
+       "None"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 set (1)<\/b> {&#x27;/data&#x27;}",
+    "<b>#2 list (5)<\/b> [→ tuple #3, → tuple #4, → tuple #5, → tuple #6, → tuple #7]",
+    "<b>#3 tuple (3)<\/b> (65, &#x27;start&#x27;, None)",
+    "<b>#4 tuple (3)<\/b> (66, &#x27;end&#x27;, None)",
+    "<b>#5 tuple (3)<\/b> (67, &#x27;start&#x27;, None)",
+    "<b>#6 tuple (3)<\/b> (68, &#x27;mkdir&#x27;, &#x27;/data/demo&#x27;)",
+    "<b>#7 tuple (3)<\/b> (69, &#x27;add&#x27;, &#x27;/data/demo/a.txt&#x27;)"
+   ]
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "<code>txid<\/code> changes to 68. <code>op<\/code> changes to &#x27;mkdir&#x27;. <code>path<\/code> changes to &#x27;/data/demo&#x27;.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "image_txid",
+       "64"
+      ],
+      [
+       "image",
+       "→ set #1"
+      ],
+      [
+       "edits",
+       "→ list #2"
+      ],
+      [
+       "rolled_at",
+       "69"
+      ],
+      [
+       "txid",
+       "68"
+      ],
+      [
+       "op",
+       "'mkdir'"
+      ],
+      [
+       "path",
+       "'/data/demo'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 set (1)<\/b> {&#x27;/data&#x27;}",
+    "<b>#2 list (5)<\/b> [→ tuple #3, → tuple #4, → tuple #5, → tuple #6, → tuple #7]",
+    "<b>#3 tuple (3)<\/b> (65, &#x27;start&#x27;, None)",
+    "<b>#4 tuple (3)<\/b> (66, &#x27;end&#x27;, None)",
+    "<b>#5 tuple (3)<\/b> (67, &#x27;start&#x27;, None)",
+    "<b>#6 tuple (3)<\/b> (68, &#x27;mkdir&#x27;, &#x27;/data/demo&#x27;)",
+    "<b>#7 tuple (3)<\/b> (69, &#x27;add&#x27;, &#x27;/data/demo/a.txt&#x27;)"
+   ],
+   "newVar": "path"
+  },
+  {
+   "line": 6,
+   "phase": "Python",
+   "note": "The condition is <b>True<\/b>, so the indented block runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "image_txid",
+       "64"
+      ],
+      [
+       "image",
+       "→ set #1"
+      ],
+      [
+       "edits",
+       "→ list #2"
+      ],
+      [
+       "rolled_at",
+       "69"
+      ],
+      [
+       "txid",
+       "68"
+      ],
+      [
+       "op",
+       "'mkdir'"
+      ],
+      [
+       "path",
+       "'/data/demo'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 set (1)<\/b> {&#x27;/data&#x27;}",
+    "<b>#2 list (5)<\/b> [→ tuple #3, → tuple #4, → tuple #5, → tuple #6, → tuple #7]",
+    "<b>#3 tuple (3)<\/b> (65, &#x27;start&#x27;, None)",
+    "<b>#4 tuple (3)<\/b> (66, &#x27;end&#x27;, None)",
+    "<b>#5 tuple (3)<\/b> (67, &#x27;start&#x27;, None)",
+    "<b>#6 tuple (3)<\/b> (68, &#x27;mkdir&#x27;, &#x27;/data/demo&#x27;)",
+    "<b>#7 tuple (3)<\/b> (69, &#x27;add&#x27;, &#x27;/data/demo/a.txt&#x27;)"
+   ]
+  },
+  {
+   "line": 7,
+   "phase": "Python",
+   "note": "Object #1 set now holds {&#x27;/data&#x27;, &#x27;/data/demo&#x27;}",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "image_txid",
+       "64"
+      ],
+      [
+       "image",
+       "→ set #1"
+      ],
+      [
+       "edits",
+       "→ list #2"
+      ],
+      [
+       "rolled_at",
+       "69"
+      ],
+      [
+       "txid",
+       "68"
+      ],
+      [
+       "op",
+       "'mkdir'"
+      ],
+      [
+       "path",
+       "'/data/demo'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 set (2)<\/b> {&#x27;/data&#x27;, &#x27;/data/demo&#x27;}",
+    "<b>#2 list (5)<\/b> [→ tuple #3, → tuple #4, → tuple #5, → tuple #6, → tuple #7]",
+    "<b>#3 tuple (3)<\/b> (65, &#x27;start&#x27;, None)",
+    "<b>#4 tuple (3)<\/b> (66, &#x27;end&#x27;, None)",
+    "<b>#5 tuple (3)<\/b> (67, &#x27;start&#x27;, None)",
+    "<b>#6 tuple (3)<\/b> (68, &#x27;mkdir&#x27;, &#x27;/data/demo&#x27;)",
+    "<b>#7 tuple (3)<\/b> (69, &#x27;add&#x27;, &#x27;/data/demo/a.txt&#x27;)"
+   ]
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "<code>txid<\/code> changes to 69. <code>op<\/code> changes to &#x27;add&#x27;. <code>path<\/code> changes to &#x27;/data/demo/a.txt&#x27;.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "image_txid",
+       "64"
+      ],
+      [
+       "image",
+       "→ set #1"
+      ],
+      [
+       "edits",
+       "→ list #2"
+      ],
+      [
+       "rolled_at",
+       "69"
+      ],
+      [
+       "txid",
+       "69"
+      ],
+      [
+       "op",
+       "'add'"
+      ],
+      [
+       "path",
+       "'/data/demo/a.txt'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 set (2)<\/b> {&#x27;/data&#x27;, &#x27;/data/demo&#x27;}",
+    "<b>#2 list (5)<\/b> [→ tuple #3, → tuple #4, → tuple #5, → tuple #6, → tuple #7]",
+    "<b>#3 tuple (3)<\/b> (65, &#x27;start&#x27;, None)",
+    "<b>#4 tuple (3)<\/b> (66, &#x27;end&#x27;, None)",
+    "<b>#5 tuple (3)<\/b> (67, &#x27;start&#x27;, None)",
+    "<b>#6 tuple (3)<\/b> (68, &#x27;mkdir&#x27;, &#x27;/data/demo&#x27;)",
+    "<b>#7 tuple (3)<\/b> (69, &#x27;add&#x27;, &#x27;/data/demo/a.txt&#x27;)"
+   ],
+   "newVar": "path"
+  },
+  {
+   "line": 6,
+   "phase": "Python",
+   "note": "The condition is <b>True<\/b>, so the indented block runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "image_txid",
+       "64"
+      ],
+      [
+       "image",
+       "→ set #1"
+      ],
+      [
+       "edits",
+       "→ list #2"
+      ],
+      [
+       "rolled_at",
+       "69"
+      ],
+      [
+       "txid",
+       "69"
+      ],
+      [
+       "op",
+       "'add'"
+      ],
+      [
+       "path",
+       "'/data/demo/a.txt'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 set (2)<\/b> {&#x27;/data&#x27;, &#x27;/data/demo&#x27;}",
+    "<b>#2 list (5)<\/b> [→ tuple #3, → tuple #4, → tuple #5, → tuple #6, → tuple #7]",
+    "<b>#3 tuple (3)<\/b> (65, &#x27;start&#x27;, None)",
+    "<b>#4 tuple (3)<\/b> (66, &#x27;end&#x27;, None)",
+    "<b>#5 tuple (3)<\/b> (67, &#x27;start&#x27;, None)",
+    "<b>#6 tuple (3)<\/b> (68, &#x27;mkdir&#x27;, &#x27;/data/demo&#x27;)",
+    "<b>#7 tuple (3)<\/b> (69, &#x27;add&#x27;, &#x27;/data/demo/a.txt&#x27;)"
+   ]
+  },
+  {
+   "line": 7,
+   "phase": "Python",
+   "note": "Object #1 set now holds {&#x27;/data&#x27;, &#x27;/data/demo&#x27;, &#x27;/data/demo/a.txt&#x27;}",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "image_txid",
+       "64"
+      ],
+      [
+       "image",
+       "→ set #1"
+      ],
+      [
+       "edits",
+       "→ list #2"
+      ],
+      [
+       "rolled_at",
+       "69"
+      ],
+      [
+       "txid",
+       "69"
+      ],
+      [
+       "op",
+       "'add'"
+      ],
+      [
+       "path",
+       "'/data/demo/a.txt'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 set (3)<\/b> {&#x27;/data&#x27;, &#x27;/data/demo&#x27;, &#x27;/data/demo/a.txt&#x27;}",
+    "<b>#2 list (5)<\/b> [→ tuple #3, → tuple #4, → tuple #5, → tuple #6, → tuple #7]",
+    "<b>#3 tuple (3)<\/b> (65, &#x27;start&#x27;, None)",
+    "<b>#4 tuple (3)<\/b> (66, &#x27;end&#x27;, None)",
+    "<b>#5 tuple (3)<\/b> (67, &#x27;start&#x27;, None)",
+    "<b>#6 tuple (3)<\/b> (68, &#x27;mkdir&#x27;, &#x27;/data/demo&#x27;)",
+    "<b>#7 tuple (3)<\/b> (69, &#x27;add&#x27;, &#x27;/data/demo/a.txt&#x27;)"
+   ]
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "Nothing is left to loop over, so the loop ends and Python moves on.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "image_txid",
+       "64"
+      ],
+      [
+       "image",
+       "→ set #1"
+      ],
+      [
+       "edits",
+       "→ list #2"
+      ],
+      [
+       "rolled_at",
+       "69"
+      ],
+      [
+       "txid",
+       "69"
+      ],
+      [
+       "op",
+       "'add'"
+      ],
+      [
+       "path",
+       "'/data/demo/a.txt'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 set (3)<\/b> {&#x27;/data&#x27;, &#x27;/data/demo&#x27;, &#x27;/data/demo/a.txt&#x27;}",
+    "<b>#2 list (5)<\/b> [→ tuple #3, → tuple #4, → tuple #5, → tuple #6, → tuple #7]",
+    "<b>#3 tuple (3)<\/b> (65, &#x27;start&#x27;, None)",
+    "<b>#4 tuple (3)<\/b> (66, &#x27;end&#x27;, None)",
+    "<b>#5 tuple (3)<\/b> (67, &#x27;start&#x27;, None)",
+    "<b>#6 tuple (3)<\/b> (68, &#x27;mkdir&#x27;, &#x27;/data/demo&#x27;)",
+    "<b>#7 tuple (3)<\/b> (69, &#x27;add&#x27;, &#x27;/data/demo/a.txt&#x27;)"
+   ]
+  },
+  {
+   "line": 8,
+   "phase": "Result",
+   "note": "The new image's file name will be fsimage_…069. <code>image_txid<\/code> changes to 69.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "image_txid",
+       "69"
+      ],
+      [
+       "image",
+       "→ set #1"
+      ],
+      [
+       "edits",
+       "→ list #2"
+      ],
+      [
+       "rolled_at",
+       "69"
+      ],
+      [
+       "txid",
+       "69"
+      ],
+      [
+       "op",
+       "'add'"
+      ],
+      [
+       "path",
+       "'/data/demo/a.txt'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 set (3)<\/b> {&#x27;/data&#x27;, &#x27;/data/demo&#x27;, &#x27;/data/demo/a.txt&#x27;}",
+    "<b>#2 list (5)<\/b> [→ tuple #3, → tuple #4, → tuple #5, → tuple #6, → tuple #7]",
+    "<b>#3 tuple (3)<\/b> (65, &#x27;start&#x27;, None)",
+    "<b>#4 tuple (3)<\/b> (66, &#x27;end&#x27;, None)",
+    "<b>#5 tuple (3)<\/b> (67, &#x27;start&#x27;, None)",
+    "<b>#6 tuple (3)<\/b> (68, &#x27;mkdir&#x27;, &#x27;/data/demo&#x27;)",
+    "<b>#7 tuple (3)<\/b> (69, &#x27;add&#x27;, &#x27;/data/demo/a.txt&#x27;)"
+   ],
+   "newVar": "image_txid"
+  },
+  {
+   "line": 9,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "image_txid",
+       "69"
+      ],
+      [
+       "image",
+       "→ set #1"
+      ],
+      [
+       "edits",
+       "→ list #2"
+      ],
+      [
+       "rolled_at",
+       "69"
+      ],
+      [
+       "txid",
+       "69"
+      ],
+      [
+       "op",
+       "'add'"
+      ],
+      [
+       "path",
+       "'/data/demo/a.txt'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 set (3)<\/b> {&#x27;/data&#x27;, &#x27;/data/demo&#x27;, &#x27;/data/demo/a.txt&#x27;}",
+    "<b>#2 list (5)<\/b> [→ tuple #3, → tuple #4, → tuple #5, → tuple #6, → tuple #7]",
+    "<b>#3 tuple (3)<\/b> (65, &#x27;start&#x27;, None)",
+    "<b>#4 tuple (3)<\/b> (66, &#x27;end&#x27;, None)",
+    "<b>#5 tuple (3)<\/b> (67, &#x27;start&#x27;, None)",
+    "<b>#6 tuple (3)<\/b> (68, &#x27;mkdir&#x27;, &#x27;/data/demo&#x27;)",
+    "<b>#7 tuple (3)<\/b> (69, &#x27;add&#x27;, &#x27;/data/demo/a.txt&#x27;)"
+   ],
+   "out": "new fsimage txid: 69 ['/data', '/data/demo', '/data/demo/a.txt']\n"
+  }
+ ]
+}</script>
+  </div>
+
+<h3 id="worked">Worked examples: real problems, solved and traced in memory</h3>
+  <p class="wx-intro">Three checkpoint calculations that matter in operations: how fast edits accumulate, how long a restart would take right now, and whether metadata storage is safe. Each runs live and is traced in memory.</p>
+  <article class="wx">
+    <div class="wx__head"><span class="wx__num">Example 1</span><span class="lvl lvl--b">Beginner</span><span class="wx__tag">Operations · rate</span></div>
+    <h4>How many edits per day?</h4>
+    <div class="wx__problem"><p class="wx__label">Problem statement</p><p>A cluster's jobs create 30 lakh files a day (each create is OP_ADD + OP_CLOSE plus a few block allocations, about 5 transactions in total) and delete as many. Deleting is one transaction per path. How many transactions per day, and how often is the 10 lakh-transaction checkpoint trigger reached?</p></div>
+    <div class="prob__io"><div><small>Input</small><pre>30,00,000 creates × 5 tx · 30,00,000 deletes × 1 tx · trigger 10,00,000</pre></div><div><small>Expected output</small><pre>18,000,000 transactions/day -&gt; count trigger 18 times/day, time trigger 24 times/day</pre></div></div>
+    <div class="wx__approach"><p class="wx__label">Approach</p><ol><li>Transactions = creates × 5 + deletes × 1.</li><li>Checkpoints by count = transactions / 10 lakh.</li><li>Compare with the hourly trigger (24 a day).</li></ol></div>
+    <p class="wx__label">Solution: run it live</p>
+    <div class="runner">
+    <script type="application/json">{
+ "lang": "python",
+ "file": "main.py",
+ "tasks": [
+  {
+   "label": "Solution",
+   "hint": "Raise creates to 1 crore a day. The count trigger now fires about 53 times a day (roughly every 27 minutes), more often than the hourly one: the SecondaryNameNode must keep up.",
+   "code": "creates, deletes = 30_00_000, 30_00_000\ntx = creates * 5 + deletes\nby_count = tx / 1_000_000\nprint(f\"{tx:,} transactions/day -> count trigger {by_count:.0f} times/day, time trigger 24 times/day\")\n"
+  }
+ ]
+}</script>
+    </div>
+    <p class="wx__label">What happens in memory, step by step</p>
+    <p class="wx__how">Recorded from a real Python run: press <b>Next</b> to execute one line at a time. Watch variables change in each frame, and lists and dictionaries (numbered #1, #2 …) fill up as objects.</p>
+    <div class="tracer">
+    <script type="application/json">{
+ "lang": "python",
+ "code": [
+  "creates, deletes = 30_00_000, 30_00_000",
+  "tx = creates * 5 + deletes",
+  "by_count = tx / 1_000_000",
+  "print(f\"{tx:,} transactions/day -> count trigger {by_count:.0f} times/day, time trigger 24 times/day\")"
+ ],
+ "steps": [
+  {
+   "line": 1,
+   "phase": "Python",
+   "note": "<code>creates<\/code> is created: 3000000. <code>deletes<\/code> is created: 3000000.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "creates",
+       "3000000"
+      ],
+      [
+       "deletes",
+       "3000000"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "deletes"
+  },
+  {
+   "line": 2,
+   "phase": "Python",
+   "note": "<code>tx<\/code> is created: 18000000.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "creates",
+       "3000000"
+      ],
+      [
+       "deletes",
+       "3000000"
+      ],
+      [
+       "tx",
+       "18000000"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "tx"
+  },
+  {
+   "line": 3,
+   "phase": "Rate",
+   "note": "Here the hourly trigger wins: 24 a day against 18 by count. <code>by_count<\/code> is created: 18.0.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "creates",
+       "3000000"
+      ],
+      [
+       "deletes",
+       "3000000"
+      ],
+      [
+       "tx",
+       "18000000"
+      ],
+      [
+       "by_count",
+       "18.0"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "by_count"
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "creates",
+       "3000000"
+      ],
+      [
+       "deletes",
+       "3000000"
+      ],
+      [
+       "tx",
+       "18000000"
+      ],
+      [
+       "by_count",
+       "18.0"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "out": "18,000,000 transactions/day -> count trigger 18 times/day, time trigger 24 times/day\n"
+  }
+ ]
+}</script>
+    </div>
+  </article>
+  <article class="wx">
+    <div class="wx__head"><span class="wx__num">Example 2</span><span class="lvl lvl--i">Intermediate</span><span class="wx__tag">Operations · restart</span></div>
+    <h4>How long would a restart take now?</h4>
+    <div class="wx__problem"><p class="wx__label">Problem statement</p><p>The last successful checkpoint was 9 days ago (it has been failing silently). The cluster logs 2 crore transactions a day. Loading the fsimage takes 4 minutes and replay runs at 60,000 transactions per second. Estimate the restart time, then the time if checkpoints were working (at most 10 lakh edits).</p></div>
+    <div class="prob__io"><div><small>Input</small><pre>9 days × 2 crore tx · load 4 min · 60,000 tx/s</pre></div><div><small>Expected output</small><pre>broken checkpoints  :   180,000,000 edits -&gt;     54 min
+healthy             :     1,000,000 edits -&gt;      4 min</pre></div></div>
+    <div class="wx__approach"><p class="wx__label">Approach</p><ol><li>Edits to replay = days × daily transactions.</li><li>Restart = load + edits / rate.</li><li>Compare with the healthy case.</li></ol></div>
+    <p class="wx__label">Solution: run it live</p>
+    <div class="runner">
+    <script type="application/json">{
+ "lang": "python",
+ "file": "main.py",
+ "tasks": [
+  {
+   "label": "Solution",
+   "hint": "The broken case is almost an hour of downtime (about 54 minutes) instead of 4. This is why “time since last checkpoint” is a standard NameNode alert.",
+   "code": "daily, days, rate, load_min = 2_00_00_000, 9, 60_000, 4\nfor label, edits in [(\"broken checkpoints\", daily * days), (\"healthy\", 1_000_000)]:\n    minutes = load_min + edits / rate / 60\n    print(f\"{label:20}: {edits:>13,} edits -> {minutes:6.0f} min\")\n"
+  }
+ ]
+}</script>
+    </div>
+    <p class="wx__label">What happens in memory, step by step</p>
+    <p class="wx__how">Recorded from a real Python run: press <b>Next</b> to execute one line at a time. Watch variables change in each frame, and lists and dictionaries (numbered #1, #2 …) fill up as objects.</p>
+    <div class="tracer">
+    <script type="application/json">{
+ "lang": "python",
+ "code": [
+  "daily, days, rate, load_min = 2_00_00_000, 9, 60_000, 4",
+  "for label, edits in [(\"broken checkpoints\", daily * days), (\"healthy\", 1_000_000)]:",
+  "    minutes = load_min + edits / rate / 60",
+  "    print(f\"{label:20}: {edits:>13,} edits -> {minutes:6.0f} min\")"
+ ],
+ "steps": [
+  {
+   "line": 1,
+   "phase": "Python",
+   "note": "<code>daily<\/code> is created: 20000000. <code>days<\/code> is created: 9. <code>rate<\/code> is created: 60000. <code>load_min<\/code> is created: 4.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "daily",
+       "20000000"
+      ],
+      [
+       "days",
+       "9"
+      ],
+      [
+       "rate",
+       "60000"
+      ],
+      [
+       "load_min",
+       "4"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "load_min"
+  },
+  {
+   "line": 2,
+   "phase": "Python",
+   "note": "<code>label<\/code> is created: &#x27;broken checkpoints&#x27;. <code>edits<\/code> is created: 180000000.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "daily",
+       "20000000"
+      ],
+      [
+       "days",
+       "9"
+      ],
+      [
+       "rate",
+       "60000"
+      ],
+      [
+       "load_min",
+       "4"
+      ],
+      [
+       "label",
+       "'broken checkpoints'"
+      ],
+      [
+       "edits",
+       "180000000"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "edits"
+  },
+  {
+   "line": 3,
+   "phase": "Replay",
+   "note": "Every transaction since the last image must be re-applied. <code>minutes<\/code> is created: 54.0.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "daily",
+       "20000000"
+      ],
+      [
+       "days",
+       "9"
+      ],
+      [
+       "rate",
+       "60000"
+      ],
+      [
+       "load_min",
+       "4"
+      ],
+      [
+       "label",
+       "'broken checkpoints'"
+      ],
+      [
+       "edits",
+       "180000000"
+      ],
+      [
+       "minutes",
+       "54.0"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "minutes"
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "daily",
+       "20000000"
+      ],
+      [
+       "days",
+       "9"
+      ],
+      [
+       "rate",
+       "60000"
+      ],
+      [
+       "load_min",
+       "4"
+      ],
+      [
+       "label",
+       "'broken checkpoints'"
+      ],
+      [
+       "edits",
+       "180000000"
+      ],
+      [
+       "minutes",
+       "54.0"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "out": "broken checkpoints  :   180,000,000 edits ->     54 min\n"
+  },
+  {
+   "line": 2,
+   "phase": "Python",
+   "note": "<code>label<\/code> changes to &#x27;healthy&#x27;. <code>edits<\/code> changes to 1000000.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "daily",
+       "20000000"
+      ],
+      [
+       "days",
+       "9"
+      ],
+      [
+       "rate",
+       "60000"
+      ],
+      [
+       "load_min",
+       "4"
+      ],
+      [
+       "label",
+       "'healthy'"
+      ],
+      [
+       "edits",
+       "1000000"
+      ],
+      [
+       "minutes",
+       "54.0"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "edits"
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "<code>minutes<\/code> changes to 4.2778.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "daily",
+       "20000000"
+      ],
+      [
+       "days",
+       "9"
+      ],
+      [
+       "rate",
+       "60000"
+      ],
+      [
+       "load_min",
+       "4"
+      ],
+      [
+       "label",
+       "'healthy'"
+      ],
+      [
+       "edits",
+       "1000000"
+      ],
+      [
+       "minutes",
+       "4.2778"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "minutes"
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "daily",
+       "20000000"
+      ],
+      [
+       "days",
+       "9"
+      ],
+      [
+       "rate",
+       "60000"
+      ],
+      [
+       "load_min",
+       "4"
+      ],
+      [
+       "label",
+       "'healthy'"
+      ],
+      [
+       "edits",
+       "1000000"
+      ],
+      [
+       "minutes",
+       "4.2778"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "out": "healthy             :     1,000,000 edits ->      4 min\n"
+  },
+  {
+   "line": 2,
+   "phase": "Python",
+   "note": "Nothing is left to loop over, so the loop ends and Python moves on.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "daily",
+       "20000000"
+      ],
+      [
+       "days",
+       "9"
+      ],
+      [
+       "rate",
+       "60000"
+      ],
+      [
+       "load_min",
+       "4"
+      ],
+      [
+       "label",
+       "'healthy'"
+      ],
+      [
+       "edits",
+       "1000000"
+      ],
+      [
+       "minutes",
+       "4.2778"
+      ]
+     ]
+    }
+   ],
+   "heap": []
+  }
+ ]
+}</script>
+    </div>
+  </article>
+  <article class="wx">
+    <div class="wx__head"><span class="wx__num">Example 3</span><span class="lvl lvl--a">Advanced</span><span class="wx__tag">Admin · resilience</span></div>
+    <h4>Check the metadata directories</h4>
+    <div class="wx__problem"><p class="wx__label">Problem statement</p><p>Write a checker for <code>dfs.namenode.name.dir</code>: warn if there is only one directory, if two directories are on the same disk, or if any is under <code>/tmp</code>.</p></div>
+    <div class="prob__io"><div><small>Input</small><pre>&quot;file:///data/1/nn,file:///data/1/nn-copy,file:///tmp/nn&quot; · disks: /data/1, /tmp</pre></div><div><small>Expected output</small><pre>[&#x27;/data/1/nn&#x27;, &#x27;/data/1/nn-copy&#x27;, &#x27;/tmp/nn&#x27;]
+several directories on the same disk
+/tmp/nn is under /tmp</pre></div></div>
+    <div class="wx__approach"><p class="wx__label">Approach</p><ol><li>Split the comma-separated value.</li><li>Map each path to its disk (mount point).</li><li>Apply the three checks.</li></ol></div>
+    <p class="wx__label">Solution: run it live</p>
+    <div class="runner">
+    <script type="application/json">{
+ "lang": "python",
+ "file": "main.py",
+ "tasks": [
+  {
+   "label": "Solution",
+   "hint": "Fix it to two directories on different disks (e.g. /data/1/nn and /data/2/nn). In HA clusters the edit log is also on JournalNodes.",
+   "code": "value = \"file:///data/1/nn,file:///data/1/nn-copy,file:///tmp/nn\"\ndirs = [d.replace(\"file://\", \"\") for d in value.split(\",\")]\ndisk = lambda p: \"/\".join(p.split(\"/\")[:3])\nproblems = []\nif len(dirs) < 2:\n    problems.append(\"only one metadata directory\")\nif len({disk(d) for d in dirs}) < len(dirs):\n    problems.append(\"several directories on the same disk\")\nproblems += [f\"{d} is under /tmp\" for d in dirs if d.startswith(\"/tmp\")]\nprint(dirs)\nprint(\"\\n\".join(problems) or \"looks good\")\n"
+  }
+ ]
+}</script>
+    </div>
+    <p class="wx__label">What happens in memory, step by step</p>
+    <p class="wx__how">Recorded from a real Python run: press <b>Next</b> to execute one line at a time. Watch variables change in each frame, and lists and dictionaries (numbered #1, #2 …) fill up as objects.</p>
+    <div class="tracer">
+    <script type="application/json">{
+ "lang": "python",
+ "code": [
+  "value = \"file:///data/1/nn,file:///data/1/nn-copy,file:///tmp/nn\"",
+  "dirs = [d.replace(\"file://\", \"\") for d in value.split(\",\")]",
+  "disk = lambda p: \"/\".join(p.split(\"/\")[:3])",
+  "problems = []",
+  "if len(dirs) < 2:",
+  "    problems.append(\"only one metadata directory\")",
+  "if len({disk(d) for d in dirs}) < len(dirs):",
+  "    problems.append(\"several directories on the same disk\")",
+  "problems += [f\"{d} is under /tmp\" for d in dirs if d.startswith(\"/tmp\")]",
+  "print(dirs)",
+  "print(\"\\n\".join(problems) or \"looks good\")"
+ ],
+ "steps": [
+  {
+   "line": 1,
+   "phase": "Python",
+   "note": "<code>value<\/code> is created: &#x27;file:///data/1/nn,file:///data/1/nn-copy,file:///tmp/nn&#x27;.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "value",
+       "'file:///data/1/nn,file:///data/1/nn-copy,file:///tmp/nn'"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "value"
+  },
+  {
+   "line": 2,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "value",
+       "'file:///data/1/nn,file:///data/1/nn-copy,file:///tmp/nn'"
+      ]
+     ]
+    }
+   ],
+   "heap": []
+  },
+  {
+   "line": 2,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "value",
+       "'file:///data/1/nn,file:///data/1/nn-copy,file:///tmp/nn'"
+      ]
+     ]
+    }
+   ],
+   "heap": []
+  },
+  {
+   "line": 2,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "value",
+       "'file:///data/1/nn,file:///data/1/nn-copy,file:///tmp/nn'"
+      ]
+     ]
+    }
+   ],
+   "heap": []
+  },
+  {
+   "line": 2,
+   "phase": "Python",
+   "note": "<code>dirs<\/code> is created: → list #1. A new list object (#1) is created: [&#x27;/data/1/nn&#x27;, &#x27;/data/1/nn-copy&#x27;, &#x27;/tmp/nn&#x27;]",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "value",
+       "'file:///data/1/nn,file:///data/1/nn-copy,file:///tmp/nn'"
+      ],
+      [
+       "dirs",
+       "→ list #1"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (3)<\/b> [&#x27;/data/1/nn&#x27;, &#x27;/data/1/nn-copy&#x27;, &#x27;/tmp/nn&#x27;]"
+   ],
+   "newVar": "dirs"
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "<code>disk<\/code> is created: function &lt;lambda&gt;().",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "value",
+       "'file:///data/1/nn,file:///data/1/nn-copy,file:///tmp/nn'"
+      ],
+      [
+       "dirs",
+       "→ list #1"
+      ],
+      [
+       "disk",
+       "function <lambda>()"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (3)<\/b> [&#x27;/data/1/nn&#x27;, &#x27;/data/1/nn-copy&#x27;, &#x27;/tmp/nn&#x27;]"
+   ],
+   "newVar": "disk"
+  },
+  {
+   "line": 4,
+   "phase": "Disk",
+   "note": "Here the first two path parts stand for the mount point. <code>problems<\/code> is created: → list #2. A new list object (#2) is created: []",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "value",
+       "'file:///data/1/nn,file:///data/1/nn-copy,file:///tmp/nn'"
+      ],
+      [
+       "dirs",
+       "→ list #1"
+      ],
+      [
+       "disk",
+       "function <lambda>()"
+      ],
+      [
+       "problems",
+       "→ list #2"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (3)<\/b> [&#x27;/data/1/nn&#x27;, &#x27;/data/1/nn-copy&#x27;, &#x27;/tmp/nn&#x27;]",
+    "<b>#2 list (0)<\/b> []"
+   ],
+   "newVar": "problems"
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "The condition is <b>False<\/b>, so the indented block is skipped.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "value",
+       "'file:///data/1/nn,file:///data/1/nn-copy,file:///tmp/nn'"
+      ],
+      [
+       "dirs",
+       "→ list #1"
+      ],
+      [
+       "disk",
+       "function <lambda>()"
+      ],
+      [
+       "problems",
+       "→ list #2"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (3)<\/b> [&#x27;/data/1/nn&#x27;, &#x27;/data/1/nn-copy&#x27;, &#x27;/tmp/nn&#x27;]",
+    "<b>#2 list (0)<\/b> []"
+   ]
+  },
+  {
+   "line": 7,
+   "phase": "Python",
+   "note": "The condition is <b>False<\/b>, so the indented block is skipped.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "value",
+       "'file:///data/1/nn,file:///data/1/nn-copy,file:///tmp/nn'"
+      ],
+      [
+       "dirs",
+       "→ list #1"
+      ],
+      [
+       "disk",
+       "function <lambda>()"
+      ],
+      [
+       "problems",
+       "→ list #2"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (3)<\/b> [&#x27;/data/1/nn&#x27;, &#x27;/data/1/nn-copy&#x27;, &#x27;/tmp/nn&#x27;]",
+    "<b>#2 list (0)<\/b> []"
+   ]
+  },
+  {
+   "line": 7,
+   "phase": "Python",
+   "note": "The condition is <b>False<\/b>, so the indented block is skipped.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "value",
+       "'file:///data/1/nn,file:///data/1/nn-copy,file:///tmp/nn'"
+      ],
+      [
+       "dirs",
+       "→ list #1"
+      ],
+      [
+       "disk",
+       "function <lambda>()"
+      ],
+      [
+       "problems",
+       "→ list #2"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (3)<\/b> [&#x27;/data/1/nn&#x27;, &#x27;/data/1/nn-copy&#x27;, &#x27;/tmp/nn&#x27;]",
+    "<b>#2 list (0)<\/b> []"
+   ]
+  },
+  {
+   "line": 7,
+   "phase": "Python",
+   "note": "The condition is <b>False<\/b>, so the indented block is skipped.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "value",
+       "'file:///data/1/nn,file:///data/1/nn-copy,file:///tmp/nn'"
+      ],
+      [
+       "dirs",
+       "→ list #1"
+      ],
+      [
+       "disk",
+       "function <lambda>()"
+      ],
+      [
+       "problems",
+       "→ list #2"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (3)<\/b> [&#x27;/data/1/nn&#x27;, &#x27;/data/1/nn-copy&#x27;, &#x27;/tmp/nn&#x27;]",
+    "<b>#2 list (0)<\/b> []"
+   ]
+  },
+  {
+   "line": 7,
+   "phase": "Python",
+   "note": "The condition is <b>True<\/b>, so the indented block runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "value",
+       "'file:///data/1/nn,file:///data/1/nn-copy,file:///tmp/nn'"
+      ],
+      [
+       "dirs",
+       "→ list #1"
+      ],
+      [
+       "disk",
+       "function <lambda>()"
+      ],
+      [
+       "problems",
+       "→ list #2"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (3)<\/b> [&#x27;/data/1/nn&#x27;, &#x27;/data/1/nn-copy&#x27;, &#x27;/tmp/nn&#x27;]",
+    "<b>#2 list (0)<\/b> []"
+   ]
+  },
+  {
+   "line": 8,
+   "phase": "Python",
+   "note": "Object #2 list now holds [&#x27;several directories on the same disk&#x27;]",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "value",
+       "'file:///data/1/nn,file:///data/1/nn-copy,file:///tmp/nn'"
+      ],
+      [
+       "dirs",
+       "→ list #1"
+      ],
+      [
+       "disk",
+       "function <lambda>()"
+      ],
+      [
+       "problems",
+       "→ list #2"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (3)<\/b> [&#x27;/data/1/nn&#x27;, &#x27;/data/1/nn-copy&#x27;, &#x27;/tmp/nn&#x27;]",
+    "<b>#2 list (1)<\/b> [&#x27;several directories on the same disk&#x27;]"
+   ]
+  },
+  {
+   "line": 9,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "value",
+       "'file:///data/1/nn,file:///data/1/nn-copy,file:///tmp/nn'"
+      ],
+      [
+       "dirs",
+       "→ list #1"
+      ],
+      [
+       "disk",
+       "function <lambda>()"
+      ],
+      [
+       "problems",
+       "→ list #2"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (3)<\/b> [&#x27;/data/1/nn&#x27;, &#x27;/data/1/nn-copy&#x27;, &#x27;/tmp/nn&#x27;]",
+    "<b>#2 list (1)<\/b> [&#x27;several directories on the same disk&#x27;]"
+   ]
+  },
+  {
+   "line": 9,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "value",
+       "'file:///data/1/nn,file:///data/1/nn-copy,file:///tmp/nn'"
+      ],
+      [
+       "dirs",
+       "→ list #1"
+      ],
+      [
+       "disk",
+       "function <lambda>()"
+      ],
+      [
+       "problems",
+       "→ list #2"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (3)<\/b> [&#x27;/data/1/nn&#x27;, &#x27;/data/1/nn-copy&#x27;, &#x27;/tmp/nn&#x27;]",
+    "<b>#2 list (1)<\/b> [&#x27;several directories on the same disk&#x27;]"
+   ]
+  },
+  {
+   "line": 9,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "value",
+       "'file:///data/1/nn,file:///data/1/nn-copy,file:///tmp/nn'"
+      ],
+      [
+       "dirs",
+       "→ list #1"
+      ],
+      [
+       "disk",
+       "function <lambda>()"
+      ],
+      [
+       "problems",
+       "→ list #2"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (3)<\/b> [&#x27;/data/1/nn&#x27;, &#x27;/data/1/nn-copy&#x27;, &#x27;/tmp/nn&#x27;]",
+    "<b>#2 list (1)<\/b> [&#x27;several directories on the same disk&#x27;]"
+   ]
+  },
+  {
+   "line": 9,
+   "phase": "Python",
+   "note": "Object #2 list now holds [&#x27;several directories on the same disk&#x27;, &#x27;/tmp/nn is under /tmp&#x27;]",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "value",
+       "'file:///data/1/nn,file:///data/1/nn-copy,file:///tmp/nn'"
+      ],
+      [
+       "dirs",
+       "→ list #1"
+      ],
+      [
+       "disk",
+       "function <lambda>()"
+      ],
+      [
+       "problems",
+       "→ list #2"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (3)<\/b> [&#x27;/data/1/nn&#x27;, &#x27;/data/1/nn-copy&#x27;, &#x27;/tmp/nn&#x27;]",
+    "<b>#2 list (2)<\/b> [&#x27;several directories on the same disk&#x27;, &#x27;/tmp/nn is under /tmp&#x27;]"
+   ]
+  },
+  {
+   "line": 10,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "value",
+       "'file:///data/1/nn,file:///data/1/nn-copy,file:///tmp/nn'"
+      ],
+      [
+       "dirs",
+       "→ list #1"
+      ],
+      [
+       "disk",
+       "function <lambda>()"
+      ],
+      [
+       "problems",
+       "→ list #2"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (3)<\/b> [&#x27;/data/1/nn&#x27;, &#x27;/data/1/nn-copy&#x27;, &#x27;/tmp/nn&#x27;]",
+    "<b>#2 list (2)<\/b> [&#x27;several directories on the same disk&#x27;, &#x27;/tmp/nn is under /tmp&#x27;]"
+   ],
+   "out": "['/data/1/nn', '/data/1/nn-copy', '/tmp/nn']\n"
+  },
+  {
+   "line": 11,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "value",
+       "'file:///data/1/nn,file:///data/1/nn-copy,file:///tmp/nn'"
+      ],
+      [
+       "dirs",
+       "→ list #1"
+      ],
+      [
+       "disk",
+       "function <lambda>()"
+      ],
+      [
+       "problems",
+       "→ list #2"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (3)<\/b> [&#x27;/data/1/nn&#x27;, &#x27;/data/1/nn-copy&#x27;, &#x27;/tmp/nn&#x27;]",
+    "<b>#2 list (2)<\/b> [&#x27;several directories on the same disk&#x27;, &#x27;/tmp/nn is under /tmp&#x27;]"
+   ],
+   "out": "several directories on the same disk\n/tmp/nn is under /tmp\n"
+  }
+ ]
+}</script>
+    </div>
+  </article>
+</section>
+
+<section class="part" id="quiz">
+  <span class="part-label"><b>9</b> Quiz and revision</span>
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <script type="application/json">[
+ {
+  "q": "What is the fsimage?",
+  "options": [
+   "A log of recent changes",
+   "A copy of all file data",
+   "A complete snapshot of the namespace as of a transaction ID",
+   "A DataNode report"
+  ],
+  "answer": 2,
+  "why": "fsimage_N is the namespace after transaction N."
+ },
+ {
+  "q": "What does the edit log record?",
+  "options": [
+   "Block contents",
+   "Every namespace change (mkdir, create, rename, delete…) with a transaction ID",
+   "DataNode heartbeats",
+   "User passwords"
+  ],
+  "answer": 1,
+  "why": "We decoded OP_MKDIR, OP_ADD, OP_CLOSE, OP_RENAME_OLD and OP_DELETE."
+ },
+ {
+  "q": "What is the main job of the SecondaryNameNode?",
+  "options": [
+   "Merge the fsimage with the edit log into a new fsimage (checkpoint)",
+   "Take over when the NameNode fails",
+   "Store a second copy of every block",
+   "Run MapReduce jobs"
+  ],
+  "answer": 0,
+  "why": "It is a checkpoint helper, not a standby."
+ },
+ {
+  "q": "By default, a checkpoint happens:",
+  "options": [
+   "Every 3 seconds",
+   "Once a day",
+   "Only when an admin runs it",
+   "Every hour or after 10 lakh transactions, whichever comes first"
+  ],
+  "answer": 3,
+  "why": "dfs.namenode.checkpoint.period = 3600 and dfs.namenode.checkpoint.txns = 1,000,000."
+ },
+ {
+  "q": "At start-up, the NameNode:",
+  "options": [
+   "Reads every DataNode's disk",
+   "Formats itself",
+   "Loads the latest fsimage and replays the edits after it",
+   "Copies the SecondaryNameNode's memory"
+  ],
+  "answer": 2,
+  "why": "Then it waits for block reports to rebuild the block map (safe mode)."
+ },
+ {
+  "q": "Why are long periods without checkpoints dangerous?",
+  "options": [
+   "DataNodes stop",
+   "The edit log grows and the next restart must replay all of it, which can take hours",
+   "Files are deleted",
+   "Replication stops"
+  ],
+  "answer": 1,
+  "why": "Restart time grows with the number of edits since the last image."
+ },
+ {
+  "q": "In an HA cluster, who performs checkpoints?",
+  "options": [
+   "The Standby NameNode",
+   "The SecondaryNameNode",
+   "The ResourceManager",
+   "Each DataNode"
+  ],
+  "answer": 0,
+  "why": "HA clusters have no SecondaryNameNode; the Standby does it."
+ },
+ {
+  "q": "What does hdfs dfsadmin -saveNamespace require?",
+  "options": [
+   "All DataNodes stopped",
+   "A formatted cluster",
+   "YARN to be running",
+   "The NameNode in safe mode"
+  ],
+  "answer": 3,
+  "why": "We entered safe mode, saved the namespace, and left safe mode."
+ }
+]</script>
+  </div>
+
+  <h3>Quick revision</h3>
+  <div class="revision">
+    <h3>Lesson 5.4 in one screen</h3>
+    <ul><li><b>fsimage_N</b> = full namespace after transaction N. <b>edits</b> = every change after it (write-ahead log).</li><li>Files: <code>edits_A-B</code> (closed), <code>edits_inprogress_N</code> (current), <code>seen_txid</code>, <code>VERSION</code>.</li><li>Ops: OP_MKDIR, OP_ADD + OP_CLOSE (create), OP_RENAME(_OLD), OP_DELETE, plus segment start/end markers.</li><li>Start-up = load latest fsimage + replay newer edits (+ wait for block reports).</li><li><b>Checkpoint</b>: roll edits → download → merge → upload new fsimage. Every <b>1 h or 10 lakh tx</b>.</li><li>Done by <b>SecondaryNameNode</b> (non-HA) or <b>Standby NameNode</b> (HA); manually with <code>-saveNamespace</code> (safe mode).</li><li>SecondaryNameNode is <b>not</b> a backup NameNode. 2 images retained by default.</li><li>Tools: <code>hdfs oiv</code> (fsimage), <code>hdfs oev</code> (edits), <code>dfsadmin -fetchImage</code> (backup).</li></ul>
+  </div>
+
+  <h3>Interview and viva questions</h3>
+  <div class="faq">
+    <details><summary>What are fsimage and edit log in HDFS?</summary><p>The fsimage is a persistent snapshot of the entire file system namespace at a certain transaction ID. The edit log records every change made after that snapshot. Together they let the NameNode rebuild its in-memory namespace after a restart.</p></details>
+    <details><summary>What is checkpointing in HDFS?</summary><p>Merging the latest fsimage with the edit log that follows it to produce a new fsimage, so that the edit log stays short and restarts are fast. It is done periodically by the SecondaryNameNode (or Standby NameNode in HA).</p></details>
+    <details><summary>Is the SecondaryNameNode a backup of the NameNode?</summary><p>No. It only creates checkpoints. If the NameNode fails, the SecondaryNameNode cannot serve clients. Its latest checkpoint can help recover metadata, but it may be missing recent edits. Automatic takeover requires HA with a Standby NameNode.</p></details>
+    <details><summary>How often does a checkpoint happen?</summary><p>By default every 3600 seconds (dfs.namenode.checkpoint.period) or when 1,000,000 transactions have accumulated (dfs.namenode.checkpoint.txns), whichever comes first. The SecondaryNameNode checks the transaction count every 60 seconds.</p></details>
+    <details><summary>Does the fsimage contain block locations?</summary><p>No. It contains each file's list of blocks but not which DataNodes hold them. Locations come from DataNode block reports after start-up.</p></details>
+    <details><summary>How can I read an fsimage or edits file?</summary><p>With the offline viewers: hdfs oiv -p XML|Delimited -i fsimage_N -o out for images, and hdfs oev -i edits_file -o out.xml for edit logs. Run them on copies, not on files the NameNode is using.</p></details>
+    <details><summary>What happens if the edit log is lost?</summary><p>All namespace changes since the last checkpoint are lost: files created or renamed after it disappear from the namespace, even though their blocks may still be on DataNodes. That is why edits are written to several directories or JournalNodes.</p></details>
+    
+  </div>
+
+  <h3 id="practice">Practice problems</h3>
+  <p class="prob-intro">Exercises on transactions, checkpoint timing and metadata files, using real file names from the lab.</p>
+  <div class="probs">
+    <article class="prob"><div class="prob__head"><span class="prob__num">P1</span><span class="prob__tag prob__tag--easy">Easy</span><h4>Transactions in a segment</h4></div>
+      <p>How many transactions does edits_0000000000000000045-0000000000000000062 contain?</p>
+      <div class="prob__io"><div><small>Input</small><pre>45 to 62</pre></div><div><small>Expected output</small><pre>18</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>print(62 - 45 + 1)</code></pre><div class="output">18</div></div>
+        <p><b>How it works:</b> 18 transactions (both ends included).</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P2</span><span class="prob__tag prob__tag--easy">Easy</span><h4>Newest image</h4></div>
+      <p>Given the image files fsimage_…064, fsimage_…066 and fsimage_…073, which one will the NameNode load at restart?</p>
+      <div class="prob__io"><div><small>Input</small><pre>064 · 066 · 073</pre></div><div><small>Expected output</small><pre>fsimage_0000000000000000073</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>print(&quot;fsimage_%019d&quot; % max([64, 66, 73]))</code></pre><div class="output">fsimage_0000000000000000073</div></div>
+        <p><b>How it works:</b> fsimage_0000000000000000073, the highest transaction ID.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P3</span><span class="prob__tag prob__tag--easy">Easy</span><h4>Operations per create</h4></div>
+      <p>Creating one empty file produced OP_ADD and OP_CLOSE. How many transactions for 1,000 empty files?</p>
+      <div class="prob__io"><div><small>Input</small><pre>1,000 files · 2 ops each</pre></div><div><small>Expected output</small><pre>2000</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>print(1000 * 2)</code></pre><div class="output">2000</div></div>
+        <p><b>How it works:</b> 2,000 transactions. Files with data also log block allocations.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P4</span><span class="prob__tag prob__tag--medium">Medium</span><h4>Which edits to replay?</h4></div>
+      <p>The newest fsimage is at txid 73 and the edit segments are 1-44, 45-62, 63-64, 65-66, 67-73 and in-progress from 74 (now at 81). Which transactions are replayed at restart?</p>
+      <div class="prob__io"><div><small>Input</small><pre>image 73 · segments … · in-progress 74–81</pre></div><div><small>Expected output</small><pre>[(74, 81)] -&gt; 8 transactions</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>image = 73
+segments = [(1, 44), (45, 62), (63, 64), (65, 66), (67, 73), (74, 81)]
+replay = [s for s in segments if s[1] &gt; image]
+print(replay, &quot;-&gt;&quot;, sum(b - max(a, image + 1) + 1 for a, b in replay), &quot;transactions&quot;)</code></pre><div class="output">[(74, 81)] -&gt; 8 transactions</div></div>
+        <p><b>How it works:</b> Only segment 74–81: 8 transactions. Everything up to 73 is already in the image.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P5</span><span class="prob__tag prob__tag--medium">Medium</span><h4>Retention</h4></div>
+      <p>With num.checkpoints.retained = 2, which fsimage files remain after images at txids 64, 66 and 73 have been written?</p>
+      <div class="prob__io"><div><small>Input</small><pre>64 · 66 · 73 · retain 2</pre></div><div><small>Expected output</small><pre>[66, 73]</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>print(sorted([64, 66, 73])[-2:])</code></pre><div class="output">[66, 73]</div></div>
+        <p><b>How it works:</b> [66, 73]: exactly what the folder listing showed after saveNamespace (064 was removed).</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P6</span><span class="prob__tag prob__tag--medium">Medium</span><h4>Checkpoint trigger</h4></div>
+      <p>The cluster logs 250 transactions per second. Will the time (3600 s) or count (10 lakh) trigger fire first, and after how long?</p>
+      <div class="prob__io"><div><small>Input</small><pre>250 tx/s</pre></div><div><small>Expected output</small><pre>time trigger after 3600 s</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>t = 1_000_000 / 250
+print(&quot;count&quot; if t &lt; 3600 else &quot;time&quot;, &quot;trigger after&quot;, min(t, 3600), &quot;s&quot;)</code></pre><div class="output">time trigger after 3600 s</div></div>
+        <p><b>How it works:</b> Time: 10 lakh transactions would take 4,000 s at 250/s, so the hourly time trigger (3,600 s) fires first.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P7</span><span class="prob__tag prob__tag--business">Business problem</span><h4>Cost of a slow restart</h4></div>
+      <p>A restart with a huge edit log takes 3 hours instead of 10 minutes. 400 analysts each lose Rs 1,200 of work per hour of downtime. What does the extra time cost?</p>
+      <div class="prob__io"><div><small>Input</small><pre>170 extra minutes · 400 people · Rs 1,200/h</pre></div><div><small>Expected output</small><pre>Rs 13.6 lakh</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>extra_h = (180 - 10) / 60
+print(f&quot;Rs {extra_h * 400 * 1200 / 1e5:.1f} lakh&quot;)</code></pre><div class="output">Rs 13.6 lakh</div></div>
+        <p><b>How it works:</b> About Rs 13.6 lakh for one restart, more than the cost of monitoring checkpoints for years.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P8</span><span class="prob__tag prob__tag--advanced">Advanced</span><h4>Detect a stuck checkpoint</h4></div>
+      <p>Given (time, last checkpoint txid, current txid) samples, alert if the checkpoint txid has not changed for more than 2 hours while transactions keep increasing.</p>
+      <div class="prob__io"><div><small>Input</small><pre>samples every hour</pre></div><div><small>Expected output</small><pre>ALERT: no checkpoint for 3 h, 3,499,500 edits pending</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>samples = [(0, 500, 900), (1, 500, 1_200_000), (2, 500, 2_400_000), (3, 500, 3_500_000)]
+first = next(t for t, cp, cur in samples if cp == samples[-1][1])
+t_now, cp, cur = samples[-1]
+if t_now - first &gt; 2 and cur &gt; cp:
+    print(f&quot;ALERT: no checkpoint for {t_now - first} h, {cur - cp:,} edits pending&quot;)</code></pre><div class="output">ALERT: no checkpoint for 3 h, 3,499,500 edits pending</div></div>
+        <p><b>How it works:</b> The checkpoint txid has been stuck at 500 for 3 hours while 35 lakh edits accumulated: the SecondaryNameNode is failing.</p>
+      </details>
+    </article>
+  </div>
+
+  <h3 id="scenarios">Real-world scenario questions (asked in company interviews)</h3>
+  <p class="scn-intro">Interviewers love the SecondaryNameNode because its name misleads so many candidates.</p>
+  <div class="scenarios">
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">HDFS · concepts</span><span class="scn__tag scn__tag--level">Fresher</span></div>
+      <h4>“The NameNode crashed. Can the SecondaryNameNode take over?”</h4>
+      <p class="scn__situation">A very common trick question.</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> that you know what the SecondaryNameNode actually does.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>No. The SecondaryNameNode only merges the fsimage and edit log into checkpoints; it never serves clients.</li>
+          <li>Restart the NameNode (it loads its fsimage + edits). If its metadata disks are lost, the SecondaryNameNode's latest checkpoint can be used to recover, losing edits since that checkpoint.</li>
+          <li>Automatic takeover needs HA: an active and a standby NameNode with shared edits on JournalNodes.</li>
+        </ul>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Operations · incident</span><span class="scn__tag scn__tag--level">Experienced</span></div>
+      <h4>The NameNode has been “starting” for two hours</h4>
+      <p class="scn__situation">After a planned restart the NameNode UI shows Startup Progress stuck in “Loading edits”.</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> root cause and prevention.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>It is replaying a very large edit log, which means checkpoints haven't been happening. Check the SecondaryNameNode/Standby logs and the last checkpoint time.</li>
+          <li>Let it finish (interrupting makes it start again). Afterwards fix the checkpoint process: memory, connectivity on port 9868/9870, disk space for <code>checkpoint.dir</code>.</li>
+          <li>Prevent: alert on time and transactions since the last checkpoint; before planned restarts run <code>saveNamespace</code> in safe mode.</li>
+        </ul>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Design · durability</span><span class="scn__tag scn__tag--level">Experienced</span></div>
+      <h4>Why is every change written to the edit log before it's acknowledged?</h4>
+      <p class="scn__situation">An interviewer asks why the NameNode doesn't just update memory and write a snapshot every minute.</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> write-ahead logging.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>Memory is lost on a crash. If changes were only in memory, a crash would forget every file created since the last snapshot, even though clients were told “success”.</li>
+          <li>Appending a small record to a log (and syncing it) is cheap; rewriting a multi-GB image is not. So: log first, then apply, then acknowledge.</li>
+          <li>Snapshots (checkpoints) only exist to keep the log short. Databases use the same idea (write-ahead log + checkpoints).</li>
+        </ul>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Analytics · metadata</span><span class="scn__tag scn__tag--level">Fresher</span></div>
+      <h4>Find the folders with the most small files, without slowing the NameNode</h4>
+      <p class="scn__situation">A manager wants a report of small files per team across a 40-crore-file namespace.</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> that you know the offline fsimage approach.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>Running <code>hdfs dfs -ls -R</code> or <code>-count</code> over everything would load the NameNode heavily.</li>
+          <li>Instead download the latest image (<code>hdfs dfsadmin -fetchImage</code>), convert it with <code>hdfs oiv -p Delimited</code>, and analyse the table with Hive or Spark: count files under 1 MB per top-level folder or owner.</li>
+          <li>Schedule it daily to track progress.</li>
+        </ul>
+      </div></details>
+    </article>
+
+  </div>
+</section>
+
+<nav class="lesson-nav" id="lesson-nav" aria-label="Lesson navigation"></nav>
+<div class="ad-slot" data-slot="bottom"></div>
+</article>
+
+<aside class="lesson-side">
+  <nav class="toc" aria-label="In this lesson">
+    <h4>In this lesson</h4>
+    <ol>
+      <li><a href="#story">The story</a></li>
+      <li><a href="#definition">Definition</a></li><li><a href="#levels">Beginner → Advanced</a></li>
+      <li><a href="#types">Types and ways to use it</a></li>
+      <li><a href="#steps">Step by step</a></li>
+      <li><a href="#animation">See it happen</a></li>
+      <li><a href="#real-world">Real-world use</a></li>
+      <li><a href="#run">Run the code</a></li><li><a href="#pc">Run on your PC</a></li>
+      <li><a href="#tracer">Line by line</a></li>
+      <li><a href="#worked">Worked examples</a></li>
+      <li><a href="#quiz">Quiz and revision</a></li>
+      <li><a href="#practice">Practice problems</a></li>
+      <li><a href="#scenarios">Industry scenarios</a></li>
+    </ol>
+  </nav>
+  <div class="ad-slot" data-slot="side"></div>
+  <div class="outline" id="outline"></div>
+</aside>
+</div>
+</main>
+
+<footer class="site-footer">
+  <div class="wrap">
+    <div><h4>MyPhatshala</h4><p>Free programming and IT lessons that show what happens behind the screen.</p></div>
+    <div><h4>Learn</h4><a href="../../../../#tracks">All courses</a><a href="../../">Apache Hadoop syllabus</a></div>
+    <div><h4>Site</h4><a href="../../../../about.html">About</a><a href="../../../../contact.html">Contact</a><a href="../../../../privacy.html">Privacy policy</a><a href="../../../../disclaimer.html">Disclaimer</a></div>
+    <div class="copyright">© MyPhatshala. All lesson content, diagrams and animations are original. Please do not copy without permission.</div>
+  </div>
+</footer>
+
+<script src="../../../../data/courses/hadoop.js"></script>
+<script src="../../../../assets/js/lesson.js"></script>
+<script src="../../../../assets/js/ads.js"></script>
+<script src="../../../../assets/js/site.js"></script>
+</body>
+</html>

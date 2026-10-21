@@ -1,0 +1,2621 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The life of a file and a job, end to end | MyPhatshala</title>
+<meta name="description" content="The HDFS write path (create, addBlock, pipeline, packets, acks, complete), the read path (block locations, nearest replica, checksums) and the life of a MapReduce job on YARN (staging, ApplicationMaster, containers, map, spill, shuffle, reduce, commit, _SUCCESS), with failure recovery at each step. Animations, a playground, Python you can run, quiz and interview scenarios.">
+<meta name="mp:minutes" content="28">
+<link rel="canonical" href="https://myphatshala.in/courses/hadoop/03-how-a-cluster-works/02-the-life-of-a-file-and-a-job-end-to-end/">
+<meta property="og:title" content="The life of a file and a job, end to end · MyPhatshala">
+<meta property="og:description" content="Two commands, hundreds of messages: follow a file into HDFS and a job through YARN, step by step.">
+<link rel="icon" href="../../../../assets/img/logo.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Fraunces:ital,opsz,wght@0,9..144,600;0,9..144,700;1,9..144,600&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../../../../assets/css/style.css">
+<link rel="stylesheet" href="../../../../assets/css/lesson.css">
+<link rel="stylesheet" href="../../../../assets/css/cluster-sim.css">
+<script src="../../../../assets/js/config.js"></script>
+<script>try { const t = localStorage.getItem("mp-theme"); if (t) document.documentElement.dataset.theme = t; } catch (e) {}</script>
+<script type="application/ld+json">{"@context": "https://schema.org", "@type": "LearningResource", "name": "The life of a file and a job, end to end", "learningResourceType": "Lesson", "educationalLevel": "Beginner → Advanced", "isAccessibleForFree": true, "inLanguage": "en", "isPartOf": {"@type": "Course", "name": "Apache Hadoop", "provider": {"@type": "Organization", "name": "MyPhatshala"}}}</script>
+</head>
+<body style="--track:#B45309" data-lesson="03-how-a-cluster-works/02-the-life-of-a-file-and-a-job-end-to-end" data-course-root="../../">
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="site-header">
+  <div class="wrap">
+    <a class="brand" href="../../../../" aria-label="MyPhatshala home"><img src="../../../../assets/img/logo.svg" width="34" height="34" alt=""><span>My<b>Phatshala</b></span></a>
+    <nav class="nav" aria-label="Main">
+      <a href="../../../../#tracks">All courses</a>
+      <a href="../../">Apache Hadoop syllabus</a>
+      <button class="theme-btn" id="theme-btn" aria-label="Toggle dark mode"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg></button>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+<section class="lesson-hero">
+  <div class="wrap">
+    <nav class="crumbs" aria-label="Breadcrumb"><a href="../../../../">Home</a><span>›</span><a href="../../../../#track-big-data">Big Data Engineering</a><span>›</span><a href="../../">Apache Hadoop</a><span>›</span><b>Lesson 3.2</b></nav>
+    <h1>The life of a file and a job, end to end</h1>
+    <p class="lead">Riya types two commands: put a file into HDFS, then run a job on it. Behind them, a dozen machines exchange hundreds of messages. This lesson follows every one: how a file is created, split into blocks and pushed through a pipeline of DataNodes; how it is read back from the nearest replica; and how a job travels from the client to the ResourceManager, its ApplicationMaster, map and reduce tasks, and finally a new file in HDFS. It is the map you will use for every later module.</p>
+    <div class="lesson-meta"><span>Module 3 · How one Hadoop cluster works</span><span>⏱ 28 min</span><span>Beginner → Advanced</span><span>Write + read anatomy</span><span>Job lifecycle animation</span><span>Runs in your browser (Python)</span><span>8 practice problems</span></div>
+  </div>
+</section>
+
+<div class="wrap lesson-layout">
+<article class="lesson-main">
+<!-- ======================= PART 1: THE STORY ======================= -->
+<section class="part" id="story">
+  <span class="part-label"><b>1</b> The story</span>
+  <h2>Two commands, two hundred messages</h2>
+  <div class="story">
+    <p class="narration">Riya types two commands. The first puts a 300 MB file of canteen orders into HDFS. The second runs a job that totals the orders per item. Both finish in under a minute, and her screen shows only a few lines. “That was easy,” she says. Arjun Sir smiles and turns her laptop around. “In that minute, about a dozen machines sent each other a few hundred messages on your behalf. Let's follow every one of them.”</p>
+
+    <div class="scene">
+      <svg viewBox="0 0 640 190" role="img" aria-label="A file goes from the client through the NameNode for permission to three DataNodes in a pipeline; then a job goes from the client to the ResourceManager, which starts an ApplicationMaster, which runs map and reduce tasks on the workers and writes the result back to HDFS.">
+        <g font-size="10">
+          <rect x="10" y="14" width="300" height="146" rx="10" class="s-soft-green" style="stroke:var(--green)"/>
+          <text x="160" y="34" text-anchor="middle" font-weight="700" class="s-green">Life of a file</text>
+          <rect x="24" y="48" width="64" height="30" rx="5" class="s-soft-blue" style="stroke:var(--blue)"/><text x="56" y="67" text-anchor="middle" font-size="9" font-weight="700" class="s-blue">Client</text>
+          <rect x="128" y="48" width="72" height="30" rx="5" class="s-board"/><text x="164" y="67" text-anchor="middle" font-size="9" font-weight="700" class="s-chalk">NameNode</text>
+          <path d="M88 63h36" class="s-line"/><text x="106" y="58" text-anchor="middle" font-size="7.6" class="s-ink2">where?</text>
+          <rect x="24" y="108" width="60" height="28" rx="5" class="s-card"/><rect x="118" y="108" width="60" height="28" rx="5" class="s-card"/><rect x="212" y="108" width="60" height="28" rx="5" class="s-card"/>
+          <text x="54" y="126" text-anchor="middle" font-size="8.6" class="s-ink">DN1</text><text x="148" y="126" text-anchor="middle" font-size="8.6" class="s-ink">DN2</text><text x="242" y="126" text-anchor="middle" font-size="8.6" class="s-ink">DN3</text>
+          <path d="M56 78v28M84 122h32M178 122h32" style="stroke:var(--track);stroke-width:2.5;fill:none"/>
+          <text x="160" y="152" text-anchor="middle" font-size="8.6" class="s-acc" font-weight="700">bytes flow in a pipeline</text>
+          <rect x="330" y="14" width="300" height="146" rx="10" class="s-soft-acc" style="stroke:var(--track)"/>
+          <text x="480" y="34" text-anchor="middle" font-weight="700" class="s-acc">Life of a job</text>
+          <rect x="344" y="48" width="64" height="30" rx="5" class="s-soft-blue" style="stroke:var(--blue)"/><text x="376" y="67" text-anchor="middle" font-size="9" font-weight="700" class="s-blue">Client</text>
+          <rect x="444" y="48" width="96" height="30" rx="5" class="s-board"/><text x="492" y="67" text-anchor="middle" font-size="9" font-weight="700" class="s-chalk">ResourceManager</text>
+          <path d="M408 63h32" class="s-line"/>
+          <rect x="344" y="104" width="56" height="30" rx="5" style="fill:#8B5CF6"/><text x="372" y="123" text-anchor="middle" font-size="8.6" font-weight="700" style="fill:#fff">AM</text>
+          <rect x="420" y="104" width="56" height="30" rx="5" class="s-green"/><text x="448" y="123" text-anchor="middle" font-size="8.6" font-weight="700" style="fill:#fff">maps</text>
+          <rect x="496" y="104" width="56" height="30" rx="5" style="fill:#8B5CF6;opacity:.75"/><text x="524" y="123" text-anchor="middle" font-size="8.6" font-weight="700" style="fill:#fff">reduce</text>
+          <rect x="566" y="104" width="54" height="30" rx="5" class="s-card"/><text x="593" y="123" text-anchor="middle" font-size="8.6" class="s-ink">HDFS</text>
+          <path d="M400 119h16M476 119h16M552 119h12" class="s-line"/>
+          <text x="480" y="152" text-anchor="middle" font-size="8.6" class="s-acc" font-weight="700">submit → plan → map → shuffle → reduce → write</text>
+        </g>
+        <text x="320" y="180" text-anchor="middle" font-size="10" class="s-ink2">Two simple commands; behind them, a carefully choreographed conversation.</text>
+        <text x="632" y="180" text-anchor="end" class="s-wm">myphatshala.in</text>
+      </svg>
+    </div>
+
+    <div class="panel"><div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#FCE6D6"/><path d="M14 64c2-12 9-18 18-18s16 6 18 18z" fill="#2E5AAC"/><circle cx="32" cy="29" r="12" fill="#C68B5E"/><path d="M19 29c0-10 6-15 13-15s13 5 13 15c-3-5-7-8-13-8s-10 3-13 8z" fill="#2A1B14"/><path d="M43 27c3 6 3 14 0 20" stroke="#2A1B14" stroke-width="4" fill="none" stroke-linecap="round"/><circle cx="27.5" cy="30" r="1.5" fill="#2A1B14"/><circle cx="36.5" cy="30" r="1.5" fill="#2A1B14"/><path d="M28 35q4 3 8 0" stroke="#2A1B14" stroke-width="1.6" fill="none" stroke-linecap="round"/><circle cx="32" cy="24" r="1.2" fill="#D64545"/></svg></div><div class="bubble"><b class="who">Riya</b><p>A few hundred messages? For one file?</p></div></div>
+    <div class="panel panel--right"><div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#DDEFE6"/><path d="M12 64c2-12 10-18 20-18s18 6 20 18z" fill="#F4F1EA"/><path d="M28 46l4 8 4-8" fill="#2F7D5B"/><circle cx="32" cy="28" r="12" fill="#B57A50"/><path d="M20 26c0-8 5-13 12-13s12 5 12 13c-2-3-6-5-12-5s-10 2-12 5z" fill="#5A5A5A"/><path d="M22 32c1 8 5 11 10 11s9-3 10-11c-2 3-6 4-10 4s-8-1-10-4z" fill="#5A5A5A"/><circle cx="27" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><circle cx="37" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><path d="M30.4 29h3.2" stroke="#1B2433" stroke-width="1.4"/><circle cx="27" cy="29" r="1.1" fill="#1B2433"/><circle cx="37" cy="29" r="1.1" fill="#1B2433"/></svg></div><div class="bubble"><b class="who">Arjun Sir</b><p>For a 300 MB file: three blocks, each with three replicas, sent as thousands of small packets, with acknowledgements coming back for each. Plus the calls to the NameNode to create the file, get each block, and close it.</p></div></div>
+    <div class="panel"><div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#E1E9F7"/><path d="M12 64c2-12 10-18 20-18s18 6 20 18z" fill="#B45309"/><circle cx="32" cy="29" r="12" fill="#A9714A"/><path d="M19 27c0-9 6-14 13-14s13 5 13 14c-2-4-5-6-8-6-3 3-9 4-13 3-2 1-4 2-5 3z" fill="#1E1A17"/><circle cx="27.5" cy="30" r="1.5" fill="#1E1A17"/><circle cx="36.5" cy="30" r="1.5" fill="#1E1A17"/><path d="M27 35.5q5 3.5 10 0" stroke="#1E1A17" stroke-width="1.6" fill="none" stroke-linecap="round"/><rect x="41" y="40" width="10" height="7" rx="1.5" fill="#2E5AAC"/></svg></div><div class="bubble"><b class="who">Kabir</b><p>And the job is even more?</p></div></div>
+    <div class="panel panel--right"><div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#DDEFE6"/><path d="M12 64c2-12 10-18 20-18s18 6 20 18z" fill="#F4F1EA"/><path d="M28 46l4 8 4-8" fill="#2F7D5B"/><circle cx="32" cy="28" r="12" fill="#B57A50"/><path d="M20 26c0-8 5-13 12-13s12 5 12 13c-2-3-6-5-12-5s-10 2-12 5z" fill="#5A5A5A"/><path d="M22 32c1 8 5 11 10 11s9-3 10-11c-2 3-6 4-10 4s-8-1-10-4z" fill="#5A5A5A"/><circle cx="27" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><circle cx="37" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><path d="M30.4 29h3.2" stroke="#1B2433" stroke-width="1.4"/><circle cx="27" cy="29" r="1.1" fill="#1B2433"/><circle cx="37" cy="29" r="1.1" fill="#1B2433"/></svg></div><div class="bubble"><b class="who">Arjun Sir</b><p>The job starts its own manager, the ApplicationMaster, which asks for containers, runs map tasks next to the blocks, moves their output to the reducers and finally writes a new file into HDFS. Which then has its own life!</p></div></div>
+    <div class="panel"><div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#FCE6D6"/><path d="M14 64c2-12 9-18 18-18s16 6 18 18z" fill="#2E5AAC"/><circle cx="32" cy="29" r="12" fill="#C68B5E"/><path d="M19 29c0-10 6-15 13-15s13 5 13 15c-3-5-7-8-13-8s-10 3-13 8z" fill="#2A1B14"/><path d="M43 27c3 6 3 14 0 20" stroke="#2A1B14" stroke-width="4" fill="none" stroke-linecap="round"/><circle cx="27.5" cy="30" r="1.5" fill="#2A1B14"/><circle cx="36.5" cy="30" r="1.5" fill="#2A1B14"/><path d="M28 35q4 3 8 0" stroke="#2A1B14" stroke-width="1.6" fill="none" stroke-linecap="round"/><circle cx="32" cy="24" r="1.2" fill="#D64545"/></svg></div><div class="bubble"><b class="who">Riya</b><p>I want to see all of it in order.</p></div></div>
+    <div class="panel panel--right"><div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#DDEFE6"/><path d="M12 64c2-12 10-18 20-18s18 6 20 18z" fill="#F4F1EA"/><path d="M28 46l4 8 4-8" fill="#2F7D5B"/><circle cx="32" cy="28" r="12" fill="#B57A50"/><path d="M20 26c0-8 5-13 12-13s12 5 12 13c-2-3-6-5-12-5s-10 2-12 5z" fill="#5A5A5A"/><path d="M22 32c1 8 5 11 10 11s9-3 10-11c-2 3-6 4-10 4s-8-1-10-4z" fill="#5A5A5A"/><circle cx="27" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><circle cx="37" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><path d="M30.4 29h3.2" stroke="#1B2433" stroke-width="1.4"/><circle cx="27" cy="29" r="1.1" fill="#1B2433"/><circle cx="37" cy="29" r="1.1" fill="#1B2433"/></svg></div><div class="bubble"><b class="who">Arjun Sir</b><p>That's today. This lesson is the bridge between the big picture (Lesson 3.1) and the deep dives in Modules 5 to 11. If you can narrate both lives, step by step, you can answer half the questions in any Hadoop interview.</p></div></div>
+  </div>
+</section>
+
+<!-- ======================= PART 2: DEFINITION ======================= -->
+<section class="part" id="definition">
+  <span class="part-label"><b>2</b> Definition</span>
+  <h2>The write path, the read path and the job lifecycle</h2>
+  <div class="def">
+    <div class="def__formal"><small>Formal definition (write this in exams)</small>
+      <p>The <b>HDFS write path</b>: the client asks the NameNode to <i>create</i> the file; for each block it calls <i>addBlock</i>, receives a block ID and a list of target DataNodes chosen by the placement policy, and streams the data as packets through a <b>pipeline</b> of those DataNodes, each storing and forwarding the packet and returning acknowledgements; finally the client calls <i>complete</i>. The <b>read path</b>: the client calls <i>open</i>, receives the block locations sorted by network distance, and reads each block directly from the closest DataNode, verifying checksums. The <b>job lifecycle</b> on YARN: the client computes input splits, copies the job resources to HDFS and submits the application to the ResourceManager; the RM launches an <b>ApplicationMaster</b>, which requests containers (preferably on nodes holding each split), runs map tasks, lets reducers shuffle and merge map outputs, runs reduce tasks that write output to HDFS, commits the output and unregisters from the RM.</p></div>
+    <div class="def__simple"><small>In simple words</small>
+      <p>Writing a file: ask the NameNode “where should block 1 go?”, send it to three DataNodes in a chain, repeat for each block, then tell the NameNode “done”. Reading: ask the NameNode “where are the blocks?”, then fetch each block from the nearest DataNode. Running a job: hand the job to the ResourceManager, which starts a small manager for your job; that manager runs map tasks next to the data, gathers their results to reducers, and writes the answer back into HDFS.</p></div>
+  </div>
+
+  <h3>Words you'll meet in this lesson</h3>
+  <div class="terms">
+    <div class="term"><b>Pipeline</b><span>The chain of DataNodes (usually 3) a block is written through: client → DN1 → DN2 → DN3.</span></div>
+    <div class="term"><b>Packet</b><span>A small piece of a block (64 KB by default) sent through the pipeline. Each packet is acknowledged.</span></div>
+    <div class="term"><b>Lease</b><span>A lock the NameNode gives one writer, so only one client writes a file at a time.</span></div>
+    <div class="term"><b>Staging directory</b><span>A folder in HDFS where the client puts the job's jar, configuration and split list before submitting.</span></div>
+    <div class="term"><b>MRAppMaster</b><span>MapReduce's ApplicationMaster: plans and supervises one job's tasks.</span></div>
+    <div class="term"><b>Spill</b><span>When a map task's in-memory buffer fills (80% of 100 MB by default), its sorted contents are written to local disk.</span></div>
+    <div class="term"><b>Output committer</b><span>Moves task outputs from a temporary folder to the final output folder only when tasks succeed.</span></div>
+    <div class="term"><b>_SUCCESS</b><span>An empty file written into the output directory when a MapReduce job completes successfully.</span></div>
+  </div>
+
+  <h3>Numbers in the life of a file and a job (defaults)</h3>
+  <table class="facts">
+    <tr><th>Block size</th><td>128 MB (<code>dfs.blocksize</code>)</td></tr>
+    <tr><th>Packet size</th><td>64 KB (<code>dfs.client-write-packet-size</code>)</td></tr>
+    <tr><th>Checksum</th><td>CRC32C for every 512 bytes, stored next to each block replica</td></tr>
+    <tr><th>Map output sort buffer</th><td>100 MB (<code>mapreduce.task.io.sort.mb</code>), spilled to disk at 80%</td></tr>
+    <tr><th>Reducers start fetching</th><td>after 5% of maps finish (<code>mapreduce.job.reduce.slowstart.completedmaps</code> = 0.05)</td></tr>
+    <tr><th>Task attempts</th><td>up to 4 per task</td></tr>
+    <tr><th>Output files</th><td><code>part-r-00000</code>, <code>part-r-00001</code>… (one per reducer) + <code>_SUCCESS</code></td></tr>
+  </table>
+
+  <h3 id="levels">The two lives at three levels</h3>
+  <div class="modlab levels"><div class="modlab__bar"><b>Pick your level. New to this? Start at Beginner and climb.</b><button type="button" data-mod="b">Beginner</button><button type="button" data-mod="i">Intermediate</button><button type="button" data-mod="a">Advanced</button></div>
+    <div class="modlab__panel" data-mod="b"><h4><span class="lvl lvl--b">Beginner</span> A courier and a census</h4>
+      <ul>
+        <li><b>Writing a file</b> is like sending a parcel by courier with three copies: the head office (NameNode) tells you which three branches, you hand it to the first branch, and each branch passes a copy on to the next.</li>
+        <li><b>Reading a file</b>: ask head office which branches have your parcels, and collect each from the nearest one.</li>
+        <li><b>Running a job</b> is like a census: the government (ResourceManager) appoints a supervisor (ApplicationMaster), the supervisor sends counters (map tasks) to every area, area totals go to district officers (reducers), and the final report is filed (written to HDFS).</li>
+      </ul>
+
+    </div>
+    <div class="modlab__panel" data-mod="i"><h4><span class="lvl lvl--i">Intermediate</span> The RPC calls you would see in a trace</h4>
+      <ul>
+        <li>Write: <code>create()</code> → <code>addBlock()</code> (per block) → data streamed to DataNodes → <code>complete()</code>.</li>
+        <li>Read: <code>getBlockLocations()</code> (in batches) → data read from DataNodes → checksums verified on the client.</li>
+        <li>Job: <code>getNewApplication()</code> → upload jar/conf/splits to the staging directory → <code>submitApplication()</code> → RM starts the AM → AM <code>registerApplicationMaster()</code> → repeated <code>allocate()</code> calls (container requests and grants) → <code>startContainers()</code> on NodeManagers → <code>finishApplicationMaster()</code>.</li>
+        <li>The NameNode only ever sees small metadata calls; the ResourceManager only sees resource requests. All heavy data moves between DataNodes, tasks and NodeManagers.</li>
+      </ul>
+
+    </div>
+    <div class="modlab__panel" data-mod="a"><h4><span class="lvl lvl--a">Advanced</span> Where things go wrong, and how each step recovers</h4>
+      <ul>
+        <li><b>A DataNode in the write pipeline dies:</b> the client removes it, finishes the block on the remaining nodes with a new generation stamp, and the NameNode re-replicates later.</li>
+        <li><b>A replica is corrupt during a read:</b> checksum mismatch → the client reads another replica and reports the bad one.</li>
+        <li><b>The client dies mid-write:</b> its lease expires; the NameNode recovers the last block and closes the file.</li>
+        <li><b>A map or reduce task fails:</b> the AM retries it (up to 4 attempts). <b>The AM itself fails:</b> YARN restarts it (MapReduce allows 2 AM attempts by default) and it recovers completed tasks.</li>
+        <li><b>The output directory already exists:</b> the job is rejected at submission (<code>FileAlreadyExistsException</code>) to protect old results.</li>
+      </ul>
+
+    </div>
+  </div>
+  <div class="callout callout--exam"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19V5a2 2 0 0 1 2-2h12v18H6a2 2 0 0 1-2-2zm0 0a2 2 0 0 1 2-2h12"/></svg><p><b>Exam tip:</b> “Explain the anatomy of a file write in HDFS” and “anatomy of a file read” are among the most frequent university questions. Number the steps (create → addBlock → pipeline + acks → complete; open → getBlockLocations → read nearest → checksum) and draw client, NameNode and three DataNodes with arrows. For “job execution flow”, list submit → AM → splits → containers → map → shuffle/sort → reduce → commit.</p></div>
+</section>
+
+<!-- ======================= PART 3: TYPES AND WAYS TO USE IT ======================= -->
+<section class="part" id="types">
+  <span class="part-label"><b>3</b> Types and ways to use it</span>
+  <h2>Three journeys compared</h2>
+  <div class="table-wrap">
+  <table class="compare" style="min-width:640px">
+    <thead><tr><th></th><th>Writing a file</th><th>Reading a file</th><th>Running a job</th></tr></thead>
+    <tbody>
+      <tr><td><b>Starts with</b></td><td><code>hdfs dfs -put</code> or <code>FileSystem.create()</code></td><td><code>hdfs dfs -cat</code> or <code>FileSystem.open()</code></td><td><code>hadoop jar</code>, <code>spark-submit</code>, a Hive query</td></tr>
+      <tr><td><b>Master asked</b></td><td>NameNode: create, addBlock, complete</td><td>NameNode: block locations</td><td>ResourceManager: new app, submit</td></tr>
+      <tr><td><b>Who moves the data</b></td><td>Client → DataNode pipeline</td><td>Nearest DataNode → client</td><td>Tasks read blocks locally; shuffle between nodes</td></tr>
+      <tr><td><b>Parallelism</b></td><td>One block at a time per writer</td><td>One block at a time per reader (many readers in parallel)</td><td>Many tasks at once</td></tr>
+      <tr><td><b>Safety mechanism</b></td><td>Acks from every DataNode, pipeline recovery</td><td>Checksums, switch replica</td><td>Task retries, AM restart, output committer</td></tr>
+      <tr><td><b>Ends with</b></td><td>File closed, visible to readers</td><td>Bytes delivered</td><td><code>part-*</code> files + <code>_SUCCESS</code></td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <h3>Ways to start each journey</h3>
+  <div class="cards">
+    <div class="card"><h4>Shell</h4><p><code>hdfs dfs -put / -get / -cat</code> and <code>hadoop jar job.jar …</code>. Best for learning and scripts.</p><span class="tag">Command line</span></div>
+    <div class="card"><h4>Java API</h4><p><code>FileSystem</code>, <code>FSDataOutputStream</code>, <code>FSDataInputStream</code>, and the MapReduce <code>Job</code> class (Modules 6 and 8).</p><span class="tag">Programs</span></div>
+    <div class="card"><h4>Engines on top</h4><p>Hive, Spark and others use the same write/read paths and submit their own applications to YARN.</p><span class="tag">Higher level</span></div>
+    <div class="card"><h4>Ingestion tools</h4><p>Pipelines (NiFi, Kafka Connect, Spark jobs) write files into HDFS through the same client library.</p><span class="tag">Pipelines</span></div>
+  </div>
+  <div class="callout callout--tip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18h6M10 22h4M12 2a7 7 0 0 0-4 12.7V17h8v-2.3A7 7 0 0 0 12 2z"/></svg><p>You can watch the job lifecycle live: run a job, then open the ResourceManager UI (port 8088). You'll see the application go from <b>ACCEPTED</b> (waiting for its ApplicationMaster container) to <b>RUNNING</b> to <b>FINISHED</b>, and you can click through to every map and reduce attempt.</p></div>
+</section>
+
+<!-- ======================= PART 4: STEP BY STEP ======================= -->
+<section class="part" id="steps">
+  <span class="part-label"><b>4</b> Step by step</span>
+  <h2>Riya's 300 MB file and her job, every step</h2>
+  <ol class="stepper">
+    <li><h4>Write: create the file</h4>
+      <div class="code" data-lang="bash" data-file="Terminal"><pre><code>hdfs dfs -put canteen_orders.csv /data/</code></pre></div>
+      <span class="behind">The client calls <code>create("/data/canteen_orders.csv")</code> on the NameNode, which checks permissions and that the file doesn't exist, adds it to the namespace as “under construction” and gives the client a <b>lease</b>.</span></li>
+    <li><h4>Write: three blocks, three pipelines</h4>
+      <div class="code" data-lang="python" data-file="blocks.py"><pre><code>import math
+size_mb, block_mb = 300, 128
+print(math.ceil(size_mb / block_mb), "blocks; last block", size_mb - 2 * block_mb, "MB")</code></pre><div class="output">3 blocks; last block 44 MB</div></div>
+      <span class="behind">For each block the client calls <code>addBlock</code>; the NameNode picks 3 DataNodes on 2 racks. The data streams as 64 KB packets: client → DN1 → DN2 → DN3, with acks flowing back. The last block uses only 44 MB of disk, not 128.</span></li>
+    <li><h4>Write: close</h4>
+      <p>After the last packet is acknowledged, the client calls <code>complete()</code>. The file is now visible and readable.</p>
+      <span class="behind">The DataNodes also tell the NameNode “I received block X” so its block map is up to date.</span></li>
+    <li><h4>Job: submit</h4>
+      <div class="code" data-lang="bash" data-file="Terminal"><pre><code>hadoop jar orders.jar ItemTotals /data/canteen_orders.csv /out/item_totals</code></pre></div>
+      <span class="behind">The client checks that <code>/out/item_totals</code> does <b>not</b> exist, computes 3 input splits (one per block), uploads the jar, configuration and split list to a staging directory in HDFS, and submits the application to the ResourceManager.</span></li>
+    <li><h4>Job: the ApplicationMaster takes over</h4>
+      <p>The ResourceManager starts the MRAppMaster in a container on some worker. The AM reads the split list and asks for 3 map containers, naming the nodes that hold each block.</p>
+      <span class="behind">The RM grants containers (ideally node-local); NodeManagers launch the map tasks. Each map sorts its output in memory, spills to local disk, and merges the spills into one partitioned file.</span></li>
+    <li><h4>Job: shuffle, reduce, commit</h4>
+      <p>Reducers fetch their partition from every map's NodeManager, merge-sort them, run the reduce function and write <code>part-r-00000</code> into a temporary folder.</p>
+      <span class="behind">When all tasks succeed, the output committer moves the files into <code>/out/item_totals</code> and writes <code>_SUCCESS</code>. The AM unregisters and exits; the job's history goes to the JobHistory Server. The output file is written through the same pipeline as step 2.</span></li>
+  </ol>
+</section>
+
+<!-- ======================= PART 5: SEE IT HAPPEN ======================= -->
+<section class="part" id="animation">
+  <span class="part-label"><b>5</b> See it happen</span>
+  <h2>The life of a file: what Riya types, and every message behind it</h2>
+  <p>Riya writes a 300 MB file and reads it back. Left: her terminal. Right: the client, the NameNode and four DataNodes.</p>
+  <div class="anim" data-frames="7">
+    <div class="anim__title">Write and read a file <span>7 steps</span></div>
+    <div class="anim__views">
+      <div class="view view--see">
+        <span class="view__tag">What you see</span>
+        <svg viewBox="0 0 360 250" role="img" aria-label="Riya's terminal">
+          <rect x="14" y="14" width="332" height="206" rx="8" class="s-board"/>
+          <text x="26" y="32" font-size="9" class="mono" style="fill:#7F8C86">riya@edge-01 : ~</text>
+          <g data-on="1-5"><text x="26" y="56" font-size="9" class="mono" style="fill:#7F8C86">$ hdfs dfs -put canteen_orders.csv /data/</text></g>
+          <g data-on="1"><text x="26" y="78" font-size="9" class="mono" style="fill:#9FD3B8">(working…)</text></g>
+          <g data-on="2-4"><rect x="26" y="74" width="300" height="12" rx="3" style="fill:#33413B"/></g>
+          <g data-on="2"><rect x="26" y="74" width="60" height="12" rx="3" style="fill:#9FD3B8"/></g>
+          <g data-on="3"><rect x="26" y="74" width="130" height="12" rx="3" style="fill:#9FD3B8"/></g>
+          <g data-on="4"><rect x="26" y="74" width="300" height="12" rx="3" style="fill:#9FD3B8"/></g>
+          <g data-on="5"><text x="26" y="78" font-size="9" class="mono" style="fill:#7F8C86">$ hdfs dfs -ls -h /data</text><text x="26" y="96" font-size="9" class="mono" style="fill:#9FD3B8">-rw-r--r-- 3 riya … 300 M canteen_orders.csv</text><text x="180" y="190" text-anchor="middle" font-size="10" class="s-chalk">“3” = replication factor.</text></g>
+          <g data-on="6-7"><text x="26" y="56" font-size="9" class="mono" style="fill:#7F8C86">$ hdfs dfs -cat /data/canteen_orders.csv | head -3</text></g>
+          <g data-on="7"><text x="26" y="78" font-size="9" class="mono" style="fill:#9FD3B8">order_id,item,amount</text><text x="26" y="94" font-size="9" class="mono" style="fill:#9FD3B8">1001,vada pav,20</text><text x="26" y="110" font-size="9" class="mono" style="fill:#9FD3B8">1002,chai,15</text></g>
+          <text x="352" y="244" text-anchor="end" class="s-wm">myphatshala.in</text>
+        </svg>
+        <ol class="caps" hidden>
+          <li>Riya runs <code>hdfs dfs -put</code>. Nothing visible happens yet, but the client is already talking to the NameNode.</li>
+          <li>The upload starts. Block 1 (128 MB) is being written.</li>
+          <li>Block 2 is being written. Each block goes to a different set of three DataNodes.</li>
+          <li>The last block (44 MB) finishes. The command returns.</li>
+          <li><code>hdfs dfs -ls -h</code> shows the file with replication 3 and size 300 MB.</li>
+          <li>Riya reads the file back with <code>-cat</code>.</li>
+          <li>The first lines appear. The bytes came from DataNodes, not from the NameNode.</li>
+        </ol>
+      </div>
+
+      <div class="view view--behind">
+        <span class="view__tag">Behind the screen</span>
+        <svg viewBox="0 0 360 250" role="img" aria-label="Client, NameNode and DataNodes exchanging messages">
+          <rect x="14" y="14" width="80" height="34" rx="6" class="s-soft-blue" style="stroke:var(--blue)"/><text x="54" y="35" text-anchor="middle" font-size="9" font-weight="700" class="s-blue">Client</text>
+          <rect x="250" y="14" width="96" height="34" rx="6" class="s-board"/><text x="298" y="35" text-anchor="middle" font-size="9" font-weight="700" class="s-chalk">NameNode</text>
+          <g><rect x="14" y="140" width="72" height="56" rx="6" class="s-card2"/><rect x="100" y="140" width="72" height="56" rx="6" class="s-card2"/><rect x="186" y="140" width="72" height="56" rx="6" class="s-card2"/><rect x="272" y="140" width="72" height="56" rx="6" class="s-card2"/>
+            <text x="50" y="156" text-anchor="middle" font-size="8.6" font-weight="700" class="s-ink">DN1 r1</text><text x="136" y="156" text-anchor="middle" font-size="8.6" font-weight="700" class="s-ink">DN2 r1</text><text x="222" y="156" text-anchor="middle" font-size="8.6" font-weight="700" class="s-ink">DN3 r2</text><text x="308" y="156" text-anchor="middle" font-size="8.6" font-weight="700" class="s-ink">DN4 r2</text></g>
+          <g data-on="1"><path d="M94 26h152" class="s-line" style="stroke:var(--blue);stroke-width:2"/><text x="170" y="20" text-anchor="middle" font-size="8.6" font-weight="700" class="s-blue">create(file)</text>
+            <path d="M246 40H98" class="s-line" style="stroke:var(--green);stroke-width:2"/><text x="170" y="56" text-anchor="middle" font-size="8.6" font-weight="700" class="s-green">OK + lease</text></g>
+          <g data-on="2"><text x="170" y="70" text-anchor="middle" font-size="8.6" font-weight="700" class="s-blue">addBlock → B1: DN1, DN3, DN4</text>
+            <path d="M54 48v92M86 176h14M172 176h14M258 176h14" style="fill:none;stroke:var(--track);stroke-width:3"/>
+            <rect x="34" y="166" width="32" height="14" rx="3" style="fill:var(--track)"/><rect x="206" y="166" width="32" height="14" rx="3" style="fill:var(--track)"/><rect x="292" y="166" width="32" height="14" rx="3" style="fill:var(--track)"/>
+            <text x="180" y="222" text-anchor="middle" font-size="8.6" class="s-acc" font-weight="700">packets: client → DN1 → DN3 → DN4 · acks ←</text></g>
+          <g data-on="3-"><rect x="34" y="166" width="32" height="14" rx="3" style="fill:var(--track)"/><rect x="206" y="166" width="32" height="14" rx="3" style="fill:var(--track)"/><rect x="292" y="166" width="32" height="14" rx="3" style="fill:var(--track)"/></g>
+          <g data-on="3"><text x="170" y="70" text-anchor="middle" font-size="8.6" font-weight="700" class="s-blue">addBlock → B2: DN2, DN4, DN3</text>
+            <rect x="120" y="182" width="32" height="10" rx="3" class="s-blue"/><rect x="292" y="182" width="32" height="10" rx="3" class="s-blue"/><rect x="206" y="182" width="32" height="10" rx="3" class="s-blue"/>
+            <text x="180" y="222" text-anchor="middle" font-size="8.6" class="s-acc" font-weight="700">new pipeline for each block</text></g>
+          <g data-on="4-"><rect x="120" y="182" width="32" height="10" rx="3" class="s-blue"/><rect x="292" y="182" width="32" height="10" rx="3" class="s-blue"/><rect x="206" y="182" width="32" height="10" rx="3" class="s-blue"/>
+            <rect x="70" y="166" width="12" height="14" rx="2" class="s-green"/><rect x="156" y="166" width="12" height="14" rx="2" class="s-green"/><rect x="242" y="182" width="12" height="10" rx="2" class="s-green"/></g>
+          <g data-on="4"><path d="M94 30h152" class="s-line" style="stroke:var(--blue);stroke-width:2"/><text x="170" y="70" text-anchor="middle" font-size="8.6" font-weight="700" class="s-blue">B3 (44 MB) written · complete(file)</text></g>
+          <g data-on="5"><text x="170" y="70" text-anchor="middle" font-size="8.6" font-weight="700" class="s-green">file closed: 3 blocks × 3 replicas</text><text x="170" y="86" text-anchor="middle" font-size="8.6" class="s-ink2">NameNode holds only the map, not the bytes</text></g>
+          <g data-on="6"><path d="M94 26h152" class="s-line" style="stroke:var(--blue);stroke-width:2"/><text x="170" y="20" text-anchor="middle" font-size="8.6" font-weight="700" class="s-blue">getBlockLocations(file)</text>
+            <path d="M246 40H98" class="s-line" style="stroke:var(--green);stroke-width:2"/><text x="170" y="56" text-anchor="middle" font-size="8.6" font-weight="700" class="s-green">B1@DN1,DN3,DN4 · B2@… (sorted by distance)</text></g>
+          <g data-on="7"><path d="M50 140V52" style="fill:none;stroke:var(--green);stroke-width:3"/><text x="64" y="100" font-size="8.6" font-weight="700" class="s-green">B1 from DN1 (nearest)</text><text x="64" y="114" font-size="8.6" class="s-ink2">checksums verified</text></g>
+          <text x="352" y="246" text-anchor="end" class="s-wm">myphatshala.in</text>
+        </svg>
+        <ol class="caps" hidden>
+          <li>The client asks the NameNode to <b>create</b> the file. The NameNode checks permissions, records the new file and grants a <b>lease</b> (a write lock).</li>
+          <li><b>addBlock</b>: the NameNode chooses DN1, DN3, DN4 for block 1. The client streams packets to DN1, which forwards to DN3, which forwards to DN4. Acknowledgements flow back along the chain.</li>
+          <li>For block 2 the client asks again and gets a different set of DataNodes: a new pipeline per block.</li>
+          <li>The small last block is written, then the client calls <b>complete</b>. The lease is released.</li>
+          <li>The file is closed: 3 blocks × 3 replicas spread over 4 nodes and 2 racks. The NameNode stores only where they are.</li>
+          <li>Reading: the client calls <b>getBlockLocations</b>. The NameNode returns each block's DataNodes, sorted closest first.</li>
+          <li>The client reads block 1 straight from the nearest DataNode, verifies its checksums, and moves on to block 2.</li>
+        </ol>
+      </div>
+    </div>
+  </div>
+
+  <h3 id="playground">Try it yourself: follow a file and a job</h3>
+  <p>Upload a file at 1× speed and read the Event log as it happens; then run a job and watch it read your blocks.</p>
+  <div class="csim"><script type="application/json">{"title": "Follow a file, then a job", "intro": "<p>Keep the <b>Event log<\/b> tab open. Every line is one step from this lesson: <code>create<\/code>, <code>addBlock<\/code> with its pipeline, completion, job submission and tasks.<\/p>", "racks": 2, "nodes": 3, "features": ["upload", "job", "fail"], "try": [{"text": "Choose <b>300 MB<\/b> and upload. How many blocks? Note the 3 DataNodes in each block's pipeline in the Event log.", "on": "upload-done"}, {"text": "Open <b>NameNode metadata<\/b>: the last block is smaller. Which racks hold each block?"}, {"text": "Run the job. One map task per block (M1, M2, M3), then the shuffle (violet) and 2 reducers.", "on": "job-done"}, {"text": "Upload again and stop a node while a block is being written. The pipeline carries on with the remaining nodes.", "on": "node-stop"}]}</script></div>
+</section>
+
+<!-- ======================= PART 6: REAL-WORLD USE ======================= -->
+<section class="part" id="real-world">
+  <span class="part-label"><b>6</b> Real-world use</span>
+  <h2>The life of a job, and where these journeys matter</h2>
+
+  <span class="live">Real-time scenario</span>
+  <h3 id="animated-example">The life of Riya's job, from submit to _SUCCESS</h3>
+  <p class="anim-intro">Follow <code>hadoop jar orders.jar ItemTotals</code> through YARN and MapReduce, one stage at a time.</p>
+  <div class="anim anim--one" data-frames="6" data-delay="4600">
+    <div class="anim__title">The life of a job <span>6 steps</span></div>
+    <div class="anim__views">
+      <div class="view view--story">
+        <span class="view__tag">Animated example</span>
+        <svg viewBox="0 0 360 236" role="img" aria-label="Job lifecycle on YARN">
+          <rect x="10" y="10" width="70" height="30" rx="5" class="s-soft-blue" style="stroke:var(--blue)"/><text x="45" y="29" text-anchor="middle" font-size="8.6" font-weight="700" class="s-blue">Client</text>
+          <rect x="140" y="10" width="110" height="30" rx="5" class="s-board"/><text x="195" y="29" text-anchor="middle" font-size="8.6" font-weight="700" class="s-chalk">ResourceManager</text>
+          <rect x="280" y="10" width="70" height="30" rx="5" class="s-card2"/><text x="315" y="29" text-anchor="middle" font-size="8.6" font-weight="700" class="s-ink">HDFS</text>
+          <g><rect x="10" y="80" width="105" height="96" rx="6" class="s-card2"/><rect x="128" y="80" width="105" height="96" rx="6" class="s-card2"/><rect x="246" y="80" width="105" height="96" rx="6" class="s-card2"/>
+            <text x="62" y="96" text-anchor="middle" font-size="8.6" font-weight="700" class="s-ink">worker1 (B1)</text><text x="180" y="96" text-anchor="middle" font-size="8.6" font-weight="700" class="s-ink">worker2 (B2)</text><text x="298" y="96" text-anchor="middle" font-size="8.6" font-weight="700" class="s-ink">worker3 (B3)</text></g>
+          <g data-on="1"><path d="M80 25h56" class="s-line" style="stroke:var(--blue);stroke-width:2"/><path d="M45 40v8h270v-8" style="fill:none;stroke:var(--blue);stroke-width:1.5;stroke-dasharray:4 3"/><text x="180" y="62" text-anchor="middle" font-size="8.6" font-weight="700" class="s-blue">jar + conf + 3 splits → staging dir; submit app</text></g>
+          <g data-on="2-"><rect x="138" y="104" width="86" height="18" rx="4" style="fill:#8B5CF6"/><text x="181" y="117" text-anchor="middle" font-size="8.6" font-weight="700" style="fill:#fff">MRAppMaster</text></g>
+          <g data-on="2"><path d="M195 40v60" class="s-line" style="stroke:#8B5CF6;stroke-width:2"/><text x="180" y="62" text-anchor="middle" font-size="8.6" font-weight="700" style="fill:#8B5CF6">RM launches the AM in a container (ACCEPTED → RUNNING)</text></g>
+          <g data-on="3"><text x="180" y="62" text-anchor="middle" font-size="8.6" font-weight="700" class="s-green">AM asks for 3 containers on the block holders</text>
+            <rect x="20" y="128" width="85" height="18" rx="4" class="s-green"/><text x="62" y="141" text-anchor="middle" font-size="8.6" font-weight="700" style="fill:#fff">map 1</text>
+            <rect x="138" y="128" width="85" height="18" rx="4" class="s-green"/><text x="180" y="141" text-anchor="middle" font-size="8.6" font-weight="700" style="fill:#fff">map 2</text>
+            <rect x="256" y="128" width="85" height="18" rx="4" class="s-green"/><text x="298" y="141" text-anchor="middle" font-size="8.6" font-weight="700" style="fill:#fff">map 3</text></g>
+          <g data-on="4"><text x="180" y="62" text-anchor="middle" font-size="8.6" font-weight="700" class="s-acc">maps sort + spill to local disk (not HDFS)</text>
+            <rect x="20" y="150" width="85" height="16" rx="4" class="s-soft-acc" style="stroke:var(--track)"/><text x="62" y="162" text-anchor="middle" font-size="7.6" class="s-acc">map output</text>
+            <rect x="138" y="150" width="85" height="16" rx="4" class="s-soft-acc" style="stroke:var(--track)"/><text x="180" y="162" text-anchor="middle" font-size="7.6" class="s-acc">map output</text>
+            <rect x="256" y="150" width="85" height="16" rx="4" class="s-soft-acc" style="stroke:var(--track)"/><text x="298" y="162" text-anchor="middle" font-size="7.6" class="s-acc">map output</text></g>
+          <g data-on="5"><text x="180" y="62" text-anchor="middle" font-size="8.6" font-weight="700" style="fill:#8B5CF6">reducer fetches its partition from every map (shuffle)</text>
+            <rect x="256" y="128" width="85" height="18" rx="4" style="fill:#8B5CF6"/><text x="298" y="141" text-anchor="middle" font-size="8.6" font-weight="700" style="fill:#fff">reduce</text>
+            <path d="M105 158c60 30 120 30 150-12M223 158c15 10 25 5 33-12" style="fill:none;stroke:#8B5CF6;stroke-width:2;stroke-dasharray:4 3"/></g>
+          <g data-on="6"><text x="180" y="62" text-anchor="middle" font-size="8.6" font-weight="700" class="s-green">commit → /out/item_totals/part-r-00000 + _SUCCESS</text>
+            <path d="M298 80V40" class="s-line" style="stroke:var(--green);stroke-width:2.5"/><text x="180" y="200" text-anchor="middle" font-size="8.6" class="s-ink2">AM unregisters; history → JobHistory Server (FINISHED)</text></g>
+          <text x="354" y="231" text-anchor="end" class="s-wm">myphatshala.in</text>
+        </svg>
+        <ol class="caps" hidden>
+          <li><b>Submit:</b> the client checks the output path, computes 3 splits, uploads the jar, configuration and split list to an HDFS staging directory, and submits the application to the ResourceManager.</li>
+          <li><b>Start the AM:</b> the RM finds a free container and asks that NodeManager to launch the MRAppMaster. The application moves from ACCEPTED to RUNNING.</li>
+          <li><b>Map:</b> the AM requests one container per split, naming the nodes that hold each block. Three map tasks start, each reading its local block.</li>
+          <li><b>Sort and spill:</b> each map writes its output to an in-memory buffer, sorts it by key and spills it to the node's <b>local disk</b>, partitioned for the reducers.</li>
+          <li><b>Shuffle and reduce:</b> the reducer fetches its partition from every map's NodeManager over HTTP, merges them in key order and runs the reduce function.</li>
+          <li><b>Commit:</b> the reducer's output is written to HDFS and committed; <code>_SUCCESS</code> appears. The AM unregisters and the job's history goes to the JobHistory Server.</li>
+        </ol>
+      </div>
+    </div>
+  </div>
+
+  <h3>Where knowing these journeys pays off</h3>
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="18" y="20" width="84" height="50" rx="6" class="s-board"/><text x="60" y="42" text-anchor="middle" font-size="8.6" class="mono" style="fill:#FF8A80">Output dir</text><text x="60" y="56" text-anchor="middle" font-size="8.6" class="mono" style="fill:#FF8A80">already exists</text></svg></div>
+    <div><h4>1. Reading error messages correctly</h4>
+      <p>Each step has typical errors: permission denied at <code>create</code>, “could only be written to 0 of the 1 minReplication nodes” at <code>addBlock</code> (no healthy DataNodes), <code>FileAlreadyExistsException</code> at job submission. Knowing the step tells you where to look.</p>
+      <div class="uc-flow"><span>Error</span><i>→</i><span class="java">Which step failed?</span><i>→</i><span>Right fix</span></div></div>
+  </div>
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="18" y="22" width="84" height="46" rx="6" class="s-card2"/><text x="60" y="42" text-anchor="middle" font-size="9" font-weight="700" class="s-ink">ACCEPTED</text><text x="60" y="58" text-anchor="middle" font-size="8.6" class="s-ink2">for 20 minutes…</text></svg></div>
+    <div><h4>2. A job stuck in ACCEPTED</h4>
+      <p>An application that stays ACCEPTED is waiting for a container for its ApplicationMaster: the queue is full or the AM's memory request doesn't fit any node. Understanding the lifecycle turns a mystery into a queue-capacity question.</p>
+      <div class="uc-flow"><span>Stuck job</span><i>→</i><span class="java">No AM container yet</span><i>→</i><span>Check queue / memory</span></div></div>
+  </div>
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="18" y="20" width="84" height="50" rx="6" class="s-soft-green" style="stroke:var(--green)"/><text x="60" y="50" text-anchor="middle" font-size="10" font-weight="700" class="s-green mono">_SUCCESS</text></svg></div>
+    <div><h4>3. Pipelines that wait for _SUCCESS</h4>
+      <p>Workflow tools (Airflow, Oozie) often start the next step only when the previous job's output folder contains <code>_SUCCESS</code>, so half-written output is never consumed.</p>
+      <div class="uc-flow"><span>Job A</span><i>→</i><span class="java">_SUCCESS appears</span><i>→</i><span>Job B starts</span></div></div>
+  </div>
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><path d="M20 45h80" style="stroke:var(--track);stroke-width:4"/><circle cx="20" cy="45" r="8" class="s-soft-blue" style="stroke:var(--blue)"/><circle cx="60" cy="45" r="8" class="s-card2"/><circle cx="100" cy="45" r="8" class="s-card2"/></svg></div>
+    <div><h4>4. Tuning ingestion speed</h4>
+      <p>Write throughput depends on the pipeline: the slowest of the three DataNodes and the cross-rack hop. Ingestion teams write many files in parallel from several clients to keep all DataNodes busy.</p>
+      <div class="uc-flow"><span>Many writers</span><i>→</i><span class="java">Many pipelines</span><i>→</i><span>Full cluster bandwidth</span></div></div>
+  </div>
+  <p class="muted">Simplified. Error texts vary slightly between versions.</p>
+</section>
+
+
+<div class="ad-slot" data-slot="mid"></div>
+
+<section class="part" id="run">
+  <span class="part-label"><b>7</b> Run the code</span>
+  <h2>Simulate the write path in Python</h2>
+  <p>This program does what the HDFS client does when you upload a file: cut it into blocks, ask a (pretend) NameNode for three DataNodes per block following the rack rule, and count the 64 KB packets that will travel through each pipeline.</p>
+  <div class="code" data-lang="python" data-file="main.py"><pre><code>import math
+
+racks = {&quot;r1&quot;: [&quot;dn1&quot;, &quot;dn2&quot;], &quot;r2&quot;: [&quot;dn3&quot;, &quot;dn4&quot;]}
+
+def add_block(n):
+    &quot;&quot;&quot;Pretend NameNode: replica 1 on any node, 2 on the other rack, 3 next to 2.&quot;&quot;&quot;
+    first_rack = &quot;r1&quot; if n % 2 == 0 else &quot;r2&quot;
+    other = &quot;r2&quot; if first_rack == &quot;r1&quot; else &quot;r1&quot;
+    return [racks[first_rack][n % 2], racks[other][0], racks[other][1]]
+
+size_mb, block_mb, packet_kb = 300, 128, 64
+blocks = math.ceil(size_mb / block_mb)
+for n in range(blocks):
+    mb = min(block_mb, size_mb - n * block_mb)
+    pipeline = add_block(n)
+    packets = math.ceil(mb * 1024 / packet_kb)
+    print(f&quot;block {n + 1}: {mb:&gt;3} MB -&gt; {&#x27; -&gt; &#x27;.join(pipeline)} ({packets} packets)&quot;)</code></pre><div class="output">block 1: 128 MB -&gt; dn1 -&gt; dn3 -&gt; dn4 (2048 packets)
+block 2: 128 MB -&gt; dn4 -&gt; dn1 -&gt; dn2 (2048 packets)
+block 3:  44 MB -&gt; dn1 -&gt; dn3 -&gt; dn4 (704 packets)</div></div>
+  <ul class="anno"><li><code>def add_block(n):</code><span>Plays the NameNode's <code>addBlock</code> call: returns the pipeline of DataNodes for the next block.</span></li><li><code>return [racks[first_rack][n % 2], racks[other][0], racks[other][1]]</code><span>Default placement: one replica on one rack, the next two together on another rack.</span></li><li><code>packets = math.ceil(mb * 1024 / packet_kb)</code><span>A 128 MB block travels as 2,048 packets of 64 KB, each acknowledged by every DataNode in the pipeline.</span></li></ul>
+  <div class="runner">
+    <script type="application/json">{
+ "lang": "python",
+ "file": "main.py",
+ "tasks": [
+  {
+   "label": "1 · Write a file",
+   "hint": "Press <b>Run<\/b>. Then upload 1,000 MB instead. How many blocks and pipelines?",
+   "code": "import math\n\nracks = {\"r1\": [\"dn1\", \"dn2\"], \"r2\": [\"dn3\", \"dn4\"]}\n\ndef add_block(n):\n    \"\"\"Pretend NameNode: replica 1 on any node, 2 on the other rack, 3 next to 2.\"\"\"\n    first_rack = \"r1\" if n % 2 == 0 else \"r2\"\n    other = \"r2\" if first_rack == \"r1\" else \"r1\"\n    return [racks[first_rack][n % 2], racks[other][0], racks[other][1]]\n\nsize_mb, block_mb, packet_kb = 300, 128, 64\nblocks = math.ceil(size_mb / block_mb)\nfor n in range(blocks):\n    mb = min(block_mb, size_mb - n * block_mb)\n    pipeline = add_block(n)\n    packets = math.ceil(mb * 1024 / packet_kb)\n    print(f\"block {n + 1}: {mb:>3} MB -> {' -> '.join(pipeline)} ({packets} packets)\")\n"
+  },
+  {
+   "label": "2 · Read from the nearest",
+   "hint": "<b>Predict first:<\/b> the client runs on dn3. Which replica of each block does it read? Hadoop sorts replicas by network distance (0 same node, 2 same rack, 4 other rack).",
+   "code": "rack = {\"dn1\": \"r1\", \"dn2\": \"r1\", \"dn3\": \"r2\", \"dn4\": \"r2\"}\nblocks = {\"B1\": [\"dn1\", \"dn3\", \"dn4\"], \"B2\": [\"dn2\", \"dn1\", \"dn4\"], \"B3\": [\"dn4\", \"dn1\", \"dn2\"]}\nclient = \"dn3\"\n\ndef dist(a, b):\n    return 0 if a == b else 2 if rack[a] == rack[b] else 4\n\nfor b, reps in blocks.items():\n    best = sorted(reps, key=lambda r: dist(client, r))[0]\n    print(b, \"read from\", best, \"distance\", dist(client, best))\n"
+  },
+  {
+   "label": "3 · Pipeline recovery",
+   "hint": "DN3 dies while block 1 is being written. The client drops it and continues with the others. What replication does the block have until the NameNode fixes it?",
+   "code": "pipeline = [\"dn1\", \"dn3\", \"dn4\"]\ndead = \"dn3\"\npipeline = [d for d in pipeline if d != dead]\nprint(\"Continue writing to:\", pipeline)\nprint(\"Block has\", len(pipeline), \"of 3 replicas; NameNode will add one later\")\n"
+  },
+  {
+   "label": "4 · Job stages",
+   "hint": "Print the stages of a job and the application state during each. Add a stage for the output committer.",
+   "code": "stages = [(\"submit to RM\", \"SUBMITTED\"), (\"waiting for AM container\", \"ACCEPTED\"),\n          (\"AM running maps\", \"RUNNING\"), (\"shuffle + reduce\", \"RUNNING\"),\n          (\"AM unregisters\", \"FINISHED\")]\nfor i, (stage, state) in enumerate(stages, 1):\n    print(f\"{i}. {stage:26} state = {state}\")\n"
+  },
+  {
+   "label": "5 · Spot the error",
+   "hint": "This job submission check should refuse to run when the output folder exists, but it never does. Find the bug.",
+   "code": "existing = {\"/data/canteen_orders.csv\", \"/out/item_totals\"}\noutput = \"/out/item_totals\"\nif output in existing == True:\n    print(\"FileAlreadyExistsException: output directory exists\")\nelse:\n    print(\"Job submitted\")\n"
+  }
+ ]
+}</script>
+  </div>
+</section>
+
+<section class="part" id="tracer">
+  <span class="part-label"><b>8</b> Line by line</span>
+  <h2>Splitting a file into blocks, one line at a time</h2>
+  <p>Watch the client cut a 300 MB file into blocks, asking for a new pipeline each time. Notice how the last block is smaller.</p>
+  <div class="tracer">
+    <script type="application/json">{
+ "lang": "python",
+ "code": [
+  "size_mb, block_mb = 300, 128",
+  "offset = 0",
+  "blocks = []",
+  "while offset < size_mb:",
+  "    length = min(block_mb, size_mb - offset)",
+  "    blocks.append((offset, length))",
+  "    offset = offset + length",
+  "print(blocks)"
+ ],
+ "steps": [
+  {
+   "line": 1,
+   "phase": "Python",
+   "note": "<code>size_mb<\/code> is created: 300. <code>block_mb<\/code> is created: 128.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "size_mb",
+       "300"
+      ],
+      [
+       "block_mb",
+       "128"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "block_mb"
+  },
+  {
+   "line": 2,
+   "phase": "Python",
+   "note": "<code>offset<\/code> is created: 0.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "size_mb",
+       "300"
+      ],
+      [
+       "block_mb",
+       "128"
+      ],
+      [
+       "offset",
+       "0"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "offset"
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "<code>blocks<\/code> is created: → list #1. A new list object (#1) is created: []",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "size_mb",
+       "300"
+      ],
+      [
+       "block_mb",
+       "128"
+      ],
+      [
+       "offset",
+       "0"
+      ],
+      [
+       "blocks",
+       "→ list #1"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (0)<\/b> []"
+   ],
+   "newVar": "blocks"
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "The condition is <b>True<\/b>, so the indented block runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "size_mb",
+       "300"
+      ],
+      [
+       "block_mb",
+       "128"
+      ],
+      [
+       "offset",
+       "0"
+      ],
+      [
+       "blocks",
+       "→ list #1"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (0)<\/b> []"
+   ]
+  },
+  {
+   "line": 5,
+   "phase": "Block",
+   "note": "The last block only holds what is left. <code>length<\/code> is created: 128.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "size_mb",
+       "300"
+      ],
+      [
+       "block_mb",
+       "128"
+      ],
+      [
+       "offset",
+       "0"
+      ],
+      [
+       "blocks",
+       "→ list #1"
+      ],
+      [
+       "length",
+       "128"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (0)<\/b> []"
+   ],
+   "newVar": "length"
+  },
+  {
+   "line": 6,
+   "phase": "Python",
+   "note": "Object #1 list now holds [→ tuple #2] A new tuple object (#2) is created: (0, 128)",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "size_mb",
+       "300"
+      ],
+      [
+       "block_mb",
+       "128"
+      ],
+      [
+       "offset",
+       "0"
+      ],
+      [
+       "blocks",
+       "→ list #1"
+      ],
+      [
+       "length",
+       "128"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (1)<\/b> [→ tuple #2]",
+    "<b>#2 tuple (2)<\/b> (0, 128)"
+   ]
+  },
+  {
+   "line": 7,
+   "phase": "Next",
+   "note": "Move the offset to the start of the next block. <code>offset<\/code> changes to 128.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "size_mb",
+       "300"
+      ],
+      [
+       "block_mb",
+       "128"
+      ],
+      [
+       "offset",
+       "128"
+      ],
+      [
+       "blocks",
+       "→ list #1"
+      ],
+      [
+       "length",
+       "128"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (1)<\/b> [→ tuple #2]",
+    "<b>#2 tuple (2)<\/b> (0, 128)"
+   ],
+   "newVar": "offset"
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "The condition is <b>True<\/b>, so the indented block runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "size_mb",
+       "300"
+      ],
+      [
+       "block_mb",
+       "128"
+      ],
+      [
+       "offset",
+       "128"
+      ],
+      [
+       "blocks",
+       "→ list #1"
+      ],
+      [
+       "length",
+       "128"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (1)<\/b> [→ tuple #2]",
+    "<b>#2 tuple (2)<\/b> (0, 128)"
+   ]
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "size_mb",
+       "300"
+      ],
+      [
+       "block_mb",
+       "128"
+      ],
+      [
+       "offset",
+       "128"
+      ],
+      [
+       "blocks",
+       "→ list #1"
+      ],
+      [
+       "length",
+       "128"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (1)<\/b> [→ tuple #2]",
+    "<b>#2 tuple (2)<\/b> (0, 128)"
+   ]
+  },
+  {
+   "line": 6,
+   "phase": "Python",
+   "note": "Object #1 list now holds [→ tuple #2, → tuple #3] A new tuple object (#3) is created: (128, 128)",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "size_mb",
+       "300"
+      ],
+      [
+       "block_mb",
+       "128"
+      ],
+      [
+       "offset",
+       "128"
+      ],
+      [
+       "blocks",
+       "→ list #1"
+      ],
+      [
+       "length",
+       "128"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (2)<\/b> [→ tuple #2, → tuple #3]",
+    "<b>#2 tuple (2)<\/b> (0, 128)",
+    "<b>#3 tuple (2)<\/b> (128, 128)"
+   ]
+  },
+  {
+   "line": 7,
+   "phase": "Python",
+   "note": "<code>offset<\/code> changes to 256.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "size_mb",
+       "300"
+      ],
+      [
+       "block_mb",
+       "128"
+      ],
+      [
+       "offset",
+       "256"
+      ],
+      [
+       "blocks",
+       "→ list #1"
+      ],
+      [
+       "length",
+       "128"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (2)<\/b> [→ tuple #2, → tuple #3]",
+    "<b>#2 tuple (2)<\/b> (0, 128)",
+    "<b>#3 tuple (2)<\/b> (128, 128)"
+   ],
+   "newVar": "offset"
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "The condition is <b>True<\/b>, so the indented block runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "size_mb",
+       "300"
+      ],
+      [
+       "block_mb",
+       "128"
+      ],
+      [
+       "offset",
+       "256"
+      ],
+      [
+       "blocks",
+       "→ list #1"
+      ],
+      [
+       "length",
+       "128"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (2)<\/b> [→ tuple #2, → tuple #3]",
+    "<b>#2 tuple (2)<\/b> (0, 128)",
+    "<b>#3 tuple (2)<\/b> (128, 128)"
+   ]
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "<code>length<\/code> changes to 44.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "size_mb",
+       "300"
+      ],
+      [
+       "block_mb",
+       "128"
+      ],
+      [
+       "offset",
+       "256"
+      ],
+      [
+       "blocks",
+       "→ list #1"
+      ],
+      [
+       "length",
+       "44"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (2)<\/b> [→ tuple #2, → tuple #3]",
+    "<b>#2 tuple (2)<\/b> (0, 128)",
+    "<b>#3 tuple (2)<\/b> (128, 128)"
+   ],
+   "newVar": "length"
+  },
+  {
+   "line": 6,
+   "phase": "Python",
+   "note": "Object #1 list now holds [→ tuple #2, → tuple #3, → tuple #4] A new tuple object (#4) is created: (256, 44)",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "size_mb",
+       "300"
+      ],
+      [
+       "block_mb",
+       "128"
+      ],
+      [
+       "offset",
+       "256"
+      ],
+      [
+       "blocks",
+       "→ list #1"
+      ],
+      [
+       "length",
+       "44"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (3)<\/b> [→ tuple #2, → tuple #3, → tuple #4]",
+    "<b>#2 tuple (2)<\/b> (0, 128)",
+    "<b>#3 tuple (2)<\/b> (128, 128)",
+    "<b>#4 tuple (2)<\/b> (256, 44)"
+   ]
+  },
+  {
+   "line": 7,
+   "phase": "Python",
+   "note": "<code>offset<\/code> changes to 300.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "size_mb",
+       "300"
+      ],
+      [
+       "block_mb",
+       "128"
+      ],
+      [
+       "offset",
+       "300"
+      ],
+      [
+       "blocks",
+       "→ list #1"
+      ],
+      [
+       "length",
+       "44"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (3)<\/b> [→ tuple #2, → tuple #3, → tuple #4]",
+    "<b>#2 tuple (2)<\/b> (0, 128)",
+    "<b>#3 tuple (2)<\/b> (128, 128)",
+    "<b>#4 tuple (2)<\/b> (256, 44)"
+   ],
+   "newVar": "offset"
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "The condition is <b>False<\/b>, so the indented block is skipped.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "size_mb",
+       "300"
+      ],
+      [
+       "block_mb",
+       "128"
+      ],
+      [
+       "offset",
+       "300"
+      ],
+      [
+       "blocks",
+       "→ list #1"
+      ],
+      [
+       "length",
+       "44"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (3)<\/b> [→ tuple #2, → tuple #3, → tuple #4]",
+    "<b>#2 tuple (2)<\/b> (0, 128)",
+    "<b>#3 tuple (2)<\/b> (128, 128)",
+    "<b>#4 tuple (2)<\/b> (256, 44)"
+   ]
+  },
+  {
+   "line": 8,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "size_mb",
+       "300"
+      ],
+      [
+       "block_mb",
+       "128"
+      ],
+      [
+       "offset",
+       "300"
+      ],
+      [
+       "blocks",
+       "→ list #1"
+      ],
+      [
+       "length",
+       "44"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (3)<\/b> [→ tuple #2, → tuple #3, → tuple #4]",
+    "<b>#2 tuple (2)<\/b> (0, 128)",
+    "<b>#3 tuple (2)<\/b> (128, 128)",
+    "<b>#4 tuple (2)<\/b> (256, 44)"
+   ],
+   "out": "[(0, 128), (128, 128), (256, 44)]\n"
+  }
+ ]
+}</script>
+  </div>
+
+<h3 id="worked">Worked examples: real problems, solved and traced in memory</h3>
+  <p class="wx-intro">Three calculations that come straight from the write path and the job lifecycle: how much traffic a write creates, how long a write takes, and a full job timeline. Each runs live and is traced in memory.</p>
+  <article class="wx">
+    <div class="wx__head"><span class="wx__num">Example 1</span><span class="lvl lvl--b">Beginner</span><span class="wx__tag">HDFS · write traffic</span></div>
+    <h4>How much data crosses the network when you upload 1 GB?</h4>
+    <div class="wx__problem"><p class="wx__label">Problem statement</p><p>A client outside the cluster uploads a <b>1 GB</b> file with replication 3. Every replica is sent once over the network (client → DN1, DN1 → DN2, DN2 → DN3). The second and third replicas are on another rack from the first. How many GB travel in total, and how many cross between racks?</p></div>
+    <div class="prob__io"><div><small>Input</small><pre>1 GB · replication 3 · replica 1 on rack A, replicas 2–3 on rack B</pre></div><div><small>Expected output</small><pre>Total sent: 3 GB
+Crossing racks or entering the cluster: 2 GB
+  client -&gt; DN1 into rack A
+  DN1 -&gt; DN2   rack A -&gt; rack B
+  DN2 -&gt; DN3   inside rack B</pre></div></div>
+    <div class="wx__approach"><p class="wx__label">Approach</p><ol><li>Total sent = size × replication (each replica crosses one link).</li><li>Cross-rack: client → DN1 (the client is outside), DN1 → DN2 (rack A to B).</li><li>DN2 → DN3 stays inside rack B.</li></ol></div>
+    <p class="wx__label">Solution: run it live</p>
+    <div class="runner">
+    <script type="application/json">{
+ "lang": "python",
+ "file": "main.py",
+ "tasks": [
+  {
+   "label": "Solution",
+   "hint": "If the client runs on a DataNode, replica 1 is written locally: no network for the first copy. That is why bulk loads often run on cluster nodes.",
+   "code": "size_gb, replication = 1, 3\nhops = [(\"client -> DN1\", \"into rack A\"), (\"DN1 -> DN2\", \"rack A -> rack B\"), (\"DN2 -> DN3\", \"inside rack B\")]\ntotal = size_gb * replication\ncross = sum(size_gb for hop, where in hops if \"->\" in where)\nprint(\"Total sent:\", total, \"GB\")\nprint(\"Crossing racks or entering the cluster:\", cross + size_gb, \"GB\")\nfor hop, where in hops:\n    print(f\"  {hop:12} {where}\")\n"
+  }
+ ]
+}</script>
+    </div>
+    <p class="wx__label">What happens in memory, step by step</p>
+    <p class="wx__how">Recorded from a real Python run: press <b>Next</b> to execute one line at a time. Watch variables change in each frame, and lists and dictionaries (numbered #1, #2 …) fill up as objects.</p>
+    <div class="tracer">
+    <script type="application/json">{
+ "lang": "python",
+ "code": [
+  "size_gb, replication = 1, 3",
+  "hops = [(\"client -> DN1\", \"into rack A\"), (\"DN1 -> DN2\", \"rack A -> rack B\"), (\"DN2 -> DN3\", \"inside rack B\")]",
+  "total = size_gb * replication",
+  "cross = sum(size_gb for hop, where in hops if \"->\" in where)",
+  "print(\"Total sent:\", total, \"GB\")",
+  "print(\"Crossing racks or entering the cluster:\", cross + size_gb, \"GB\")",
+  "for hop, where in hops:",
+  "    print(f\"  {hop:12} {where}\")"
+ ],
+ "steps": [
+  {
+   "line": 1,
+   "phase": "Python",
+   "note": "<code>size_gb<\/code> is created: 1. <code>replication<\/code> is created: 3.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "size_gb",
+       "1"
+      ],
+      [
+       "replication",
+       "3"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "replication"
+  },
+  {
+   "line": 2,
+   "phase": "Python",
+   "note": "<code>hops<\/code> is created: → list #1. A new list object (#1) is created: [→ tuple #2, → tuple #3, → tuple #4] A new tuple object (#2) is created: (&#x27;client -&gt; DN1&#x27;, &#x27;into rack A&#x27;) A new tuple object (#3) is created: (&#x27;DN1 -&gt; DN2&#x27;, &#x27;rack A -&gt; rack B&#x27;) A new tuple object (#4) is created: (&#x27;DN2 -&gt; DN3&#x27;, &#x27;inside rack B&#x27;)",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "size_gb",
+       "1"
+      ],
+      [
+       "replication",
+       "3"
+      ],
+      [
+       "hops",
+       "→ list #1"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (3)<\/b> [→ tuple #2, → tuple #3, → tuple #4]",
+    "<b>#2 tuple (2)<\/b> (&#x27;client -&gt; DN1&#x27;, &#x27;into rack A&#x27;)",
+    "<b>#3 tuple (2)<\/b> (&#x27;DN1 -&gt; DN2&#x27;, &#x27;rack A -&gt; rack B&#x27;)",
+    "<b>#4 tuple (2)<\/b> (&#x27;DN2 -&gt; DN3&#x27;, &#x27;inside rack B&#x27;)"
+   ],
+   "newVar": "hops"
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "<code>total<\/code> is created: 3.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "size_gb",
+       "1"
+      ],
+      [
+       "replication",
+       "3"
+      ],
+      [
+       "hops",
+       "→ list #1"
+      ],
+      [
+       "total",
+       "3"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (3)<\/b> [→ tuple #2, → tuple #3, → tuple #4]",
+    "<b>#2 tuple (2)<\/b> (&#x27;client -&gt; DN1&#x27;, &#x27;into rack A&#x27;)",
+    "<b>#3 tuple (2)<\/b> (&#x27;DN1 -&gt; DN2&#x27;, &#x27;rack A -&gt; rack B&#x27;)",
+    "<b>#4 tuple (2)<\/b> (&#x27;DN2 -&gt; DN3&#x27;, &#x27;inside rack B&#x27;)"
+   ],
+   "newVar": "total"
+  },
+  {
+   "line": 4,
+   "phase": "Cross",
+   "note": "Only the DN1 → DN2 hop goes between racks inside the cluster. <code>cross<\/code> is created: 1.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "size_gb",
+       "1"
+      ],
+      [
+       "replication",
+       "3"
+      ],
+      [
+       "hops",
+       "→ list #1"
+      ],
+      [
+       "total",
+       "3"
+      ],
+      [
+       "cross",
+       "1"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (3)<\/b> [→ tuple #2, → tuple #3, → tuple #4]",
+    "<b>#2 tuple (2)<\/b> (&#x27;client -&gt; DN1&#x27;, &#x27;into rack A&#x27;)",
+    "<b>#3 tuple (2)<\/b> (&#x27;DN1 -&gt; DN2&#x27;, &#x27;rack A -&gt; rack B&#x27;)",
+    "<b>#4 tuple (2)<\/b> (&#x27;DN2 -&gt; DN3&#x27;, &#x27;inside rack B&#x27;)"
+   ],
+   "newVar": "cross"
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "size_gb",
+       "1"
+      ],
+      [
+       "replication",
+       "3"
+      ],
+      [
+       "hops",
+       "→ list #1"
+      ],
+      [
+       "total",
+       "3"
+      ],
+      [
+       "cross",
+       "1"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (3)<\/b> [→ tuple #2, → tuple #3, → tuple #4]",
+    "<b>#2 tuple (2)<\/b> (&#x27;client -&gt; DN1&#x27;, &#x27;into rack A&#x27;)",
+    "<b>#3 tuple (2)<\/b> (&#x27;DN1 -&gt; DN2&#x27;, &#x27;rack A -&gt; rack B&#x27;)",
+    "<b>#4 tuple (2)<\/b> (&#x27;DN2 -&gt; DN3&#x27;, &#x27;inside rack B&#x27;)"
+   ],
+   "out": "Total sent: 3 GB\n"
+  },
+  {
+   "line": 6,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "size_gb",
+       "1"
+      ],
+      [
+       "replication",
+       "3"
+      ],
+      [
+       "hops",
+       "→ list #1"
+      ],
+      [
+       "total",
+       "3"
+      ],
+      [
+       "cross",
+       "1"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (3)<\/b> [→ tuple #2, → tuple #3, → tuple #4]",
+    "<b>#2 tuple (2)<\/b> (&#x27;client -&gt; DN1&#x27;, &#x27;into rack A&#x27;)",
+    "<b>#3 tuple (2)<\/b> (&#x27;DN1 -&gt; DN2&#x27;, &#x27;rack A -&gt; rack B&#x27;)",
+    "<b>#4 tuple (2)<\/b> (&#x27;DN2 -&gt; DN3&#x27;, &#x27;inside rack B&#x27;)"
+   ],
+   "out": "Crossing racks or entering the cluster: 2 GB\n"
+  },
+  {
+   "line": 7,
+   "phase": "Python",
+   "note": "<code>hop<\/code> is created: &#x27;client -&gt; DN1&#x27;. <code>where<\/code> is created: &#x27;into rack A&#x27;.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "size_gb",
+       "1"
+      ],
+      [
+       "replication",
+       "3"
+      ],
+      [
+       "hops",
+       "→ list #1"
+      ],
+      [
+       "total",
+       "3"
+      ],
+      [
+       "cross",
+       "1"
+      ],
+      [
+       "hop",
+       "'client -> DN1'"
+      ],
+      [
+       "where",
+       "'into rack A'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (3)<\/b> [→ tuple #2, → tuple #3, → tuple #4]",
+    "<b>#2 tuple (2)<\/b> (&#x27;client -&gt; DN1&#x27;, &#x27;into rack A&#x27;)",
+    "<b>#3 tuple (2)<\/b> (&#x27;DN1 -&gt; DN2&#x27;, &#x27;rack A -&gt; rack B&#x27;)",
+    "<b>#4 tuple (2)<\/b> (&#x27;DN2 -&gt; DN3&#x27;, &#x27;inside rack B&#x27;)"
+   ],
+   "newVar": "where"
+  },
+  {
+   "line": 8,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "size_gb",
+       "1"
+      ],
+      [
+       "replication",
+       "3"
+      ],
+      [
+       "hops",
+       "→ list #1"
+      ],
+      [
+       "total",
+       "3"
+      ],
+      [
+       "cross",
+       "1"
+      ],
+      [
+       "hop",
+       "'client -> DN1'"
+      ],
+      [
+       "where",
+       "'into rack A'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (3)<\/b> [→ tuple #2, → tuple #3, → tuple #4]",
+    "<b>#2 tuple (2)<\/b> (&#x27;client -&gt; DN1&#x27;, &#x27;into rack A&#x27;)",
+    "<b>#3 tuple (2)<\/b> (&#x27;DN1 -&gt; DN2&#x27;, &#x27;rack A -&gt; rack B&#x27;)",
+    "<b>#4 tuple (2)<\/b> (&#x27;DN2 -&gt; DN3&#x27;, &#x27;inside rack B&#x27;)"
+   ],
+   "out": "  client -> DN1 into rack A\n"
+  },
+  {
+   "line": 7,
+   "phase": "Python",
+   "note": "<code>hop<\/code> changes to &#x27;DN1 -&gt; DN2&#x27;. <code>where<\/code> changes to &#x27;rack A -&gt; rack B&#x27;.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "size_gb",
+       "1"
+      ],
+      [
+       "replication",
+       "3"
+      ],
+      [
+       "hops",
+       "→ list #1"
+      ],
+      [
+       "total",
+       "3"
+      ],
+      [
+       "cross",
+       "1"
+      ],
+      [
+       "hop",
+       "'DN1 -> DN2'"
+      ],
+      [
+       "where",
+       "'rack A -> rack B'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (3)<\/b> [→ tuple #2, → tuple #3, → tuple #4]",
+    "<b>#2 tuple (2)<\/b> (&#x27;client -&gt; DN1&#x27;, &#x27;into rack A&#x27;)",
+    "<b>#3 tuple (2)<\/b> (&#x27;DN1 -&gt; DN2&#x27;, &#x27;rack A -&gt; rack B&#x27;)",
+    "<b>#4 tuple (2)<\/b> (&#x27;DN2 -&gt; DN3&#x27;, &#x27;inside rack B&#x27;)"
+   ],
+   "newVar": "where"
+  },
+  {
+   "line": 8,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "size_gb",
+       "1"
+      ],
+      [
+       "replication",
+       "3"
+      ],
+      [
+       "hops",
+       "→ list #1"
+      ],
+      [
+       "total",
+       "3"
+      ],
+      [
+       "cross",
+       "1"
+      ],
+      [
+       "hop",
+       "'DN1 -> DN2'"
+      ],
+      [
+       "where",
+       "'rack A -> rack B'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (3)<\/b> [→ tuple #2, → tuple #3, → tuple #4]",
+    "<b>#2 tuple (2)<\/b> (&#x27;client -&gt; DN1&#x27;, &#x27;into rack A&#x27;)",
+    "<b>#3 tuple (2)<\/b> (&#x27;DN1 -&gt; DN2&#x27;, &#x27;rack A -&gt; rack B&#x27;)",
+    "<b>#4 tuple (2)<\/b> (&#x27;DN2 -&gt; DN3&#x27;, &#x27;inside rack B&#x27;)"
+   ],
+   "out": "  DN1 -> DN2   rack A -> rack B\n"
+  },
+  {
+   "line": 7,
+   "phase": "Python",
+   "note": "<code>hop<\/code> changes to &#x27;DN2 -&gt; DN3&#x27;. <code>where<\/code> changes to &#x27;inside rack B&#x27;.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "size_gb",
+       "1"
+      ],
+      [
+       "replication",
+       "3"
+      ],
+      [
+       "hops",
+       "→ list #1"
+      ],
+      [
+       "total",
+       "3"
+      ],
+      [
+       "cross",
+       "1"
+      ],
+      [
+       "hop",
+       "'DN2 -> DN3'"
+      ],
+      [
+       "where",
+       "'inside rack B'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (3)<\/b> [→ tuple #2, → tuple #3, → tuple #4]",
+    "<b>#2 tuple (2)<\/b> (&#x27;client -&gt; DN1&#x27;, &#x27;into rack A&#x27;)",
+    "<b>#3 tuple (2)<\/b> (&#x27;DN1 -&gt; DN2&#x27;, &#x27;rack A -&gt; rack B&#x27;)",
+    "<b>#4 tuple (2)<\/b> (&#x27;DN2 -&gt; DN3&#x27;, &#x27;inside rack B&#x27;)"
+   ],
+   "newVar": "where"
+  },
+  {
+   "line": 8,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "size_gb",
+       "1"
+      ],
+      [
+       "replication",
+       "3"
+      ],
+      [
+       "hops",
+       "→ list #1"
+      ],
+      [
+       "total",
+       "3"
+      ],
+      [
+       "cross",
+       "1"
+      ],
+      [
+       "hop",
+       "'DN2 -> DN3'"
+      ],
+      [
+       "where",
+       "'inside rack B'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (3)<\/b> [→ tuple #2, → tuple #3, → tuple #4]",
+    "<b>#2 tuple (2)<\/b> (&#x27;client -&gt; DN1&#x27;, &#x27;into rack A&#x27;)",
+    "<b>#3 tuple (2)<\/b> (&#x27;DN1 -&gt; DN2&#x27;, &#x27;rack A -&gt; rack B&#x27;)",
+    "<b>#4 tuple (2)<\/b> (&#x27;DN2 -&gt; DN3&#x27;, &#x27;inside rack B&#x27;)"
+   ],
+   "out": "  DN2 -> DN3   inside rack B\n"
+  },
+  {
+   "line": 7,
+   "phase": "Python",
+   "note": "Nothing is left to loop over, so the loop ends and Python moves on.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "size_gb",
+       "1"
+      ],
+      [
+       "replication",
+       "3"
+      ],
+      [
+       "hops",
+       "→ list #1"
+      ],
+      [
+       "total",
+       "3"
+      ],
+      [
+       "cross",
+       "1"
+      ],
+      [
+       "hop",
+       "'DN2 -> DN3'"
+      ],
+      [
+       "where",
+       "'inside rack B'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (3)<\/b> [→ tuple #2, → tuple #3, → tuple #4]",
+    "<b>#2 tuple (2)<\/b> (&#x27;client -&gt; DN1&#x27;, &#x27;into rack A&#x27;)",
+    "<b>#3 tuple (2)<\/b> (&#x27;DN1 -&gt; DN2&#x27;, &#x27;rack A -&gt; rack B&#x27;)",
+    "<b>#4 tuple (2)<\/b> (&#x27;DN2 -&gt; DN3&#x27;, &#x27;inside rack B&#x27;)"
+   ]
+  }
+ ]
+}</script>
+    </div>
+  </article>
+  <article class="wx">
+    <div class="wx__head"><span class="wx__num">Example 2</span><span class="lvl lvl--i">Intermediate</span><span class="wx__tag">HDFS · write time</span></div>
+    <h4>How long does a pipeline write take?</h4>
+    <div class="wx__problem"><p class="wx__label">Problem statement</p><p>A pipeline streams packets: DN1 forwards each packet to DN2 while receiving the next one, so the three copies are written <b>at the same time</b>, limited by the slowest link. Estimate the time to upload <b>10 GB</b> when the slowest link is <b>200 MB/s</b>, versus writing the three copies one after another.</p></div>
+    <div class="prob__io"><div><small>Input</small><pre>10 GB · slowest link 200 MB/s · 3 replicas</pre></div><div><small>Expected output</small><pre>Pipelined : 51 s
+Sequential: 154 s</pre></div></div>
+    <div class="wx__approach"><p class="wx__label">Approach</p><ol><li>Pipelined: time ≈ size ÷ slowest link speed.</li><li>Sequential (one copy after another): 3 × that.</li><li>Print both.</li></ol></div>
+    <p class="wx__label">Solution: run it live</p>
+    <div class="runner">
+    <script type="application/json">{
+ "lang": "python",
+ "file": "main.py",
+ "tasks": [
+  {
+   "label": "Solution",
+   "hint": "Make one DataNode's disk slow (80 MB/s). The whole pipeline slows to that speed, which is why one bad disk can hurt many writes.",
+   "code": "size_mb = 10 * 1024\nslowest = 200\npipelined = size_mb / slowest\nsequential = 3 * pipelined\nprint(f\"Pipelined : {pipelined:.0f} s\")\nprint(f\"Sequential: {sequential:.0f} s\")\n"
+  }
+ ]
+}</script>
+    </div>
+    <p class="wx__label">What happens in memory, step by step</p>
+    <p class="wx__how">Recorded from a real Python run: press <b>Next</b> to execute one line at a time. Watch variables change in each frame, and lists and dictionaries (numbered #1, #2 …) fill up as objects.</p>
+    <div class="tracer">
+    <script type="application/json">{
+ "lang": "python",
+ "code": [
+  "size_mb = 10 * 1024",
+  "slowest = 200",
+  "pipelined = size_mb / slowest",
+  "sequential = 3 * pipelined",
+  "print(f\"Pipelined : {pipelined:.0f} s\")",
+  "print(f\"Sequential: {sequential:.0f} s\")"
+ ],
+ "steps": [
+  {
+   "line": 1,
+   "phase": "Python",
+   "note": "<code>size_mb<\/code> is created: 10240.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "size_mb",
+       "10240"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "size_mb"
+  },
+  {
+   "line": 2,
+   "phase": "Python",
+   "note": "<code>slowest<\/code> is created: 200.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "size_mb",
+       "10240"
+      ],
+      [
+       "slowest",
+       "200"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "slowest"
+  },
+  {
+   "line": 3,
+   "phase": "Pipeline",
+   "note": "All three copies are written as the packets flow. <code>pipelined<\/code> is created: 51.2.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "size_mb",
+       "10240"
+      ],
+      [
+       "slowest",
+       "200"
+      ],
+      [
+       "pipelined",
+       "51.2"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "pipelined"
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "<code>sequential<\/code> is created: 153.6.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "size_mb",
+       "10240"
+      ],
+      [
+       "slowest",
+       "200"
+      ],
+      [
+       "pipelined",
+       "51.2"
+      ],
+      [
+       "sequential",
+       "153.6"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "sequential"
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "size_mb",
+       "10240"
+      ],
+      [
+       "slowest",
+       "200"
+      ],
+      [
+       "pipelined",
+       "51.2"
+      ],
+      [
+       "sequential",
+       "153.6"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "out": "Pipelined : 51 s\n"
+  },
+  {
+   "line": 6,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "size_mb",
+       "10240"
+      ],
+      [
+       "slowest",
+       "200"
+      ],
+      [
+       "pipelined",
+       "51.2"
+      ],
+      [
+       "sequential",
+       "153.6"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "out": "Sequential: 154 s\n"
+  }
+ ]
+}</script>
+    </div>
+  </article>
+  <article class="wx">
+    <div class="wx__head"><span class="wx__num">Example 3</span><span class="lvl lvl--a">Advanced</span><span class="wx__tag">MapReduce · job timeline</span></div>
+    <h4>Estimate a whole job, stage by stage</h4>
+    <div class="wx__problem"><p class="wx__label">Problem statement</p><p>A job reads <b>40 GB</b> (128 MB splits). The cluster can run <b>60</b> map tasks at once. Each map takes <b>40 s</b>. Starting the ApplicationMaster takes <b>15 s</b>; after the maps, the shuffle and reduce take <b>90 s</b>; committing takes <b>5 s</b>. Estimate the total time.</p></div>
+    <div class="prob__io"><div><small>Input</small><pre>40 GB · 128 MB splits · 60 slots · 40 s/map · AM 15 s · shuffle+reduce 90 s · commit 5 s</pre></div><div><small>Expected output</small><pre>start AM         :   15 s
+maps             :  240 s
+shuffle + reduce :   90 s
+commit           :    5 s
+Total: 350 s for 320 maps in 6 waves</pre></div></div>
+    <div class="wx__approach"><p class="wx__label">Approach</p><ol><li>Splits = 40 GB ÷ 128 MB.</li><li>Map waves = splits ÷ 60, rounded up; map time = waves × 40 s.</li><li>Total = AM + map time + shuffle/reduce + commit.</li></ol></div>
+    <p class="wx__label">Solution: run it live</p>
+    <div class="runner">
+    <script type="application/json">{
+ "lang": "python",
+ "file": "main.py",
+ "tasks": [
+  {
+   "label": "Solution",
+   "hint": "The reducers really start fetching after 5% of maps finish, overlapping with the map phase. How would that change the estimate?",
+   "code": "import math\nsplits = math.ceil(40 * 1024 / 128)\nwaves = math.ceil(splits / 60)\nstages = {\"start AM\": 15, \"maps\": waves * 40, \"shuffle + reduce\": 90, \"commit\": 5}\nfor s, secs in stages.items():\n    print(f\"{s:17}: {secs:>4} s\")\nprint(f\"Total: {sum(stages.values())} s for {splits} maps in {waves} waves\")\n"
+  }
+ ]
+}</script>
+    </div>
+    <p class="wx__label">What happens in memory, step by step</p>
+    <p class="wx__how">Recorded from a real Python run: press <b>Next</b> to execute one line at a time. Watch variables change in each frame, and lists and dictionaries (numbered #1, #2 …) fill up as objects.</p>
+    <div class="tracer">
+    <script type="application/json">{
+ "lang": "python",
+ "code": [
+  "import math",
+  "splits = math.ceil(40 * 1024 / 128)",
+  "waves = math.ceil(splits / 60)",
+  "stages = {\"start AM\": 15, \"maps\": waves * 40, \"shuffle + reduce\": 90, \"commit\": 5}",
+  "for s, secs in stages.items():",
+  "    print(f\"{s:17}: {secs:>4} s\")",
+  "print(f\"Total: {sum(stages.values())} s for {splits} maps in {waves} waves\")"
+ ],
+ "steps": [
+  {
+   "line": 1,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": []
+    }
+   ],
+   "heap": []
+  },
+  {
+   "line": 2,
+   "phase": "Splits",
+   "note": "One map task per 128 MB split. <code>splits<\/code> is created: 320.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "splits",
+       "320"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "splits"
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "<code>waves<\/code> is created: 6.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "splits",
+       "320"
+      ],
+      [
+       "waves",
+       "6"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "waves"
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "<code>stages<\/code> is created: → dict #1. A new dict object (#1) is created: {&#x27;start AM&#x27;: 15, &#x27;maps&#x27;: 240, &#x27;shuffle + reduce&#x27;: 90, &#x27;commit&#x27;: 5}",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "splits",
+       "320"
+      ],
+      [
+       "waves",
+       "6"
+      ],
+      [
+       "stages",
+       "→ dict #1"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (4)<\/b> {&#x27;start AM&#x27;: 15, &#x27;maps&#x27;: 240, &#x27;shuffle + reduce&#x27;: 90, &#x27;commit&#x27;: 5}"
+   ],
+   "newVar": "stages"
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "<code>s<\/code> is created: &#x27;start AM&#x27;. <code>secs<\/code> is created: 15.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "splits",
+       "320"
+      ],
+      [
+       "waves",
+       "6"
+      ],
+      [
+       "stages",
+       "→ dict #1"
+      ],
+      [
+       "s",
+       "'start AM'"
+      ],
+      [
+       "secs",
+       "15"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (4)<\/b> {&#x27;start AM&#x27;: 15, &#x27;maps&#x27;: 240, &#x27;shuffle + reduce&#x27;: 90, &#x27;commit&#x27;: 5}"
+   ],
+   "newVar": "secs"
+  },
+  {
+   "line": 6,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "splits",
+       "320"
+      ],
+      [
+       "waves",
+       "6"
+      ],
+      [
+       "stages",
+       "→ dict #1"
+      ],
+      [
+       "s",
+       "'start AM'"
+      ],
+      [
+       "secs",
+       "15"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (4)<\/b> {&#x27;start AM&#x27;: 15, &#x27;maps&#x27;: 240, &#x27;shuffle + reduce&#x27;: 90, &#x27;commit&#x27;: 5}"
+   ],
+   "out": "start AM         :   15 s\n"
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "<code>s<\/code> changes to &#x27;maps&#x27;. <code>secs<\/code> changes to 240.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "splits",
+       "320"
+      ],
+      [
+       "waves",
+       "6"
+      ],
+      [
+       "stages",
+       "→ dict #1"
+      ],
+      [
+       "s",
+       "'maps'"
+      ],
+      [
+       "secs",
+       "240"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (4)<\/b> {&#x27;start AM&#x27;: 15, &#x27;maps&#x27;: 240, &#x27;shuffle + reduce&#x27;: 90, &#x27;commit&#x27;: 5}"
+   ],
+   "newVar": "secs"
+  },
+  {
+   "line": 6,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "splits",
+       "320"
+      ],
+      [
+       "waves",
+       "6"
+      ],
+      [
+       "stages",
+       "→ dict #1"
+      ],
+      [
+       "s",
+       "'maps'"
+      ],
+      [
+       "secs",
+       "240"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (4)<\/b> {&#x27;start AM&#x27;: 15, &#x27;maps&#x27;: 240, &#x27;shuffle + reduce&#x27;: 90, &#x27;commit&#x27;: 5}"
+   ],
+   "out": "maps             :  240 s\n"
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "<code>s<\/code> changes to &#x27;shuffle + reduce&#x27;. <code>secs<\/code> changes to 90.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "splits",
+       "320"
+      ],
+      [
+       "waves",
+       "6"
+      ],
+      [
+       "stages",
+       "→ dict #1"
+      ],
+      [
+       "s",
+       "'shuffle + reduce'"
+      ],
+      [
+       "secs",
+       "90"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (4)<\/b> {&#x27;start AM&#x27;: 15, &#x27;maps&#x27;: 240, &#x27;shuffle + reduce&#x27;: 90, &#x27;commit&#x27;: 5}"
+   ],
+   "newVar": "secs"
+  },
+  {
+   "line": 6,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "splits",
+       "320"
+      ],
+      [
+       "waves",
+       "6"
+      ],
+      [
+       "stages",
+       "→ dict #1"
+      ],
+      [
+       "s",
+       "'shuffle + reduce'"
+      ],
+      [
+       "secs",
+       "90"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (4)<\/b> {&#x27;start AM&#x27;: 15, &#x27;maps&#x27;: 240, &#x27;shuffle + reduce&#x27;: 90, &#x27;commit&#x27;: 5}"
+   ],
+   "out": "shuffle + reduce :   90 s\n"
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "<code>s<\/code> changes to &#x27;commit&#x27;. <code>secs<\/code> changes to 5.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "splits",
+       "320"
+      ],
+      [
+       "waves",
+       "6"
+      ],
+      [
+       "stages",
+       "→ dict #1"
+      ],
+      [
+       "s",
+       "'commit'"
+      ],
+      [
+       "secs",
+       "5"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (4)<\/b> {&#x27;start AM&#x27;: 15, &#x27;maps&#x27;: 240, &#x27;shuffle + reduce&#x27;: 90, &#x27;commit&#x27;: 5}"
+   ],
+   "newVar": "secs"
+  },
+  {
+   "line": 6,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "splits",
+       "320"
+      ],
+      [
+       "waves",
+       "6"
+      ],
+      [
+       "stages",
+       "→ dict #1"
+      ],
+      [
+       "s",
+       "'commit'"
+      ],
+      [
+       "secs",
+       "5"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (4)<\/b> {&#x27;start AM&#x27;: 15, &#x27;maps&#x27;: 240, &#x27;shuffle + reduce&#x27;: 90, &#x27;commit&#x27;: 5}"
+   ],
+   "out": "commit           :    5 s\n"
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "Nothing is left to loop over, so the loop ends and Python moves on.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "splits",
+       "320"
+      ],
+      [
+       "waves",
+       "6"
+      ],
+      [
+       "stages",
+       "→ dict #1"
+      ],
+      [
+       "s",
+       "'commit'"
+      ],
+      [
+       "secs",
+       "5"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (4)<\/b> {&#x27;start AM&#x27;: 15, &#x27;maps&#x27;: 240, &#x27;shuffle + reduce&#x27;: 90, &#x27;commit&#x27;: 5}"
+   ]
+  },
+  {
+   "line": 7,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "splits",
+       "320"
+      ],
+      [
+       "waves",
+       "6"
+      ],
+      [
+       "stages",
+       "→ dict #1"
+      ],
+      [
+       "s",
+       "'commit'"
+      ],
+      [
+       "secs",
+       "5"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (4)<\/b> {&#x27;start AM&#x27;: 15, &#x27;maps&#x27;: 240, &#x27;shuffle + reduce&#x27;: 90, &#x27;commit&#x27;: 5}"
+   ],
+   "out": "Total: 350 s for 320 maps in 6 waves\n"
+  }
+ ]
+}</script>
+    </div>
+  </article>
+</section>
+
+<section class="part" id="quiz">
+  <span class="part-label"><b>9</b> Quiz and revision</span>
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <script type="application/json">[
+ {
+  "q": "During an HDFS write, how does data reach the second and third DataNodes?",
+  "options": [
+   "The client sends it to each DataNode separately",
+   "Via the NameNode",
+   "Through a pipeline: DN1 forwards to DN2, which forwards to DN3",
+   "The ResourceManager copies it later"
+  ],
+  "answer": 2,
+  "why": "Data flows in a <b>pipeline<\/b>, and acknowledgements flow back along the same chain."
+ },
+ {
+  "q": "Which NameNode call gives the client the DataNodes for the next block?",
+  "options": [
+   "complete()",
+   "addBlock()",
+   "getBlockLocations()",
+   "renewLease()"
+  ],
+  "answer": 1,
+  "why": "<code>addBlock<\/code> allocates a new block ID and returns the pipeline of target DataNodes."
+ },
+ {
+  "q": "When reading a file, which replica does the client use first?",
+  "options": [
+   "The closest one by network distance",
+   "A random one",
+   "Always the first replica written",
+   "The one on the NameNode"
+  ],
+  "answer": 0,
+  "why": "The NameNode returns locations sorted by distance from the client; it reads the nearest and falls back to others if needed."
+ },
+ {
+  "q": "What does the client do if a checksum does not match while reading?",
+  "options": [
+   "Returns the corrupt bytes",
+   "Deletes the file",
+   "Restarts the cluster",
+   "Reads another replica and reports the corrupt one to the NameNode"
+  ],
+  "answer": 3,
+  "why": "Checksums catch corruption; the client switches replica and the bad one is replaced."
+ },
+ {
+  "q": "Who launches the MapReduce ApplicationMaster?",
+  "options": [
+   "The client, on the edge node",
+   "The NameNode",
+   "The ResourceManager, in a container on a NodeManager",
+   "The JobHistory Server"
+  ],
+  "answer": 2,
+  "why": "The RM allocates a container and asks a NodeManager to start the AM there. The application state goes from ACCEPTED to RUNNING."
+ },
+ {
+  "q": "Where do map tasks write their intermediate output?",
+  "options": [
+   "To HDFS with 3 replicas",
+   "To the local disk of the node they run on",
+   "To the NameNode",
+   "To the client"
+  ],
+  "answer": 1,
+  "why": "Map outputs are temporary, so they go to local disk (no replication). That is why a lost node forces finished maps to be re-run."
+ },
+ {
+  "q": "A job fails immediately with FileAlreadyExistsException. Why?",
+  "options": [
+   "The output directory already exists; MapReduce refuses to overwrite it",
+   "The input file is missing",
+   "HDFS is full",
+   "The jar is corrupt"
+  ],
+  "answer": 0,
+  "why": "The output check happens at submission to protect previous results. Delete or rename the old output, or choose a new path."
+ },
+ {
+  "q": "What does the _SUCCESS file in an output directory mean?",
+  "options": [
+   "The input was valid",
+   "The NameNode is healthy",
+   "The file is compressed",
+   "The job completed and its output was committed"
+  ],
+  "answer": 3,
+  "why": "The output committer writes <code>_SUCCESS<\/code> after all tasks succeed; workflows wait for it before reading the output."
+ }
+]</script>
+  </div>
+
+  <h3>Quick revision</h3>
+  <div class="revision">
+    <h3>Lesson 3.2 in one screen</h3>
+    <ul><li><b>Write:</b> <code>create</code> (lease) → per block <code>addBlock</code> → 64 KB packets through DN1 → DN2 → DN3, acks back → <code>complete</code>.</li><li>New pipeline for each block; last block only as big as needed.</li><li><b>Read:</b> <code>getBlockLocations</code> (sorted by distance) → read nearest DataNode directly → verify CRC → next block.</li><li>Masters never carry data. Pipeline failure → continue with remaining DataNodes; NameNode re-replicates later.</li><li><b>Job:</b> client checks output dir, computes splits, uploads jar/conf/splits to staging, submits to RM.</li><li>RM starts <b>MRAppMaster</b> (ACCEPTED → RUNNING); AM requests containers near each split.</li><li>Map → sort buffer (100 MB) → spill to <b>local disk</b> → partitions. Reducers fetch (shuffle) after 5% of maps.</li><li>Reduce → write to HDFS → output committer → <code>part-r-*</code> + <code>_SUCCESS</code>; AM unregisters; history to JobHistory.</li></ul>
+  </div>
+
+  <h3>Interview and viva questions</h3>
+  <div class="faq">
+    <details><summary>Explain the anatomy of a file write in HDFS.</summary><p>The client calls create() on the DistributedFileSystem, which makes an RPC to the NameNode; the NameNode checks permissions and that the file does not exist, records it and grants a lease. The client's output stream splits data into packets in a data queue. A DataStreamer asks the NameNode for a new block (addBlock), which returns a block ID and a pipeline of DataNodes chosen by the placement policy. Packets are sent to the first DataNode, which stores and forwards them to the second, and so on; acknowledgements return along the pipeline and packets are removed from the ack queue. This repeats for each block. On close(), remaining packets are flushed and acknowledged, and the client calls complete() on the NameNode.</p></details>
+    <details><summary>Explain the anatomy of a file read in HDFS.</summary><p>The client calls open(); the DistributedFileSystem asks the NameNode for the locations of the first blocks, sorted by network distance from the client. The input stream connects to the closest DataNode for the first block and streams the data, verifying checksums. At the end of the block it connects to the best DataNode for the next block, fetching more locations from the NameNode as needed. If a DataNode fails or a checksum does not match, it tries the next replica and reports the problem.</p></details>
+    <details><summary>What happens if a DataNode fails during a write?</summary><p>The pipeline is closed, packets in the ack queue are put back at the front of the data queue, the failed DataNode is removed, the current block on the good DataNodes gets a new generation stamp (so the partial replica on the failed node will be discarded later), and writing continues with the remaining DataNodes. The NameNode notices the block is under-replicated and creates another replica afterwards.</p></details>
+    <details><summary>Describe the steps in running a MapReduce job on YARN.</summary><p>The client checks the output path, computes input splits, copies the job jar, configuration and split information to a staging directory in HDFS, and submits the application to the ResourceManager. The RM allocates a container and a NodeManager launches the MRAppMaster. The AM requests containers for map tasks (with locality preferences) and later reduce tasks; NodeManagers launch them. Maps write partitioned, sorted output to local disk; reducers shuffle and merge it, run the reduce function and write output to HDFS through the output committer. The AM then cleans up, writes _SUCCESS, unregisters from the RM, and job history is available from the JobHistory Server.</p></details>
+    <details><summary>Why are map outputs written to local disk and not to HDFS?</summary><p>They are intermediate and short-lived; replicating them to HDFS would triple the write cost and network traffic for data that is deleted once the job finishes. The trade-off is that if a node is lost before reducers have fetched its map outputs, those map tasks must be re-run.</p></details>
+    
+  </div>
+
+  <h3 id="practice">Practice problems</h3>
+  <p class="prob-intro">Practise the two journeys with numbers and small simulations, from counting blocks to building a job timeline.</p>
+  <div class="probs">
+    <article class="prob"><div class="prob__head"><span class="prob__num">P1</span><span class="prob__tag prob__tag--easy">Easy</span><h4>Blocks and last block</h4></div>
+      <p>A 1,000 MB file is written with 128 MB blocks. How many blocks, and how big is the last one?</p>
+      <div class="prob__io"><div><small>Input</small><pre>1000 MB · 128 MB</pre></div><div><small>Expected output</small><pre>8 blocks; last block 104 MB</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>import math
+n = math.ceil(1000 / 128)
+print(n, &quot;blocks; last block&quot;, 1000 - (n - 1) * 128, &quot;MB&quot;)</code></pre><div class="output">8 blocks; last block 104 MB</div></div>
+        <p><b>How it works:</b> 8 blocks; the last holds 104 MB. HDFS does not pad it to 128 MB on disk.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P2</span><span class="prob__tag prob__tag--easy">Easy</span><h4>Packets per block</h4></div>
+      <p>How many 64 KB packets make up one full 128 MB block?</p>
+      <div class="prob__io"><div><small>Input</small><pre>128 MB · 64 KB</pre></div><div><small>Expected output</small><pre>2048 packets</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>print(128 * 1024 // 64, &quot;packets&quot;)</code></pre><div class="output">2048 packets</div></div>
+        <p><b>How it works:</b> 2,048 packets, each acknowledged by every DataNode in the pipeline.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P3</span><span class="prob__tag prob__tag--easy">Easy</span><h4>Replicas written</h4></div>
+      <p>A 2 GB file with replication 3: how many block replicas are written in total (128 MB blocks)?</p>
+      <div class="prob__io"><div><small>Input</small><pre>2 GB · 128 MB · ×3</pre></div><div><small>Expected output</small><pre>48 block replicas</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>print(2 * 1024 // 128 * 3, &quot;block replicas&quot;)</code></pre><div class="output">48 block replicas</div></div>
+        <p><b>How it works:</b> 16 blocks × 3 = 48 replicas, each one a file (plus a checksum file) on some DataNode's disk.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P4</span><span class="prob__tag prob__tag--medium">Medium</span><h4>Nearest replica for every block</h4></div>
+      <p>For a client on dn2, print the best replica of each block using distance 0/2/4.</p>
+      <div class="prob__io"><div><small>Input</small><pre>racks r1: dn1, dn2 · r2: dn3, dn4 · B1 [dn3, dn4, dn1] · B2 [dn4, dn3, dn2]</pre></div><div><small>Expected output</small><pre>B1 -&gt; dn1
+B2 -&gt; dn2</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>rack = {&quot;dn1&quot;: &quot;r1&quot;, &quot;dn2&quot;: &quot;r1&quot;, &quot;dn3&quot;: &quot;r2&quot;, &quot;dn4&quot;: &quot;r2&quot;}
+d = lambda a, b: 0 if a == b else 2 if rack[a] == rack[b] else 4
+for b, reps in {&quot;B1&quot;: [&quot;dn3&quot;, &quot;dn4&quot;, &quot;dn1&quot;], &quot;B2&quot;: [&quot;dn4&quot;, &quot;dn3&quot;, &quot;dn2&quot;]}.items():
+    print(b, &quot;-&gt;&quot;, min(reps, key=lambda r: d(&quot;dn2&quot;, r)))</code></pre><div class="output">B1 -&gt; dn1
+B2 -&gt; dn2</div></div>
+        <p><b>How it works:</b> B1 is read from dn1 (same rack), B2 from dn2 itself (same node, distance 0).</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P5</span><span class="prob__tag prob__tag--medium">Medium</span><h4>Map waves for a job</h4></div>
+      <p>A job reads 25 GB in 128 MB splits on a cluster with 50 map slots. How many map tasks and waves?</p>
+      <div class="prob__io"><div><small>Input</small><pre>25 GB · 128 MB · 50 slots</pre></div><div><small>Expected output</small><pre>200 maps in 4 waves</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>import math
+maps = math.ceil(25 * 1024 / 128)
+print(maps, &quot;maps in&quot;, math.ceil(maps / 50), &quot;waves&quot;)</code></pre><div class="output">200 maps in 4 waves</div></div>
+        <p><b>How it works:</b> 200 maps in 4 waves. Doubling the slots would halve the map phase, but not the AM start-up or the reduce phase.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P6</span><span class="prob__tag prob__tag--medium">Medium</span><h4>Output files of a job</h4></div>
+      <p>Print the names of the output files of a job with 4 reducers (Hadoop naming), plus the success marker.</p>
+      <div class="prob__io"><div><small>Input</small><pre>4 reducers</pre></div><div><small>Expected output</small><pre>[&#x27;part-r-00000&#x27;, &#x27;part-r-00001&#x27;, &#x27;part-r-00002&#x27;, &#x27;part-r-00003&#x27;, &#x27;_SUCCESS&#x27;]</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>files = [f&quot;part-r-{i:05d}&quot; for i in range(4)] + [&quot;_SUCCESS&quot;]
+print(files)</code></pre><div class="output">[&#x27;part-r-00000&#x27;, &#x27;part-r-00001&#x27;, &#x27;part-r-00002&#x27;, &#x27;part-r-00003&#x27;, &#x27;_SUCCESS&#x27;]</div></div>
+        <p><b>How it works:</b> One file per reducer: <code>part-r-00000</code>… Map-only jobs produce <code>part-m-*</code> files instead.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P7</span><span class="prob__tag prob__tag--business">Business problem</span><h4>Bulk load: client outside vs on the cluster</h4></div>
+      <p>A team uploads 5 TB per night. From an edge node outside the racks, every replica crosses the network. From a DataNode, replica 1 is written locally. How many TB of network traffic does each approach create?</p>
+      <div class="prob__io"><div><small>Input</small><pre>5 TB · replication 3</pre></div><div><small>Expected output</small><pre>From an edge node : 15 TB over the network
+From a DataNode   : 10 TB over the network</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>tb = 5
+outside = tb * 3
+on_node = tb * 2
+print(&quot;From an edge node :&quot;, outside, &quot;TB over the network&quot;)
+print(&quot;From a DataNode   :&quot;, on_node, &quot;TB over the network&quot;)</code></pre><div class="output">From an edge node : 15 TB over the network
+From a DataNode   : 10 TB over the network</div></div>
+        <p><b>How it works:</b> 15 TB vs 10 TB a night. Loading from cluster nodes (or with distributed loaders) saves a third of the network traffic, at the cost of the first node filling faster unless writes are spread out.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P8</span><span class="prob__tag prob__tag--business">Business problem</span><h4>SLA check for a nightly job</h4></div>
+      <p>The nightly job must finish within 30 minutes. Using the stage times below, does it meet the SLA, and how much slack is left?</p>
+      <div class="prob__io"><div><small>Input</small><pre>queue wait 4 min · AM start 0.5 min · maps 14 min · shuffle+reduce 8 min · commit 0.5 min</pre></div><div><small>Expected output</small><pre>Total 27.0 min; SLA met: True; slack 3.0 min</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>stages = {&quot;queue wait&quot;: 4, &quot;AM start&quot;: 0.5, &quot;maps&quot;: 14, &quot;shuffle + reduce&quot;: 8, &quot;commit&quot;: 0.5}
+total = sum(stages.values())
+print(f&quot;Total {total} min; SLA met: {total &lt;= 30}; slack {30 - total} min&quot;)</code></pre><div class="output">Total 27.0 min; SLA met: True; slack 3.0 min</div></div>
+        <p><b>How it works:</b> 27 minutes, 3 minutes of slack. The queue wait (time in ACCEPTED) is often forgotten in SLA estimates.</p>
+      </details>
+    </article>
+  </div>
+
+  <h3 id="scenarios">Real-world scenario questions (asked in company interviews)</h3>
+  <p class="scn-intro">Interviewers love asking you to narrate a write, a read or a job, and then break one step. Practise the narration and the failure cases.</p>
+  <div class="scenarios">
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Any company · concepts</span><span class="scn__tag scn__tag--level">Fresher</span></div>
+      <h4>“A DataNode dies while I'm writing a file. What happens?”</h4>
+      <p class="scn__situation">You have just explained the write pipeline. The interviewer asks what happens if DN2 crashes halfway through block 3.</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> do you know pipeline recovery, not just the happy path?</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ol>
+          <li>The client notices missing acknowledgements and closes the pipeline.</li>
+          <li>Unacknowledged packets are put back in the queue so nothing is lost.</li>
+          <li>DN2 is removed; the block on DN1 and DN3 gets a new generation stamp so DN2's partial copy will later be recognised as stale and deleted.</li>
+          <li>Writing continues to DN1 and DN3. The write succeeds as long as at least the minimum replication (1 by default) is met.</li>
+          <li>The NameNode later sees block 3 has 2 replicas and schedules a third.</li>
+        </ol>
+        <p class="scn__avoid"><b>Avoid:</b> “The write fails and the user must retry.”</p>
+      </div></details>
+    </article>
+
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Operations · troubleshooting</span><span class="scn__tag scn__tag--level">Fresher</span></div>
+      <h4>“could only be written to 0 of the 1 minReplication nodes”</h4>
+      <p class="scn__situation">A student's freshly installed cluster accepts <code>hdfs dfs -mkdir</code> but every <code>-put</code> fails with this message.</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> can you map an error to the write step where it happens?</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li><code>mkdir</code> only talks to the NameNode, so metadata works. The error comes at <code>addBlock</code>: the NameNode found <b>no DataNode</b> it could place a block on.</li>
+          <li>Check <code>jps</code>: is a DataNode running? Check <code>hdfs dfsadmin -report</code>: live DataNodes and free space.</li>
+          <li>Common causes: the DataNode failed to start (often a cluster-ID mismatch after re-formatting the NameNode), the disk is full, or the DataNode can't reach the NameNode (hostname/firewall).</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> reformatting the NameNode again; that wipes metadata and often causes the ID mismatch in the first place.</p>
+      </div></details>
+    </article>
+
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Data platform · operations</span><span class="scn__tag scn__tag--level">1–3 years</span></div>
+      <h4>Jobs stay in ACCEPTED for an hour</h4>
+      <p class="scn__situation">Every morning, newly submitted jobs sit in ACCEPTED state for a long time before running, although the cluster “isn't that busy”.</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> do you know what ACCEPTED means in the job lifecycle?</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>ACCEPTED means the RM has the application but has not yet started its <b>ApplicationMaster</b> container.</li>
+          <li>Check the queue: it may be at its capacity or at its limit for AMs (<code>maximum-am-resource-percent</code>), so new AMs wait even if some memory is free.</li>
+          <li>Check whether the AM container size fits on any node, and whether many small jobs are each holding an AM.</li>
+          <li>Fixes: adjust queue capacities or AM limits, schedule big jobs at different times, combine many tiny jobs.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> killing and resubmitting jobs; they go back to the end of the queue.</p>
+      </div></details>
+    </article>
+
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Data engineering · pipelines</span><span class="scn__tag scn__tag--level">1–3 years</span></div>
+      <h4>The downstream job read half-written output</h4>
+      <p class="scn__situation">A reporting job starts every day at 6 am and reads <code>/out/daily_sales</code>. Some days its numbers are too low. The upstream MapReduce job sometimes finishes after 6 am.</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> do you understand output commit and how pipelines should wait for it?</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>Successful task output is only moved into the final folder at commit, but a downstream job can still start before or during it, or read an old partial folder.</li>
+          <li>Make the reporting job depend on the upstream job's completion: in Airflow or Oozie, wait for the <code>_SUCCESS</code> file (or the job status) before starting.</li>
+          <li>Write each day to its own dated folder, so readers never see a folder that is being rewritten.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> “Just start the report later.” Time-based guesses break on slow days.</p>
+      </div></details>
+    </article>
+  </div>
+</section>
+
+<nav class="lesson-nav" id="lesson-nav" aria-label="Lesson navigation"></nav>
+<div class="ad-slot" data-slot="bottom"></div>
+</article>
+
+<aside class="lesson-side">
+  <nav class="toc" aria-label="In this lesson">
+    <h4>In this lesson</h4>
+    <ol>
+      <li><a href="#story">The story</a></li>
+      <li><a href="#definition">Definition</a></li><li><a href="#levels">Beginner → Advanced</a></li>
+      <li><a href="#types">Types and ways to use it</a></li>
+      <li><a href="#steps">Step by step</a></li>
+      <li><a href="#animation">See it happen</a></li>
+      <li><a href="#real-world">Real-world use</a></li>
+      <li><a href="#run">Run the code</a></li>
+      <li><a href="#tracer">Line by line</a></li>
+      <li><a href="#worked">Worked examples</a></li>
+      <li><a href="#quiz">Quiz and revision</a></li>
+      <li><a href="#practice">Practice problems</a></li>
+      <li><a href="#scenarios">Industry scenarios</a></li>
+    </ol>
+  </nav>
+  <div class="ad-slot" data-slot="side"></div>
+  <div class="outline" id="outline"></div>
+</aside>
+</div>
+</main>
+
+<footer class="site-footer">
+  <div class="wrap">
+    <div><h4>MyPhatshala</h4><p>Free programming and IT lessons that show what happens behind the screen.</p></div>
+    <div><h4>Learn</h4><a href="../../../../#tracks">All courses</a><a href="../../">Apache Hadoop syllabus</a></div>
+    <div><h4>Site</h4><a href="../../../../about.html">About</a><a href="../../../../contact.html">Contact</a><a href="../../../../privacy.html">Privacy policy</a><a href="../../../../disclaimer.html">Disclaimer</a></div>
+    <div class="copyright">© MyPhatshala. All lesson content, diagrams and animations are original. Please do not copy without permission.</div>
+  </div>
+</footer>
+
+<script src="../../../../data/courses/hadoop.js"></script>
+<script src="../../../../assets/js/lesson.js"></script>
+<script src="../../../../assets/js/cluster-sim.js"></script>
+<script src="../../../../assets/js/ads.js"></script>
+<script src="../../../../assets/js/site.js"></script>
+</body>
+</html>

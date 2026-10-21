@@ -1,0 +1,64 @@
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Retail · requirements</span><span class="scn__tag scn__tag--level">Fresher</span></div>
+      <h4>“Make the daily sales report real-time”</h4>
+      <p class="scn__situation">A store manager asks for the daily sales report, which is read once each morning, to be built on Kafka and Flink “because real-time is modern”.</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> do you choose based on the business need, not on fashion?</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <p>Ask how the report is used. If it is read once at 9 am, an answer at 6 am is as good as one at 8:59:59. A <b>nightly batch</b> job is cheaper, simpler to test and easy to re-run.</p>
+        <ul>
+          <li>If the manager actually needs intraday decisions (restocking during a sale), offer an hourly batch or a small live counter for just that metric.</li>
+          <li>Keep stream processing for cases where a late answer loses money or customers.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> building a 24×7 streaming system for a report nobody reads in real time.</p>
+      </div></details>
+    </article>
+
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Fintech · fraud</span><span class="scn__tag scn__tag--level">1–3 years</span></div>
+      <h4>Fraud is found the next morning</h4>
+      <p class="scn__situation">A wallet company's fraud report runs every night. Losses keep growing because stolen accounts are emptied within minutes. Design the change.</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> can you design a basic streaming flow with state, windows and a fallback to batch?</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ol>
+          <li>Publish every payment attempt to Kafka <b>before</b> it is completed.</li>
+          <li>A stream processor (Flink or Spark Structured Streaming) keeps <b>per-account state</b>: recent payments, known devices, usual location.</li>
+          <li>Apply rules and a model score over <b>sliding windows</b> (for example, payments in the last 2 minutes) and return allow, hold or block within the latency budget.</li>
+          <li>Keep the <b>nightly batch</b> job to retrain the model and tune rules on full history.</li>
+          <li>Monitor latency and false positives; blocking genuine customers has a cost too.</li>
+        </ol>
+        <p class="scn__avoid"><b>Avoid:</b> running the nightly job every 5 minutes and calling it real time; it still can't stop a payment in progress.</p>
+      </div></details>
+    </article>
+
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Payments · correctness</span><span class="scn__tag scn__tag--level">1–3 years</span></div>
+      <h4>The live revenue counter is higher than the bank's figure</h4>
+      <p class="scn__situation">A streaming dashboard shows ₹1.02 crore for today; the settlement file says ₹1.00 crore. The stream job restarted twice today after crashes.</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> do you understand delivery guarantees and how restarts cause duplicates?</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <p>The pipeline is probably <b>at-least-once</b>: after each crash it re-read events since its last checkpoint and counted some twice.</p>
+        <ul>
+          <li>Make results idempotent: de-duplicate on transaction id, or write with upserts keyed by id.</li>
+          <li>Use the engine's checkpointing with transactional or idempotent sinks for <b>exactly-once</b> results.</li>
+          <li>Reconcile daily against the settlement file and alert on differences.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> “fixing” the dashboard by subtracting an estimated difference.</p>
+      </div></details>
+    </article>
+
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Mobile gaming · late data</span><span class="scn__tag scn__tag--level">3+ years</span></div>
+      <h4>Players' events arrive hours late</h4>
+      <p class="scn__situation">A mobile game sends events when the phone is online. Players on flights or in villages with weak signal send events hours later. Hourly “active players” counts keep changing after they are published.</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> event time, watermarks, allowed lateness and how batch corrects stream results.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>Aggregate by <b>event time</b> (from the phone), not by arrival time.</li>
+          <li>Set a <b>watermark</b> that matches business needs, e.g. 10 minutes, and publish hourly counts as <i>provisional</i>.</li>
+          <li>Send events later than the allowed lateness to a <b>side output</b> instead of dropping them.</li>
+          <li>Run a <b>nightly batch</b> job over the complete data in the lake to publish <i>final</i> numbers. That is the Lambda idea from Lesson 4.4.</li>
+          <li>Guard against wrong device clocks: reject or clamp event times far in the future.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> waiting hours before showing any number, or silently dropping late events.</p>
+      </div></details>
+    </article>

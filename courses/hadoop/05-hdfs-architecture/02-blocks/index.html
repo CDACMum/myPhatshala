@@ -1,0 +1,3061 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Blocks (and how they differ from splits) | MyPhatshala</title>
+<meta name="description" content="HDFS blocks: why files are stored as 128 MB blocks, how the last block uses only its real size, the 1 MB minimum, and why block size is chosen per file. Shown on a real Hadoop 3.5.0 cluster: a record cut across a block boundary, and a MapReduce job whose 5 splits read 70,485 + 67,321 + 65,498 + 65,574 + 31,123 = 300,001 records. Block vs input split, RecordReader rules, Python simulator, quiz and interview scenarios.">
+<meta name="mp:minutes" content="26">
+<link rel="canonical" href="https://myphatshala.in/courses/hadoop/05-hdfs-architecture/02-blocks/">
+<meta property="og:title" content="Blocks (and how they differ from splits) · MyPhatshala">
+<meta property="og:description" content="HDFS cuts files by bytes, even mid-record. Splits put the records back together. See both on a real cluster.">
+<link rel="icon" href="../../../../assets/img/logo.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Fraunces:ital,opsz,wght@0,9..144,600;0,9..144,700;1,9..144,600&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../../../../assets/css/style.css">
+<link rel="stylesheet" href="../../../../assets/css/lesson.css">
+<link rel="stylesheet" href="../../../../assets/css/cluster-sim.css">
+<script src="../../../../assets/js/config.js"></script>
+<script>try { const t = localStorage.getItem("mp-theme"); if (t) document.documentElement.dataset.theme = t; } catch (e) {}</script>
+<script type="application/ld+json">{"@context": "https://schema.org", "@type": "LearningResource", "name": "Blocks (and how they differ from splits)", "learningResourceType": "Lesson", "educationalLevel": "Beginner → Intermediate", "isAccessibleForFree": true, "inLanguage": "en", "isPartOf": {"@type": "Course", "name": "Apache Hadoop", "provider": {"@type": "Organization", "name": "MyPhatshala"}}}</script>
+</head>
+<body style="--track:#B45309" data-lesson="05-hdfs-architecture/02-blocks" data-course-root="../../">
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="site-header">
+  <div class="wrap">
+    <a class="brand" href="../../../../" aria-label="MyPhatshala home"><img src="../../../../assets/img/logo.svg" width="34" height="34" alt=""><span>My<b>Phatshala</b></span></a>
+    <nav class="nav" aria-label="Main">
+      <a href="../../../../#tracks">All courses</a>
+      <a href="../../">Apache Hadoop syllabus</a>
+      <button class="theme-btn" id="theme-btn" aria-label="Toggle dark mode"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg></button>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+<section class="lesson-hero">
+  <div class="wrap">
+    <nav class="crumbs" aria-label="Breadcrumb"><a href="../../../../">Home</a><span>›</span><a href="../../../../#track-big-data">Big Data Engineering</a><span>›</span><a href="../../">Apache Hadoop</a><span>›</span><b>Lesson 5.2</b></nav>
+    <h1>Blocks (and how they differ from splits)</h1>
+    <p class="lead">HDFS stores every file as fixed-size blocks, cut at exact byte counts with no regard for lines or records. MapReduce then divides the work into input splits that follow those blocks but always deliver whole records. This lesson shows both on a real cluster: a canteen order sliced in two by a block boundary, and the job counters proving every order was still read exactly once.</p>
+    <div class="lesson-meta"><span>Module 5 · HDFS architecture</span><span>⏱ 26 min</span><span>Beginner → Intermediate</span><span>Real block files</span><span>Hadoop-exact split simulator</span><span>Cluster Playground</span><span>8 practice problems</span></div>
+  </div>
+</section>
+
+<div class="wrap lesson-layout">
+<article class="lesson-main">
+<!-- ======================= PART 1: THE STORY ======================= -->
+<section class="part" id="story">
+  <span class="part-label"><b>1</b> The story</span>
+  <h2>A cut through the middle of an order</h2>
+  <div class="story">
+    <p class="narration">Kabir stored the canteen file with 1 MB blocks and opened the end of the first block on a DataNode. The last line reads <code>71484,poha,2</code>. The first line of the next block is just <code>5</code>. Order 71484 cost 25 rupees, and HDFS has sliced it in half. “Our MapReduce job will read a poha for 2 rupees!” he says. But the job's answer was correct. Why?</p>
+
+    <div class="scene">
+      <svg viewBox="0 0 640 180" role="img" aria-label="A file is cut into blocks at exact byte positions, even in the middle of a line. Input splits follow the blocks, but the reader of each split finishes the last line from the next block.">
+        <g font-size="10">
+          <text x="20" y="28" font-weight="700" class="s-ink">Blocks: cut by bytes</text>
+          <rect x="20" y="38" width="290" height="36" rx="6" class="s-soft-blue" style="stroke:var(--blue)"/><text x="165" y="60" text-anchor="middle" class="mono s-blue" font-size="9">block 0 … 71483,dosa,45⏎71484,poha,2</text>
+          <rect x="314" y="38" width="290" height="36" rx="6" class="s-soft-blue" style="stroke:var(--blue)"/><text x="459" y="60" text-anchor="middle" class="mono s-blue" font-size="9">5⏎71485,idli,30⏎71486,idli,30 … block 1</text>
+          <path d="M312 30v52" style="stroke:var(--red);stroke-width:2;stroke-dasharray:4 3"/><text x="312" y="96" text-anchor="middle" font-size="8.6" class="s-red">byte 1,048,576</text>
+          <text x="20" y="124" font-weight="700" class="s-ink">Splits: whole records</text>
+          <rect x="20" y="134" width="304" height="30" rx="6" class="s-soft-acc" style="stroke:var(--track)"/><text x="172" y="153" text-anchor="middle" class="mono s-acc" font-size="9">map 0 reads … 71484,poha,25 ✓</text>
+          <rect x="330" y="134" width="274" height="30" rx="6" class="s-soft-acc" style="stroke:var(--track)"/><text x="467" y="153" text-anchor="middle" class="mono s-acc" font-size="9">map 1 skips “5”, starts at 71485</text>
+        </g>
+        <text x="632" y="176" text-anchor="end" class="s-wm">myphatshala.in</text>
+      </svg>
+    </div>
+
+    <div class="panel panel--right"><div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#DDEFE6"/><path d="M12 64c2-12 10-18 20-18s18 6 20 18z" fill="#F4F1EA"/><path d="M28 46l4 8 4-8" fill="#2F7D5B"/><circle cx="32" cy="28" r="12" fill="#B57A50"/><path d="M20 26c0-8 5-13 12-13s12 5 12 13c-2-3-6-5-12-5s-10 2-12 5z" fill="#5A5A5A"/><path d="M22 32c1 8 5 11 10 11s9-3 10-11c-2 3-6 4-10 4s-8-1-10-4z" fill="#5A5A5A"/><circle cx="27" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><circle cx="37" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><path d="M30.4 29h3.2" stroke="#1B2433" stroke-width="1.4"/><circle cx="27" cy="29" r="1.1" fill="#1B2433"/><circle cx="37" cy="29" r="1.1" fill="#1B2433"/></svg></div><div class="bubble"><b class="who">Arjun Sir</b><p>Two different ideas are hiding in your question. A <b>block</b> is how HDFS <i>stores</i> a file: fixed-size pieces of bytes, cut wherever the byte count says, even in the middle of a word. HDFS doesn't know or care what a “line” is.</p></div></div>
+    <div class="panel"><div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#FCE6D6"/><path d="M14 64c2-12 9-18 18-18s16 6 18 18z" fill="#2E5AAC"/><circle cx="32" cy="29" r="12" fill="#C68B5E"/><path d="M19 29c0-10 6-15 13-15s13 5 13 15c-3-5-7-8-13-8s-10 3-13 8z" fill="#2A1B14"/><path d="M43 27c3 6 3 14 0 20" stroke="#2A1B14" stroke-width="4" fill="none" stroke-linecap="round"/><circle cx="27.5" cy="30" r="1.5" fill="#2A1B14"/><circle cx="36.5" cy="30" r="1.5" fill="#2A1B14"/><path d="M28 35q4 3 8 0" stroke="#2A1B14" stroke-width="1.6" fill="none" stroke-linecap="round"/><circle cx="32" cy="24" r="1.2" fill="#D64545"/></svg></div><div class="bubble"><b class="who">Riya</b><p>And the job?</p></div></div>
+    <div class="panel panel--right"><div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#DDEFE6"/><path d="M12 64c2-12 10-18 20-18s18 6 20 18z" fill="#F4F1EA"/><path d="M28 46l4 8 4-8" fill="#2F7D5B"/><circle cx="32" cy="28" r="12" fill="#B57A50"/><path d="M20 26c0-8 5-13 12-13s12 5 12 13c-2-3-6-5-12-5s-10 2-12 5z" fill="#5A5A5A"/><path d="M22 32c1 8 5 11 10 11s9-3 10-11c-2 3-6 4-10 4s-8-1-10-4z" fill="#5A5A5A"/><circle cx="27" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><circle cx="37" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><path d="M30.4 29h3.2" stroke="#1B2433" stroke-width="1.4"/><circle cx="27" cy="29" r="1.1" fill="#1B2433"/><circle cx="37" cy="29" r="1.1" fill="#1B2433"/></svg></div><div class="bubble"><b class="who">Arjun Sir</b><p>The job works with <b>input splits</b>: one split per map task, usually one per block. But a split is <i>logical</i>. Its reader finishes the last record even if that means reading a few bytes from the next block, and the next reader skips the broken first line. Every order is read exactly once, whole.</p></div></div>
+    <div class="panel"><div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#E1E9F7"/><path d="M12 64c2-12 10-18 20-18s18 6 20 18z" fill="#B45309"/><circle cx="32" cy="29" r="12" fill="#A9714A"/><path d="M19 27c0-9 6-14 13-14s13 5 13 14c-2-4-5-6-8-6-3 3-9 4-13 3-2 1-4 2-5 3z" fill="#1E1A17"/><circle cx="27.5" cy="30" r="1.5" fill="#1E1A17"/><circle cx="36.5" cy="30" r="1.5" fill="#1E1A17"/><path d="M27 35.5q5 3.5 10 0" stroke="#1E1A17" stroke-width="1.6" fill="none" stroke-linecap="round"/><rect x="41" y="40" width="10" height="7" rx="1.5" fill="#2E5AAC"/></svg></div><div class="bubble"><b class="who">Kabir</b><p>So the 2-rupee poha never exists.</p></div></div>
+    <div class="panel panel--right"><div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#DDEFE6"/><path d="M12 64c2-12 10-18 20-18s18 6 20 18z" fill="#F4F1EA"/><path d="M28 46l4 8 4-8" fill="#2F7D5B"/><circle cx="32" cy="28" r="12" fill="#B57A50"/><path d="M20 26c0-8 5-13 12-13s12 5 12 13c-2-3-6-5-12-5s-10 2-12 5z" fill="#5A5A5A"/><path d="M22 32c1 8 5 11 10 11s9-3 10-11c-2 3-6 4-10 4s-8-1-10-4z" fill="#5A5A5A"/><circle cx="27" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><circle cx="37" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><path d="M30.4 29h3.2" stroke="#1B2433" stroke-width="1.4"/><circle cx="27" cy="29" r="1.1" fill="#1B2433"/><circle cx="37" cy="29" r="1.1" fill="#1B2433"/></svg></div><div class="bubble"><b class="who">Arjun Sir</b><p>Never. Today we'll prove it on the real cluster: count the records each map task read, and check that they add up to the whole file.</p></div></div>
+  </div>
+</section>
+
+<!-- ======================= PART 2: DEFINITION ======================= -->
+<section class="part" id="definition">
+  <span class="part-label"><b>2</b> Definition</span>
+  <h2>HDFS blocks (and input splits)</h2>
+  <div class="def">
+    <div class="def__formal"><small>Formal definition (write this in exams)</small>
+      <p>An <b>HDFS block</b> is the unit in which a file is stored and replicated: a file is divided into blocks of a fixed size (<code>dfs.blocksize</code>, default <b>128 MB</b> in Hadoop 2 and 3), chosen per file by the writing client; every block except the last is full, and the last block occupies only as much space as its data. Each block is replicated independently and placed on DataNodes by the NameNode. An <b>input split</b> is a <b>logical</b> division of the input for MapReduce: one split is processed by one map task. <code>FileInputFormat</code> creates splits that by default match block boundaries, and the <b>RecordReader</b> (e.g. <code>LineRecordReader</code>) ensures records crossing a boundary are read whole by exactly one split.</p></div>
+    <div class="def__simple"><small>In simple words</small>
+      <p>Blocks are how HDFS chops a file for storage: by size, not by meaning. Splits are how a job divides the work: about one per block, but always in whole records.</p></div>
+  </div>
+
+  <h3>Words you'll meet in this lesson</h3>
+  <div class="terms">
+    <div class="term"><b>dfs.blocksize</b><span>Block size for new files, set by the writer. Default 134,217,728 bytes (128 MB).</span></div>
+    <div class="term"><b>Last block</b><span>Usually smaller; uses only the disk space of its data (no padding).</span></div>
+    <div class="term"><b>Input split</b><span>The piece of input one map task processes: path, start offset, length, preferred hosts.</span></div>
+    <div class="term"><b>RecordReader</b><span>Turns a split's bytes into records; finishes boundary records, skips partial first lines.</span></div>
+    <div class="term"><b>Block ID</b><span>Unique number, e.g. <code>blk_1073741826</code>, plus a generation stamp <code>_1002</code>.</span></div>
+    <div class="term"><b>Seek vs transfer</b><span>Large blocks keep disk seek time small compared with reading time.</span></div>
+  </div>
+
+  <h3>Block facts (Hadoop 3.5.0 defaults)</h3>
+  <table class="facts" style="table-layout:fixed;overflow-wrap:anywhere">
+    <tr><th>Default block size</th><td>134,217,728 bytes = 128 MB (<code>dfs.blocksize</code>; Hadoop 1 used 64 MB)</td></tr>
+    <tr><th>Minimum block size</th><td>1,048,576 bytes = 1 MB (<code>dfs.namenode.fs-limits.min-block-size</code>)</td></tr>
+    <tr><th>Who chooses</th><td>The client writing the file; can differ per file (<code>-D dfs.blocksize=…</code>)</td></tr>
+    <tr><th>Last block</th><td>Stores only real data: our 4,692,009-byte file uses one 4,692,009-byte block file, not 128 MB</td></tr>
+    <tr><th>Splits by default</th><td>One per block (<code>mapreduce.input.fileinputformat.split.minsize</code>/<code>maxsize</code> can change this)</td></tr>
+  </table>
+
+  <h3 id="levels">Blocks and splits at three levels</h3>
+  <div class="modlab levels"><div class="modlab__bar"><b>Pick your level. New to this? Start at Beginner and climb.</b><button type="button" data-mod="b">Beginner</button><button type="button" data-mod="i">Intermediate</button><button type="button" data-mod="a">Advanced</button></div>
+    <div class="modlab__panel" data-mod="b"><h4><span class="lvl lvl--b">Beginner</span> A long train and its coaches</h4>
+      <ul>
+        <li>A file is a long train. HDFS cuts it into coaches of equal length (blocks), even if a passenger's seat gets split by the cut.</li>
+        <li>Each coach is parked in three different stations (replicas).</li>
+        <li>Ticket checkers (map tasks) each take a coach. A checker who finds a passenger half in the next coach walks over and checks the whole passenger; the next checker ignores that half.</li>
+      </ul>
+
+    </div>
+    <div class="modlab__panel" data-mod="i"><h4><span class="lvl lvl--i">Intermediate</span> Why big blocks?</h4>
+      <ul>
+        <li>A disk spends a few milliseconds seeking before it can read. With large blocks, reading takes much longer than seeking, so disks work at full speed.</li>
+        <li>Fewer blocks mean less NameNode memory and fewer map tasks to schedule.</li>
+        <li>Too big and you get too few map tasks (little parallelism) for medium files.</li>
+        <li>So 128 MB is a balance; 256 MB is common for very large tables, smaller sizes are rarely useful.</li>
+      </ul>
+
+    </div>
+    <div class="modlab__panel" data-mod="a"><h4><span class="lvl lvl--a">Advanced</span> Splits in detail</h4>
+      <ul>
+        <li>Split size = max(minSize, min(maxSize, blockSize)); with defaults it equals the block size.</li>
+        <li>A small last piece (up to 10% larger than a split) is merged into the previous split (<code>SPLIT_SLOP</code> = 1.1).</li>
+        <li>Non-splittable inputs (e.g. a gzip file) become one split however many blocks they have (Lesson 10.3).</li>
+        <li>Each split carries the hosts of its block, so YARN can run the map task where the data is (locality).</li>
+        <li>Reading the end of a boundary record can be a small remote read from another DataNode.</li>
+      </ul>
+
+    </div>
+  </div>
+  <div class="callout callout--exam"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19V5a2 2 0 0 1 2-2h12v18H6a2 2 0 0 1-2-2zm0 0a2 2 0 0 1 2-2h12"/></svg><p><b>Exam tip:</b> “Differentiate HDFS block and input split”: block = <b>physical</b> division for storage, fixed size (128 MB), may cut a record, replicated; split = <b>logical</b> division for processing, one per map task, respects record boundaries, usually equals one block. Draw a record crossing a block boundary and show which split reads it.</p></div>
+</section>
+
+<!-- ======================= PART 3: TYPES AND WAYS TO USE IT ======================= -->
+<section class="part" id="types">
+  <span class="part-label"><b>3</b> Types and ways to use it</span>
+  <h2>Block vs split, and choosing a block size</h2>
+  <div class="table-wrap">
+  <table class="compare" style="min-width:600px">
+    <thead><tr><th></th><th>Block</th><th>Input split</th></tr></thead>
+    <tbody>
+      <tr><td><b>Kind</b></td><td>Physical: bytes on disks</td><td>Logical: a range of the input</td></tr>
+      <tr><td><b>Belongs to</b></td><td>HDFS</td><td>MapReduce / Spark / Hive input formats</td></tr>
+      <tr><td><b>Size set by</b></td><td><code>dfs.blocksize</code> when writing</td><td>Block size and split min/max settings when reading</td></tr>
+      <tr><td><b>Respects records?</b></td><td>No, cuts at a byte count</td><td>Yes, via the RecordReader</td></tr>
+      <tr><td><b>Count for our file</b></td><td>5 blocks (1 MB) or 1 block (128 MB)</td><td>5 splits or 1 split (real job output)</td></tr>
+      <tr><td><b>Replicated?</b></td><td>Yes, 3 copies</td><td>No; it just points to data</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <h3>Common block sizes</h3>
+  <div class="cards">
+    <div class="card"><h4>64 MB</h4><p>Hadoop 1 default. Still seen on old clusters; more blocks, more NameNode memory.</p><span class="tag">Legacy</span></div>
+    <div class="card"><h4>128 MB</h4><p>Hadoop 2/3 default. Good for most data.</p><span class="tag">Default</span></div>
+    <div class="card"><h4>256 MB</h4><p>Very large tables scanned in full; fewer, longer map tasks.</p><span class="tag">Big tables</span></div>
+    <div class="card"><h4>1 MB</h4><p>The minimum allowed. Only for demos like this lesson: terrible for real data.</p><span class="tag">Demo only</span></div>
+  </div>
+  <div class="callout callout--tip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18h6M10 22h4M12 2a7 7 0 0 0-4 12.7V17h8v-2.3A7 7 0 0 0 12 2z"/></svg><p>Block size is per file and set when the file is written. To change it for existing data, rewrite the data (for example with <code>distcp</code> or by re-running the job that produced it with a different <code>dfs.blocksize</code>).</p></div>
+</section>
+
+<!-- ======================= PART 4: STEP BY STEP ======================= -->
+<section class="part" id="steps">
+  <span class="part-label"><b>4</b> Step by step</span>
+  <h2>See blocks and splits on the real cluster</h2>
+  <p>Uses the Module 5 lab cluster and the two copies of <code>canteen_orders.csv</code> from Lesson 5.1.</p>
+  <ol class="stepper">
+    <li><h4>Compare block sizes of the two copies</h4>
+      <div class="code" data-lang="bash" data-file="Terminal"><pre><code>docker compose exec namenode hdfs dfs -stat "%o %b %n" data/canteen_orders.csv data/canteen_1mb.csv
+docker compose exec namenode hdfs fsck /user/hadoop/data/canteen_1mb.csv -files -blocks | grep blk_</code></pre><div class="output">134217728 4692009 canteen_orders.csv
+1048576 4692009 canteen_1mb.csv
+0. BP-1507681208-…:blk_1073741826_1002 len=1048576 Live_repl=3
+1. BP-1507681208-…:blk_1073741827_1003 len=1048576 Live_repl=3
+2. BP-1507681208-…:blk_1073741828_1004 len=1048576 Live_repl=3
+3. BP-1507681208-…:blk_1073741829_1005 len=1048576 Live_repl=3
+4. BP-1507681208-…:blk_1073741830_1006 len=497705 Live_repl=3</div></div>
+      <span class="behind">4 full blocks of 1,048,576 bytes and a last block of 497,705 bytes: 4 × 1,048,576 + 497,705 = 4,692,009. The 128 MB copy has a single block.</span></li>
+    <li><h4>Check the real files on a DataNode</h4>
+      <div class="code" data-lang="bash" data-file="Terminal (on datanode-1)"><pre><code>find /tmp/hadoop-hadoop/dfs/data -name "blk_*" | grep -v meta | sort | xargs ls -l</code></pre><div class="output">-rw-r--r-- 1 hadoop users 4692009 … blk_1073741825
+-rw-r--r-- 1 hadoop users 1048576 … blk_1073741826
+-rw-r--r-- 1 hadoop users 1048576 … blk_1073741827
+-rw-r--r-- 1 hadoop users 1048576 … blk_1073741828
+-rw-r--r-- 1 hadoop users 1048576 … blk_1073741829
+-rw-r--r-- 1 hadoop users  497705 … blk_1073741830</div></div>
+      <span class="behind"><code>blk_1073741825</code> belongs to a file with 128 MB blocks, yet the file on disk is 4,692,009 bytes. A block is a maximum size, not a reservation.</span></li>
+    <li><h4>Find the record cut by the boundary</h4>
+      <div class="code" data-lang="bash" data-file="Terminal (on datanode-1, in the block folder)"><pre><code>tail -c 60 blk_1073741826
+head -c 60 blk_1073741827</code></pre><div class="output">ha,25
+71481,poha,25
+71482,poha,25
+71483,dosa,45
+71484,poha,2
+5
+71485,idli,30
+71486,idli,30
+71487,dosa,45
+71488,vada pav,2</div></div>
+      <span class="behind">The 1,048,576th byte falls between the “2” and the “5” of order 71484. HDFS stores bytes; it has no idea this is a CSV.</span></li>
+    <li><h4>Run a job and count splits</h4>
+      <div class="code" data-lang="bash" data-file="Terminal"><pre><code>docker compose exec namenode hadoop jar \
+  /opt/hadoop/share/hadoop/mapreduce/hadoop-mapreduce-examples-3.5.0.jar wordcount \
+  -D mapreduce.framework.name=local data/canteen_1mb.csv out/wc1</code></pre><div class="output">INFO  FileInputFormat:303 - Total input files to process : 1
+INFO  JobSubmitter:203 - number of splits:5
+		Map input records=70485
+		Map input records=67321
+		Map input records=65498
+		Map input records=65574
+		Map input records=31123
+INFO  Job:1765 - Job job_local479046282_0001 completed successfully
+		Map input records=300001</div></div>
+      <span class="behind">5 blocks → 5 splits → 5 map tasks (run locally inside the client here, reading from HDFS). Their records add up to 300,001: the header plus 3 lakh orders, each read exactly once.</span></li>
+    <li><h4>Same job on the 128 MB copy</h4>
+      <div class="code" data-lang="bash" data-file="Terminal"><pre><code>docker compose exec namenode hadoop jar \
+  /opt/hadoop/share/hadoop/mapreduce/hadoop-mapreduce-examples-3.5.0.jar wordcount \
+  -D mapreduce.framework.name=local data/canteen_orders.csv out/wc128</code></pre><div class="output">INFO  JobSubmitter:203 - number of splits:1
+		Map input records=300001</div></div>
+      <span class="behind">One block, one split, one map task reading all 300,001 lines. Same data, different parallelism, decided by how the file was written.</span></li>
+  </ol>
+  <div class="callout callout--warn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3 2 21h20L12 3z"/><path d="M12 10v5M12 18v.5"/></svg><p>Don't shrink the block size to “get more map tasks” for big data. Smaller blocks multiply NameNode objects and task overhead. Tune the split size of the job instead, or use a format and engine that parallelise well.</p></div>
+</section>
+
+<!-- ======================= PART 5: SEE IT HAPPEN ======================= -->
+<section class="part" id="animation">
+  <span class="part-label"><b>5</b> See it happen</span>
+  <h2>How map 0 and map 1 share order 71484</h2>
+  <p>The real bytes around the first block boundary of <code>canteen_1mb.csv</code>, and what each map task's RecordReader does with them.</p>
+  <div class="anim" data-frames="6">
+    <div class="anim__title">Blocks cut bytes, splits keep records <span>6 steps</span></div>
+    <div class="anim__views">
+      <div class="view view--see">
+        <span class="view__tag">What you see</span>
+        <svg viewBox="0 0 360 250" role="img" aria-label="Bytes around the block boundary">
+          <rect x="14" y="14" width="332" height="206" rx="8" class="s-board"/>
+          <text x="26" y="32" font-size="9" class="mono" style="fill:#7F8C86">bytes near offset 1,048,576</text>
+          <g font-size="9" class="mono"><text x="26" y="58" style="fill:#9FD3B8">71482,poha,25⏎</text><text x="26" y="74" style="fill:#9FD3B8">71483,dosa,45⏎</text><text x="26" y="90" style="fill:#F5C77E">71484,poha,2</text><text x="26" y="118" style="fill:#F5C77E">5⏎</text><text x="26" y="134" style="fill:#9FD3B8">71485,idli,30⏎</text><text x="26" y="150" style="fill:#9FD3B8">71486,idli,30⏎</text></g>
+          <path d="M20 103h320" style="stroke:#FF8A80;stroke-width:1.6;stroke-dasharray:5 4"/><text x="336" y="99" text-anchor="end" font-size="8" class="mono" style="fill:#FF8A80">block 0 | block 1</text>
+          <g data-on="1"><text x="180" y="196" text-anchor="middle" font-size="10" class="s-chalk">HDFS cut at exactly 1 MB.</text></g>
+          <g data-on="2"><rect x="22" y="46" width="150" height="50" rx="4" style="fill:none;stroke:#9FD3B8;stroke-width:1.6"/><text x="180" y="196" text-anchor="middle" font-size="10" class="s-chalk">map 0 reads its block line by line…</text></g>
+          <g data-on="3"><rect x="22" y="80" width="150" height="44" rx="4" style="fill:none;stroke:#F5C77E;stroke-width:2"/><text x="180" y="196" text-anchor="middle" font-size="10" class="s-chalk">…and finishes 71484 from block 1.</text></g>
+          <g data-on="4"><path d="M20 118h60" style="stroke:#FF8A80;stroke-width:2"/><text x="180" y="196" text-anchor="middle" font-size="10" class="s-chalk">map 1 skips the partial “5⏎”.</text></g>
+          <g data-on="5"><rect x="22" y="124" width="150" height="32" rx="4" style="fill:none;stroke:#9FD3B8;stroke-width:1.6"/><text x="180" y="196" text-anchor="middle" font-size="10" class="s-chalk">map 1 starts at 71485.</text></g>
+          <g data-on="6"><text x="180" y="180" text-anchor="middle" font-size="9" class="mono" style="fill:#9FD3B8">70485+67321+65498+65574+31123</text><text x="180" y="198" text-anchor="middle" font-size="9" class="mono" style="fill:#9FD3B8">= 300001 records ✓</text></g>
+          <text x="352" y="244" text-anchor="end" class="s-wm">myphatshala.in</text>
+        </svg>
+        <ol class="caps" hidden>
+          <li>The real bytes: the block boundary falls inside order 71484, between “2” and “5”.</li>
+          <li>Map task 0 reads its split, record by record, from the start of the file.</li>
+          <li>At the end of its split it is in the middle of a record, so it keeps reading into block 1 until the line ends: it gets the whole “71484,poha,25”.</li>
+          <li>Map task 1 starts at byte 1,048,576. Because it is not the first split, it throws away everything up to the first newline.</li>
+          <li>Its first record is the complete order 71485.</li>
+          <li>The real job counters add up to every line of the file: no record lost, none read twice.</li>
+        </ol>
+      </div>
+
+      <div class="view view--behind">
+        <span class="view__tag">Behind the screen</span>
+        <svg viewBox="0 0 360 250" role="img" aria-label="Blocks on DataNodes and splits to map tasks">
+          <g font-size="8.6">
+            <rect x="16" y="20" width="60" height="30" rx="4" class="s-soft-blue" style="stroke:var(--blue)"/><text x="46" y="39" text-anchor="middle" class="s-blue">blk 0</text>
+            <rect x="82" y="20" width="60" height="30" rx="4" class="s-soft-blue" style="stroke:var(--blue)"/><text x="112" y="39" text-anchor="middle" class="s-blue">blk 1</text>
+            <rect x="148" y="20" width="60" height="30" rx="4" class="s-soft-blue" style="stroke:var(--blue)"/><text x="178" y="39" text-anchor="middle" class="s-blue">blk 2</text>
+            <rect x="214" y="20" width="60" height="30" rx="4" class="s-soft-blue" style="stroke:var(--blue)"/><text x="244" y="39" text-anchor="middle" class="s-blue">blk 3</text>
+            <rect x="280" y="20" width="30" height="30" rx="4" class="s-soft-blue" style="stroke:var(--blue)"/><text x="295" y="39" text-anchor="middle" class="s-blue">4</text>
+          </g>
+          <text x="180" y="230" text-anchor="middle" font-size="8.6" class="s-ink2">blocks: 4 × 1,048,576 + 497,705 bytes, on DataNodes</text>
+          <g data-on="2-">
+            <rect x="16" y="90" width="60" height="30" rx="4" class="s-soft-acc" style="stroke:var(--track)"/><text x="46" y="109" text-anchor="middle" font-size="8.6" class="s-acc">map 0</text>
+            <path d="M46 50v40" class="s-line"/>
+          </g>
+          <g data-on="3-"><path d="M76 105c10 0 14-40 16-55" style="fill:none;stroke:var(--track);stroke-width:2"/><text x="112" y="86" font-size="7.6" class="s-acc">reads a few bytes</text><text x="112" y="96" font-size="7.6" class="s-acc">of blk 1 (maybe remote)</text></g>
+          <g data-on="4-"><rect x="82" y="130" width="60" height="30" rx="4" class="s-soft-acc" style="stroke:var(--track)"/><text x="112" y="149" text-anchor="middle" font-size="8.6" class="s-acc">map 1</text><path d="M112 50v80" class="s-line"/></g>
+          <g data-on="6"><rect x="148" y="90" width="60" height="30" rx="4" class="s-soft-acc" style="stroke:var(--track)"/><text x="178" y="109" text-anchor="middle" font-size="8.6" class="s-acc">map 2</text><rect x="214" y="130" width="60" height="30" rx="4" class="s-soft-acc" style="stroke:var(--track)"/><text x="244" y="149" text-anchor="middle" font-size="8.6" class="s-acc">map 3</text><rect x="280" y="90" width="60" height="30" rx="4" class="s-soft-acc" style="stroke:var(--track)"/><text x="310" y="109" text-anchor="middle" font-size="8.6" class="s-acc">map 4</text></g>
+          <g data-on="1"><text x="180" y="190" text-anchor="middle" font-size="9" class="s-ink2">blocks: fixed size, any byte can be a boundary</text></g>
+          <g data-on="2-3"><text x="180" y="190" text-anchor="middle" font-size="9" class="s-ink2">one split per block, one map task per split</text></g>
+          <g data-on="4-5"><text x="180" y="190" text-anchor="middle" font-size="9" class="s-ink2">every split except the first skips a partial first line</text></g>
+          <g data-on="6"><text x="180" y="190" text-anchor="middle" font-size="9" font-weight="700" class="s-green">5 blocks → 5 splits → 5 map tasks</text><text x="180" y="206" text-anchor="middle" font-size="8.6" class="s-ink2">(a 128 MB block size gave 1 of each)</text></g>
+          <text x="352" y="246" text-anchor="end" class="s-wm">myphatshala.in</text>
+        </svg>
+        <ol class="caps" hidden>
+          <li>The file sits in HDFS as five blocks; each is replicated on three DataNodes.</li>
+          <li><code>FileInputFormat</code> creates one split per block, and YARN runs one map task per split.</li>
+          <li>Map 0 reads past its split's end into block 1 to finish the last record. Sometimes that block is on another machine: a small remote read.</li>
+          <li>Map 1 starts at its block, skipping the first partial line that map 0 already handled.</li>
+          <li>The rule is the same at every boundary.</li>
+          <li>Result: five map tasks for five blocks. The file written with 128 MB blocks gave one split and one map task.</li>
+        </ol>
+      </div>
+    </div>
+  </div>
+
+  <h3 id="playground">Try it yourself: block size in the playground</h3>
+  <p>Change <b>Block</b> before each upload and compare how many blocks the same file becomes.</p>
+  <div class="csim"><script type="application/json">{"title": "Same file, different block sizes", "intro": "<p>Upload a <b>1 GB<\/b> file three times with Block set to <b>64<\/b>, <b>128<\/b> and <b>256<\/b> MB. Compare the block counts in the NameNode metadata tab, then run the job.<\/p>", "racks": 2, "nodes": 3, "features": ["upload", "job", "fsck"], "try": [{"text": "Upload 1 GB with <b>64 MB<\/b> blocks.", "on": "upload-done"}, {"text": "Upload 1 GB with <b>128 MB<\/b> blocks.", "on": "upload-done"}, {"text": "Upload 1 GB with <b>256 MB<\/b> blocks: 16, 8, then 4 blocks for the same data.", "on": "upload-done"}, {"text": "Run the job: one map task per block of the input.", "on": "job-done"}]}</script></div>
+</section>
+
+<!-- ======================= PART 6: REAL-WORLD USE ======================= -->
+<section class="part" id="real-world">
+  <span class="part-label"><b>6</b> Real-world use</span>
+  <h2>Blocks and splits at work</h2>
+
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="20" y="20" width="80" height="50" rx="6" class="s-soft-blue" style="stroke:var(--blue)"/><text x="60" y="42" text-anchor="middle" font-size="8.6" font-weight="700" class="s-blue">256 MB</text><text x="60" y="58" text-anchor="middle" font-size="8.6" class="s-ink">big fact tables</text></svg></div>
+    <div><h4>1. Bigger blocks for huge tables</h4>
+      <p>Teams writing multi-terabyte fact tables often use 256 MB blocks (and matching Parquet row groups), halving block counts and NameNode load while keeping enough parallelism.</p>
+      <div class="uc-flow"><span>Huge table</span><i>→</i><span class="java">256 MB blocks</span><i>→</i><span>Fewer objects</span></div></div>
+  </div>
+
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="20" y="20" width="80" height="50" rx="6" class="s-soft-acc" style="stroke:var(--track)"/><text x="60" y="42" text-anchor="middle" font-size="8.6" font-weight="700" class="s-acc">split.maxsize</text><text x="60" y="58" text-anchor="middle" font-size="8.6" class="s-ink">more mappers</text></svg></div>
+    <div><h4>2. Tuning splits, not blocks</h4>
+      <p>When a CPU-heavy job needs more parallel tasks, engineers lower the job's maximum split size instead of rewriting data with smaller blocks.</p>
+      <div class="uc-flow"><span>Slow job</span><i>→</i><span class="java">Smaller splits</span><i>→</i><span>More map tasks</span></div></div>
+  </div>
+
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="20" y="20" width="80" height="50" rx="6" class="s-card2"/><text x="60" y="42" text-anchor="middle" font-size="8.6" font-weight="700" class="s-ink">.gz = 1 split</text><text x="60" y="58" text-anchor="middle" font-size="8.6" class="s-ink2">bottleneck</text></svg></div>
+    <div><h4>3. Unsplittable files</h4>
+      <p>A 10 GB gzip log is 80 blocks but one split, so one map task reads it all. Ingestion teams store logs in splittable formats (bzip2, or Parquet/ORC with Snappy) to avoid this.</p>
+      <div class="uc-flow"><span>One .gz</span><i>→</i><span class="java">One mapper</span><i>→</i><span>Use splittable formats</span></div></div>
+  </div>
+
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="20" y="20" width="80" height="50" rx="6" class="s-soft-green" style="stroke:var(--green)"/><text x="60" y="42" text-anchor="middle" font-size="8.6" font-weight="700" class="s-green">Spark</text><text x="60" y="58" text-anchor="middle" font-size="8.6" class="s-ink">partitions ≈ splits</text></svg></div>
+    <div><h4>4. Same idea in Spark</h4>
+      <p>When Spark reads files from HDFS, its initial partitions come from the same Hadoop input splits, so block size also affects how many tasks a Spark stage starts with.</p>
+      <div class="uc-flow"><span>HDFS blocks</span><i>→</i><span class="java">Splits</span><i>→</i><span>Spark partitions</span></div></div>
+  </div>
+  <p class="muted">Simplified; organisations differ in tools and policies.</p>
+</section>
+
+
+<div class="ad-slot" data-slot="mid"></div>
+
+<section class="part" id="run">
+  <span class="part-label"><b>7</b> Run the code</span>
+  <h2>Cut a file into blocks, then read it in splits</h2>
+  <p>This program stores a small CSV in 32-byte “blocks” (as HDFS would with a tiny block size), shows how lines get cut, then reads each split with Hadoop's two rules: <i>skip the partial first line unless you are split 0</i> and <i>finish the record that starts inside your split</i>.</p>
+  <div class="code" data-lang="python" data-file="main.py"><pre><code>data = &quot;1001,samosa,18\n1002,vada pav,20\n1003,poha,25\n1004,dosa,45\n1005,chai,15\n&quot;
+BLOCK = 32
+blocks = [data[i:i + BLOCK] for i in range(0, len(data), BLOCK)]
+for i, b in enumerate(blocks):
+    print(f&quot;block {i}: {b!r}&quot;)
+
+for i in range(len(blocks)):
+    start, end = i * BLOCK, min((i + 1) * BLOCK, len(data))
+    pos = start if i == 0 else data.index(&quot;\n&quot;, start - 1) + 1
+    records = []
+    while pos &lt; end:
+        nl = data.index(&quot;\n&quot;, pos)
+        records.append(data[pos:nl])
+        pos = nl + 1
+    print(f&quot;split {i}: {records}&quot;)</code></pre><div class="output">block 0: &#x27;1001,samosa,18\n1002,vada pav,20\n&#x27;
+block 1: &#x27;1003,poha,25\n1004,dosa,45\n1005,c&#x27;
+block 2: &#x27;hai,15\n&#x27;
+split 0: [&#x27;1001,samosa,18&#x27;, &#x27;1002,vada pav,20&#x27;]
+split 1: [&#x27;1003,poha,25&#x27;, &#x27;1004,dosa,45&#x27;, &#x27;1005,chai,15&#x27;]
+split 2: []</div></div>
+  <ul class="anno"><li><code>blocks = [data[i:i + BLOCK] for i in range(0, len(data), BLOCK)]</code><span>Blocks are cut every 32 characters, wherever that falls. Look for cut-off orders in the output.</span></li><li><code>pos = start if i == 0 else data.index(&quot;\n&quot;, start - 1) + 1</code><span>Rule 1: every split except the first skips to just after the first newline at or after its start (looking one byte back, in case the split starts exactly at a line).</span></li><li><code>while pos &lt; end:</code><span>Rule 2: a record that <b>starts</b> before the end of the split belongs to it, even if it ends in the next block.</span></li></ul>
+  <div class="runner">
+    <script type="application/json">{
+ "lang": "python",
+ "file": "main.py",
+ "tasks": [
+  {
+   "label": "1 · Blocks vs splits",
+   "hint": "Press <b>Run<\/b>. Which orders are cut by block boundaries, and which split reads each of them whole?",
+   "code": "data = \"1001,samosa,18\\n1002,vada pav,20\\n1003,poha,25\\n1004,dosa,45\\n1005,chai,15\\n\"\nBLOCK = 32\nblocks = [data[i:i + BLOCK] for i in range(0, len(data), BLOCK)]\nfor i, b in enumerate(blocks):\n    print(f\"block {i}: {b!r}\")\n\nfor i in range(len(blocks)):\n    start, end = i * BLOCK, min((i + 1) * BLOCK, len(data))\n    pos = start if i == 0 else data.index(\"\\n\", start - 1) + 1\n    records = []\n    while pos < end:\n        nl = data.index(\"\\n\", pos)\n        records.append(data[pos:nl])\n        pos = nl + 1\n    print(f\"split {i}: {records}\")\n"
+  },
+  {
+   "label": "2 · Change the block size",
+   "hint": "<b>Predict first:<\/b> with <code>BLOCK = 20<\/code>, how many blocks and how many records per split? Every order must still appear exactly once.",
+   "code": "data = \"1001,samosa,18\\n1002,vada pav,20\\n1003,poha,25\\n1004,dosa,45\\n1005,chai,15\\n\"\nBLOCK = 20\nn = (len(data) + BLOCK - 1) // BLOCK\ntotal = 0\nfor i in range(n):\n    start, end = i * BLOCK, min((i + 1) * BLOCK, len(data))\n    pos = start if i == 0 else data.index(\"\\n\", start - 1) + 1\n    count = 0\n    while pos < end:\n        pos = data.index(\"\\n\", pos) + 1\n        count += 1\n    total += count\n    print(f\"split {i}: {count} record(s)\")\nprint(n, \"blocks,\", total, \"records in total\")\n"
+  },
+  {
+   "label": "3 · Blocks for a file size",
+   "hint": "How many blocks, and how big is the last one, for the real 4,692,009-byte file with 1 MB and 128 MB blocks?",
+   "code": "size = 4_692_009\nfor block in [1_048_576, 134_217_728]:\n    n = -(-size // block)\n    last = size - (n - 1) * block\n    print(f\"block {block:>11,}: {n} block(s), last block {last:,} bytes\")\n"
+  },
+  {
+   "label": "4 · Why 128 MB?",
+   "hint": "A disk seeks for 10 ms and reads 150 MB/s. What share of time is spent seeking for blocks of 1, 64, 128 and 256 MB?",
+   "code": "seek_s, mb_per_s = 0.010, 150\nfor mb in [1, 64, 128, 256]:\n    read_s = mb / mb_per_s\n    print(f\"{mb:>4} MB block: seeking {seek_s / (seek_s + read_s):.1%} of the time\")\n"
+  },
+  {
+   "label": "5 · Spot the error",
+   "hint": "This reader drops a record at every boundary. Compare with Rule 2 in the main program and fix it.",
+   "code": "data = \"a1\\nb22\\nc333\\nd4444\\n\"\nBLOCK = 6\nfor i in range(-(-len(data) // BLOCK)):\n    start, end = i * BLOCK, min((i + 1) * BLOCK, len(data))\n    pos = start if i == 0 else data.index(\"\\n\", start - 1) + 1\n    recs = []\n    while pos < end:\n        nl = data.index(\"\\n\", pos)\n        if nl < end:\n            recs.append(data[pos:nl])\n        pos = nl + 1\n    print(i, recs)\n"
+  }
+ ]
+}</script>
+  </div>
+  <h3 id="pc">Run it on your PC: predict Hadoop's split counters exactly</h3>
+  <p>This script applies HDFS block cutting and Hadoop's <code>LineRecordReader</code> rules to the real <code>canteen_orders.csv</code> (from <code>make_canteen.py</code>, Lesson 4.3) with 1 MB blocks. Save it as <code>blocks_and_splits.py</code> next to the CSV and run it. Then compare with the job counters in Part 4.</p>
+  <div class="pcrun"><h4>Blocks, splits and the cut record, without Hadoop</h4>
+  <div class="code" data-lang="bash" data-file="blocks_and_splits.py"><pre><code># blocks_and_splits.py: cut a file into HDFS-style blocks, then count records per split
+# the way Hadoop&#x27;s LineRecordReader does (no Hadoop needed).
+
+FILE = &quot;canteen_orders.csv&quot;
+BLOCK = 1024 * 1024                       # same as -D dfs.blocksize=1048576
+data = open(FILE, &quot;rb&quot;).read()
+size = len(data)
+starts = list(range(0, size, BLOCK))
+print(f&quot;{FILE}: {size:,} bytes -&gt; {len(starts)} blocks of up to {BLOCK:,} bytes&quot;)
+
+for i, start in enumerate(starts):
+    end = min(start + BLOCK, size)
+    pos = start
+    if start != 0:                        # not the first split: skip the partial first line
+        pos = data.index(b&quot;\n&quot;, start - 1) + 1
+    records = 0
+    while pos &lt; end:                      # a record that STARTS inside the split belongs to it
+        nl = data.find(b&quot;\n&quot;, pos)
+        pos = size if nl == -1 else nl + 1
+        records += 1
+    print(f&quot;split {i}: bytes {start:&gt;7}-{end - 1:&gt;7}  records {records:&gt;6}&quot;)
+
+cut = BLOCK                               # show the line broken by the first block boundary
+line_start = data.rindex(b&quot;\n&quot;, 0, cut) + 1
+line_end = data.index(b&quot;\n&quot;, cut)
+print(&quot;record cut by block 0/1:&quot;, data[line_start:cut], &quot;+&quot;, data[cut:line_end])
+
+# In a terminal:
+#   python3 blocks_and_splits.py</code></pre><div class="output">canteen_orders.csv: 4,692,009 bytes -&gt; 5 blocks of up to 1,048,576 bytes
+split 0: bytes       0-1048575  records  70485
+split 1: bytes 1048576-2097151  records  67321
+split 2: bytes 2097152-3145727  records  65498
+split 3: bytes 3145728-4194303  records  65574
+split 4: bytes 4194304-4692008  records  31123
+record cut by block 0/1: b&#x27;71484,poha,2&#x27; + b&#x27;5&#x27;</div></div>
+  <p class="muted">Every count matches the five “Map input records” counters of the real Hadoop job, and the cut record is the same one found in the block files on the DataNode.</p></div>
+</section>
+
+<section class="part" id="tracer">
+  <span class="part-label"><b>8</b> Line by line</span>
+  <h2>Reading split 1, one line at a time</h2>
+  <p>Follow the reader of the <b>second</b> split. Watch how it skips the partial line and where it stops.</p>
+  <div class="tracer">
+    <script type="application/json">{
+ "lang": "python",
+ "code": [
+  "data = \"71483,dosa,45\\n71484,poha,25\\n71485,idli,30\\n\"",
+  "start, end = 26, len(data)",
+  "pos = data.index(\"\\n\", start - 1) + 1",
+  "records = []",
+  "while pos < end:",
+  "    nl = data.index(\"\\n\", pos)",
+  "    records.append(data[pos:nl])",
+  "    pos = nl + 1",
+  "print(records)"
+ ],
+ "steps": [
+  {
+   "line": 1,
+   "phase": "Python",
+   "note": "<code>data<\/code> is created: &#x27;71483,dosa,45\\n71484,poha,25\\n71485,idli,30\\n&#x27;.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "data",
+       "'71483,dosa,45\\n71484,poha,25\\n71485,idli,30\\n'"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "data"
+  },
+  {
+   "line": 2,
+   "phase": "Boundary",
+   "note": "Byte 26 is inside “71484,poha,25” (between “2” and “5”). <code>start<\/code> is created: 26. <code>end<\/code> is created: 42.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "data",
+       "'71483,dosa,45\\n71484,poha,25\\n71485,idli,30\\n'"
+      ],
+      [
+       "start",
+       "26"
+      ],
+      [
+       "end",
+       "42"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "end"
+  },
+  {
+   "line": 3,
+   "phase": "Skip",
+   "note": "Jump past the next newline: the partial record belongs to the previous split. <code>pos<\/code> is created: 28.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "data",
+       "'71483,dosa,45\\n71484,poha,25\\n71485,idli,30\\n'"
+      ],
+      [
+       "start",
+       "26"
+      ],
+      [
+       "end",
+       "42"
+      ],
+      [
+       "pos",
+       "28"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "pos"
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "<code>records<\/code> is created: → list #1. A new list object (#1) is created: []",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "data",
+       "'71483,dosa,45\\n71484,poha,25\\n71485,idli,30\\n'"
+      ],
+      [
+       "start",
+       "26"
+      ],
+      [
+       "end",
+       "42"
+      ],
+      [
+       "pos",
+       "28"
+      ],
+      [
+       "records",
+       "→ list #1"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (0)<\/b> []"
+   ],
+   "newVar": "records"
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "The condition is <b>True<\/b>, so the indented block runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "data",
+       "'71483,dosa,45\\n71484,poha,25\\n71485,idli,30\\n'"
+      ],
+      [
+       "start",
+       "26"
+      ],
+      [
+       "end",
+       "42"
+      ],
+      [
+       "pos",
+       "28"
+      ],
+      [
+       "records",
+       "→ list #1"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (0)<\/b> []"
+   ]
+  },
+  {
+   "line": 6,
+   "phase": "Python",
+   "note": "<code>nl<\/code> is created: 41.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "data",
+       "'71483,dosa,45\\n71484,poha,25\\n71485,idli,30\\n'"
+      ],
+      [
+       "start",
+       "26"
+      ],
+      [
+       "end",
+       "42"
+      ],
+      [
+       "pos",
+       "28"
+      ],
+      [
+       "records",
+       "→ list #1"
+      ],
+      [
+       "nl",
+       "41"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (0)<\/b> []"
+   ],
+   "newVar": "nl"
+  },
+  {
+   "line": 7,
+   "phase": "Read",
+   "note": "Whole records from here on. Object #1 list now holds [&#x27;71485,idli,30&#x27;]",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "data",
+       "'71483,dosa,45\\n71484,poha,25\\n71485,idli,30\\n'"
+      ],
+      [
+       "start",
+       "26"
+      ],
+      [
+       "end",
+       "42"
+      ],
+      [
+       "pos",
+       "28"
+      ],
+      [
+       "records",
+       "→ list #1"
+      ],
+      [
+       "nl",
+       "41"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (1)<\/b> [&#x27;71485,idli,30&#x27;]"
+   ]
+  },
+  {
+   "line": 8,
+   "phase": "Python",
+   "note": "<code>pos<\/code> changes to 42.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "data",
+       "'71483,dosa,45\\n71484,poha,25\\n71485,idli,30\\n'"
+      ],
+      [
+       "start",
+       "26"
+      ],
+      [
+       "end",
+       "42"
+      ],
+      [
+       "pos",
+       "42"
+      ],
+      [
+       "records",
+       "→ list #1"
+      ],
+      [
+       "nl",
+       "41"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (1)<\/b> [&#x27;71485,idli,30&#x27;]"
+   ],
+   "newVar": "pos"
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "The condition is <b>False<\/b>, so the indented block is skipped.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "data",
+       "'71483,dosa,45\\n71484,poha,25\\n71485,idli,30\\n'"
+      ],
+      [
+       "start",
+       "26"
+      ],
+      [
+       "end",
+       "42"
+      ],
+      [
+       "pos",
+       "42"
+      ],
+      [
+       "records",
+       "→ list #1"
+      ],
+      [
+       "nl",
+       "41"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (1)<\/b> [&#x27;71485,idli,30&#x27;]"
+   ]
+  },
+  {
+   "line": 9,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "data",
+       "'71483,dosa,45\\n71484,poha,25\\n71485,idli,30\\n'"
+      ],
+      [
+       "start",
+       "26"
+      ],
+      [
+       "end",
+       "42"
+      ],
+      [
+       "pos",
+       "42"
+      ],
+      [
+       "records",
+       "→ list #1"
+      ],
+      [
+       "nl",
+       "41"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (1)<\/b> [&#x27;71485,idli,30&#x27;]"
+   ],
+   "out": "['71485,idli,30']\n"
+  }
+ ]
+}</script>
+  </div>
+
+<h3 id="worked">Worked examples: real problems, solved and traced in memory</h3>
+  <p class="wx-intro">Three block calculations that come up in real projects: how many blocks and map tasks a data set produces, how a block-size change affects the NameNode, and how splits are formed with the 10% slop rule. Each runs live and is traced in memory.</p>
+  <article class="wx">
+    <div class="wx__head"><span class="wx__num">Example 1</span><span class="lvl lvl--b">Beginner</span><span class="wx__tag">Planning · tasks</span></div>
+    <h4>How many map tasks will this job start?</h4>
+    <div class="wx__problem"><p class="wx__label">Problem statement</p><p>A job reads three files: 1 GB, 300 MB and 50 MB, all with 128 MB blocks. How many blocks, and how many map tasks (one per split, splits = blocks by default)?</p></div>
+    <div class="prob__io"><div><small>Input</small><pre>1024 MB · 300 MB · 50 MB · 128 MB blocks</pre></div><div><small>Expected output</small><pre>sales.csv     1024 MB -&gt; 8 block(s)
+returns.csv    300 MB -&gt; 3 block(s)
+stores.csv      50 MB -&gt; 1 block(s)
+map tasks: 12</pre></div></div>
+    <div class="wx__approach"><p class="wx__label">Approach</p><ol><li>Blocks per file = ceil(size / 128).</li><li>Every file starts its own splits; small files still need one.</li><li>Sum them.</li></ol></div>
+    <p class="wx__label">Solution: run it live</p>
+    <div class="runner">
+    <script type="application/json">{
+ "lang": "python",
+ "file": "main.py",
+ "tasks": [
+  {
+   "label": "Solution",
+   "hint": "Replace stores.csv with 500 files of 100 KB. How many map tasks now? Many small files mean many tiny tasks.",
+   "code": "import math\nfiles = {\"sales.csv\": 1024, \"returns.csv\": 300, \"stores.csv\": 50}\ntotal = 0\nfor name, mb in files.items():\n    n = math.ceil(mb / 128)\n    total += n\n    print(f\"{name:12} {mb:>5} MB -> {n} block(s)\")\nprint(\"map tasks:\", total)\n"
+  }
+ ]
+}</script>
+    </div>
+    <p class="wx__label">What happens in memory, step by step</p>
+    <p class="wx__how">Recorded from a real Python run: press <b>Next</b> to execute one line at a time. Watch variables change in each frame, and lists and dictionaries (numbered #1, #2 …) fill up as objects.</p>
+    <div class="tracer">
+    <script type="application/json">{
+ "lang": "python",
+ "code": [
+  "import math",
+  "files = {\"sales.csv\": 1024, \"returns.csv\": 300, \"stores.csv\": 50}",
+  "total = 0",
+  "for name, mb in files.items():",
+  "    n = math.ceil(mb / 128)",
+  "    total += n",
+  "    print(f\"{name:12} {mb:>5} MB -> {n} block(s)\")",
+  "print(\"map tasks:\", total)"
+ ],
+ "steps": [
+  {
+   "line": 1,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": []
+    }
+   ],
+   "heap": []
+  },
+  {
+   "line": 2,
+   "phase": "Python",
+   "note": "<code>files<\/code> is created: → dict #1. A new dict object (#1) is created: {&#x27;sales.csv&#x27;: 1024, &#x27;returns.csv&#x27;: 300, &#x27;stores.csv&#x27;: 50}",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "files",
+       "→ dict #1"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;sales.csv&#x27;: 1024, &#x27;returns.csv&#x27;: 300, &#x27;stores.csv&#x27;: 50}"
+   ],
+   "newVar": "files"
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "<code>total<\/code> is created: 0.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "files",
+       "→ dict #1"
+      ],
+      [
+       "total",
+       "0"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;sales.csv&#x27;: 1024, &#x27;returns.csv&#x27;: 300, &#x27;stores.csv&#x27;: 50}"
+   ],
+   "newVar": "total"
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "<code>name<\/code> is created: &#x27;sales.csv&#x27;. <code>mb<\/code> is created: 1024.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "files",
+       "→ dict #1"
+      ],
+      [
+       "total",
+       "0"
+      ],
+      [
+       "name",
+       "'sales.csv'"
+      ],
+      [
+       "mb",
+       "1024"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;sales.csv&#x27;: 1024, &#x27;returns.csv&#x27;: 300, &#x27;stores.csv&#x27;: 50}"
+   ],
+   "newVar": "mb"
+  },
+  {
+   "line": 5,
+   "phase": "Per file",
+   "note": "A 50 MB file still costs a whole map task. <code>n<\/code> is created: 8.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "files",
+       "→ dict #1"
+      ],
+      [
+       "total",
+       "0"
+      ],
+      [
+       "name",
+       "'sales.csv'"
+      ],
+      [
+       "mb",
+       "1024"
+      ],
+      [
+       "n",
+       "8"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;sales.csv&#x27;: 1024, &#x27;returns.csv&#x27;: 300, &#x27;stores.csv&#x27;: 50}"
+   ],
+   "newVar": "n"
+  },
+  {
+   "line": 6,
+   "phase": "Python",
+   "note": "<code>total<\/code> changes to 8.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "files",
+       "→ dict #1"
+      ],
+      [
+       "total",
+       "8"
+      ],
+      [
+       "name",
+       "'sales.csv'"
+      ],
+      [
+       "mb",
+       "1024"
+      ],
+      [
+       "n",
+       "8"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;sales.csv&#x27;: 1024, &#x27;returns.csv&#x27;: 300, &#x27;stores.csv&#x27;: 50}"
+   ],
+   "newVar": "total"
+  },
+  {
+   "line": 7,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "files",
+       "→ dict #1"
+      ],
+      [
+       "total",
+       "8"
+      ],
+      [
+       "name",
+       "'sales.csv'"
+      ],
+      [
+       "mb",
+       "1024"
+      ],
+      [
+       "n",
+       "8"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;sales.csv&#x27;: 1024, &#x27;returns.csv&#x27;: 300, &#x27;stores.csv&#x27;: 50}"
+   ],
+   "out": "sales.csv     1024 MB -> 8 block(s)\n"
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "<code>name<\/code> changes to &#x27;returns.csv&#x27;. <code>mb<\/code> changes to 300.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "files",
+       "→ dict #1"
+      ],
+      [
+       "total",
+       "8"
+      ],
+      [
+       "name",
+       "'returns.csv'"
+      ],
+      [
+       "mb",
+       "300"
+      ],
+      [
+       "n",
+       "8"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;sales.csv&#x27;: 1024, &#x27;returns.csv&#x27;: 300, &#x27;stores.csv&#x27;: 50}"
+   ],
+   "newVar": "mb"
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "<code>n<\/code> changes to 3.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "files",
+       "→ dict #1"
+      ],
+      [
+       "total",
+       "8"
+      ],
+      [
+       "name",
+       "'returns.csv'"
+      ],
+      [
+       "mb",
+       "300"
+      ],
+      [
+       "n",
+       "3"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;sales.csv&#x27;: 1024, &#x27;returns.csv&#x27;: 300, &#x27;stores.csv&#x27;: 50}"
+   ],
+   "newVar": "n"
+  },
+  {
+   "line": 6,
+   "phase": "Python",
+   "note": "<code>total<\/code> changes to 11.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "files",
+       "→ dict #1"
+      ],
+      [
+       "total",
+       "11"
+      ],
+      [
+       "name",
+       "'returns.csv'"
+      ],
+      [
+       "mb",
+       "300"
+      ],
+      [
+       "n",
+       "3"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;sales.csv&#x27;: 1024, &#x27;returns.csv&#x27;: 300, &#x27;stores.csv&#x27;: 50}"
+   ],
+   "newVar": "total"
+  },
+  {
+   "line": 7,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "files",
+       "→ dict #1"
+      ],
+      [
+       "total",
+       "11"
+      ],
+      [
+       "name",
+       "'returns.csv'"
+      ],
+      [
+       "mb",
+       "300"
+      ],
+      [
+       "n",
+       "3"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;sales.csv&#x27;: 1024, &#x27;returns.csv&#x27;: 300, &#x27;stores.csv&#x27;: 50}"
+   ],
+   "out": "returns.csv    300 MB -> 3 block(s)\n"
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "<code>name<\/code> changes to &#x27;stores.csv&#x27;. <code>mb<\/code> changes to 50.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "files",
+       "→ dict #1"
+      ],
+      [
+       "total",
+       "11"
+      ],
+      [
+       "name",
+       "'stores.csv'"
+      ],
+      [
+       "mb",
+       "50"
+      ],
+      [
+       "n",
+       "3"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;sales.csv&#x27;: 1024, &#x27;returns.csv&#x27;: 300, &#x27;stores.csv&#x27;: 50}"
+   ],
+   "newVar": "mb"
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "<code>n<\/code> changes to 1.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "files",
+       "→ dict #1"
+      ],
+      [
+       "total",
+       "11"
+      ],
+      [
+       "name",
+       "'stores.csv'"
+      ],
+      [
+       "mb",
+       "50"
+      ],
+      [
+       "n",
+       "1"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;sales.csv&#x27;: 1024, &#x27;returns.csv&#x27;: 300, &#x27;stores.csv&#x27;: 50}"
+   ],
+   "newVar": "n"
+  },
+  {
+   "line": 6,
+   "phase": "Python",
+   "note": "<code>total<\/code> changes to 12.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "files",
+       "→ dict #1"
+      ],
+      [
+       "total",
+       "12"
+      ],
+      [
+       "name",
+       "'stores.csv'"
+      ],
+      [
+       "mb",
+       "50"
+      ],
+      [
+       "n",
+       "1"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;sales.csv&#x27;: 1024, &#x27;returns.csv&#x27;: 300, &#x27;stores.csv&#x27;: 50}"
+   ],
+   "newVar": "total"
+  },
+  {
+   "line": 7,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "files",
+       "→ dict #1"
+      ],
+      [
+       "total",
+       "12"
+      ],
+      [
+       "name",
+       "'stores.csv'"
+      ],
+      [
+       "mb",
+       "50"
+      ],
+      [
+       "n",
+       "1"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;sales.csv&#x27;: 1024, &#x27;returns.csv&#x27;: 300, &#x27;stores.csv&#x27;: 50}"
+   ],
+   "out": "stores.csv      50 MB -> 1 block(s)\n"
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "Nothing is left to loop over, so the loop ends and Python moves on.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "files",
+       "→ dict #1"
+      ],
+      [
+       "total",
+       "12"
+      ],
+      [
+       "name",
+       "'stores.csv'"
+      ],
+      [
+       "mb",
+       "50"
+      ],
+      [
+       "n",
+       "1"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;sales.csv&#x27;: 1024, &#x27;returns.csv&#x27;: 300, &#x27;stores.csv&#x27;: 50}"
+   ]
+  },
+  {
+   "line": 8,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "files",
+       "→ dict #1"
+      ],
+      [
+       "total",
+       "12"
+      ],
+      [
+       "name",
+       "'stores.csv'"
+      ],
+      [
+       "mb",
+       "50"
+      ],
+      [
+       "n",
+       "1"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;sales.csv&#x27;: 1024, &#x27;returns.csv&#x27;: 300, &#x27;stores.csv&#x27;: 50}"
+   ],
+   "out": "map tasks: 12\n"
+  }
+ ]
+}</script>
+    </div>
+  </article>
+  <article class="wx">
+    <div class="wx__head"><span class="wx__num">Example 2</span><span class="lvl lvl--i">Intermediate</span><span class="wx__tag">NameNode · objects</span></div>
+    <h4>What does doubling the block size save?</h4>
+    <div class="wx__problem"><p class="wx__label">Problem statement</p><p>A 600 TB data warehouse is stored with 128 MB blocks. How many blocks is that, and how much NameNode heap would 256 MB blocks save, at 150 bytes per block object?</p></div>
+    <div class="prob__io"><div><small>Input</small><pre>600 TB · 128 vs 256 MB · 150 B per block</pre></div><div><small>Expected output</small><pre>128 MB: 4,915,200 blocks   256 MB: 2,457,600 blocks
+heap saved ~0.34 GB</pre></div></div>
+    <div class="wx__approach"><p class="wx__label">Approach</p><ol><li>Blocks = data / block size.</li><li>Heap for blocks = blocks × 150 bytes.</li><li>Difference between the two sizes.</li></ol></div>
+    <p class="wx__label">Solution: run it live</p>
+    <div class="runner">
+    <script type="application/json">{
+ "lang": "python",
+ "file": "main.py",
+ "tasks": [
+  {
+   "label": "Solution",
+   "hint": "The saving is modest for big files. The real heap problem is small files (Lesson 7.5), where block size does not help at all.",
+   "code": "tb_mb = 600 * 1024 * 1024\nb128, b256 = tb_mb // 128, tb_mb // 256\nsaved_gb = (b128 - b256) * 150 / 2**30\nprint(f\"128 MB: {b128:,} blocks   256 MB: {b256:,} blocks\")\nprint(f\"heap saved ~{saved_gb:.2f} GB\")\n"
+  }
+ ]
+}</script>
+    </div>
+    <p class="wx__label">What happens in memory, step by step</p>
+    <p class="wx__how">Recorded from a real Python run: press <b>Next</b> to execute one line at a time. Watch variables change in each frame, and lists and dictionaries (numbered #1, #2 …) fill up as objects.</p>
+    <div class="tracer">
+    <script type="application/json">{
+ "lang": "python",
+ "code": [
+  "tb_mb = 600 * 1024 * 1024",
+  "b128, b256 = tb_mb // 128, tb_mb // 256",
+  "saved_gb = (b128 - b256) * 150 / 2**30",
+  "print(f\"128 MB: {b128:,} blocks   256 MB: {b256:,} blocks\")",
+  "print(f\"heap saved ~{saved_gb:.2f} GB\")"
+ ],
+ "steps": [
+  {
+   "line": 1,
+   "phase": "Python",
+   "note": "<code>tb_mb<\/code> is created: 629145600.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "tb_mb",
+       "629145600"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "tb_mb"
+  },
+  {
+   "line": 2,
+   "phase": "Count",
+   "note": "600 TB in MB divided by block size. <code>b128<\/code> is created: 4915200. <code>b256<\/code> is created: 2457600.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "tb_mb",
+       "629145600"
+      ],
+      [
+       "b128",
+       "4915200"
+      ],
+      [
+       "b256",
+       "2457600"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "b256"
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "<code>saved_gb<\/code> is created: 0.3433.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "tb_mb",
+       "629145600"
+      ],
+      [
+       "b128",
+       "4915200"
+      ],
+      [
+       "b256",
+       "2457600"
+      ],
+      [
+       "saved_gb",
+       "0.3433"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "saved_gb"
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "tb_mb",
+       "629145600"
+      ],
+      [
+       "b128",
+       "4915200"
+      ],
+      [
+       "b256",
+       "2457600"
+      ],
+      [
+       "saved_gb",
+       "0.3433"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "out": "128 MB: 4,915,200 blocks   256 MB: 2,457,600 blocks\n"
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "tb_mb",
+       "629145600"
+      ],
+      [
+       "b128",
+       "4915200"
+      ],
+      [
+       "b256",
+       "2457600"
+      ],
+      [
+       "saved_gb",
+       "0.3433"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "out": "heap saved ~0.34 GB\n"
+  }
+ ]
+}</script>
+    </div>
+  </article>
+  <article class="wx">
+    <div class="wx__head"><span class="wx__num">Example 3</span><span class="lvl lvl--a">Advanced</span><span class="wx__tag">MapReduce · splits</span></div>
+    <h4>Form splits with the 10% slop rule</h4>
+    <div class="wx__problem"><p class="wx__label">Problem statement</p><p><code>FileInputFormat</code> keeps cutting full splits while the remaining bytes are more than 1.1 × the split size; whatever remains becomes the last split. Compute the splits for a 270 MB file and a 260 MB file with 128 MB split size.</p></div>
+    <div class="prob__io"><div><small>Input</small><pre>270 MB and 260 MB · split 128 MB · slop 1.1</pre></div><div><small>Expected output</small><pre>270 MB -&gt; [128, 128, 14]
+260 MB -&gt; [128, 132]</pre></div></div>
+    <div class="wx__approach"><p class="wx__label">Approach</p><ol><li>While remaining / split > 1.1: cut one full split.</li><li>Then the remainder (if any) is one split.</li><li>Compare with a naive ceil(size / 128).</li></ol></div>
+    <p class="wx__label">Solution: run it live</p>
+    <div class="runner">
+    <script type="application/json">{
+ "lang": "python",
+ "file": "main.py",
+ "tasks": [
+  {
+   "label": "Solution",
+   "hint": "For 260 MB the last split is 132 MB, larger than a block: its map task reads part of a third block. This is real FileInputFormat behaviour.",
+   "code": "def splits(size, split=128, slop=1.1):\n    out, remaining = [], size\n    while remaining / split > slop:\n        out.append(split)\n        remaining -= split\n    if remaining:\n        out.append(remaining)\n    return out\nfor mb in [270, 260]:\n    print(mb, \"MB ->\", splits(mb))\n"
+  }
+ ]
+}</script>
+    </div>
+    <p class="wx__label">What happens in memory, step by step</p>
+    <p class="wx__how">Recorded from a real Python run: press <b>Next</b> to execute one line at a time. Watch variables change in each frame, and lists and dictionaries (numbered #1, #2 …) fill up as objects.</p>
+    <div class="tracer">
+    <script type="application/json">{
+ "lang": "python",
+ "code": [
+  "def splits(size, split=128, slop=1.1):",
+  "    out, remaining = [], size",
+  "    while remaining / split > slop:",
+  "        out.append(split)",
+  "        remaining -= split",
+  "    if remaining:",
+  "        out.append(remaining)",
+  "    return out",
+  "for mb in [270, 260]:",
+  "    print(mb, \"MB ->\", splits(mb))"
+ ],
+ "steps": [
+  {
+   "line": 1,
+   "phase": "Python",
+   "note": "<code>splits<\/code> is created: function splits().",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "splits",
+       "function splits()"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "splits"
+  },
+  {
+   "line": 9,
+   "phase": "Python",
+   "note": "<code>mb<\/code> is created: 270.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "splits",
+       "function splits()"
+      ],
+      [
+       "mb",
+       "270"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "mb"
+  },
+  {
+   "line": 10,
+   "phase": "Python",
+   "note": "<code>splits()<\/code> is called: a new frame is pushed with <code>size<\/code> = 270, <code>split<\/code> = 128, <code>slop<\/code> = 1.1.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "splits",
+       "function splits()"
+      ],
+      [
+       "mb",
+       "270"
+      ]
+     ]
+    },
+    {
+     "frame": "splits()",
+     "vars": [
+      [
+       "size",
+       "270"
+      ],
+      [
+       "split",
+       "128"
+      ],
+      [
+       "slop",
+       "1.1"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "slop"
+  },
+  {
+   "line": 2,
+   "phase": "Python",
+   "note": "<code>out<\/code> is created: → list #1. <code>remaining<\/code> is created: 270. A new list object (#1) is created: []",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "splits",
+       "function splits()"
+      ],
+      [
+       "mb",
+       "270"
+      ]
+     ]
+    },
+    {
+     "frame": "splits()",
+     "vars": [
+      [
+       "size",
+       "270"
+      ],
+      [
+       "split",
+       "128"
+      ],
+      [
+       "slop",
+       "1.1"
+      ],
+      [
+       "out",
+       "→ list #1"
+      ],
+      [
+       "remaining",
+       "270"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (0)<\/b> []"
+   ],
+   "newVar": "remaining"
+  },
+  {
+   "line": 3,
+   "phase": "Slop",
+   "note": "Avoid a tiny last split by allowing the last one to be up to 10% bigger. The condition is <b>True<\/b>, so the indented block runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "splits",
+       "function splits()"
+      ],
+      [
+       "mb",
+       "270"
+      ]
+     ]
+    },
+    {
+     "frame": "splits()",
+     "vars": [
+      [
+       "size",
+       "270"
+      ],
+      [
+       "split",
+       "128"
+      ],
+      [
+       "slop",
+       "1.1"
+      ],
+      [
+       "out",
+       "→ list #1"
+      ],
+      [
+       "remaining",
+       "270"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (0)<\/b> []"
+   ]
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "Object #1 list now holds [128]",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "splits",
+       "function splits()"
+      ],
+      [
+       "mb",
+       "270"
+      ]
+     ]
+    },
+    {
+     "frame": "splits()",
+     "vars": [
+      [
+       "size",
+       "270"
+      ],
+      [
+       "split",
+       "128"
+      ],
+      [
+       "slop",
+       "1.1"
+      ],
+      [
+       "out",
+       "→ list #1"
+      ],
+      [
+       "remaining",
+       "270"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (1)<\/b> [128]"
+   ]
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "<code>remaining<\/code> changes to 142.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "splits",
+       "function splits()"
+      ],
+      [
+       "mb",
+       "270"
+      ]
+     ]
+    },
+    {
+     "frame": "splits()",
+     "vars": [
+      [
+       "size",
+       "270"
+      ],
+      [
+       "split",
+       "128"
+      ],
+      [
+       "slop",
+       "1.1"
+      ],
+      [
+       "out",
+       "→ list #1"
+      ],
+      [
+       "remaining",
+       "142"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (1)<\/b> [128]"
+   ],
+   "newVar": "remaining"
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "The condition is <b>True<\/b>, so the indented block runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "splits",
+       "function splits()"
+      ],
+      [
+       "mb",
+       "270"
+      ]
+     ]
+    },
+    {
+     "frame": "splits()",
+     "vars": [
+      [
+       "size",
+       "270"
+      ],
+      [
+       "split",
+       "128"
+      ],
+      [
+       "slop",
+       "1.1"
+      ],
+      [
+       "out",
+       "→ list #1"
+      ],
+      [
+       "remaining",
+       "142"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (1)<\/b> [128]"
+   ]
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "Object #1 list now holds [128, 128]",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "splits",
+       "function splits()"
+      ],
+      [
+       "mb",
+       "270"
+      ]
+     ]
+    },
+    {
+     "frame": "splits()",
+     "vars": [
+      [
+       "size",
+       "270"
+      ],
+      [
+       "split",
+       "128"
+      ],
+      [
+       "slop",
+       "1.1"
+      ],
+      [
+       "out",
+       "→ list #1"
+      ],
+      [
+       "remaining",
+       "142"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (2)<\/b> [128, 128]"
+   ]
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "<code>remaining<\/code> changes to 14.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "splits",
+       "function splits()"
+      ],
+      [
+       "mb",
+       "270"
+      ]
+     ]
+    },
+    {
+     "frame": "splits()",
+     "vars": [
+      [
+       "size",
+       "270"
+      ],
+      [
+       "split",
+       "128"
+      ],
+      [
+       "slop",
+       "1.1"
+      ],
+      [
+       "out",
+       "→ list #1"
+      ],
+      [
+       "remaining",
+       "14"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (2)<\/b> [128, 128]"
+   ],
+   "newVar": "remaining"
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "The condition is <b>False<\/b>, so the indented block is skipped.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "splits",
+       "function splits()"
+      ],
+      [
+       "mb",
+       "270"
+      ]
+     ]
+    },
+    {
+     "frame": "splits()",
+     "vars": [
+      [
+       "size",
+       "270"
+      ],
+      [
+       "split",
+       "128"
+      ],
+      [
+       "slop",
+       "1.1"
+      ],
+      [
+       "out",
+       "→ list #1"
+      ],
+      [
+       "remaining",
+       "14"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (2)<\/b> [128, 128]"
+   ]
+  },
+  {
+   "line": 6,
+   "phase": "Python",
+   "note": "The condition is <b>True<\/b>, so the indented block runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "splits",
+       "function splits()"
+      ],
+      [
+       "mb",
+       "270"
+      ]
+     ]
+    },
+    {
+     "frame": "splits()",
+     "vars": [
+      [
+       "size",
+       "270"
+      ],
+      [
+       "split",
+       "128"
+      ],
+      [
+       "slop",
+       "1.1"
+      ],
+      [
+       "out",
+       "→ list #1"
+      ],
+      [
+       "remaining",
+       "14"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (2)<\/b> [128, 128]"
+   ]
+  },
+  {
+   "line": 7,
+   "phase": "Python",
+   "note": "Object #1 list now holds [128, 128, 14]",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "splits",
+       "function splits()"
+      ],
+      [
+       "mb",
+       "270"
+      ]
+     ]
+    },
+    {
+     "frame": "splits()",
+     "vars": [
+      [
+       "size",
+       "270"
+      ],
+      [
+       "split",
+       "128"
+      ],
+      [
+       "slop",
+       "1.1"
+      ],
+      [
+       "out",
+       "→ list #1"
+      ],
+      [
+       "remaining",
+       "14"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (3)<\/b> [128, 128, 14]"
+   ]
+  },
+  {
+   "line": 8,
+   "phase": "Python",
+   "note": "The return value is worked out and handed back to the caller.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "splits",
+       "function splits()"
+      ],
+      [
+       "mb",
+       "270"
+      ]
+     ]
+    },
+    {
+     "frame": "splits()",
+     "vars": [
+      [
+       "size",
+       "270"
+      ],
+      [
+       "split",
+       "128"
+      ],
+      [
+       "slop",
+       "1.1"
+      ],
+      [
+       "out",
+       "→ list #1"
+      ],
+      [
+       "remaining",
+       "14"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (3)<\/b> [128, 128, 14]"
+   ]
+  },
+  {
+   "line": 10,
+   "phase": "Return",
+   "note": "<code>splits()<\/code> returns <b>→ list #1<\/b> and its frame is popped. The caller continues on this line with that value.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "splits",
+       "function splits()"
+      ],
+      [
+       "mb",
+       "270"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "out": "270 MB -> [128, 128, 14]\n"
+  },
+  {
+   "line": 9,
+   "phase": "Python",
+   "note": "<code>mb<\/code> changes to 260.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "splits",
+       "function splits()"
+      ],
+      [
+       "mb",
+       "260"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "mb"
+  },
+  {
+   "line": 10,
+   "phase": "Python",
+   "note": "<code>splits()<\/code> is called: a new frame is pushed with <code>size<\/code> = 260, <code>split<\/code> = 128, <code>slop<\/code> = 1.1.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "splits",
+       "function splits()"
+      ],
+      [
+       "mb",
+       "260"
+      ]
+     ]
+    },
+    {
+     "frame": "splits()",
+     "vars": [
+      [
+       "size",
+       "260"
+      ],
+      [
+       "split",
+       "128"
+      ],
+      [
+       "slop",
+       "1.1"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "slop"
+  },
+  {
+   "line": 2,
+   "phase": "Python",
+   "note": "<code>out<\/code> is created: → list #2. <code>remaining<\/code> is created: 260. A new list object (#2) is created: []",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "splits",
+       "function splits()"
+      ],
+      [
+       "mb",
+       "260"
+      ]
+     ]
+    },
+    {
+     "frame": "splits()",
+     "vars": [
+      [
+       "size",
+       "260"
+      ],
+      [
+       "split",
+       "128"
+      ],
+      [
+       "slop",
+       "1.1"
+      ],
+      [
+       "out",
+       "→ list #2"
+      ],
+      [
+       "remaining",
+       "260"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#2 list (0)<\/b> []"
+   ],
+   "newVar": "remaining"
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "The condition is <b>True<\/b>, so the indented block runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "splits",
+       "function splits()"
+      ],
+      [
+       "mb",
+       "260"
+      ]
+     ]
+    },
+    {
+     "frame": "splits()",
+     "vars": [
+      [
+       "size",
+       "260"
+      ],
+      [
+       "split",
+       "128"
+      ],
+      [
+       "slop",
+       "1.1"
+      ],
+      [
+       "out",
+       "→ list #2"
+      ],
+      [
+       "remaining",
+       "260"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#2 list (0)<\/b> []"
+   ]
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "Object #2 list now holds [128]",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "splits",
+       "function splits()"
+      ],
+      [
+       "mb",
+       "260"
+      ]
+     ]
+    },
+    {
+     "frame": "splits()",
+     "vars": [
+      [
+       "size",
+       "260"
+      ],
+      [
+       "split",
+       "128"
+      ],
+      [
+       "slop",
+       "1.1"
+      ],
+      [
+       "out",
+       "→ list #2"
+      ],
+      [
+       "remaining",
+       "260"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#2 list (1)<\/b> [128]"
+   ]
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "<code>remaining<\/code> changes to 132.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "splits",
+       "function splits()"
+      ],
+      [
+       "mb",
+       "260"
+      ]
+     ]
+    },
+    {
+     "frame": "splits()",
+     "vars": [
+      [
+       "size",
+       "260"
+      ],
+      [
+       "split",
+       "128"
+      ],
+      [
+       "slop",
+       "1.1"
+      ],
+      [
+       "out",
+       "→ list #2"
+      ],
+      [
+       "remaining",
+       "132"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#2 list (1)<\/b> [128]"
+   ],
+   "newVar": "remaining"
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "The condition is <b>False<\/b>, so the indented block is skipped.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "splits",
+       "function splits()"
+      ],
+      [
+       "mb",
+       "260"
+      ]
+     ]
+    },
+    {
+     "frame": "splits()",
+     "vars": [
+      [
+       "size",
+       "260"
+      ],
+      [
+       "split",
+       "128"
+      ],
+      [
+       "slop",
+       "1.1"
+      ],
+      [
+       "out",
+       "→ list #2"
+      ],
+      [
+       "remaining",
+       "132"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#2 list (1)<\/b> [128]"
+   ]
+  },
+  {
+   "line": 6,
+   "phase": "Python",
+   "note": "The condition is <b>True<\/b>, so the indented block runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "splits",
+       "function splits()"
+      ],
+      [
+       "mb",
+       "260"
+      ]
+     ]
+    },
+    {
+     "frame": "splits()",
+     "vars": [
+      [
+       "size",
+       "260"
+      ],
+      [
+       "split",
+       "128"
+      ],
+      [
+       "slop",
+       "1.1"
+      ],
+      [
+       "out",
+       "→ list #2"
+      ],
+      [
+       "remaining",
+       "132"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#2 list (1)<\/b> [128]"
+   ]
+  },
+  {
+   "line": 7,
+   "phase": "Python",
+   "note": "Object #2 list now holds [128, 132]",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "splits",
+       "function splits()"
+      ],
+      [
+       "mb",
+       "260"
+      ]
+     ]
+    },
+    {
+     "frame": "splits()",
+     "vars": [
+      [
+       "size",
+       "260"
+      ],
+      [
+       "split",
+       "128"
+      ],
+      [
+       "slop",
+       "1.1"
+      ],
+      [
+       "out",
+       "→ list #2"
+      ],
+      [
+       "remaining",
+       "132"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#2 list (2)<\/b> [128, 132]"
+   ]
+  },
+  {
+   "line": 8,
+   "phase": "Python",
+   "note": "The return value is worked out and handed back to the caller.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "splits",
+       "function splits()"
+      ],
+      [
+       "mb",
+       "260"
+      ]
+     ]
+    },
+    {
+     "frame": "splits()",
+     "vars": [
+      [
+       "size",
+       "260"
+      ],
+      [
+       "split",
+       "128"
+      ],
+      [
+       "slop",
+       "1.1"
+      ],
+      [
+       "out",
+       "→ list #2"
+      ],
+      [
+       "remaining",
+       "132"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#2 list (2)<\/b> [128, 132]"
+   ]
+  },
+  {
+   "line": 10,
+   "phase": "Return",
+   "note": "<code>splits()<\/code> returns <b>→ list #2<\/b> and its frame is popped. The caller continues on this line with that value.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "splits",
+       "function splits()"
+      ],
+      [
+       "mb",
+       "260"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "out": "260 MB -> [128, 132]\n"
+  },
+  {
+   "line": 9,
+   "phase": "Python",
+   "note": "Nothing is left to loop over, so the loop ends and Python moves on.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "splits",
+       "function splits()"
+      ],
+      [
+       "mb",
+       "260"
+      ]
+     ]
+    }
+   ],
+   "heap": []
+  }
+ ]
+}</script>
+    </div>
+  </article>
+</section>
+
+<section class="part" id="quiz">
+  <span class="part-label"><b>9</b> Quiz and revision</span>
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <script type="application/json">[
+ {
+  "q": "What is the default HDFS block size in Hadoop 3?",
+  "options": [
+   "64 MB",
+   "256 MB",
+   "128 MB",
+   "1 GB"
+  ],
+  "answer": 2,
+  "why": "dfs.blocksize defaults to 134,217,728 bytes. Hadoop 1 used 64 MB."
+ },
+ {
+  "q": "A 4.5 MB file is stored with a 128 MB block size. How much disk does each replica use?",
+  "options": [
+   "128 MB",
+   "About 4.5 MB (plus a small checksum file)",
+   "64 MB",
+   "384 MB"
+  ],
+  "answer": 1,
+  "why": "The real block file was 4,692,009 bytes. Blocks are not padded."
+ },
+ {
+  "q": "Where are blocks cut?",
+  "options": [
+   "At an exact byte count, even in the middle of a record",
+   "At the end of a line",
+   "Wherever the NameNode finds a comma",
+   "At file boundaries only"
+  ],
+  "answer": 0,
+  "why": "HDFS cuts by bytes. We saw “71484,poha,2” and “5” in two different blocks."
+ },
+ {
+  "q": "What is an input split?",
+  "options": [
+   "A physical copy of a block",
+   "A type of checksum",
+   "A DataNode folder",
+   "A logical piece of input processed by one map task"
+  ],
+  "answer": 3,
+  "why": "Splits are logical and usually match blocks; one map task per split."
+ },
+ {
+  "q": "Which split reads a record that crosses a block boundary?",
+  "options": [
+   "Both splits read half each",
+   "The split in which it ends",
+   "The split in which the record starts",
+   "Neither: it is skipped"
+  ],
+  "answer": 2,
+  "why": "The earlier split finishes the record; the next one skips the partial first line."
+ },
+ {
+  "q": "Who decides a file's block size?",
+  "options": [
+   "The NameNode, globally and forever",
+   "The client writing the file (dfs.blocksize, can be set per file)",
+   "Each DataNode",
+   "YARN"
+  ],
+  "answer": 1,
+  "why": "We wrote the same file with 128 MB and 1 MB blocks."
+ },
+ {
+  "q": "Why are HDFS blocks large?",
+  "options": [
+   "So disk transfer time dominates seek time, and NameNode metadata stays small",
+   "To fit in RAM",
+   "Because Java requires it",
+   "To encrypt data"
+  ],
+  "answer": 0,
+  "why": "Large blocks keep disks streaming and reduce the number of objects."
+ },
+ {
+  "q": "A 10 GB gzip file in HDFS gives how many input splits?",
+  "options": [
+   "80",
+   "10",
+   "3",
+   "1, because gzip cannot be split"
+  ],
+  "answer": 3,
+  "why": "gzip is not splittable, so one map task must read the whole file."
+ }
+]</script>
+  </div>
+
+  <h3>Quick revision</h3>
+  <div class="revision">
+    <h3>Lesson 5.2 in one screen</h3>
+    <ul><li>Block = <b>physical</b> unit of storage and replication; default <b>128 MB</b> (min 1 MB).</li><li>Cut by <b>byte count</b>: records can be split across blocks.</li><li>Last block stores only real data (4,692,009-byte file → 4,692,009-byte block file).</li><li>Block size is per file, chosen by the writer: <code>-D dfs.blocksize=…</code>.</li><li>Split = <b>logical</b> unit of work, one per map task, usually one per block.</li><li>RecordReader: skip partial first line (except split 0); finish the record that starts in your split.</li><li>Real proof: 5 splits read 70485 + 67321 + 65498 + 65574 + 31123 = 300001 records.</li><li>Bigger blocks: less seek overhead, less NameNode memory, fewer tasks. Unsplittable formats (gzip) = 1 split.</li></ul>
+  </div>
+
+  <h3>Interview and viva questions</h3>
+  <div class="faq">
+    <details><summary>What is a block in HDFS?</summary><p>The unit in which HDFS stores and replicates a file. Files are divided into blocks of dfs.blocksize bytes (128 MB by default); each block is stored on several DataNodes. Only the last block of a file may be smaller, and it uses only the space it needs.</p></details>
+    <details><summary>Why is the HDFS block size so large?</summary><p>To make reading efficient on disks (the time to transfer a block is much larger than the time to seek to it) and to keep the number of blocks, and so the NameNode's memory and the number of tasks, small.</p></details>
+    <details><summary>What is the difference between a block and an input split?</summary><p>A block is a physical division of a file for storage. An input split is a logical division of the input for processing by one map task. Splits usually match blocks, but the RecordReader makes sure records crossing block boundaries are read whole by exactly one split.</p></details>
+    <details><summary>Does a small file occupy a full 128 MB block?</summary><p>No. A 1 MB file uses about 1 MB of disk per replica. It does, however, cost one file object and one block object in NameNode memory, which is why many small files are a problem.</p></details>
+    <details><summary>Can I change the block size of an existing file?</summary><p>Not in place. Block size is fixed when the file is written; to change it, rewrite the file (for example copy it with -D dfs.blocksize=… or with distcp).</p></details>
+    <details><summary>How many map tasks will my job have?</summary><p>By default one per input split, and splits follow blocks: a 1 GB file with 128 MB blocks gives 8 map tasks. Split size settings, the 10% slop rule, unsplittable compression and combined input formats can change this.</p></details>
+    
+  </div>
+
+  <h3 id="practice">Practice problems</h3>
+  <p class="prob-intro">Block and split exercises, several using the exact numbers from the real cluster.</p>
+  <div class="probs">
+    <article class="prob"><div class="prob__head"><span class="prob__num">P1</span><span class="prob__tag prob__tag--easy">Easy</span><h4>Blocks for a file</h4></div>
+      <p>How many 128 MB blocks does a 1,000 MB file need, and how big is the last block?</p>
+      <div class="prob__io"><div><small>Input</small><pre>1000 MB · 128 MB</pre></div><div><small>Expected output</small><pre>8 blocks, last block 104 MB</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>import math
+n = math.ceil(1000 / 128)
+print(n, &quot;blocks, last block&quot;, 1000 - (n - 1) * 128, &quot;MB&quot;)</code></pre><div class="output">8 blocks, last block 104 MB</div></div>
+        <p><b>How it works:</b> 8 blocks: 7 full ones and a last block of 104 MB.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P2</span><span class="prob__tag prob__tag--easy">Easy</span><h4>Check the real numbers</h4></div>
+      <p>Verify that 4 blocks of 1,048,576 bytes plus 497,705 bytes equal the file size 4,692,009.</p>
+      <div class="prob__io"><div><small>Input</small><pre>4 × 1,048,576 + 497,705</pre></div><div><small>Expected output</small><pre>True</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>print(4 * 1048576 + 497705 == 4692009)</code></pre><div class="output">True</div></div>
+        <p><b>How it works:</b> True: the fsck lengths add up to the file size exactly.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P3</span><span class="prob__tag prob__tag--easy">Easy</span><h4>Add up the counters</h4></div>
+      <p>Add the five real Map input records counters and compare with the file's line count (300,001).</p>
+      <div class="prob__io"><div><small>Input</small><pre>70485 · 67321 · 65498 · 65574 · 31123</pre></div><div><small>Expected output</small><pre>300001</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>print(sum([70485, 67321, 65498, 65574, 31123]))</code></pre><div class="output">300001</div></div>
+        <p><b>How it works:</b> 300,001: every line read exactly once, despite five block boundaries.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P4</span><span class="prob__tag prob__tag--medium">Medium</span><h4>Where is byte N?</h4></div>
+      <p>For 1 MB blocks, which block contains byte offsets 0, 1,048,575, 1,048,576 and 4,692,008, and at what offset inside the block?</p>
+      <div class="prob__io"><div><small>Input</small><pre>offsets 0 · 1048575 · 1048576 · 4692008</pre></div><div><small>Expected output</small><pre>0 -&gt; block 0 offset 0
+1048575 -&gt; block 0 offset 1048575
+1048576 -&gt; block 1 offset 0
+4692008 -&gt; block 4 offset 497704</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>B = 1048576
+for off in [0, 1048575, 1048576, 4692008]:
+    print(off, &quot;-&gt; block&quot;, off // B, &quot;offset&quot;, off % B)</code></pre><div class="output">0 -&gt; block 0 offset 0
+1048575 -&gt; block 0 offset 1048575
+1048576 -&gt; block 1 offset 0
+4692008 -&gt; block 4 offset 497704</div></div>
+        <p><b>How it works:</b> Block = offset // block size, position = offset % block size. Byte 1,048,576 is the first byte of block 1, the “5” of order 71484.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P5</span><span class="prob__tag prob__tag--medium">Medium</span><h4>Splits for many files</h4></div>
+      <p>A folder has 20 files of 200 MB and 1,000 files of 2 MB. How many map tasks with one split per block (128 MB)?</p>
+      <div class="prob__io"><div><small>Input</small><pre>20 × 200 MB · 1000 × 2 MB</pre></div><div><small>Expected output</small><pre>1040</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>import math
+print(20 * math.ceil(200 / 128) + 1000 * math.ceil(2 / 128))</code></pre><div class="output">1040</div></div>
+        <p><b>How it works:</b> 40 tasks for the big files and 1,000 for the tiny ones: 1,040 tasks, most of them doing almost nothing.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P6</span><span class="prob__tag prob__tag--medium">Medium</span><h4>Seek share</h4></div>
+      <p>With 8 ms seek and 200 MB/s transfer, what block size keeps seeking under 1% of the time?</p>
+      <div class="prob__io"><div><small>Input</small><pre>8 ms · 200 MB/s · 1%</pre></div><div><small>Expected output</small><pre>about 256 MB</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>seek, rate = 0.008, 200
+mb = 1
+while seek / (seek + mb / rate) &gt; 0.01:
+    mb *= 2
+print(&quot;about&quot;, mb, &quot;MB&quot;)</code></pre><div class="output">about 256 MB</div></div>
+        <p><b>How it works:</b> About 256 MB (the first power of two that brings seeking under 1%); with 128 MB it is about 1.2%.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P7</span><span class="prob__tag prob__tag--business">Business problem</span><h4>Mapper hours wasted</h4></div>
+      <p>A nightly job reads 5,000 small files, one map task each. Each task has 3 s of start-up overhead. Merging them into 40 files of 128 MB reduces it to 40 tasks. How many task-hours of overhead are saved per month (30 runs)?</p>
+      <div class="prob__io"><div><small>Input</small><pre>5000 vs 40 tasks · 3 s · 30 runs</pre></div><div><small>Expected output</small><pre>124 task-hours per month</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>saved_s = (5000 - 40) * 3 * 30
+print(f&quot;{saved_s / 3600:.0f} task-hours per month&quot;)</code></pre><div class="output">124 task-hours per month</div></div>
+        <p><b>How it works:</b> About 124 task-hours a month of pure start-up overhead, before counting NameNode load.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P8</span><span class="prob__tag prob__tag--advanced">Advanced</span><h4>Record reader for a boundary</h4></div>
+      <p>Implement the two RecordReader rules for a list of split boundaries and return records per split for the given text.</p>
+      <div class="prob__io"><div><small>Input</small><pre>&quot;aa\nbbbb\ncc\ndddddd\ne\n&quot; · splits at 0, 5, 12</pre></div><div><small>Expected output</small><pre>split 0 [0,5): [&#x27;aa&#x27;, &#x27;bbbb&#x27;]
+split 1 [5,12): [&#x27;cc&#x27;, &#x27;dddddd&#x27;]
+split 2 [12,20): [&#x27;e&#x27;]</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>data = &quot;aa\nbbbb\ncc\ndddddd\ne\n&quot;
+bounds = [0, 5, 12, len(data)]
+for i in range(len(bounds) - 1):
+    start, end = bounds[i], bounds[i + 1]
+    pos = start if start == 0 else data.index(&quot;\n&quot;, start - 1) + 1
+    recs = []
+    while pos &lt; end:
+        nl = data.index(&quot;\n&quot;, pos)
+        recs.append(data[pos:nl]); pos = nl + 1
+    print(f&quot;split {i} [{start},{end}):&quot;, recs)</code></pre><div class="output">split 0 [0,5): [&#x27;aa&#x27;, &#x27;bbbb&#x27;]
+split 1 [5,12): [&#x27;cc&#x27;, &#x27;dddddd&#x27;]
+split 2 [12,20): [&#x27;e&#x27;]</div></div>
+        <p><b>How it works:</b> Split 0 gets aa and bbbb (bbbb crosses byte 5), split 1 gets cc and dddddd, split 2 gets e. Each record appears once.</p>
+      </details>
+    </article>
+  </div>
+
+  <h3 id="scenarios">Real-world scenario questions (asked in company interviews)</h3>
+  <p class="scn-intro">Block and split questions appear in almost every Hadoop interview. Use exact numbers when you can.</p>
+  <div class="scenarios">
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">HDFS · concepts</span><span class="scn__tag scn__tag--level">Fresher</span></div>
+      <h4>“If a line is split across two blocks, is the record corrupted?”</h4>
+      <p class="scn__situation">An interviewer draws a CSV row crossing a block boundary.</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> block vs split, and the RecordReader.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>The block boundary is purely physical; the bytes are all stored, just in two blocks.</li>
+          <li>The map task whose split contains the start of the line reads past its end (possibly from another DataNode) to finish it.</li>
+          <li>The next split's reader skips everything up to the first newline. So each record is processed exactly once.</li>
+          <li>Real example: order 71484 cut between “2” and “5”; the job still read all 300,001 lines.</li>
+        </ul>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Performance · tuning</span><span class="scn__tag scn__tag--level">Experienced</span></div>
+      <h4>“The job uses only 4 mappers for 1 TB”</h4>
+      <p class="scn__situation">A job over 1 TB of logs starts only 4 map tasks and takes hours.</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> what controls the number of splits.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>1 TB at 128 MB should give about 8,000 splits, so something prevents splitting.</li>
+          <li>Most likely the input is 4 large gzip files (unsplittable). Check the file extensions and the job's “number of splits”.</li>
+          <li>Fix: store data in a splittable format (bzip2, or Parquet/ORC with Snappy), or split files at ingestion. Also check any custom InputFormat and split min-size settings.</li>
+        </ul>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Design · storage</span><span class="scn__tag scn__tag--level">Experienced</span></div>
+      <h4>Choose a block size for a new 2 PB table</h4>
+      <p class="scn__situation">A team will write a 2 PB fact table, scanned mostly in full each night.</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> trade-offs, not a memorised number.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>Large, fully scanned data favours bigger blocks, e.g. 256 MB: half the block objects, longer efficient reads.</li>
+          <li>Check parallelism: 2 PB / 256 MB is still about 80 lakh blocks, plenty of tasks.</li>
+          <li>Align file format units (Parquet row groups / ORC stripes) with the block size so a task's data sits in one block.</li>
+          <li>Keep file sizes large too; block size does not help if writers produce small files.</li>
+        </ul>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Storage · basics</span><span class="scn__tag scn__tag--level">Fresher</span></div>
+      <h4>“A 1 KB file wastes 128 MB, right?”</h4>
+      <p class="scn__situation">A student claims small files waste disk because each takes a full block.</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> what really costs with small files.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>No: a block file is only as big as its data (plus a tiny checksum file). The 4.5 MB file used 4.5 MB per replica, not 128 MB.</li>
+          <li>The real cost is metadata: every file and block is an object in NameNode memory, and each small file usually becomes its own map task.</li>
+          <li>So small files are a NameNode and scheduling problem, not a disk problem.</li>
+        </ul>
+      </div></details>
+    </article>
+
+  </div>
+</section>
+
+<nav class="lesson-nav" id="lesson-nav" aria-label="Lesson navigation"></nav>
+<div class="ad-slot" data-slot="bottom"></div>
+</article>
+
+<aside class="lesson-side">
+  <nav class="toc" aria-label="In this lesson">
+    <h4>In this lesson</h4>
+    <ol>
+      <li><a href="#story">The story</a></li>
+      <li><a href="#definition">Definition</a></li><li><a href="#levels">Beginner → Advanced</a></li>
+      <li><a href="#types">Types and ways to use it</a></li>
+      <li><a href="#steps">Step by step</a></li>
+      <li><a href="#animation">See it happen</a></li>
+      <li><a href="#real-world">Real-world use</a></li>
+      <li><a href="#run">Run the code</a></li><li><a href="#pc">Run on your PC</a></li>
+      <li><a href="#tracer">Line by line</a></li>
+      <li><a href="#worked">Worked examples</a></li>
+      <li><a href="#quiz">Quiz and revision</a></li>
+      <li><a href="#practice">Practice problems</a></li>
+      <li><a href="#scenarios">Industry scenarios</a></li>
+    </ol>
+  </nav>
+  <div class="ad-slot" data-slot="side"></div>
+  <div class="outline" id="outline"></div>
+</aside>
+</div>
+</main>
+
+<footer class="site-footer">
+  <div class="wrap">
+    <div><h4>MyPhatshala</h4><p>Free programming and IT lessons that show what happens behind the screen.</p></div>
+    <div><h4>Learn</h4><a href="../../../../#tracks">All courses</a><a href="../../">Apache Hadoop syllabus</a></div>
+    <div><h4>Site</h4><a href="../../../../about.html">About</a><a href="../../../../contact.html">Contact</a><a href="../../../../privacy.html">Privacy policy</a><a href="../../../../disclaimer.html">Disclaimer</a></div>
+    <div class="copyright">© MyPhatshala. All lesson content, diagrams and animations are original. Please do not copy without permission.</div>
+  </div>
+</footer>
+
+<script src="../../../../data/courses/hadoop.js"></script>
+<script src="../../../../assets/js/lesson.js"></script>
+<script src="../../../../assets/js/cluster-sim.js"></script>
+<script src="../../../../assets/js/ads.js"></script>
+<script src="../../../../assets/js/site.js"></script>
+</body>
+</html>

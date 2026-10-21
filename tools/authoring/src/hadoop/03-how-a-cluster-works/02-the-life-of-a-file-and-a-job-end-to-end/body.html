@@ -1,0 +1,316 @@
+<!-- ======================= PART 1: THE STORY ======================= -->
+<section class="part" id="story">
+  <span class="part-label"><b>1</b> The story</span>
+  <h2>Two commands, two hundred messages</h2>
+  <div class="story">
+    <p class="narration">Riya types two commands. The first puts a 300 MB file of canteen orders into HDFS. The second runs a job that totals the orders per item. Both finish in under a minute, and her screen shows only a few lines. “That was easy,” she says. Arjun Sir smiles and turns her laptop around. “In that minute, about a dozen machines sent each other a few hundred messages on your behalf. Let's follow every one of them.”</p>
+
+    <div class="scene">
+      <svg viewBox="0 0 640 190" role="img" aria-label="A file goes from the client through the NameNode for permission to three DataNodes in a pipeline; then a job goes from the client to the ResourceManager, which starts an ApplicationMaster, which runs map and reduce tasks on the workers and writes the result back to HDFS.">
+        <g font-size="10">
+          <rect x="10" y="14" width="300" height="146" rx="10" class="s-soft-green" style="stroke:var(--green)"/>
+          <text x="160" y="34" text-anchor="middle" font-weight="700" class="s-green">Life of a file</text>
+          <rect x="24" y="48" width="64" height="30" rx="5" class="s-soft-blue" style="stroke:var(--blue)"/><text x="56" y="67" text-anchor="middle" font-size="9" font-weight="700" class="s-blue">Client</text>
+          <rect x="128" y="48" width="72" height="30" rx="5" class="s-board"/><text x="164" y="67" text-anchor="middle" font-size="9" font-weight="700" class="s-chalk">NameNode</text>
+          <path d="M88 63h36" class="s-line"/><text x="106" y="58" text-anchor="middle" font-size="7.6" class="s-ink2">where?</text>
+          <rect x="24" y="108" width="60" height="28" rx="5" class="s-card"/><rect x="118" y="108" width="60" height="28" rx="5" class="s-card"/><rect x="212" y="108" width="60" height="28" rx="5" class="s-card"/>
+          <text x="54" y="126" text-anchor="middle" font-size="8.6" class="s-ink">DN1</text><text x="148" y="126" text-anchor="middle" font-size="8.6" class="s-ink">DN2</text><text x="242" y="126" text-anchor="middle" font-size="8.6" class="s-ink">DN3</text>
+          <path d="M56 78v28M84 122h32M178 122h32" style="stroke:var(--track);stroke-width:2.5;fill:none"/>
+          <text x="160" y="152" text-anchor="middle" font-size="8.6" class="s-acc" font-weight="700">bytes flow in a pipeline</text>
+          <rect x="330" y="14" width="300" height="146" rx="10" class="s-soft-acc" style="stroke:var(--track)"/>
+          <text x="480" y="34" text-anchor="middle" font-weight="700" class="s-acc">Life of a job</text>
+          <rect x="344" y="48" width="64" height="30" rx="5" class="s-soft-blue" style="stroke:var(--blue)"/><text x="376" y="67" text-anchor="middle" font-size="9" font-weight="700" class="s-blue">Client</text>
+          <rect x="444" y="48" width="96" height="30" rx="5" class="s-board"/><text x="492" y="67" text-anchor="middle" font-size="9" font-weight="700" class="s-chalk">ResourceManager</text>
+          <path d="M408 63h32" class="s-line"/>
+          <rect x="344" y="104" width="56" height="30" rx="5" style="fill:#8B5CF6"/><text x="372" y="123" text-anchor="middle" font-size="8.6" font-weight="700" style="fill:#fff">AM</text>
+          <rect x="420" y="104" width="56" height="30" rx="5" class="s-green"/><text x="448" y="123" text-anchor="middle" font-size="8.6" font-weight="700" style="fill:#fff">maps</text>
+          <rect x="496" y="104" width="56" height="30" rx="5" style="fill:#8B5CF6;opacity:.75"/><text x="524" y="123" text-anchor="middle" font-size="8.6" font-weight="700" style="fill:#fff">reduce</text>
+          <rect x="566" y="104" width="54" height="30" rx="5" class="s-card"/><text x="593" y="123" text-anchor="middle" font-size="8.6" class="s-ink">HDFS</text>
+          <path d="M400 119h16M476 119h16M552 119h12" class="s-line"/>
+          <text x="480" y="152" text-anchor="middle" font-size="8.6" class="s-acc" font-weight="700">submit → plan → map → shuffle → reduce → write</text>
+        </g>
+        <text x="320" y="180" text-anchor="middle" font-size="10" class="s-ink2">Two simple commands; behind them, a carefully choreographed conversation.</text>
+        <text x="632" y="180" text-anchor="end" class="s-wm">myphatshala.in</text>
+      </svg>
+    </div>
+
+R> A few hundred messages? For one file?
+A> For a 300 MB file: three blocks, each with three replicas, sent as thousands of small packets, with acknowledgements coming back for each. Plus the calls to the NameNode to create the file, get each block, and close it.
+K> And the job is even more?
+A> The job starts its own manager, the ApplicationMaster, which asks for containers, runs map tasks next to the blocks, moves their output to the reducers and finally writes a new file into HDFS. Which then has its own life!
+R> I want to see all of it in order.
+A> That's today. This lesson is the bridge between the big picture (Lesson 3.1) and the deep dives in Modules 5 to 11. If you can narrate both lives, step by step, you can answer half the questions in any Hadoop interview.
+  </div>
+</section>
+
+<!-- ======================= PART 2: DEFINITION ======================= -->
+<section class="part" id="definition">
+  <span class="part-label"><b>2</b> Definition</span>
+  <h2>The write path, the read path and the job lifecycle</h2>
+  <div class="def">
+    <div class="def__formal"><small>Formal definition (write this in exams)</small>
+      <p>The <b>HDFS write path</b>: the client asks the NameNode to <i>create</i> the file; for each block it calls <i>addBlock</i>, receives a block ID and a list of target DataNodes chosen by the placement policy, and streams the data as packets through a <b>pipeline</b> of those DataNodes, each storing and forwarding the packet and returning acknowledgements; finally the client calls <i>complete</i>. The <b>read path</b>: the client calls <i>open</i>, receives the block locations sorted by network distance, and reads each block directly from the closest DataNode, verifying checksums. The <b>job lifecycle</b> on YARN: the client computes input splits, copies the job resources to HDFS and submits the application to the ResourceManager; the RM launches an <b>ApplicationMaster</b>, which requests containers (preferably on nodes holding each split), runs map tasks, lets reducers shuffle and merge map outputs, runs reduce tasks that write output to HDFS, commits the output and unregisters from the RM.</p></div>
+    <div class="def__simple"><small>In simple words</small>
+      <p>Writing a file: ask the NameNode “where should block 1 go?”, send it to three DataNodes in a chain, repeat for each block, then tell the NameNode “done”. Reading: ask the NameNode “where are the blocks?”, then fetch each block from the nearest DataNode. Running a job: hand the job to the ResourceManager, which starts a small manager for your job; that manager runs map tasks next to the data, gathers their results to reducers, and writes the answer back into HDFS.</p></div>
+  </div>
+
+  <h3>Words you'll meet in this lesson</h3>
+  <div class="terms">
+    <div class="term"><b>Pipeline</b><span>The chain of DataNodes (usually 3) a block is written through: client → DN1 → DN2 → DN3.</span></div>
+    <div class="term"><b>Packet</b><span>A small piece of a block (64 KB by default) sent through the pipeline. Each packet is acknowledged.</span></div>
+    <div class="term"><b>Lease</b><span>A lock the NameNode gives one writer, so only one client writes a file at a time.</span></div>
+    <div class="term"><b>Staging directory</b><span>A folder in HDFS where the client puts the job's jar, configuration and split list before submitting.</span></div>
+    <div class="term"><b>MRAppMaster</b><span>MapReduce's ApplicationMaster: plans and supervises one job's tasks.</span></div>
+    <div class="term"><b>Spill</b><span>When a map task's in-memory buffer fills (80% of 100 MB by default), its sorted contents are written to local disk.</span></div>
+    <div class="term"><b>Output committer</b><span>Moves task outputs from a temporary folder to the final output folder only when tasks succeed.</span></div>
+    <div class="term"><b>_SUCCESS</b><span>An empty file written into the output directory when a MapReduce job completes successfully.</span></div>
+  </div>
+
+  <h3>Numbers in the life of a file and a job (defaults)</h3>
+  <table class="facts">
+    <tr><th>Block size</th><td>128 MB (<code>dfs.blocksize</code>)</td></tr>
+    <tr><th>Packet size</th><td>64 KB (<code>dfs.client-write-packet-size</code>)</td></tr>
+    <tr><th>Checksum</th><td>CRC32C for every 512 bytes, stored next to each block replica</td></tr>
+    <tr><th>Map output sort buffer</th><td>100 MB (<code>mapreduce.task.io.sort.mb</code>), spilled to disk at 80%</td></tr>
+    <tr><th>Reducers start fetching</th><td>after 5% of maps finish (<code>mapreduce.job.reduce.slowstart.completedmaps</code> = 0.05)</td></tr>
+    <tr><th>Task attempts</th><td>up to 4 per task</td></tr>
+    <tr><th>Output files</th><td><code>part-r-00000</code>, <code>part-r-00001</code>… (one per reducer) + <code>_SUCCESS</code></td></tr>
+  </table>
+
+LEVELS> The two lives at three levels
+L1> A courier and a census
+      <ul>
+        <li><b>Writing a file</b> is like sending a parcel by courier with three copies: the head office (NameNode) tells you which three branches, you hand it to the first branch, and each branch passes a copy on to the next.</li>
+        <li><b>Reading a file</b>: ask head office which branches have your parcels, and collect each from the nearest one.</li>
+        <li><b>Running a job</b> is like a census: the government (ResourceManager) appoints a supervisor (ApplicationMaster), the supervisor sends counters (map tasks) to every area, area totals go to district officers (reducers), and the final report is filed (written to HDFS).</li>
+      </ul>
+L2> The RPC calls you would see in a trace
+      <ul>
+        <li>Write: <code>create()</code> → <code>addBlock()</code> (per block) → data streamed to DataNodes → <code>complete()</code>.</li>
+        <li>Read: <code>getBlockLocations()</code> (in batches) → data read from DataNodes → checksums verified on the client.</li>
+        <li>Job: <code>getNewApplication()</code> → upload jar/conf/splits to the staging directory → <code>submitApplication()</code> → RM starts the AM → AM <code>registerApplicationMaster()</code> → repeated <code>allocate()</code> calls (container requests and grants) → <code>startContainers()</code> on NodeManagers → <code>finishApplicationMaster()</code>.</li>
+        <li>The NameNode only ever sees small metadata calls; the ResourceManager only sees resource requests. All heavy data moves between DataNodes, tasks and NodeManagers.</li>
+      </ul>
+L3> Where things go wrong, and how each step recovers
+      <ul>
+        <li><b>A DataNode in the write pipeline dies:</b> the client removes it, finishes the block on the remaining nodes with a new generation stamp, and the NameNode re-replicates later.</li>
+        <li><b>A replica is corrupt during a read:</b> checksum mismatch → the client reads another replica and reports the bad one.</li>
+        <li><b>The client dies mid-write:</b> its lease expires; the NameNode recovers the last block and closes the file.</li>
+        <li><b>A map or reduce task fails:</b> the AM retries it (up to 4 attempts). <b>The AM itself fails:</b> YARN restarts it (MapReduce allows 2 AM attempts by default) and it recovers completed tasks.</li>
+        <li><b>The output directory already exists:</b> the job is rejected at submission (<code>FileAlreadyExistsException</code>) to protect old results.</li>
+      </ul>
+/LEVELS
+EXAM> “Explain the anatomy of a file write in HDFS” and “anatomy of a file read” are among the most frequent university questions. Number the steps (create → addBlock → pipeline + acks → complete; open → getBlockLocations → read nearest → checksum) and draw client, NameNode and three DataNodes with arrows. For “job execution flow”, list submit → AM → splits → containers → map → shuffle/sort → reduce → commit.
+</section>
+
+<!-- ======================= PART 3: TYPES AND WAYS TO USE IT ======================= -->
+<section class="part" id="types">
+  <span class="part-label"><b>3</b> Types and ways to use it</span>
+  <h2>Three journeys compared</h2>
+  <div class="table-wrap">
+  <table class="compare" style="min-width:640px">
+    <thead><tr><th></th><th>Writing a file</th><th>Reading a file</th><th>Running a job</th></tr></thead>
+    <tbody>
+      <tr><td><b>Starts with</b></td><td><code>hdfs dfs -put</code> or <code>FileSystem.create()</code></td><td><code>hdfs dfs -cat</code> or <code>FileSystem.open()</code></td><td><code>hadoop jar</code>, <code>spark-submit</code>, a Hive query</td></tr>
+      <tr><td><b>Master asked</b></td><td>NameNode: create, addBlock, complete</td><td>NameNode: block locations</td><td>ResourceManager: new app, submit</td></tr>
+      <tr><td><b>Who moves the data</b></td><td>Client → DataNode pipeline</td><td>Nearest DataNode → client</td><td>Tasks read blocks locally; shuffle between nodes</td></tr>
+      <tr><td><b>Parallelism</b></td><td>One block at a time per writer</td><td>One block at a time per reader (many readers in parallel)</td><td>Many tasks at once</td></tr>
+      <tr><td><b>Safety mechanism</b></td><td>Acks from every DataNode, pipeline recovery</td><td>Checksums, switch replica</td><td>Task retries, AM restart, output committer</td></tr>
+      <tr><td><b>Ends with</b></td><td>File closed, visible to readers</td><td>Bytes delivered</td><td><code>part-*</code> files + <code>_SUCCESS</code></td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <h3>Ways to start each journey</h3>
+  <div class="cards">
+    <div class="card"><h4>Shell</h4><p><code>hdfs dfs -put / -get / -cat</code> and <code>hadoop jar job.jar …</code>. Best for learning and scripts.</p><span class="tag">Command line</span></div>
+    <div class="card"><h4>Java API</h4><p><code>FileSystem</code>, <code>FSDataOutputStream</code>, <code>FSDataInputStream</code>, and the MapReduce <code>Job</code> class (Modules 6 and 8).</p><span class="tag">Programs</span></div>
+    <div class="card"><h4>Engines on top</h4><p>Hive, Spark and others use the same write/read paths and submit their own applications to YARN.</p><span class="tag">Higher level</span></div>
+    <div class="card"><h4>Ingestion tools</h4><p>Pipelines (NiFi, Kafka Connect, Spark jobs) write files into HDFS through the same client library.</p><span class="tag">Pipelines</span></div>
+  </div>
+TIP> You can watch the job lifecycle live: run a job, then open the ResourceManager UI (port 8088). You'll see the application go from <b>ACCEPTED</b> (waiting for its ApplicationMaster container) to <b>RUNNING</b> to <b>FINISHED</b>, and you can click through to every map and reduce attempt.
+</section>
+
+<!-- ======================= PART 4: STEP BY STEP ======================= -->
+<section class="part" id="steps">
+  <span class="part-label"><b>4</b> Step by step</span>
+  <h2>Riya's 300 MB file and her job, every step</h2>
+  <ol class="stepper">
+    <li><h4>Write: create the file</h4>
+      <div class="code" data-lang="bash" data-file="Terminal"><pre><code>hdfs dfs -put canteen_orders.csv /data/</code></pre></div>
+      <span class="behind">The client calls <code>create("/data/canteen_orders.csv")</code> on the NameNode, which checks permissions and that the file doesn't exist, adds it to the namespace as “under construction” and gives the client a <b>lease</b>.</span></li>
+    <li><h4>Write: three blocks, three pipelines</h4>
+      <div class="code" data-lang="python" data-file="blocks.py"><pre><code>import math
+size_mb, block_mb = 300, 128
+print(math.ceil(size_mb / block_mb), "blocks; last block", size_mb - 2 * block_mb, "MB")</code></pre><div class="output">3 blocks; last block 44 MB</div></div>
+      <span class="behind">For each block the client calls <code>addBlock</code>; the NameNode picks 3 DataNodes on 2 racks. The data streams as 64 KB packets: client → DN1 → DN2 → DN3, with acks flowing back. The last block uses only 44 MB of disk, not 128.</span></li>
+    <li><h4>Write: close</h4>
+      <p>After the last packet is acknowledged, the client calls <code>complete()</code>. The file is now visible and readable.</p>
+      <span class="behind">The DataNodes also tell the NameNode “I received block X” so its block map is up to date.</span></li>
+    <li><h4>Job: submit</h4>
+      <div class="code" data-lang="bash" data-file="Terminal"><pre><code>hadoop jar orders.jar ItemTotals /data/canteen_orders.csv /out/item_totals</code></pre></div>
+      <span class="behind">The client checks that <code>/out/item_totals</code> does <b>not</b> exist, computes 3 input splits (one per block), uploads the jar, configuration and split list to a staging directory in HDFS, and submits the application to the ResourceManager.</span></li>
+    <li><h4>Job: the ApplicationMaster takes over</h4>
+      <p>The ResourceManager starts the MRAppMaster in a container on some worker. The AM reads the split list and asks for 3 map containers, naming the nodes that hold each block.</p>
+      <span class="behind">The RM grants containers (ideally node-local); NodeManagers launch the map tasks. Each map sorts its output in memory, spills to local disk, and merges the spills into one partitioned file.</span></li>
+    <li><h4>Job: shuffle, reduce, commit</h4>
+      <p>Reducers fetch their partition from every map's NodeManager, merge-sort them, run the reduce function and write <code>part-r-00000</code> into a temporary folder.</p>
+      <span class="behind">When all tasks succeed, the output committer moves the files into <code>/out/item_totals</code> and writes <code>_SUCCESS</code>. The AM unregisters and exits; the job's history goes to the JobHistory Server. The output file is written through the same pipeline as step 2.</span></li>
+  </ol>
+</section>
+
+<!-- ======================= PART 5: SEE IT HAPPEN ======================= -->
+<section class="part" id="animation">
+  <span class="part-label"><b>5</b> See it happen</span>
+  <h2>The life of a file: what Riya types, and every message behind it</h2>
+  <p>Riya writes a 300 MB file and reads it back. Left: her terminal. Right: the client, the NameNode and four DataNodes.</p>
+  <div class="anim" data-frames="7">
+    <div class="anim__title">Write and read a file <span>7 steps</span></div>
+    <div class="anim__views">
+      <div class="view view--see">
+        <span class="view__tag">What you see</span>
+        <svg viewBox="0 0 360 250" role="img" aria-label="Riya's terminal">
+          <rect x="14" y="14" width="332" height="206" rx="8" class="s-board"/>
+          <text x="26" y="32" font-size="9" class="mono" style="fill:#7F8C86">riya@edge-01 : ~</text>
+          <g data-on="1-5"><text x="26" y="56" font-size="9" class="mono" style="fill:#7F8C86">$ hdfs dfs -put canteen_orders.csv /data/</text></g>
+          <g data-on="1"><text x="26" y="78" font-size="9" class="mono" style="fill:#9FD3B8">(working…)</text></g>
+          <g data-on="2-4"><rect x="26" y="74" width="300" height="12" rx="3" style="fill:#33413B"/></g>
+          <g data-on="2"><rect x="26" y="74" width="60" height="12" rx="3" style="fill:#9FD3B8"/></g>
+          <g data-on="3"><rect x="26" y="74" width="130" height="12" rx="3" style="fill:#9FD3B8"/></g>
+          <g data-on="4"><rect x="26" y="74" width="300" height="12" rx="3" style="fill:#9FD3B8"/></g>
+          <g data-on="5"><text x="26" y="78" font-size="9" class="mono" style="fill:#7F8C86">$ hdfs dfs -ls -h /data</text><text x="26" y="96" font-size="9" class="mono" style="fill:#9FD3B8">-rw-r--r-- 3 riya … 300 M canteen_orders.csv</text><text x="180" y="190" text-anchor="middle" font-size="10" class="s-chalk">“3” = replication factor.</text></g>
+          <g data-on="6-7"><text x="26" y="56" font-size="9" class="mono" style="fill:#7F8C86">$ hdfs dfs -cat /data/canteen_orders.csv | head -3</text></g>
+          <g data-on="7"><text x="26" y="78" font-size="9" class="mono" style="fill:#9FD3B8">order_id,item,amount</text><text x="26" y="94" font-size="9" class="mono" style="fill:#9FD3B8">1001,vada pav,20</text><text x="26" y="110" font-size="9" class="mono" style="fill:#9FD3B8">1002,chai,15</text></g>
+          <text x="352" y="244" text-anchor="end" class="s-wm">myphatshala.in</text>
+        </svg>
+        <ol class="caps" hidden>
+          <li>Riya runs <code>hdfs dfs -put</code>. Nothing visible happens yet, but the client is already talking to the NameNode.</li>
+          <li>The upload starts. Block 1 (128 MB) is being written.</li>
+          <li>Block 2 is being written. Each block goes to a different set of three DataNodes.</li>
+          <li>The last block (44 MB) finishes. The command returns.</li>
+          <li><code>hdfs dfs -ls -h</code> shows the file with replication 3 and size 300 MB.</li>
+          <li>Riya reads the file back with <code>-cat</code>.</li>
+          <li>The first lines appear. The bytes came from DataNodes, not from the NameNode.</li>
+        </ol>
+      </div>
+
+      <div class="view view--behind">
+        <span class="view__tag">Behind the screen</span>
+        <svg viewBox="0 0 360 250" role="img" aria-label="Client, NameNode and DataNodes exchanging messages">
+          <rect x="14" y="14" width="80" height="34" rx="6" class="s-soft-blue" style="stroke:var(--blue)"/><text x="54" y="35" text-anchor="middle" font-size="9" font-weight="700" class="s-blue">Client</text>
+          <rect x="250" y="14" width="96" height="34" rx="6" class="s-board"/><text x="298" y="35" text-anchor="middle" font-size="9" font-weight="700" class="s-chalk">NameNode</text>
+          <g><rect x="14" y="140" width="72" height="56" rx="6" class="s-card2"/><rect x="100" y="140" width="72" height="56" rx="6" class="s-card2"/><rect x="186" y="140" width="72" height="56" rx="6" class="s-card2"/><rect x="272" y="140" width="72" height="56" rx="6" class="s-card2"/>
+            <text x="50" y="156" text-anchor="middle" font-size="8.6" font-weight="700" class="s-ink">DN1 r1</text><text x="136" y="156" text-anchor="middle" font-size="8.6" font-weight="700" class="s-ink">DN2 r1</text><text x="222" y="156" text-anchor="middle" font-size="8.6" font-weight="700" class="s-ink">DN3 r2</text><text x="308" y="156" text-anchor="middle" font-size="8.6" font-weight="700" class="s-ink">DN4 r2</text></g>
+          <g data-on="1"><path d="M94 26h152" class="s-line" style="stroke:var(--blue);stroke-width:2"/><text x="170" y="20" text-anchor="middle" font-size="8.6" font-weight="700" class="s-blue">create(file)</text>
+            <path d="M246 40H98" class="s-line" style="stroke:var(--green);stroke-width:2"/><text x="170" y="56" text-anchor="middle" font-size="8.6" font-weight="700" class="s-green">OK + lease</text></g>
+          <g data-on="2"><text x="170" y="70" text-anchor="middle" font-size="8.6" font-weight="700" class="s-blue">addBlock → B1: DN1, DN3, DN4</text>
+            <path d="M54 48v92M86 176h14M172 176h14M258 176h14" style="fill:none;stroke:var(--track);stroke-width:3"/>
+            <rect x="34" y="166" width="32" height="14" rx="3" style="fill:var(--track)"/><rect x="206" y="166" width="32" height="14" rx="3" style="fill:var(--track)"/><rect x="292" y="166" width="32" height="14" rx="3" style="fill:var(--track)"/>
+            <text x="180" y="222" text-anchor="middle" font-size="8.6" class="s-acc" font-weight="700">packets: client → DN1 → DN3 → DN4 · acks ←</text></g>
+          <g data-on="3-"><rect x="34" y="166" width="32" height="14" rx="3" style="fill:var(--track)"/><rect x="206" y="166" width="32" height="14" rx="3" style="fill:var(--track)"/><rect x="292" y="166" width="32" height="14" rx="3" style="fill:var(--track)"/></g>
+          <g data-on="3"><text x="170" y="70" text-anchor="middle" font-size="8.6" font-weight="700" class="s-blue">addBlock → B2: DN2, DN4, DN3</text>
+            <rect x="120" y="182" width="32" height="10" rx="3" class="s-blue"/><rect x="292" y="182" width="32" height="10" rx="3" class="s-blue"/><rect x="206" y="182" width="32" height="10" rx="3" class="s-blue"/>
+            <text x="180" y="222" text-anchor="middle" font-size="8.6" class="s-acc" font-weight="700">new pipeline for each block</text></g>
+          <g data-on="4-"><rect x="120" y="182" width="32" height="10" rx="3" class="s-blue"/><rect x="292" y="182" width="32" height="10" rx="3" class="s-blue"/><rect x="206" y="182" width="32" height="10" rx="3" class="s-blue"/>
+            <rect x="70" y="166" width="12" height="14" rx="2" class="s-green"/><rect x="156" y="166" width="12" height="14" rx="2" class="s-green"/><rect x="242" y="182" width="12" height="10" rx="2" class="s-green"/></g>
+          <g data-on="4"><path d="M94 30h152" class="s-line" style="stroke:var(--blue);stroke-width:2"/><text x="170" y="70" text-anchor="middle" font-size="8.6" font-weight="700" class="s-blue">B3 (44 MB) written · complete(file)</text></g>
+          <g data-on="5"><text x="170" y="70" text-anchor="middle" font-size="8.6" font-weight="700" class="s-green">file closed: 3 blocks × 3 replicas</text><text x="170" y="86" text-anchor="middle" font-size="8.6" class="s-ink2">NameNode holds only the map, not the bytes</text></g>
+          <g data-on="6"><path d="M94 26h152" class="s-line" style="stroke:var(--blue);stroke-width:2"/><text x="170" y="20" text-anchor="middle" font-size="8.6" font-weight="700" class="s-blue">getBlockLocations(file)</text>
+            <path d="M246 40H98" class="s-line" style="stroke:var(--green);stroke-width:2"/><text x="170" y="56" text-anchor="middle" font-size="8.6" font-weight="700" class="s-green">B1@DN1,DN3,DN4 · B2@… (sorted by distance)</text></g>
+          <g data-on="7"><path d="M50 140V52" style="fill:none;stroke:var(--green);stroke-width:3"/><text x="64" y="100" font-size="8.6" font-weight="700" class="s-green">B1 from DN1 (nearest)</text><text x="64" y="114" font-size="8.6" class="s-ink2">checksums verified</text></g>
+          <text x="352" y="246" text-anchor="end" class="s-wm">myphatshala.in</text>
+        </svg>
+        <ol class="caps" hidden>
+          <li>The client asks the NameNode to <b>create</b> the file. The NameNode checks permissions, records the new file and grants a <b>lease</b> (a write lock).</li>
+          <li><b>addBlock</b>: the NameNode chooses DN1, DN3, DN4 for block 1. The client streams packets to DN1, which forwards to DN3, which forwards to DN4. Acknowledgements flow back along the chain.</li>
+          <li>For block 2 the client asks again and gets a different set of DataNodes: a new pipeline per block.</li>
+          <li>The small last block is written, then the client calls <b>complete</b>. The lease is released.</li>
+          <li>The file is closed: 3 blocks × 3 replicas spread over 4 nodes and 2 racks. The NameNode stores only where they are.</li>
+          <li>Reading: the client calls <b>getBlockLocations</b>. The NameNode returns each block's DataNodes, sorted closest first.</li>
+          <li>The client reads block 1 straight from the nearest DataNode, verifies its checksums, and moves on to block 2.</li>
+        </ol>
+      </div>
+    </div>
+  </div>
+
+  <h3 id="playground">Try it yourself: follow a file and a job</h3>
+  <p>Upload a file at 1× speed and read the Event log as it happens; then run a job and watch it read your blocks.</p>
+  {{PLAYGROUND}}
+</section>
+
+<!-- ======================= PART 6: REAL-WORLD USE ======================= -->
+<section class="part" id="real-world">
+  <span class="part-label"><b>6</b> Real-world use</span>
+  <h2>The life of a job, and where these journeys matter</h2>
+
+  <span class="live">Real-time scenario</span>
+  <h3 id="animated-example">The life of Riya's job, from submit to _SUCCESS</h3>
+  <p class="anim-intro">Follow <code>hadoop jar orders.jar ItemTotals</code> through YARN and MapReduce, one stage at a time.</p>
+  <div class="anim anim--one" data-frames="6" data-delay="4600">
+    <div class="anim__title">The life of a job <span>6 steps</span></div>
+    <div class="anim__views">
+      <div class="view view--story">
+        <span class="view__tag">Animated example</span>
+        <svg viewBox="0 0 360 236" role="img" aria-label="Job lifecycle on YARN">
+          <rect x="10" y="10" width="70" height="30" rx="5" class="s-soft-blue" style="stroke:var(--blue)"/><text x="45" y="29" text-anchor="middle" font-size="8.6" font-weight="700" class="s-blue">Client</text>
+          <rect x="140" y="10" width="110" height="30" rx="5" class="s-board"/><text x="195" y="29" text-anchor="middle" font-size="8.6" font-weight="700" class="s-chalk">ResourceManager</text>
+          <rect x="280" y="10" width="70" height="30" rx="5" class="s-card2"/><text x="315" y="29" text-anchor="middle" font-size="8.6" font-weight="700" class="s-ink">HDFS</text>
+          <g><rect x="10" y="80" width="105" height="96" rx="6" class="s-card2"/><rect x="128" y="80" width="105" height="96" rx="6" class="s-card2"/><rect x="246" y="80" width="105" height="96" rx="6" class="s-card2"/>
+            <text x="62" y="96" text-anchor="middle" font-size="8.6" font-weight="700" class="s-ink">worker1 (B1)</text><text x="180" y="96" text-anchor="middle" font-size="8.6" font-weight="700" class="s-ink">worker2 (B2)</text><text x="298" y="96" text-anchor="middle" font-size="8.6" font-weight="700" class="s-ink">worker3 (B3)</text></g>
+          <g data-on="1"><path d="M80 25h56" class="s-line" style="stroke:var(--blue);stroke-width:2"/><path d="M45 40v8h270v-8" style="fill:none;stroke:var(--blue);stroke-width:1.5;stroke-dasharray:4 3"/><text x="180" y="62" text-anchor="middle" font-size="8.6" font-weight="700" class="s-blue">jar + conf + 3 splits → staging dir; submit app</text></g>
+          <g data-on="2-"><rect x="138" y="104" width="86" height="18" rx="4" style="fill:#8B5CF6"/><text x="181" y="117" text-anchor="middle" font-size="8.6" font-weight="700" style="fill:#fff">MRAppMaster</text></g>
+          <g data-on="2"><path d="M195 40v60" class="s-line" style="stroke:#8B5CF6;stroke-width:2"/><text x="180" y="62" text-anchor="middle" font-size="8.6" font-weight="700" style="fill:#8B5CF6">RM launches the AM in a container (ACCEPTED → RUNNING)</text></g>
+          <g data-on="3"><text x="180" y="62" text-anchor="middle" font-size="8.6" font-weight="700" class="s-green">AM asks for 3 containers on the block holders</text>
+            <rect x="20" y="128" width="85" height="18" rx="4" class="s-green"/><text x="62" y="141" text-anchor="middle" font-size="8.6" font-weight="700" style="fill:#fff">map 1</text>
+            <rect x="138" y="128" width="85" height="18" rx="4" class="s-green"/><text x="180" y="141" text-anchor="middle" font-size="8.6" font-weight="700" style="fill:#fff">map 2</text>
+            <rect x="256" y="128" width="85" height="18" rx="4" class="s-green"/><text x="298" y="141" text-anchor="middle" font-size="8.6" font-weight="700" style="fill:#fff">map 3</text></g>
+          <g data-on="4"><text x="180" y="62" text-anchor="middle" font-size="8.6" font-weight="700" class="s-acc">maps sort + spill to local disk (not HDFS)</text>
+            <rect x="20" y="150" width="85" height="16" rx="4" class="s-soft-acc" style="stroke:var(--track)"/><text x="62" y="162" text-anchor="middle" font-size="7.6" class="s-acc">map output</text>
+            <rect x="138" y="150" width="85" height="16" rx="4" class="s-soft-acc" style="stroke:var(--track)"/><text x="180" y="162" text-anchor="middle" font-size="7.6" class="s-acc">map output</text>
+            <rect x="256" y="150" width="85" height="16" rx="4" class="s-soft-acc" style="stroke:var(--track)"/><text x="298" y="162" text-anchor="middle" font-size="7.6" class="s-acc">map output</text></g>
+          <g data-on="5"><text x="180" y="62" text-anchor="middle" font-size="8.6" font-weight="700" style="fill:#8B5CF6">reducer fetches its partition from every map (shuffle)</text>
+            <rect x="256" y="128" width="85" height="18" rx="4" style="fill:#8B5CF6"/><text x="298" y="141" text-anchor="middle" font-size="8.6" font-weight="700" style="fill:#fff">reduce</text>
+            <path d="M105 158c60 30 120 30 150-12M223 158c15 10 25 5 33-12" style="fill:none;stroke:#8B5CF6;stroke-width:2;stroke-dasharray:4 3"/></g>
+          <g data-on="6"><text x="180" y="62" text-anchor="middle" font-size="8.6" font-weight="700" class="s-green">commit → /out/item_totals/part-r-00000 + _SUCCESS</text>
+            <path d="M298 80V40" class="s-line" style="stroke:var(--green);stroke-width:2.5"/><text x="180" y="200" text-anchor="middle" font-size="8.6" class="s-ink2">AM unregisters; history → JobHistory Server (FINISHED)</text></g>
+          <text x="354" y="231" text-anchor="end" class="s-wm">myphatshala.in</text>
+        </svg>
+        <ol class="caps" hidden>
+          <li><b>Submit:</b> the client checks the output path, computes 3 splits, uploads the jar, configuration and split list to an HDFS staging directory, and submits the application to the ResourceManager.</li>
+          <li><b>Start the AM:</b> the RM finds a free container and asks that NodeManager to launch the MRAppMaster. The application moves from ACCEPTED to RUNNING.</li>
+          <li><b>Map:</b> the AM requests one container per split, naming the nodes that hold each block. Three map tasks start, each reading its local block.</li>
+          <li><b>Sort and spill:</b> each map writes its output to an in-memory buffer, sorts it by key and spills it to the node's <b>local disk</b>, partitioned for the reducers.</li>
+          <li><b>Shuffle and reduce:</b> the reducer fetches its partition from every map's NodeManager over HTTP, merges them in key order and runs the reduce function.</li>
+          <li><b>Commit:</b> the reducer's output is written to HDFS and committed; <code>_SUCCESS</code> appears. The AM unregisters and the job's history goes to the JobHistory Server.</li>
+        </ol>
+      </div>
+    </div>
+  </div>
+
+  <h3>Where knowing these journeys pays off</h3>
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="18" y="20" width="84" height="50" rx="6" class="s-board"/><text x="60" y="42" text-anchor="middle" font-size="8.6" class="mono" style="fill:#FF8A80">Output dir</text><text x="60" y="56" text-anchor="middle" font-size="8.6" class="mono" style="fill:#FF8A80">already exists</text></svg></div>
+    <div><h4>1. Reading error messages correctly</h4>
+      <p>Each step has typical errors: permission denied at <code>create</code>, “could only be written to 0 of the 1 minReplication nodes” at <code>addBlock</code> (no healthy DataNodes), <code>FileAlreadyExistsException</code> at job submission. Knowing the step tells you where to look.</p>
+      <div class="uc-flow"><span>Error</span><i>→</i><span class="java">Which step failed?</span><i>→</i><span>Right fix</span></div></div>
+  </div>
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="18" y="22" width="84" height="46" rx="6" class="s-card2"/><text x="60" y="42" text-anchor="middle" font-size="9" font-weight="700" class="s-ink">ACCEPTED</text><text x="60" y="58" text-anchor="middle" font-size="8.6" class="s-ink2">for 20 minutes…</text></svg></div>
+    <div><h4>2. A job stuck in ACCEPTED</h4>
+      <p>An application that stays ACCEPTED is waiting for a container for its ApplicationMaster: the queue is full or the AM's memory request doesn't fit any node. Understanding the lifecycle turns a mystery into a queue-capacity question.</p>
+      <div class="uc-flow"><span>Stuck job</span><i>→</i><span class="java">No AM container yet</span><i>→</i><span>Check queue / memory</span></div></div>
+  </div>
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="18" y="20" width="84" height="50" rx="6" class="s-soft-green" style="stroke:var(--green)"/><text x="60" y="50" text-anchor="middle" font-size="10" font-weight="700" class="s-green mono">_SUCCESS</text></svg></div>
+    <div><h4>3. Pipelines that wait for _SUCCESS</h4>
+      <p>Workflow tools (Airflow, Oozie) often start the next step only when the previous job's output folder contains <code>_SUCCESS</code>, so half-written output is never consumed.</p>
+      <div class="uc-flow"><span>Job A</span><i>→</i><span class="java">_SUCCESS appears</span><i>→</i><span>Job B starts</span></div></div>
+  </div>
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><path d="M20 45h80" style="stroke:var(--track);stroke-width:4"/><circle cx="20" cy="45" r="8" class="s-soft-blue" style="stroke:var(--blue)"/><circle cx="60" cy="45" r="8" class="s-card2"/><circle cx="100" cy="45" r="8" class="s-card2"/></svg></div>
+    <div><h4>4. Tuning ingestion speed</h4>
+      <p>Write throughput depends on the pipeline: the slowest of the three DataNodes and the cross-rack hop. Ingestion teams write many files in parallel from several clients to keep all DataNodes busy.</p>
+      <div class="uc-flow"><span>Many writers</span><i>→</i><span class="java">Many pipelines</span><i>→</i><span>Full cluster bandwidth</span></div></div>
+  </div>
+  <p class="muted">Simplified. Error texts vary slightly between versions.</p>
+</section>

@@ -1,0 +1,3542 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>How a file is read | MyPhatshala</title>
+<meta name="description" content="The anatomy of an HDFS read from real Hadoop 3.5.0 logs: getBlockLocations, replicas sorted by network distance, a client on a DataNode reading every block locally, a client off the DataNodes spreading reads, and per-512-byte checksums. A replica corrupted on purpose: the client reports “Found Checksum error … at 499712”, reads another replica (identical MD5), and the NameNode replaces the bad copy in 6 seconds. Python distance-sorting simulator, quiz and interview scenarios.">
+<meta name="mp:minutes" content="24">
+<link rel="canonical" href="https://myphatshala.in/courses/hadoop/06-hdfs-operations/02-how-a-file-is-read/">
+<meta property="og:title" content="How a file is read · MyPhatshala">
+<meta property="og:description" content="Nearest replica first, and never trust a damaged one. Watch HDFS read around a corrupted block on a real cluster.">
+<link rel="icon" href="../../../../assets/img/logo.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Fraunces:ital,opsz,wght@0,9..144,600;0,9..144,700;1,9..144,600&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../../../../assets/css/style.css">
+<link rel="stylesheet" href="../../../../assets/css/lesson.css">
+<script src="../../../../assets/js/config.js"></script>
+<script>try { const t = localStorage.getItem("mp-theme"); if (t) document.documentElement.dataset.theme = t; } catch (e) {}</script>
+<script type="application/ld+json">{"@context": "https://schema.org", "@type": "LearningResource", "name": "How a file is read", "learningResourceType": "Lesson", "educationalLevel": "Intermediate", "isAccessibleForFree": true, "inLanguage": "en", "isPartOf": {"@type": "Course", "name": "Apache Hadoop", "provider": {"@type": "Organization", "name": "MyPhatshala"}}}</script>
+</head>
+<body style="--track:#B45309" data-lesson="06-hdfs-operations/02-how-a-file-is-read" data-course-root="../../">
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="site-header">
+  <div class="wrap">
+    <a class="brand" href="../../../../" aria-label="MyPhatshala home"><img src="../../../../assets/img/logo.svg" width="34" height="34" alt=""><span>My<b>Phatshala</b></span></a>
+    <nav class="nav" aria-label="Main">
+      <a href="../../../../#tracks">All courses</a>
+      <a href="../../">Apache Hadoop syllabus</a>
+      <button class="theme-btn" id="theme-btn" aria-label="Toggle dark mode"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg></button>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+<section class="lesson-hero">
+  <div class="wrap">
+    <nav class="crumbs" aria-label="Breadcrumb"><a href="../../../../">Home</a><span>›</span><a href="../../../../#track-big-data">Big Data Engineering</a><span>›</span><a href="../../">Apache Hadoop</a><span>›</span><b>Lesson 6.2</b></nav>
+    <h1>How a file is read</h1>
+    <p class="lead">Reading a file from HDFS is a conversation with the NameNode followed by direct transfers from DataNodes. This lesson shows both on a real cluster: which DataNode serves each block depending on where the client runs, how every 512 bytes are checked, and what happens when we corrupt a replica on purpose: the reader gets correct data anyway, and HDFS repairs itself within seconds.</p>
+    <div class="lesson-meta"><span>Module 6 · HDFS operations</span><span>⏱ 24 min</span><span>Intermediate</span><span>Real client logs</span><span>Corruption repaired live</span><span>Runs in your browser (Python)</span><span>8 practice problems</span></div>
+  </div>
+</section>
+
+<div class="wrap lesson-layout">
+<article class="lesson-main">
+<!-- ======================= PART 1: THE STORY ======================= -->
+<section class="part" id="story">
+  <span class="part-label"><b>1</b> The story</span>
+  <h2>Nearest copy first, and never trust a damaged one</h2>
+  <div class="story">
+    <p class="narration">Kabir reads the 5-block canteen file twice: once from the namenode container, once from datanode-2. From the namenode container the blocks come from datanode-2, then datanode-3 three times, then datanode-1. From datanode-2, every single block comes from datanode-2 itself. Then Riya does something wicked: she overwrites one byte of a block file on datanode-2's disk with an <code>X</code>, and reads again from datanode-2. A warning appears: <code>Found Checksum error … at 499712</code>. Yet the file that comes out is byte-for-byte identical to the original.</p>
+
+    <div class="scene">
+      <svg viewBox="0 0 640 190" role="img" aria-label="The client asks the NameNode for block locations sorted by distance, then reads each block directly from the nearest DataNode, verifying checksums and switching to another replica on errors.">
+        <g font-size="10">
+          <rect x="250" y="12" width="140" height="44" rx="10" class="s-board"/><text x="320" y="32" text-anchor="middle" font-weight="700" class="s-chalk">NameNode</text><text x="320" y="47" text-anchor="middle" font-size="8.6" class="s-chalk">block → DataNodes, nearest first</text>
+          <rect x="20" y="100" width="130" height="56" rx="10" class="s-soft-acc" style="stroke:var(--track)"/><text x="85" y="124" text-anchor="middle" font-weight="700" class="s-acc">Client</text><text x="85" y="140" text-anchor="middle" font-size="8.6" class="s-ink">on datanode-2</text>
+          <rect x="200" y="100" width="120" height="56" rx="10" class="s-soft-green" style="stroke:var(--green)"/><text x="260" y="124" text-anchor="middle" font-weight="700" class="s-green">datanode-2</text><text x="260" y="140" text-anchor="middle" font-size="8.6" class="s-ink">same machine</text>
+          <rect x="350" y="100" width="120" height="56" rx="10" class="s-card2"/><text x="410" y="124" text-anchor="middle" font-weight="700" class="s-ink">datanode-1</text><text x="410" y="140" text-anchor="middle" font-size="8.6" class="s-ink2">same rack</text>
+          <rect x="500" y="100" width="120" height="56" rx="10" class="s-card2"/><text x="560" y="124" text-anchor="middle" font-weight="700" class="s-ink">datanode-3</text><text x="560" y="140" text-anchor="middle" font-size="8.6" class="s-ink2">other rack</text>
+          <path d="M85 100V34h165" style="fill:none;stroke:var(--track);stroke-width:1.6;stroke-dasharray:4 3"/><text x="160" y="28" font-size="8.6" class="s-acc">1. where are the blocks?</text>
+          <path d="M150 128h50" style="stroke:var(--blue);stroke-width:3"/><text x="175" y="120" text-anchor="middle" font-size="8.6" class="s-blue">2. read</text>
+        </g>
+        <text x="320" y="180" text-anchor="middle" font-size="10" class="s-ink2">Distance order: same node &lt; same rack &lt; other rack. Bad checksum? Try the next replica.</text>
+        <text x="632" y="182" text-anchor="end" class="s-wm">myphatshala.in</text>
+      </svg>
+    </div>
+
+    <div class="panel panel--right"><div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#DDEFE6"/><path d="M12 64c2-12 10-18 20-18s18 6 20 18z" fill="#F4F1EA"/><path d="M28 46l4 8 4-8" fill="#2F7D5B"/><circle cx="32" cy="28" r="12" fill="#B57A50"/><path d="M20 26c0-8 5-13 12-13s12 5 12 13c-2-3-6-5-12-5s-10 2-12 5z" fill="#5A5A5A"/><path d="M22 32c1 8 5 11 10 11s9-3 10-11c-2 3-6 4-10 4s-8-1-10-4z" fill="#5A5A5A"/><circle cx="27" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><circle cx="37" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><path d="M30.4 29h3.2" stroke="#1B2433" stroke-width="1.4"/><circle cx="27" cy="29" r="1.1" fill="#1B2433"/><circle cx="37" cy="29" r="1.1" fill="#1B2433"/></svg></div><div class="bubble"><b class="who">Arjun Sir</b><p>A read has two parts. First the client asks the NameNode “where are the blocks of this file?”. The NameNode answers with every block's replica locations, <b>sorted by distance</b> from the client. Then the client reads each block directly from the first DataNode in that list.</p></div></div>
+    <div class="panel"><div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#E1E9F7"/><path d="M12 64c2-12 10-18 20-18s18 6 20 18z" fill="#B45309"/><circle cx="32" cy="29" r="12" fill="#A9714A"/><path d="M19 27c0-9 6-14 13-14s13 5 13 14c-2-4-5-6-8-6-3 3-9 4-13 3-2 1-4 2-5 3z" fill="#1E1A17"/><circle cx="27.5" cy="30" r="1.5" fill="#1E1A17"/><circle cx="36.5" cy="30" r="1.5" fill="#1E1A17"/><path d="M27 35.5q5 3.5 10 0" stroke="#1E1A17" stroke-width="1.6" fill="none" stroke-linecap="round"/><rect x="41" y="40" width="10" height="7" rx="1.5" fill="#2E5AAC"/></svg></div><div class="bubble"><b class="who">Kabir</b><p>And from the namenode container there was no “nearest”?</p></div></div>
+    <div class="panel panel--right"><div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#DDEFE6"/><path d="M12 64c2-12 10-18 20-18s18 6 20 18z" fill="#F4F1EA"/><path d="M28 46l4 8 4-8" fill="#2F7D5B"/><circle cx="32" cy="28" r="12" fill="#B57A50"/><path d="M20 26c0-8 5-13 12-13s12 5 12 13c-2-3-6-5-12-5s-10 2-12 5z" fill="#5A5A5A"/><path d="M22 32c1 8 5 11 10 11s9-3 10-11c-2 3-6 4-10 4s-8-1-10-4z" fill="#5A5A5A"/><circle cx="27" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><circle cx="37" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><path d="M30.4 29h3.2" stroke="#1B2433" stroke-width="1.4"/><circle cx="27" cy="29" r="1.1" fill="#1B2433"/><circle cx="37" cy="29" r="1.1" fill="#1B2433"/></svg></div><div class="bubble"><b class="who">Arjun Sir</b><p>Right: it isn't a DataNode, and all three replicas were equally far, so the order was shuffled to spread the load. From datanode-2, its own disk is always closest. And the corrupted byte? Every 512 bytes of a block has a checksum. The client verified it, saw a mismatch, quietly fetched that part from another replica, and told the NameNode the copy on datanode-2 was bad. A few seconds later the NameNode had made a fresh copy elsewhere and deleted the bad one.</p></div></div>
+  </div>
+</section>
+
+<!-- ======================= PART 2: DEFINITION ======================= -->
+<section class="part" id="definition">
+  <span class="part-label"><b>2</b> Definition</span>
+  <h2>The HDFS read path</h2>
+  <div class="def">
+    <div class="def__formal"><small>Formal definition (write this in exams)</small>
+      <p>To read a file, the client calls <b>open</b>; the <code>DFSInputStream</code> asks the NameNode (<b>getBlockLocations</b>) for the locations of the file's blocks, in batches. For each block the NameNode returns the DataNodes holding a replica, <b>sorted by network distance</b> from the client (local node, then same rack, then other racks; equal distances are shuffled). The client connects to the closest DataNode and streams the block directly; at a block boundary it moves to the best DataNode for the next block. Data is <b>verified with checksums</b> (one per 512 bytes) as it is read. On a checksum error or a DataNode failure, the client reads from the next replica, remembers the bad DataNode for that stream, and reports corrupt replicas to the NameNode (<b>reportBadBlocks</b>), which schedules re-replication from a good replica and deletes the corrupt one. The NameNode serves only metadata; data never passes through it.</p></div>
+    <div class="def__simple"><small>In simple words</small>
+      <p>Ask the NameNode where the pieces are, then fetch each piece from the nearest machine that has it, checking every 512 bytes. If a piece is broken or a machine doesn't answer, use another copy and tell the NameNode.</p></div>
+  </div>
+
+  <h3>Words you'll meet in this lesson</h3>
+  <div class="terms">
+    <div class="term"><b>getBlockLocations</b><span>NameNode call returning blocks and their replica locations for a byte range of a file.</span></div>
+    <div class="term"><b>LocatedBlocks</b><span>The reply: file length and a list of blocks, each with sorted locations.</span></div>
+    <div class="term"><b>Network distance</b><span>0 same node, 2 same rack, 4 different rack (in the default topology).</span></div>
+    <div class="term"><b>DFSInputStream</b><span>The client-side stream that picks DataNodes, reads, verifies and retries.</span></div>
+    <div class="term"><b>ChecksumException</b><span>Raised when data doesn't match its stored checksum.</span></div>
+    <div class="term"><b>reportBadBlocks</b><span>Client or DataNode tells the NameNode a replica is corrupt.</span></div>
+    <div class="term"><b>Short-circuit read</b><span>Optional: a client on the same machine reads the block file directly, bypassing the DataNode process.</span></div>
+    <div class="term"><b>Positional read (pread)</b><span>Read bytes at an offset without moving the stream position; used by Parquet/ORC readers.</span></div>
+  </div>
+
+  <h3>Read facts (Hadoop 3.5.0, seen in the lab)</h3>
+  <table class="facts" style="table-layout:fixed;overflow-wrap:anywhere">
+    <tr><th>Checksum unit</th><td>512 bytes (<code>dfs.bytes-per-checksum</code>); error reported at offset 499,712 = 976 × 512, the chunk containing the changed byte 500,000</td></tr>
+    <tr><th>Client on a DataNode</th><td>All 5 blocks read from its own DataNode</td></tr>
+    <tr><th>Client off the DataNodes</th><td>Replicas at equal distance are shuffled: we saw dn-2, dn-3, dn-3, dn-3, dn-1</td></tr>
+    <tr><th>Short-circuit reads</th><td><code>dfs.client.read.shortcircuit</code> = false by default (needs a domain socket path)</td></tr>
+    <tr><th>Corrupt replica handling</th><td>reportBadBlocks at 09:37:30, new replica on another DataNode 6 s later, bad file removed</td></tr>
+  </table>
+
+  <h3 id="levels">The read path at three levels</h3>
+  <div class="modlab levels"><div class="modlab__bar"><b>Pick your level. New to this? Start at Beginner and climb.</b><button type="button" data-mod="b">Beginner</button><button type="button" data-mod="i">Intermediate</button><button type="button" data-mod="a">Advanced</button></div>
+    <div class="modlab__panel" data-mod="b"><h4><span class="lvl lvl--b">Beginner</span> A library with photocopies</h4>
+      <ul>
+        <li>You ask the index desk: “Where is chapter 1?” The librarian lists shelves holding copies, the nearest first.</li>
+        <li>You walk to the nearest shelf and read it there. The librarian never fetches pages.</li>
+        <li>If a page is smudged, you take another copy and tell the librarian, who replaces the smudged one.</li>
+      </ul>
+
+    </div>
+    <div class="modlab__panel" data-mod="i"><h4><span class="lvl lvl--i">Intermediate</span> Step by step</h4>
+      <ul>
+        <li><b>open()</b>: client asks the NameNode for block locations of the first part of the file.</li>
+        <li><b>read()</b>: connect to the first (closest) DataNode for block 0 and stream it, verifying checksums.</li>
+        <li>At the end of block 0, pick the best DataNode for block 1 (maybe a different one), and so on.</li>
+        <li>For long files, ask the NameNode for more locations as needed.</li>
+        <li><b>close()</b>: release connections.</li>
+      </ul>
+
+    </div>
+    <div class="modlab__panel" data-mod="a"><h4><span class="lvl lvl--a">Advanced</span> Robustness and performance</h4>
+      <ul>
+        <li>Failures: a DataNode that doesn't respond is added to the stream's dead-node list and the next replica is used.</li>
+        <li>Corruption: detected end-to-end by the client (checksums were created by the writer), so disk, network and memory errors are all caught.</li>
+        <li>DataNodes also run a background <b>block scanner</b> that finds corrupt replicas nobody has read for weeks.</li>
+        <li>Data locality in MapReduce and Spark is the same idea: put the task where the closest replica is distance 0.</li>
+        <li>Hedged reads (optional) start a second read from another replica if the first is slow.</li>
+      </ul>
+
+    </div>
+  </div>
+  <div class="callout callout--exam"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19V5a2 2 0 0 1 2-2h12v18H6a2 2 0 0 1-2-2zm0 0a2 2 0 0 1 2-2h12"/></svg><p><b>Exam tip:</b> “Explain the anatomy of a file read in HDFS”: client <code>open()</code> → NameNode returns block locations <b>sorted by proximity</b> → client reads each block <b>directly from the nearest DataNode</b>, verifying <b>checksums</b> → moves to the next block → on error, tries another replica and reports the bad block → <code>close()</code>. Stress that the NameNode never sends data.</p></div>
+</section>
+
+<!-- ======================= PART 3: TYPES AND WAYS TO USE IT ======================= -->
+<section class="part" id="types">
+  <span class="part-label"><b>3</b> Types and ways to use it</span>
+  <h2>Kinds of reads</h2>
+  <div class="table-wrap">
+  <table class="compare" style="min-width:600px">
+    <thead><tr><th>Read</th><th>Where the client is</th><th>How data travels</th><th>Typical user</th></tr></thead>
+    <tbody>
+      <tr><td><b>Local</b></td><td>On a DataNode holding the block</td><td>From the local DataNode (over a local socket)</td><td>MapReduce/Spark task with data locality</td></tr>
+      <tr><td><b>Short-circuit local</b></td><td>Same, with short-circuit enabled</td><td>Reads the block file directly from disk</td><td>Impala, HBase, tuned Spark clusters</td></tr>
+      <tr><td><b>Rack-local</b></td><td>Same rack as a replica</td><td>Through the rack switch</td><td>Tasks that missed node locality</td></tr>
+      <tr><td><b>Remote</b></td><td>Other rack or outside the cluster</td><td>Through the core network</td><td>Edge-node users, BI tools, <code>hdfs dfs -get</code></td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <h3>Read-side protections</h3>
+  <div class="cards">
+    <div class="card"><h4>Checksums</h4><p>CRC per 512 bytes, checked by the reading client. Catches disk and network corruption.</p><span class="tag">Integrity</span></div>
+    <div class="card"><h4>Replica failover</h4><p>Dead or slow DataNode → next replica in the sorted list.</p><span class="tag">Availability</span></div>
+    <div class="card"><h4>Block scanner</h4><p>Each DataNode re-verifies its blocks in the background (default every 3 weeks).</p><span class="tag">Background</span></div>
+    <div class="card"><h4>reportBadBlocks</h4><p>Corrupt replicas are replaced from good ones automatically.</p><span class="tag">Self-healing</span></div>
+  </div>
+  <div class="callout callout--tip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18h6M10 22h4M12 2a7 7 0 0 0-4 12.7V17h8v-2.3A7 7 0 0 0 12 2z"/></svg><p><code>hdfs dfs -checksum path</code> prints a file-level checksum built from block checksums. Compare it between two clusters (with the same block size) to check that a copy is identical without reading the data yourself.</p></div>
+</section>
+
+<!-- ======================= PART 4: STEP BY STEP ======================= -->
+<section class="part" id="steps">
+  <span class="part-label"><b>4</b> Step by step</span>
+  <h2>Watch reads on the real cluster</h2>
+  <p>IP addresses at the time: datanode-1 = 172.19.0.4, datanode-2 = .3, datanode-3 = .6, datanode-4 = .7. Debug logging is switched on for the client only (configuration in <code>read_trace.py</code>, Part 4b).</p>
+  <ol class="stepper">
+    <li><h4>What the NameNode tells the client</h4>
+      <div class="code" data-lang="bash" data-file="Terminal (in the namenode container)"><pre><code>HADOOP_CLIENT_OPTS="-Dlog4j.configuration=file:/tmp/dbg2.properties" \
+  hdfs dfs -cat /user/hadoop/data/canteen_1mb.csv 2&gt;/tmp/rd.log &gt;/dev/null
+grep -o "LocatedBlocks{.*" /tmp/rd.log | cut -c1-420</code></pre><div class="output">LocatedBlocks{;  fileLength=4692009;  underConstruction=false;  blocks=[LocatedBlock{BP-1507681208-172.19.0.3-1792565333483:blk_1073741826_1002; getBlockSize()=1048576; corrupt=false; offset=0; locs=[DatanodeInfoWithStorage[172.19.0.3:9866,…], DatanodeInfoWithStorage[172.19.0.4:9866,…], DatanodeInfoWithStorage[172.19.0.6:9866,…]]; cachedLocs=[]}, LocatedBlock{…:blk_1073741827_1003; getBlockSize()=1048576; corrupt=false; offset=1048576…</div></div>
+      <span class="behind">One answer describes the whole file: its length, and for each block the ID, size, offset in the file and the replica locations. That's all the client needs; it never asks about data again.</span></li>
+    <li><h4>Read from outside the DataNodes</h4>
+      <div class="code" data-lang="bash" data-file="Terminal (in the namenode container)"><pre><code>grep "Connecting to datanode" /tmp/rd.log</code></pre><div class="output">09:36:54,867 DEBUG DFSClient - Connecting to datanode 172.19.0.6:9866
+09:36:55,119 DEBUG DFSClient - Connecting to datanode 172.19.0.6:9866
+09:36:55,135 DEBUG DFSClient - Connecting to datanode 172.19.0.4:9866
+09:36:55,149 DEBUG DFSClient - Connecting to datanode 172.19.0.6:9866
+09:36:55,161 DEBUG DFSClient - Connecting to datanode 172.19.0.3:9866</div></div>
+      <span class="behind">The namenode container holds no replicas and isn't in either rack, so every replica is equally far. The order is shuffled per block, spreading readers across DataNodes.</span></li>
+    <li><h4>Read from a DataNode that holds the blocks</h4>
+      <div class="code" data-lang="bash" data-file="Terminal (in datanode-2)"><pre><code>HADOOP_CLIENT_OPTS="-Dlog4j.configuration=file:/tmp/dbg2.properties" \
+  hdfs dfs -cat /user/hadoop/data/canteen_1mb.csv 2&gt;&amp;1 &gt;/dev/null | grep "Connecting to datanode"</code></pre><div class="output">09:36:57,823 DEBUG DFSClient - Connecting to datanode 172.19.0.3:9866
+09:36:57,924 DEBUG DFSClient - Connecting to datanode 172.19.0.3:9866
+09:36:57,942 DEBUG DFSClient - Connecting to datanode 172.19.0.3:9866
+09:36:57,961 DEBUG DFSClient - Connecting to datanode 172.19.0.3:9866
+09:36:57,970 DEBUG DFSClient - Connecting to datanode 172.19.0.3:9866</div></div>
+      <span class="behind">Every block from 172.19.0.3, datanode-2 itself: distance 0. This is exactly what a map task with data locality gets.</span></li>
+    <li><h4>Damage one replica</h4>
+      <div class="code" data-lang="bash" data-file="Terminal (in datanode-2)"><pre><code>f=$(find /tmp/hadoop-hadoop/dfs/data -name blk_1073741827)
+printf 'X' | dd of=$f bs=1 seek=500000 conv=notrunc</code></pre></div>
+      <span class="behind">One byte in the middle of a 1 MB block replica on datanode-2 is overwritten. The file size doesn't change and HDFS isn't told. (Never do this on a real cluster: it's a demonstration of corruption.)</span></li>
+    <li><h4>Read again from datanode-2</h4>
+      <div class="code" data-lang="bash" data-file="Terminal (in datanode-2)"><pre><code>hdfs dfs -cat /user/hadoop/data/canteen_1mb.csv &gt; /tmp/out.csv
+md5sum /tmp/out.csv
+md5sum canteen_orders.csv          # the original, on your PC</code></pre><div class="output">09:37:30 WARN  DFSClient - Found Checksum error for BP-1507681208-…:blk_1073741827_1003 from DatanodeInfoWithStorage[172.19.0.3:9866,…] at 499712
+6cba714b557a8b2d1e01eb091ff42ca2  /tmp/out.csv
+6cba714b557a8b2d1e01eb091ff42ca2  canteen_orders.csv</div></div>
+      <span class="behind">The client noticed that the 512-byte chunk starting at 499,712 didn't match its checksum, read that block from another replica, and produced a file identical to the original (same MD5).</span></li>
+    <li><h4>The NameNode heals the block</h4>
+      <div class="code" data-lang="bash" data-file="Terminal"><pre><code>docker compose logs namenode | grep blk_1073741827 | tail -2
+docker compose exec namenode hdfs fsck /user/hadoop/data/canteen_1mb.csv -files -blocks -locations | grep blk_1073741827
+docker exec lab5-datanode-2 bash -c 'find /tmp/hadoop-hadoop/dfs/data -name "blk_1073741827*" | wc -l'</code></pre><div class="output">09:37:30 INFO  StateChange:6023 - *DIR* reportBadBlocks for block: …:blk_1073741827_1003 on datanode: 172.19.0.3:9866
+09:37:36 INFO  BlockStateChange:3806 - BLOCK* addStoredBlock: 172.19.0.7:9866 is added to blk_1073741827_1003 (size=1048576)
+1. …:blk_1073741827_1003 len=1048576 Live_repl=3  [172.19.0.4, 172.19.0.7, 172.19.0.6]
+0</div></div>
+      <span class="behind">The client reported the bad replica; six seconds later a good copy existed on datanode-4 (.7), and the corrupt files on datanode-2 were deleted (0 left). Three healthy replicas again, without anyone running a command.</span></li>
+  </ol>
+  <div class="callout callout--warn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3 2 21h20L12 3z"/><path d="M12 10v5M12 18v.5"/></svg><p>If <i>every</i> replica of a block is corrupt or unavailable, the read fails with a <code>BlockMissingException</code> and fsck marks the file CORRUPT. Replication protects against independent failures, not against writing bad data in the first place.</p></div>
+</section>
+
+<!-- ======================= PART 5: SEE IT HAPPEN ======================= -->
+<section class="part" id="animation">
+  <span class="part-label"><b>5</b> See it happen</span>
+  <h2>A read that survives a corrupt replica</h2>
+  <p>Steps 3 to 6 from the lab, frame by frame.</p>
+  <div class="anim" data-frames="6">
+    <div class="anim__title">Reading canteen_1mb.csv from datanode-2 <span>6 steps</span></div>
+    <div class="anim__views">
+      <div class="view view--see">
+        <span class="view__tag">What you see</span>
+        <svg viewBox="0 0 360 250" role="img" aria-label="Terminal on datanode-2">
+          <rect x="14" y="14" width="332" height="206" rx="8" class="s-board"/>
+          <text x="26" y="32" font-size="9" class="mono" style="fill:#7F8C86">hadoop@datanode-2 : /tmp</text>
+          <g data-on="1"><text x="26" y="56" font-size="8.6" class="mono" style="fill:#7F8C86">$ hdfs dfs -cat …/canteen_1mb.csv</text><text x="26" y="72" font-size="8.6" class="mono" style="fill:#9FD3B8">Connecting to datanode 172.19.0.3 (×5)</text></g>
+          <g data-on="2"><text x="26" y="56" font-size="8.6" class="mono" style="fill:#7F8C86">$ printf 'X' | dd of=…/blk_1073741827 \</text><text x="26" y="70" font-size="8.6" class="mono" style="fill:#7F8C86">    bs=1 seek=500000 conv=notrunc</text><text x="180" y="190" text-anchor="middle" font-size="10" class="s-chalk">One byte changed on disk.</text></g>
+          <g data-on="3"><text x="26" y="56" font-size="8.6" class="mono" style="fill:#7F8C86">$ hdfs dfs -cat … &gt; /tmp/out.csv</text><text x="26" y="72" font-size="8.6" class="mono" style="fill:#F5C77E">WARN Found Checksum error for</text><text x="26" y="86" font-size="8.6" class="mono" style="fill:#F5C77E">  …blk_1073741827_1003 from …172.19.0.3</text><text x="26" y="100" font-size="8.6" class="mono" style="fill:#F5C77E">  at 499712</text></g>
+          <g data-on="4"><text x="26" y="56" font-size="8.6" class="mono" style="fill:#7F8C86">$ md5sum /tmp/out.csv canteen_orders.csv</text><text x="26" y="72" font-size="8.6" class="mono" style="fill:#9FD3B8">6cba714b…ca2  /tmp/out.csv</text><text x="26" y="86" font-size="8.6" class="mono" style="fill:#9FD3B8">6cba714b…ca2  canteen_orders.csv</text></g>
+          <g data-on="5"><text x="26" y="56" font-size="8.6" class="mono" style="fill:#9FD3B8">reportBadBlocks for block: …827</text><text x="26" y="70" font-size="8.6" class="mono" style="fill:#9FD3B8">  on datanode: 172.19.0.3:9866</text><text x="26" y="88" font-size="8.6" class="mono" style="fill:#9FD3B8">addStoredBlock: 172.19.0.7 is added</text><text x="26" y="102" font-size="8.6" class="mono" style="fill:#9FD3B8">  to blk_1073741827_1003</text></g>
+          <g data-on="6"><text x="26" y="56" font-size="8.6" class="mono" style="fill:#9FD3B8">Live_repl=3 [.4, .7, .6]</text><text x="26" y="72" font-size="8.6" class="mono" style="fill:#7F8C86">$ find … -name "blk_1073741827*" | wc -l</text><text x="26" y="88" font-size="8.6" class="mono" style="fill:#9FD3B8">0</text></g>
+          <text x="352" y="244" text-anchor="end" class="s-wm">myphatshala.in</text>
+        </svg>
+        <ol class="caps" hidden>
+          <li>Normally a client on datanode-2 reads every block from datanode-2 itself.</li>
+          <li>We damage one byte of one replica on datanode-2's disk.</li>
+          <li>The next read detects the damage: the 512-byte chunk at offset 499,712 fails its checksum.</li>
+          <li>Still, the output is identical to the original file: the client read that block from another replica.</li>
+          <li>The client reported the bad replica; the NameNode copied a good one to datanode-4.</li>
+          <li>Three healthy replicas, none on datanode-2: the corrupt copy was deleted.</li>
+        </ol>
+      </div>
+
+      <div class="view view--behind">
+        <span class="view__tag">Behind the screen</span>
+        <svg viewBox="0 0 360 250" role="img" aria-label="Replicas and the client">
+          <rect x="120" y="12" width="120" height="30" rx="6" class="s-board"/><text x="180" y="31" text-anchor="middle" font-size="9" font-weight="700" class="s-chalk">NameNode</text>
+          <rect x="14" y="80" width="78" height="56" rx="6" class="s-soft-acc" style="stroke:var(--track)"/><text x="53" y="102" text-anchor="middle" font-size="8.6" font-weight="700" class="s-acc">client</text><text x="53" y="118" text-anchor="middle" font-size="7.6" class="s-ink">on dn-2</text>
+          <rect x="110" y="80" width="56" height="56" rx="6" class="s-soft-green" style="stroke:var(--green)"/><text x="138" y="100" text-anchor="middle" font-size="8.6" font-weight="700" class="s-green">dn-2</text>
+          <rect x="176" y="80" width="56" height="56" rx="6" class="s-soft-green" style="stroke:var(--green)"/><text x="204" y="100" text-anchor="middle" font-size="8.6" font-weight="700" class="s-green">dn-1</text>
+          <rect x="242" y="80" width="56" height="56" rx="6" class="s-soft-green" style="stroke:var(--green)"/><text x="270" y="100" text-anchor="middle" font-size="8.6" font-weight="700" class="s-green">dn-3</text>
+          <rect x="304" y="80" width="46" height="56" rx="6" class="s-card2"/><text x="327" y="100" text-anchor="middle" font-size="8.6" font-weight="700" class="s-ink">dn-4</text>
+          <g data-on="1-4"><rect x="118" y="108" width="40" height="16" rx="3" class="s-soft-blue" style="stroke:var(--blue)"/><text x="138" y="119" text-anchor="middle" font-size="7.6" class="s-blue">…827</text></g>
+          <rect x="184" y="108" width="40" height="16" rx="3" class="s-soft-blue" style="stroke:var(--blue)"/><text x="204" y="119" text-anchor="middle" font-size="7.6" class="s-blue">…827</text>
+          <rect x="250" y="108" width="40" height="16" rx="3" class="s-soft-blue" style="stroke:var(--blue)"/><text x="270" y="119" text-anchor="middle" font-size="7.6" class="s-blue">…827</text>
+          <g data-on="1"><path d="M92 116h18" style="stroke:var(--blue);stroke-width:3"/><text x="180" y="180" text-anchor="middle" font-size="9" class="s-ink2">distance 0: its own DataNode first</text></g>
+          <g data-on="2-4"><rect x="118" y="108" width="40" height="16" rx="3" style="fill:none;stroke:var(--red);stroke-width:2"/><text x="138" y="150" text-anchor="middle" font-size="8" font-weight="700" class="s-red">1 byte bad</text></g>
+          <g data-on="3"><path d="M92 116h18" style="stroke:var(--red);stroke-width:3"/><text x="180" y="180" text-anchor="middle" font-size="9" class="s-red">chunk 976 (offset 499,712): CRC mismatch</text></g>
+          <g data-on="4"><path d="M92 128c40 30 100 30 112 -4" style="fill:none;stroke:var(--blue);stroke-width:3"/><text x="180" y="190" text-anchor="middle" font-size="9" class="s-ink2">same block read from dn-1 instead: correct data</text></g>
+          <g data-on="5"><path d="M53 80V27h67" style="fill:none;stroke:var(--track);stroke-width:2"/><text x="96" y="58" font-size="7.6" class="s-acc">reportBadBlocks</text><path d="M270 124c20 40 50 40 57 0" style="fill:none;stroke:var(--green);stroke-width:2"/><rect x="307" y="108" width="40" height="16" rx="3" class="s-soft-blue" style="stroke:var(--blue)"/><text x="327" y="119" text-anchor="middle" font-size="7.6" class="s-blue">…827</text><text x="180" y="190" text-anchor="middle" font-size="9" class="s-ink2">NameNode orders a fresh copy from a good replica</text></g>
+          <g data-on="6"><rect x="307" y="108" width="40" height="16" rx="3" class="s-soft-blue" style="stroke:var(--blue)"/><text x="327" y="119" text-anchor="middle" font-size="7.6" class="s-blue">…827</text><text x="180" y="190" text-anchor="middle" font-size="9" font-weight="700" class="s-green">bad replica deleted; 3 good replicas</text></g>
+          <text x="352" y="246" text-anchor="end" class="s-wm">myphatshala.in</text>
+        </svg>
+        <ol class="caps" hidden>
+          <li>The NameNode sorted dn-2 first for this client, so it reads from its own machine.</li>
+          <li>The replica on dn-2 now has one wrong byte; its stored checksums still describe the original data.</li>
+          <li>The client recomputes the checksum of each 512-byte chunk as it reads; chunk 976 doesn't match.</li>
+          <li>It discards that data and reads the block from the next replica in the list.</li>
+          <li>It reports the corrupt replica; the NameNode schedules a copy from a good replica to dn-4.</li>
+          <li>The corrupt replica on dn-2 is invalidated (deleted). The block is fully protected again.</li>
+        </ol>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ======================= PART 6: REAL-WORLD USE ======================= -->
+<section class="part" id="real-world">
+  <span class="part-label"><b>6</b> Real-world use</span>
+  <h2>The read path at work</h2>
+
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="20" y="20" width="80" height="50" rx="6" class="s-soft-green" style="stroke:var(--green)"/><text x="60" y="42" text-anchor="middle" font-size="8.6" font-weight="700" class="s-green">locality</text><text x="60" y="58" text-anchor="middle" font-size="8.6" class="s-ink">task on dn-2</text></svg></div>
+    <div><h4>1. Data-local tasks</h4>
+      <p>Schedulers place map and Spark tasks on nodes holding a replica, so most reads are distance 0, like step 3. Job counters such as “Data-local map tasks” show how well this worked.</p>
+      <div class="uc-flow"><span>Block on dn-2</span><i>→</i><span class="java">Task on dn-2</span><i>→</i><span>Local read</span></div></div>
+  </div>
+
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="20" y="20" width="80" height="50" rx="6" class="s-soft-blue" style="stroke:var(--blue)"/><text x="60" y="42" text-anchor="middle" font-size="8.6" font-weight="700" class="s-blue">short-circuit</text><text x="60" y="58" text-anchor="middle" font-size="8.6" class="s-ink">disk → query</text></svg></div>
+    <div><h4>2. Short-circuit reads for fast engines</h4>
+      <p>Interactive SQL engines and HBase enable short-circuit local reads so they read block files straight from disk, skipping the DataNode's network stack and cutting latency.</p>
+      <div class="uc-flow"><span>Local block</span><i>→</i><span class="java">Read file directly</span><i>→</i><span>Lower latency</span></div></div>
+  </div>
+
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="20" y="20" width="80" height="50" rx="6" class="s-board"/><text x="60" y="42" text-anchor="middle" font-size="8.6" class="mono" style="fill:#F5C77E">Checksum error</text><text x="60" y="58" text-anchor="middle" font-size="8.6" class="mono" style="fill:#9FD3B8">auto-healed</text></svg></div>
+    <div><h4>3. Silent disk errors caught</h4>
+      <p>On thousands of disks, bit rot and bad sectors happen. Checksum errors show up as WARN lines and DataNode metrics; the data is healed automatically, and repeated errors on one disk tell admins to replace it.</p>
+      <div class="uc-flow"><span>Bad sector</span><i>→</i><span class="java">Checksum error</span><i>→</i><span>Replace replica, then disk</span></div></div>
+  </div>
+
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="20" y="20" width="80" height="50" rx="6" class="s-card2"/><text x="60" y="42" text-anchor="middle" font-size="8.6" font-weight="700" class="s-ink">-checksum</text><text x="60" y="58" text-anchor="middle" font-size="8.6" class="s-ink2">verify copies</text></svg></div>
+    <div><h4>4. Verifying copies between clusters</h4>
+      <p>After copying data to a DR cluster, teams compare <code>hdfs dfs -checksum</code> (or let DistCp do it) instead of reading terabytes back to compare.</p>
+      <div class="uc-flow"><span>Copy</span><i>→</i><span class="java">Compare checksums</span><i>→</i><span>Proven identical</span></div></div>
+  </div>
+  <p class="muted">Simplified; organisations differ in tools and policies.</p>
+</section>
+
+
+<div class="ad-slot" data-slot="mid"></div>
+
+<section class="part" id="run">
+  <span class="part-label"><b>7</b> Run the code</span>
+  <h2>Sort replicas by distance, like the NameNode</h2>
+  <p>This program computes the network distance from a client to each replica (0 same node, 2 same rack, 4 other rack) and sorts the replica list, shuffling ties as HDFS does. Try it for a client on a DataNode and for one outside the racks.</p>
+  <div class="code" data-lang="python" data-file="main.py"><pre><code>import random
+random.seed(3)
+rack = {&quot;dn-1&quot;: &quot;/rack1&quot;, &quot;dn-2&quot;: &quot;/rack1&quot;, &quot;dn-3&quot;: &quot;/rack2&quot;, &quot;dn-4&quot;: &quot;/rack2&quot;}
+
+def distance(client, dn):
+    if client == dn:
+        return 0
+    if rack.get(client) == rack[dn]:
+        return 2
+    return 4
+
+def sorted_replicas(client, replicas):
+    shuffled = random.sample(replicas, len(replicas))     # ties in random order
+    return sorted(shuffled, key=lambda dn: distance(client, dn))
+
+replicas = [&quot;dn-1&quot;, &quot;dn-2&quot;, &quot;dn-3&quot;]
+for client in [&quot;dn-2&quot;, &quot;dn-4&quot;, &quot;edge-node&quot;]:
+    order = sorted_replicas(client, replicas)
+    print(f&quot;{client:9} reads from {order[0]}   (order {order})&quot;)</code></pre><div class="output">dn-2      reads from dn-2   (order [&#x27;dn-2&#x27;, &#x27;dn-1&#x27;, &#x27;dn-3&#x27;])
+dn-4      reads from dn-3   (order [&#x27;dn-3&#x27;, &#x27;dn-2&#x27;, &#x27;dn-1&#x27;])
+edge-node reads from dn-3   (order [&#x27;dn-3&#x27;, &#x27;dn-1&#x27;, &#x27;dn-2&#x27;])</div></div>
+  <ul class="anno"><li><code>if rack.get(client) == rack[dn]:</code><span>A client that is not in any rack (like an edge node or our namenode container) never matches, so every replica is distance 4.</span></li><li><code>shuffled = random.sample(replicas, len(replicas))     # ties in random order</code><span>Shuffling before a stable sort keeps the distance order but randomises equal distances, spreading load. That is why the off-cluster read used several DataNodes.</span></li></ul>
+  <div class="runner">
+    <script type="application/json">{
+ "lang": "python",
+ "file": "main.py",
+ "tasks": [
+  {
+   "label": "1 · Who reads from where?",
+   "hint": "Press <b>Run<\/b>. Then add a client <code>\"dn-3\"<\/code>.",
+   "code": "import random\nrandom.seed(3)\nrack = {\"dn-1\": \"/rack1\", \"dn-2\": \"/rack1\", \"dn-3\": \"/rack2\", \"dn-4\": \"/rack2\"}\n\ndef distance(client, dn):\n    if client == dn:\n        return 0\n    if rack.get(client) == rack[dn]:\n        return 2\n    return 4\n\ndef sorted_replicas(client, replicas):\n    shuffled = random.sample(replicas, len(replicas))     # ties in random order\n    return sorted(shuffled, key=lambda dn: distance(client, dn))\n\nreplicas = [\"dn-1\", \"dn-2\", \"dn-3\"]\nfor client in [\"dn-2\", \"dn-4\", \"edge-node\"]:\n    order = sorted_replicas(client, replicas)\n    print(f\"{client:9} reads from {order[0]}   (order {order})\")\n"
+  },
+  {
+   "label": "2 · Chunk with the error",
+   "hint": "<b>Predict first:<\/b> byte 500,000 was changed. Which 512-byte chunk is that, and where does it start?",
+   "code": "offset = 500_000\nchunk = offset // 512\nprint(\"chunk\", chunk, \"starts at\", chunk * 512, \"(the log said: at 499712)\")\n"
+  },
+  {
+   "label": "3 · Checksums catch one changed byte",
+   "hint": "Compute a CRC per 512-byte chunk, change one byte, and find the chunk that no longer matches.",
+   "code": "import zlib\ndata = bytearray(b\"71484,poha,25\\n\" * 200)          # about 2.8 KB\nsums = [zlib.crc32(data[i:i + 512]) for i in range(0, len(data), 512)]\ndata[1500] = ord(\"X\")\nfor n, i in enumerate(range(0, len(data), 512)):\n    if zlib.crc32(data[i:i + 512]) != sums[n]:\n        print(\"checksum error in chunk\", n, \"at offset\", i)\n"
+  },
+  {
+   "label": "4 · Fail over to the next replica",
+   "hint": "The first replica is corrupt and the second DataNode is dead. Which replica does the client finally read?",
+   "code": "replicas = [\"dn-2\", \"dn-1\", \"dn-3\"]\ncorrupt, dead = {\"dn-2\"}, {\"dn-1\"}\nfor dn in replicas:\n    if dn in dead:\n        print(dn, \"not responding -> next\")\n    elif dn in corrupt:\n        print(dn, \"checksum error -> report bad block, next\")\n    else:\n        print(\"read from\", dn); break\n"
+  },
+  {
+   "label": "5 · Spot the error",
+   "hint": "This sorting puts the farthest replica first. Fix the sort.",
+   "code": "dist = {\"dn-1\": 2, \"dn-2\": 0, \"dn-3\": 4}\norder = sorted(dist, key=lambda d: -dist[d])\nprint(\"read from\", order[0])\n"
+  }
+ ]
+}</script>
+  </div>
+  <h3 id="pc">Run it on your PC: who serves your reads?</h3>
+  <p>This script prints where each block of <code>canteen_1mb.csv</code> has replicas, then reads the file from two clients (the namenode container and datanode-2) with client debug logging and shows which DataNode served each block. Save it as <code>read_trace.py</code> in the <code>hdfs-lab</code> folder.</p>
+  <div class="pcrun"><h4>Same file, two clients, different DataNodes</h4>
+  <div class="code" data-lang="bash" data-file="read_trace.py"><pre><code># read_trace.py: read the same file from two different clients and show
+# which DataNode served each block. Run in the hdfs-lab folder.
+import re
+import subprocess
+
+LOG4J = &quot;&quot;&quot;log4j.rootLogger=WARN, err
+log4j.appender.err=org.apache.log4j.ConsoleAppender
+log4j.appender.err.Target=System.err
+log4j.appender.err.layout=org.apache.log4j.PatternLayout
+log4j.appender.err.layout.ConversionPattern=%m%n
+log4j.logger.org.apache.hadoop.hdfs.DFSClient=DEBUG
+&quot;&quot;&quot;
+FILE = &quot;/user/hadoop/data/canteen_1mb.csv&quot;
+
+def sh(cmd):
+    return subprocess.run(cmd, shell=True, capture_output=True, text=True)
+
+names = {}
+for n in sh(&quot;docker ps --format &#x27;{{.Names}}&#x27;&quot;).stdout.split():
+    ip = sh(&quot;docker inspect -f &#x27;{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}&#x27; &quot; + n).stdout.strip()
+    names[ip] = n.replace(&quot;lab5-&quot;, &quot;&quot;)
+
+fsck = sh(f&quot;docker compose exec -T namenode hdfs fsck {FILE} -files -blocks -locations&quot;).stdout
+for i, line in enumerate(l for l in fsck.splitlines() if &quot;blk_&quot; in l):
+    hosts = re.findall(r&quot;(\d+\.\d+\.\d+\.\d+):9866&quot;, line)
+    print(f&quot;block {i} replicas on: {&#x27;, &#x27;.join(names[h] for h in hosts)}&quot;)
+
+for client in [&quot;lab5-namenode-1&quot;, &quot;lab5-datanode-2&quot;]:
+    sh(f&quot;docker exec -i {client} bash -c &#x27;cat &gt; /tmp/r.properties&#x27; &lt;&lt;&#x27;X&#x27;\n{LOG4J}X&quot;)
+    err = sh(f&quot;docker exec {client} bash -c &#x27;HADOOP_CLIENT_OPTS=-Dlog4j.configuration=file:/tmp/r.properties &quot;
+             f&quot;hdfs dfs -cat {FILE} &gt; /dev/null&#x27;&quot;).stderr
+    served = re.findall(r&quot;Connecting to datanode (\d+\.\d+\.\d+\.\d+):9866&quot;, err)
+    print(f&quot;client {client.replace(&#x27;lab5-&#x27;, &#x27;&#x27;):11} read from: {&#x27;, &#x27;.join(names[s] for s in served)}&quot;)
+
+# In the hdfs-lab folder:
+#   python3 read_trace.py</code></pre><div class="output">block 0 replicas on: datanode-1, datanode-2, datanode-3
+block 1 replicas on: datanode-1, datanode-2, datanode-3
+block 2 replicas on: datanode-1, datanode-2, datanode-3
+block 3 replicas on: datanode-1, datanode-2, datanode-3
+block 4 replicas on: datanode-1, datanode-2, datanode-3
+client namenode-1  read from: datanode-2, datanode-3, datanode-3, datanode-3, datanode-1
+client datanode-2  read from: datanode-2, datanode-2, datanode-2, datanode-2, datanode-2</div></div>
+  <p class="muted">Real output. The off-cluster client's choices are random among equally distant replicas, so your order will differ; the client on datanode-2 always reads locally.</p></div>
+</section>
+
+<section class="part" id="tracer">
+  <span class="part-label"><b>8</b> Line by line</span>
+  <h2>Reading a file block by block</h2>
+  <p>Follow a client reading a 3-block file from the sorted location lists, skipping a dead DataNode for one block.</p>
+  <div class="tracer">
+    <script type="application/json">{
+ "lang": "python",
+ "code": [
+  "locations = {0: [\"dn-2\", \"dn-1\", \"dn-3\"], 1: [\"dn-2\", \"dn-3\", \"dn-1\"], 2: [\"dn-1\", \"dn-2\", \"dn-3\"]}",
+  "dead = {\"dn-1\"}",
+  "served = []",
+  "for block, nodes in locations.items():",
+  "    for dn in nodes:",
+  "        if dn not in dead:",
+  "            served.append((block, dn))",
+  "            break",
+  "print(served)"
+ ],
+ "steps": [
+  {
+   "line": 1,
+   "phase": "Python",
+   "note": "<code>locations<\/code> is created: → dict #1.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "locations",
+       "→ dict #1"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {0: → list #2, 1: → list #3, 2: → list #4}",
+    "<b>#2 list (3)<\/b> [&#x27;dn-2&#x27;, &#x27;dn-1&#x27;, &#x27;dn-3&#x27;]",
+    "<b>#3 list (3)<\/b> [&#x27;dn-2&#x27;, &#x27;dn-3&#x27;, &#x27;dn-1&#x27;]",
+    "<b>#4 list (3)<\/b> [&#x27;dn-1&#x27;, &#x27;dn-2&#x27;, &#x27;dn-3&#x27;]"
+   ],
+   "newVar": "locations"
+  },
+  {
+   "line": 2,
+   "phase": "Python",
+   "note": "<code>dead<\/code> is created: → set #5. A new set object (#5) is created: {&#x27;dn-1&#x27;}",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "locations",
+       "→ dict #1"
+      ],
+      [
+       "dead",
+       "→ set #5"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {0: → list #2, 1: → list #3, 2: → list #4}",
+    "<b>#2 list (3)<\/b> [&#x27;dn-2&#x27;, &#x27;dn-1&#x27;, &#x27;dn-3&#x27;]",
+    "<b>#3 list (3)<\/b> [&#x27;dn-2&#x27;, &#x27;dn-3&#x27;, &#x27;dn-1&#x27;]",
+    "<b>#4 list (3)<\/b> [&#x27;dn-1&#x27;, &#x27;dn-2&#x27;, &#x27;dn-3&#x27;]",
+    "<b>#5 set (1)<\/b> {&#x27;dn-1&#x27;}"
+   ],
+   "newVar": "dead"
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "<code>served<\/code> is created: → list #6. A new list object (#6) is created: []",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "locations",
+       "→ dict #1"
+      ],
+      [
+       "dead",
+       "→ set #5"
+      ],
+      [
+       "served",
+       "→ list #6"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {0: → list #2, 1: → list #3, 2: → list #4}",
+    "<b>#2 list (3)<\/b> [&#x27;dn-2&#x27;, &#x27;dn-1&#x27;, &#x27;dn-3&#x27;]",
+    "<b>#3 list (3)<\/b> [&#x27;dn-2&#x27;, &#x27;dn-3&#x27;, &#x27;dn-1&#x27;]",
+    "<b>#4 list (3)<\/b> [&#x27;dn-1&#x27;, &#x27;dn-2&#x27;, &#x27;dn-3&#x27;]",
+    "<b>#5 set (1)<\/b> {&#x27;dn-1&#x27;}",
+    "<b>#6 list (0)<\/b> []"
+   ],
+   "newVar": "served"
+  },
+  {
+   "line": 4,
+   "phase": "Per block",
+   "note": "Each block has its own sorted list; the best DataNode can differ per block. <code>block<\/code> is created: 0. <code>nodes<\/code> is created: → list #2.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "locations",
+       "→ dict #1"
+      ],
+      [
+       "dead",
+       "→ set #5"
+      ],
+      [
+       "served",
+       "→ list #6"
+      ],
+      [
+       "block",
+       "0"
+      ],
+      [
+       "nodes",
+       "→ list #2"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {0: → list #2, 1: → list #3, 2: → list #4}",
+    "<b>#2 list (3)<\/b> [&#x27;dn-2&#x27;, &#x27;dn-1&#x27;, &#x27;dn-3&#x27;]",
+    "<b>#3 list (3)<\/b> [&#x27;dn-2&#x27;, &#x27;dn-3&#x27;, &#x27;dn-1&#x27;]",
+    "<b>#4 list (3)<\/b> [&#x27;dn-1&#x27;, &#x27;dn-2&#x27;, &#x27;dn-3&#x27;]",
+    "<b>#5 set (1)<\/b> {&#x27;dn-1&#x27;}",
+    "<b>#6 list (0)<\/b> []"
+   ],
+   "newVar": "nodes"
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "<code>dn<\/code> is created: &#x27;dn-2&#x27;.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "locations",
+       "→ dict #1"
+      ],
+      [
+       "dead",
+       "→ set #5"
+      ],
+      [
+       "served",
+       "→ list #6"
+      ],
+      [
+       "block",
+       "0"
+      ],
+      [
+       "nodes",
+       "→ list #2"
+      ],
+      [
+       "dn",
+       "'dn-2'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {0: → list #2, 1: → list #3, 2: → list #4}",
+    "<b>#2 list (3)<\/b> [&#x27;dn-2&#x27;, &#x27;dn-1&#x27;, &#x27;dn-3&#x27;]",
+    "<b>#3 list (3)<\/b> [&#x27;dn-2&#x27;, &#x27;dn-3&#x27;, &#x27;dn-1&#x27;]",
+    "<b>#4 list (3)<\/b> [&#x27;dn-1&#x27;, &#x27;dn-2&#x27;, &#x27;dn-3&#x27;]",
+    "<b>#5 set (1)<\/b> {&#x27;dn-1&#x27;}",
+    "<b>#6 list (0)<\/b> []"
+   ],
+   "newVar": "dn"
+  },
+  {
+   "line": 6,
+   "phase": "Skip",
+   "note": "A DataNode that failed is put on the stream's dead list and skipped. The condition is <b>True<\/b>, so the indented block runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "locations",
+       "→ dict #1"
+      ],
+      [
+       "dead",
+       "→ set #5"
+      ],
+      [
+       "served",
+       "→ list #6"
+      ],
+      [
+       "block",
+       "0"
+      ],
+      [
+       "nodes",
+       "→ list #2"
+      ],
+      [
+       "dn",
+       "'dn-2'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {0: → list #2, 1: → list #3, 2: → list #4}",
+    "<b>#2 list (3)<\/b> [&#x27;dn-2&#x27;, &#x27;dn-1&#x27;, &#x27;dn-3&#x27;]",
+    "<b>#3 list (3)<\/b> [&#x27;dn-2&#x27;, &#x27;dn-3&#x27;, &#x27;dn-1&#x27;]",
+    "<b>#4 list (3)<\/b> [&#x27;dn-1&#x27;, &#x27;dn-2&#x27;, &#x27;dn-3&#x27;]",
+    "<b>#5 set (1)<\/b> {&#x27;dn-1&#x27;}",
+    "<b>#6 list (0)<\/b> []"
+   ]
+  },
+  {
+   "line": 7,
+   "phase": "Python",
+   "note": "Object #6 list now holds [→ tuple #7] A new tuple object (#7) is created: (0, &#x27;dn-2&#x27;)",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "locations",
+       "→ dict #1"
+      ],
+      [
+       "dead",
+       "→ set #5"
+      ],
+      [
+       "served",
+       "→ list #6"
+      ],
+      [
+       "block",
+       "0"
+      ],
+      [
+       "nodes",
+       "→ list #2"
+      ],
+      [
+       "dn",
+       "'dn-2'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {0: → list #2, 1: → list #3, 2: → list #4}",
+    "<b>#2 list (3)<\/b> [&#x27;dn-2&#x27;, &#x27;dn-1&#x27;, &#x27;dn-3&#x27;]",
+    "<b>#3 list (3)<\/b> [&#x27;dn-2&#x27;, &#x27;dn-3&#x27;, &#x27;dn-1&#x27;]",
+    "<b>#4 list (3)<\/b> [&#x27;dn-1&#x27;, &#x27;dn-2&#x27;, &#x27;dn-3&#x27;]",
+    "<b>#5 set (1)<\/b> {&#x27;dn-1&#x27;}",
+    "<b>#6 list (1)<\/b> [→ tuple #7]",
+    "<b>#7 tuple (2)<\/b> (0, &#x27;dn-2&#x27;)"
+   ]
+  },
+  {
+   "line": 8,
+   "phase": "Python",
+   "note": "<code>break<\/code> leaves the loop immediately.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "locations",
+       "→ dict #1"
+      ],
+      [
+       "dead",
+       "→ set #5"
+      ],
+      [
+       "served",
+       "→ list #6"
+      ],
+      [
+       "block",
+       "0"
+      ],
+      [
+       "nodes",
+       "→ list #2"
+      ],
+      [
+       "dn",
+       "'dn-2'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {0: → list #2, 1: → list #3, 2: → list #4}",
+    "<b>#2 list (3)<\/b> [&#x27;dn-2&#x27;, &#x27;dn-1&#x27;, &#x27;dn-3&#x27;]",
+    "<b>#3 list (3)<\/b> [&#x27;dn-2&#x27;, &#x27;dn-3&#x27;, &#x27;dn-1&#x27;]",
+    "<b>#4 list (3)<\/b> [&#x27;dn-1&#x27;, &#x27;dn-2&#x27;, &#x27;dn-3&#x27;]",
+    "<b>#5 set (1)<\/b> {&#x27;dn-1&#x27;}",
+    "<b>#6 list (1)<\/b> [→ tuple #7]",
+    "<b>#7 tuple (2)<\/b> (0, &#x27;dn-2&#x27;)"
+   ]
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "<code>block<\/code> changes to 1. <code>nodes<\/code> changes to → list #3.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "locations",
+       "→ dict #1"
+      ],
+      [
+       "dead",
+       "→ set #5"
+      ],
+      [
+       "served",
+       "→ list #6"
+      ],
+      [
+       "block",
+       "1"
+      ],
+      [
+       "nodes",
+       "→ list #3"
+      ],
+      [
+       "dn",
+       "'dn-2'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {0: → list #2, 1: → list #3, 2: → list #4}",
+    "<b>#2 list (3)<\/b> [&#x27;dn-2&#x27;, &#x27;dn-1&#x27;, &#x27;dn-3&#x27;]",
+    "<b>#3 list (3)<\/b> [&#x27;dn-2&#x27;, &#x27;dn-3&#x27;, &#x27;dn-1&#x27;]",
+    "<b>#4 list (3)<\/b> [&#x27;dn-1&#x27;, &#x27;dn-2&#x27;, &#x27;dn-3&#x27;]",
+    "<b>#5 set (1)<\/b> {&#x27;dn-1&#x27;}",
+    "<b>#6 list (1)<\/b> [→ tuple #7]",
+    "<b>#7 tuple (2)<\/b> (0, &#x27;dn-2&#x27;)"
+   ],
+   "newVar": "nodes"
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "The loop takes the next item (it has the same value as the previous one).",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "locations",
+       "→ dict #1"
+      ],
+      [
+       "dead",
+       "→ set #5"
+      ],
+      [
+       "served",
+       "→ list #6"
+      ],
+      [
+       "block",
+       "1"
+      ],
+      [
+       "nodes",
+       "→ list #3"
+      ],
+      [
+       "dn",
+       "'dn-2'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {0: → list #2, 1: → list #3, 2: → list #4}",
+    "<b>#2 list (3)<\/b> [&#x27;dn-2&#x27;, &#x27;dn-1&#x27;, &#x27;dn-3&#x27;]",
+    "<b>#3 list (3)<\/b> [&#x27;dn-2&#x27;, &#x27;dn-3&#x27;, &#x27;dn-1&#x27;]",
+    "<b>#4 list (3)<\/b> [&#x27;dn-1&#x27;, &#x27;dn-2&#x27;, &#x27;dn-3&#x27;]",
+    "<b>#5 set (1)<\/b> {&#x27;dn-1&#x27;}",
+    "<b>#6 list (1)<\/b> [→ tuple #7]",
+    "<b>#7 tuple (2)<\/b> (0, &#x27;dn-2&#x27;)"
+   ]
+  },
+  {
+   "line": 6,
+   "phase": "Python",
+   "note": "The condition is <b>True<\/b>, so the indented block runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "locations",
+       "→ dict #1"
+      ],
+      [
+       "dead",
+       "→ set #5"
+      ],
+      [
+       "served",
+       "→ list #6"
+      ],
+      [
+       "block",
+       "1"
+      ],
+      [
+       "nodes",
+       "→ list #3"
+      ],
+      [
+       "dn",
+       "'dn-2'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {0: → list #2, 1: → list #3, 2: → list #4}",
+    "<b>#2 list (3)<\/b> [&#x27;dn-2&#x27;, &#x27;dn-1&#x27;, &#x27;dn-3&#x27;]",
+    "<b>#3 list (3)<\/b> [&#x27;dn-2&#x27;, &#x27;dn-3&#x27;, &#x27;dn-1&#x27;]",
+    "<b>#4 list (3)<\/b> [&#x27;dn-1&#x27;, &#x27;dn-2&#x27;, &#x27;dn-3&#x27;]",
+    "<b>#5 set (1)<\/b> {&#x27;dn-1&#x27;}",
+    "<b>#6 list (1)<\/b> [→ tuple #7]",
+    "<b>#7 tuple (2)<\/b> (0, &#x27;dn-2&#x27;)"
+   ]
+  },
+  {
+   "line": 7,
+   "phase": "Python",
+   "note": "Object #6 list now holds [→ tuple #7, → tuple #8] A new tuple object (#8) is created: (1, &#x27;dn-2&#x27;)",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "locations",
+       "→ dict #1"
+      ],
+      [
+       "dead",
+       "→ set #5"
+      ],
+      [
+       "served",
+       "→ list #6"
+      ],
+      [
+       "block",
+       "1"
+      ],
+      [
+       "nodes",
+       "→ list #3"
+      ],
+      [
+       "dn",
+       "'dn-2'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {0: → list #2, 1: → list #3, 2: → list #4}",
+    "<b>#2 list (3)<\/b> [&#x27;dn-2&#x27;, &#x27;dn-1&#x27;, &#x27;dn-3&#x27;]",
+    "<b>#3 list (3)<\/b> [&#x27;dn-2&#x27;, &#x27;dn-3&#x27;, &#x27;dn-1&#x27;]",
+    "<b>#4 list (3)<\/b> [&#x27;dn-1&#x27;, &#x27;dn-2&#x27;, &#x27;dn-3&#x27;]",
+    "<b>#5 set (1)<\/b> {&#x27;dn-1&#x27;}",
+    "<b>#6 list (2)<\/b> [→ tuple #7, → tuple #8]",
+    "<b>#7 tuple (2)<\/b> (0, &#x27;dn-2&#x27;)",
+    "<b>#8 tuple (2)<\/b> (1, &#x27;dn-2&#x27;)"
+   ]
+  },
+  {
+   "line": 8,
+   "phase": "Python",
+   "note": "<code>break<\/code> leaves the loop immediately.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "locations",
+       "→ dict #1"
+      ],
+      [
+       "dead",
+       "→ set #5"
+      ],
+      [
+       "served",
+       "→ list #6"
+      ],
+      [
+       "block",
+       "1"
+      ],
+      [
+       "nodes",
+       "→ list #3"
+      ],
+      [
+       "dn",
+       "'dn-2'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {0: → list #2, 1: → list #3, 2: → list #4}",
+    "<b>#2 list (3)<\/b> [&#x27;dn-2&#x27;, &#x27;dn-1&#x27;, &#x27;dn-3&#x27;]",
+    "<b>#3 list (3)<\/b> [&#x27;dn-2&#x27;, &#x27;dn-3&#x27;, &#x27;dn-1&#x27;]",
+    "<b>#4 list (3)<\/b> [&#x27;dn-1&#x27;, &#x27;dn-2&#x27;, &#x27;dn-3&#x27;]",
+    "<b>#5 set (1)<\/b> {&#x27;dn-1&#x27;}",
+    "<b>#6 list (2)<\/b> [→ tuple #7, → tuple #8]",
+    "<b>#7 tuple (2)<\/b> (0, &#x27;dn-2&#x27;)",
+    "<b>#8 tuple (2)<\/b> (1, &#x27;dn-2&#x27;)"
+   ]
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "<code>block<\/code> changes to 2. <code>nodes<\/code> changes to → list #4.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "locations",
+       "→ dict #1"
+      ],
+      [
+       "dead",
+       "→ set #5"
+      ],
+      [
+       "served",
+       "→ list #6"
+      ],
+      [
+       "block",
+       "2"
+      ],
+      [
+       "nodes",
+       "→ list #4"
+      ],
+      [
+       "dn",
+       "'dn-2'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {0: → list #2, 1: → list #3, 2: → list #4}",
+    "<b>#2 list (3)<\/b> [&#x27;dn-2&#x27;, &#x27;dn-1&#x27;, &#x27;dn-3&#x27;]",
+    "<b>#3 list (3)<\/b> [&#x27;dn-2&#x27;, &#x27;dn-3&#x27;, &#x27;dn-1&#x27;]",
+    "<b>#4 list (3)<\/b> [&#x27;dn-1&#x27;, &#x27;dn-2&#x27;, &#x27;dn-3&#x27;]",
+    "<b>#5 set (1)<\/b> {&#x27;dn-1&#x27;}",
+    "<b>#6 list (2)<\/b> [→ tuple #7, → tuple #8]",
+    "<b>#7 tuple (2)<\/b> (0, &#x27;dn-2&#x27;)",
+    "<b>#8 tuple (2)<\/b> (1, &#x27;dn-2&#x27;)"
+   ],
+   "newVar": "nodes"
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "<code>dn<\/code> changes to &#x27;dn-1&#x27;.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "locations",
+       "→ dict #1"
+      ],
+      [
+       "dead",
+       "→ set #5"
+      ],
+      [
+       "served",
+       "→ list #6"
+      ],
+      [
+       "block",
+       "2"
+      ],
+      [
+       "nodes",
+       "→ list #4"
+      ],
+      [
+       "dn",
+       "'dn-1'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {0: → list #2, 1: → list #3, 2: → list #4}",
+    "<b>#2 list (3)<\/b> [&#x27;dn-2&#x27;, &#x27;dn-1&#x27;, &#x27;dn-3&#x27;]",
+    "<b>#3 list (3)<\/b> [&#x27;dn-2&#x27;, &#x27;dn-3&#x27;, &#x27;dn-1&#x27;]",
+    "<b>#4 list (3)<\/b> [&#x27;dn-1&#x27;, &#x27;dn-2&#x27;, &#x27;dn-3&#x27;]",
+    "<b>#5 set (1)<\/b> {&#x27;dn-1&#x27;}",
+    "<b>#6 list (2)<\/b> [→ tuple #7, → tuple #8]",
+    "<b>#7 tuple (2)<\/b> (0, &#x27;dn-2&#x27;)",
+    "<b>#8 tuple (2)<\/b> (1, &#x27;dn-2&#x27;)"
+   ],
+   "newVar": "dn"
+  },
+  {
+   "line": 6,
+   "phase": "Python",
+   "note": "The condition is <b>False<\/b>, so the indented block is skipped.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "locations",
+       "→ dict #1"
+      ],
+      [
+       "dead",
+       "→ set #5"
+      ],
+      [
+       "served",
+       "→ list #6"
+      ],
+      [
+       "block",
+       "2"
+      ],
+      [
+       "nodes",
+       "→ list #4"
+      ],
+      [
+       "dn",
+       "'dn-1'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {0: → list #2, 1: → list #3, 2: → list #4}",
+    "<b>#2 list (3)<\/b> [&#x27;dn-2&#x27;, &#x27;dn-1&#x27;, &#x27;dn-3&#x27;]",
+    "<b>#3 list (3)<\/b> [&#x27;dn-2&#x27;, &#x27;dn-3&#x27;, &#x27;dn-1&#x27;]",
+    "<b>#4 list (3)<\/b> [&#x27;dn-1&#x27;, &#x27;dn-2&#x27;, &#x27;dn-3&#x27;]",
+    "<b>#5 set (1)<\/b> {&#x27;dn-1&#x27;}",
+    "<b>#6 list (2)<\/b> [→ tuple #7, → tuple #8]",
+    "<b>#7 tuple (2)<\/b> (0, &#x27;dn-2&#x27;)",
+    "<b>#8 tuple (2)<\/b> (1, &#x27;dn-2&#x27;)"
+   ]
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "<code>dn<\/code> changes to &#x27;dn-2&#x27;.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "locations",
+       "→ dict #1"
+      ],
+      [
+       "dead",
+       "→ set #5"
+      ],
+      [
+       "served",
+       "→ list #6"
+      ],
+      [
+       "block",
+       "2"
+      ],
+      [
+       "nodes",
+       "→ list #4"
+      ],
+      [
+       "dn",
+       "'dn-2'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {0: → list #2, 1: → list #3, 2: → list #4}",
+    "<b>#2 list (3)<\/b> [&#x27;dn-2&#x27;, &#x27;dn-1&#x27;, &#x27;dn-3&#x27;]",
+    "<b>#3 list (3)<\/b> [&#x27;dn-2&#x27;, &#x27;dn-3&#x27;, &#x27;dn-1&#x27;]",
+    "<b>#4 list (3)<\/b> [&#x27;dn-1&#x27;, &#x27;dn-2&#x27;, &#x27;dn-3&#x27;]",
+    "<b>#5 set (1)<\/b> {&#x27;dn-1&#x27;}",
+    "<b>#6 list (2)<\/b> [→ tuple #7, → tuple #8]",
+    "<b>#7 tuple (2)<\/b> (0, &#x27;dn-2&#x27;)",
+    "<b>#8 tuple (2)<\/b> (1, &#x27;dn-2&#x27;)"
+   ],
+   "newVar": "dn"
+  },
+  {
+   "line": 6,
+   "phase": "Python",
+   "note": "The condition is <b>True<\/b>, so the indented block runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "locations",
+       "→ dict #1"
+      ],
+      [
+       "dead",
+       "→ set #5"
+      ],
+      [
+       "served",
+       "→ list #6"
+      ],
+      [
+       "block",
+       "2"
+      ],
+      [
+       "nodes",
+       "→ list #4"
+      ],
+      [
+       "dn",
+       "'dn-2'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {0: → list #2, 1: → list #3, 2: → list #4}",
+    "<b>#2 list (3)<\/b> [&#x27;dn-2&#x27;, &#x27;dn-1&#x27;, &#x27;dn-3&#x27;]",
+    "<b>#3 list (3)<\/b> [&#x27;dn-2&#x27;, &#x27;dn-3&#x27;, &#x27;dn-1&#x27;]",
+    "<b>#4 list (3)<\/b> [&#x27;dn-1&#x27;, &#x27;dn-2&#x27;, &#x27;dn-3&#x27;]",
+    "<b>#5 set (1)<\/b> {&#x27;dn-1&#x27;}",
+    "<b>#6 list (2)<\/b> [→ tuple #7, → tuple #8]",
+    "<b>#7 tuple (2)<\/b> (0, &#x27;dn-2&#x27;)",
+    "<b>#8 tuple (2)<\/b> (1, &#x27;dn-2&#x27;)"
+   ]
+  },
+  {
+   "line": 7,
+   "phase": "Python",
+   "note": "Object #6 list now holds [→ tuple #7, → tuple #8, → tuple #9] A new tuple object (#9) is created: (2, &#x27;dn-2&#x27;)",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "locations",
+       "→ dict #1"
+      ],
+      [
+       "dead",
+       "→ set #5"
+      ],
+      [
+       "served",
+       "→ list #6"
+      ],
+      [
+       "block",
+       "2"
+      ],
+      [
+       "nodes",
+       "→ list #4"
+      ],
+      [
+       "dn",
+       "'dn-2'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {0: → list #2, 1: → list #3, 2: → list #4}",
+    "<b>#2 list (3)<\/b> [&#x27;dn-2&#x27;, &#x27;dn-1&#x27;, &#x27;dn-3&#x27;]",
+    "<b>#3 list (3)<\/b> [&#x27;dn-2&#x27;, &#x27;dn-3&#x27;, &#x27;dn-1&#x27;]",
+    "<b>#4 list (3)<\/b> [&#x27;dn-1&#x27;, &#x27;dn-2&#x27;, &#x27;dn-3&#x27;]",
+    "<b>#5 set (1)<\/b> {&#x27;dn-1&#x27;}",
+    "<b>#6 list (3)<\/b> [→ tuple #7, → tuple #8, → tuple #9]",
+    "<b>#7 tuple (2)<\/b> (0, &#x27;dn-2&#x27;)",
+    "<b>#8 tuple (2)<\/b> (1, &#x27;dn-2&#x27;)",
+    "<b>#9 tuple (2)<\/b> (2, &#x27;dn-2&#x27;)"
+   ]
+  },
+  {
+   "line": 8,
+   "phase": "Python",
+   "note": "<code>break<\/code> leaves the loop immediately.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "locations",
+       "→ dict #1"
+      ],
+      [
+       "dead",
+       "→ set #5"
+      ],
+      [
+       "served",
+       "→ list #6"
+      ],
+      [
+       "block",
+       "2"
+      ],
+      [
+       "nodes",
+       "→ list #4"
+      ],
+      [
+       "dn",
+       "'dn-2'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {0: → list #2, 1: → list #3, 2: → list #4}",
+    "<b>#2 list (3)<\/b> [&#x27;dn-2&#x27;, &#x27;dn-1&#x27;, &#x27;dn-3&#x27;]",
+    "<b>#3 list (3)<\/b> [&#x27;dn-2&#x27;, &#x27;dn-3&#x27;, &#x27;dn-1&#x27;]",
+    "<b>#4 list (3)<\/b> [&#x27;dn-1&#x27;, &#x27;dn-2&#x27;, &#x27;dn-3&#x27;]",
+    "<b>#5 set (1)<\/b> {&#x27;dn-1&#x27;}",
+    "<b>#6 list (3)<\/b> [→ tuple #7, → tuple #8, → tuple #9]",
+    "<b>#7 tuple (2)<\/b> (0, &#x27;dn-2&#x27;)",
+    "<b>#8 tuple (2)<\/b> (1, &#x27;dn-2&#x27;)",
+    "<b>#9 tuple (2)<\/b> (2, &#x27;dn-2&#x27;)"
+   ]
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "Nothing is left to loop over, so the loop ends and Python moves on.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "locations",
+       "→ dict #1"
+      ],
+      [
+       "dead",
+       "→ set #5"
+      ],
+      [
+       "served",
+       "→ list #6"
+      ],
+      [
+       "block",
+       "2"
+      ],
+      [
+       "nodes",
+       "→ list #4"
+      ],
+      [
+       "dn",
+       "'dn-2'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {0: → list #2, 1: → list #3, 2: → list #4}",
+    "<b>#2 list (3)<\/b> [&#x27;dn-2&#x27;, &#x27;dn-1&#x27;, &#x27;dn-3&#x27;]",
+    "<b>#3 list (3)<\/b> [&#x27;dn-2&#x27;, &#x27;dn-3&#x27;, &#x27;dn-1&#x27;]",
+    "<b>#4 list (3)<\/b> [&#x27;dn-1&#x27;, &#x27;dn-2&#x27;, &#x27;dn-3&#x27;]",
+    "<b>#5 set (1)<\/b> {&#x27;dn-1&#x27;}",
+    "<b>#6 list (3)<\/b> [→ tuple #7, → tuple #8, → tuple #9]",
+    "<b>#7 tuple (2)<\/b> (0, &#x27;dn-2&#x27;)",
+    "<b>#8 tuple (2)<\/b> (1, &#x27;dn-2&#x27;)",
+    "<b>#9 tuple (2)<\/b> (2, &#x27;dn-2&#x27;)"
+   ]
+  },
+  {
+   "line": 9,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "locations",
+       "→ dict #1"
+      ],
+      [
+       "dead",
+       "→ set #5"
+      ],
+      [
+       "served",
+       "→ list #6"
+      ],
+      [
+       "block",
+       "2"
+      ],
+      [
+       "nodes",
+       "→ list #4"
+      ],
+      [
+       "dn",
+       "'dn-2'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {0: → list #2, 1: → list #3, 2: → list #4}",
+    "<b>#2 list (3)<\/b> [&#x27;dn-2&#x27;, &#x27;dn-1&#x27;, &#x27;dn-3&#x27;]",
+    "<b>#3 list (3)<\/b> [&#x27;dn-2&#x27;, &#x27;dn-3&#x27;, &#x27;dn-1&#x27;]",
+    "<b>#4 list (3)<\/b> [&#x27;dn-1&#x27;, &#x27;dn-2&#x27;, &#x27;dn-3&#x27;]",
+    "<b>#5 set (1)<\/b> {&#x27;dn-1&#x27;}",
+    "<b>#6 list (3)<\/b> [→ tuple #7, → tuple #8, → tuple #9]",
+    "<b>#7 tuple (2)<\/b> (0, &#x27;dn-2&#x27;)",
+    "<b>#8 tuple (2)<\/b> (1, &#x27;dn-2&#x27;)",
+    "<b>#9 tuple (2)<\/b> (2, &#x27;dn-2&#x27;)"
+   ],
+   "out": "[(0, 'dn-2'), (1, 'dn-2'), (2, 'dn-2')]\n"
+  }
+ ]
+}</script>
+  </div>
+
+<h3 id="worked">Worked examples: real problems, solved and traced in memory</h3>
+  <p class="wx-intro">Three read-path questions with numbers: how much locality saves on the network, how rare silent corruption really is at scale, and how hedged reads cut tail latency. Each runs live and is traced in memory.</p>
+  <article class="wx">
+    <div class="wx__head"><span class="wx__num">Example 1</span><span class="lvl lvl--b">Beginner</span><span class="wx__tag">Network · locality</span></div>
+    <h4>How much traffic does data locality save?</h4>
+    <div class="wx__problem"><p class="wx__label">Problem statement</p><p>A daily job reads 40 TB. With good scheduling, 85% of reads are node-local, 12% rack-local and 3% off-rack. Without locality, assume 0% local, 20% rack-local and 80% off-rack. How many TB cross the core network in each case?</p></div>
+    <div class="prob__io"><div><small>Input</small><pre>40 TB · 85/12/3% vs 0/20/80%</pre></div><div><small>Expected output</small><pre>with locality : 1.2 TB through the core network
+without       : 32.0 TB through the core network</pre></div></div>
+    <div class="wx__approach"><p class="wx__label">Approach</p><ol><li>Only off-rack reads cross the core switch.</li><li>Core traffic = total × off-rack share.</li><li>Compare.</li></ol></div>
+    <p class="wx__label">Solution: run it live</p>
+    <div class="runner">
+    <script type="application/json">{
+ "lang": "python",
+ "file": "main.py",
+ "tasks": [
+  {
+   "label": "Solution",
+   "hint": "32 TB vs 1.2 TB a day: locality is why Hadoop clusters could use cheaper, oversubscribed core networks.",
+   "code": "tb = 40\nfor name, off in [(\"with locality\", 0.03), (\"without\", 0.80)]:\n    print(f\"{name:14}: {tb * off:.1f} TB through the core network\")\n"
+  }
+ ]
+}</script>
+    </div>
+    <p class="wx__label">What happens in memory, step by step</p>
+    <p class="wx__how">Recorded from a real Python run: press <b>Next</b> to execute one line at a time. Watch variables change in each frame, and lists and dictionaries (numbered #1, #2 …) fill up as objects.</p>
+    <div class="tracer">
+    <script type="application/json">{
+ "lang": "python",
+ "code": [
+  "tb = 40",
+  "for name, off in [(\"with locality\", 0.03), (\"without\", 0.80)]:",
+  "    print(f\"{name:14}: {tb * off:.1f} TB through the core network\")"
+ ],
+ "steps": [
+  {
+   "line": 1,
+   "phase": "Python",
+   "note": "<code>tb<\/code> is created: 40.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "tb",
+       "40"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "tb"
+  },
+  {
+   "line": 2,
+   "phase": "Python",
+   "note": "<code>name<\/code> is created: &#x27;with locality&#x27;. <code>off<\/code> is created: 0.03.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "tb",
+       "40"
+      ],
+      [
+       "name",
+       "'with locality'"
+      ],
+      [
+       "off",
+       "0.03"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "off"
+  },
+  {
+   "line": 3,
+   "phase": "Core",
+   "note": "Node-local reads never leave the machine; rack-local ones stay in the rack. The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "tb",
+       "40"
+      ],
+      [
+       "name",
+       "'with locality'"
+      ],
+      [
+       "off",
+       "0.03"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "out": "with locality : 1.2 TB through the core network\n"
+  },
+  {
+   "line": 2,
+   "phase": "Python",
+   "note": "<code>name<\/code> changes to &#x27;without&#x27;. <code>off<\/code> changes to 0.8.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "tb",
+       "40"
+      ],
+      [
+       "name",
+       "'without'"
+      ],
+      [
+       "off",
+       "0.8"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "off"
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "tb",
+       "40"
+      ],
+      [
+       "name",
+       "'without'"
+      ],
+      [
+       "off",
+       "0.8"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "out": "without       : 32.0 TB through the core network\n"
+  },
+  {
+   "line": 2,
+   "phase": "Python",
+   "note": "Nothing is left to loop over, so the loop ends and Python moves on.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "tb",
+       "40"
+      ],
+      [
+       "name",
+       "'without'"
+      ],
+      [
+       "off",
+       "0.8"
+      ]
+     ]
+    }
+   ],
+   "heap": []
+  }
+ ]
+}</script>
+    </div>
+  </article>
+  <article class="wx">
+    <div class="wx__head"><span class="wx__num">Example 2</span><span class="lvl lvl--i">Intermediate</span><span class="wx__tag">Integrity · scale</span></div>
+    <h4>How many corrupt chunks per day?</h4>
+    <div class="wx__problem"><p class="wx__label">Problem statement</p><p>Suppose disks return a silently wrong byte once per 10<sup>14</sup> bits read. A cluster reads 2 PB per day. How many checksum errors per day would you expect, and why does HDFS still return correct data?</p></div>
+    <div class="prob__io"><div><small>Input</small><pre>1 error per 1e14 bits · 2 PB/day</pre></div><div><small>Expected output</small><pre>about 180 silent errors per day, each caught by a checksum</pre></div></div>
+    <div class="wx__approach"><p class="wx__label">Approach</p><ol><li>Bits read = 2 PB × 8.</li><li>Errors = bits / 1e14.</li><li>Each is caught by the 512-byte checksums and served from another replica.</li></ol></div>
+    <p class="wx__label">Solution: run it live</p>
+    <div class="runner">
+    <script type="application/json">{
+ "lang": "python",
+ "file": "main.py",
+ "tasks": [
+  {
+   "label": "Solution",
+   "hint": "Without end-to-end checksums, those errors would end up inside reports and models without anyone noticing.",
+   "code": "bits = 2 * 2**50 * 8\nprint(f\"about {bits / 1e14:.0f} silent errors per day, each caught by a checksum\")\n"
+  }
+ ]
+}</script>
+    </div>
+    <p class="wx__label">What happens in memory, step by step</p>
+    <p class="wx__how">Recorded from a real Python run: press <b>Next</b> to execute one line at a time. Watch variables change in each frame, and lists and dictionaries (numbered #1, #2 …) fill up as objects.</p>
+    <div class="tracer">
+    <script type="application/json">{
+ "lang": "python",
+ "code": [
+  "bits = 2 * 2**50 * 8",
+  "print(f\"about {bits / 1e14:.0f} silent errors per day, each caught by a checksum\")"
+ ],
+ "steps": [
+  {
+   "line": 1,
+   "phase": "Scale",
+   "note": "Rare events become daily events on big clusters. <code>bits<\/code> is created: 18014398509481984.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "bits",
+       "18014398509481984"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "bits"
+  },
+  {
+   "line": 2,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "bits",
+       "18014398509481984"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "out": "about 180 silent errors per day, each caught by a checksum\n"
+  }
+ ]
+}</script>
+    </div>
+  </article>
+  <article class="wx">
+    <div class="wx__head"><span class="wx__num">Example 3</span><span class="lvl lvl--a">Advanced</span><span class="wx__tag">Latency · hedged reads</span></div>
+    <h4>Do hedged reads help the slowest requests?</h4>
+    <div class="wx__problem"><p class="wx__label">Problem statement</p><p>Each block read normally takes 20 ms, but out of 50 reads, 2 hit a slow disk and take 800 ms. With hedged reads, if a read hasn't finished in 50 ms, a second read starts on another replica (which takes the normal 20 ms) and the faster one wins. Compare the slowest read and the average with and without hedging.</p></div>
+    <div class="prob__io"><div><small>Input</small><pre>50 reads · 2 at 800 ms · hedge after 50 ms</pre></div><div><small>Expected output</small><pre>slowest read: without 800 ms, with hedging 70 ms
+average: without 51.2 ms, with hedging 22.0 ms
+extra reads started: 2</pre></div></div>
+    <div class="wx__approach"><p class="wx__label">Approach</p><ol><li>Without hedging, slow reads take 800 ms.</li><li>With hedging, a slow read takes 50 ms + 20 ms for the second replica.</li><li>Compare the worst case and the average.</li></ol></div>
+    <p class="wx__label">Solution: run it live</p>
+    <div class="runner">
+    <script type="application/json">{
+ "lang": "python",
+ "file": "main.py",
+ "tasks": [
+  {
+   "label": "Solution",
+   "hint": "Hedged reads cost extra reads (here 2 of 50). HDFS supports them with dfs.client.hedged.read.threadpool.size and dfs.client.hedged.read.threshold.millis.",
+   "code": "reads = [20] * 48 + [800, 800]\nhedge_after, other_replica = 50, 20\nhedged = [r if r <= hedge_after else min(r, hedge_after + other_replica) for r in reads]\nprint(\"slowest read: without\", max(reads), \"ms, with hedging\", max(hedged), \"ms\")\nprint(\"average: without\", sum(reads) / len(reads), \"ms, with hedging\", sum(hedged) / len(hedged), \"ms\")\nprint(\"extra reads started:\", sum(r > hedge_after for r in reads))\n"
+  }
+ ]
+}</script>
+    </div>
+    <p class="wx__label">What happens in memory, step by step</p>
+    <p class="wx__how">Recorded from a real Python run: press <b>Next</b> to execute one line at a time. Watch variables change in each frame, and lists and dictionaries (numbered #1, #2 …) fill up as objects.</p>
+    <div class="tracer">
+    <script type="application/json">{
+ "lang": "python",
+ "code": [
+  "reads = [20] * 48 + [800, 800]",
+  "hedge_after, other_replica = 50, 20",
+  "hedged = [r if r <= hedge_after else min(r, hedge_after + other_replica) for r in reads]",
+  "print(\"slowest read: without\", max(reads), \"ms, with hedging\", max(hedged), \"ms\")",
+  "print(\"average: without\", sum(reads) / len(reads), \"ms, with hedging\", sum(hedged) / len(hedged), \"ms\")",
+  "print(\"extra reads started:\", sum(r > hedge_after for r in reads))"
+ ],
+ "steps": [
+  {
+   "line": 1,
+   "phase": "Python",
+   "note": "<code>reads<\/code> is created: → list #1.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "reads",
+       "→ list #1"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (50)<\/b> [20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, …"
+   ],
+   "newVar": "reads"
+  },
+  {
+   "line": 2,
+   "phase": "Python",
+   "note": "<code>hedge_after<\/code> is created: 50. <code>other_replica<\/code> is created: 20.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "reads",
+       "→ list #1"
+      ],
+      [
+       "hedge_after",
+       "50"
+      ],
+      [
+       "other_replica",
+       "20"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (50)<\/b> [20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, …"
+   ],
+   "newVar": "other_replica"
+  },
+  {
+   "line": 3,
+   "phase": "Hedge",
+   "note": "Only reads still running after 50 ms get a second attempt.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "reads",
+       "→ list #1"
+      ],
+      [
+       "hedge_after",
+       "50"
+      ],
+      [
+       "other_replica",
+       "20"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (50)<\/b> [20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, …"
+   ]
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "reads",
+       "→ list #1"
+      ],
+      [
+       "hedge_after",
+       "50"
+      ],
+      [
+       "other_replica",
+       "20"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (50)<\/b> [20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, …"
+   ]
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "reads",
+       "→ list #1"
+      ],
+      [
+       "hedge_after",
+       "50"
+      ],
+      [
+       "other_replica",
+       "20"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (50)<\/b> [20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, …"
+   ]
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "reads",
+       "→ list #1"
+      ],
+      [
+       "hedge_after",
+       "50"
+      ],
+      [
+       "other_replica",
+       "20"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (50)<\/b> [20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, …"
+   ]
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "reads",
+       "→ list #1"
+      ],
+      [
+       "hedge_after",
+       "50"
+      ],
+      [
+       "other_replica",
+       "20"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (50)<\/b> [20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, …"
+   ]
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "reads",
+       "→ list #1"
+      ],
+      [
+       "hedge_after",
+       "50"
+      ],
+      [
+       "other_replica",
+       "20"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (50)<\/b> [20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, …"
+   ]
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "reads",
+       "→ list #1"
+      ],
+      [
+       "hedge_after",
+       "50"
+      ],
+      [
+       "other_replica",
+       "20"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (50)<\/b> [20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, …"
+   ]
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "reads",
+       "→ list #1"
+      ],
+      [
+       "hedge_after",
+       "50"
+      ],
+      [
+       "other_replica",
+       "20"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (50)<\/b> [20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, …"
+   ]
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "reads",
+       "→ list #1"
+      ],
+      [
+       "hedge_after",
+       "50"
+      ],
+      [
+       "other_replica",
+       "20"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (50)<\/b> [20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, …"
+   ]
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "reads",
+       "→ list #1"
+      ],
+      [
+       "hedge_after",
+       "50"
+      ],
+      [
+       "other_replica",
+       "20"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (50)<\/b> [20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, …"
+   ]
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "reads",
+       "→ list #1"
+      ],
+      [
+       "hedge_after",
+       "50"
+      ],
+      [
+       "other_replica",
+       "20"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (50)<\/b> [20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, …"
+   ]
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "reads",
+       "→ list #1"
+      ],
+      [
+       "hedge_after",
+       "50"
+      ],
+      [
+       "other_replica",
+       "20"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (50)<\/b> [20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, …"
+   ]
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "reads",
+       "→ list #1"
+      ],
+      [
+       "hedge_after",
+       "50"
+      ],
+      [
+       "other_replica",
+       "20"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (50)<\/b> [20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, …"
+   ]
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "reads",
+       "→ list #1"
+      ],
+      [
+       "hedge_after",
+       "50"
+      ],
+      [
+       "other_replica",
+       "20"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (50)<\/b> [20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, …"
+   ]
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "reads",
+       "→ list #1"
+      ],
+      [
+       "hedge_after",
+       "50"
+      ],
+      [
+       "other_replica",
+       "20"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (50)<\/b> [20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, …"
+   ]
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "reads",
+       "→ list #1"
+      ],
+      [
+       "hedge_after",
+       "50"
+      ],
+      [
+       "other_replica",
+       "20"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (50)<\/b> [20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, …"
+   ]
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "reads",
+       "→ list #1"
+      ],
+      [
+       "hedge_after",
+       "50"
+      ],
+      [
+       "other_replica",
+       "20"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (50)<\/b> [20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, …"
+   ]
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "reads",
+       "→ list #1"
+      ],
+      [
+       "hedge_after",
+       "50"
+      ],
+      [
+       "other_replica",
+       "20"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (50)<\/b> [20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, …"
+   ]
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "reads",
+       "→ list #1"
+      ],
+      [
+       "hedge_after",
+       "50"
+      ],
+      [
+       "other_replica",
+       "20"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (50)<\/b> [20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, …"
+   ]
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "reads",
+       "→ list #1"
+      ],
+      [
+       "hedge_after",
+       "50"
+      ],
+      [
+       "other_replica",
+       "20"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (50)<\/b> [20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, …"
+   ]
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "reads",
+       "→ list #1"
+      ],
+      [
+       "hedge_after",
+       "50"
+      ],
+      [
+       "other_replica",
+       "20"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (50)<\/b> [20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, …"
+   ]
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "reads",
+       "→ list #1"
+      ],
+      [
+       "hedge_after",
+       "50"
+      ],
+      [
+       "other_replica",
+       "20"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (50)<\/b> [20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, …"
+   ]
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "reads",
+       "→ list #1"
+      ],
+      [
+       "hedge_after",
+       "50"
+      ],
+      [
+       "other_replica",
+       "20"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (50)<\/b> [20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, …"
+   ]
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "reads",
+       "→ list #1"
+      ],
+      [
+       "hedge_after",
+       "50"
+      ],
+      [
+       "other_replica",
+       "20"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (50)<\/b> [20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, …"
+   ]
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "reads",
+       "→ list #1"
+      ],
+      [
+       "hedge_after",
+       "50"
+      ],
+      [
+       "other_replica",
+       "20"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (50)<\/b> [20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, …"
+   ]
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "reads",
+       "→ list #1"
+      ],
+      [
+       "hedge_after",
+       "50"
+      ],
+      [
+       "other_replica",
+       "20"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (50)<\/b> [20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, …"
+   ]
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "reads",
+       "→ list #1"
+      ],
+      [
+       "hedge_after",
+       "50"
+      ],
+      [
+       "other_replica",
+       "20"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (50)<\/b> [20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, …"
+   ]
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "reads",
+       "→ list #1"
+      ],
+      [
+       "hedge_after",
+       "50"
+      ],
+      [
+       "other_replica",
+       "20"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (50)<\/b> [20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, …"
+   ]
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "reads",
+       "→ list #1"
+      ],
+      [
+       "hedge_after",
+       "50"
+      ],
+      [
+       "other_replica",
+       "20"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (50)<\/b> [20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, …"
+   ]
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "reads",
+       "→ list #1"
+      ],
+      [
+       "hedge_after",
+       "50"
+      ],
+      [
+       "other_replica",
+       "20"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (50)<\/b> [20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, …"
+   ]
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "reads",
+       "→ list #1"
+      ],
+      [
+       "hedge_after",
+       "50"
+      ],
+      [
+       "other_replica",
+       "20"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (50)<\/b> [20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, …"
+   ]
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "reads",
+       "→ list #1"
+      ],
+      [
+       "hedge_after",
+       "50"
+      ],
+      [
+       "other_replica",
+       "20"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (50)<\/b> [20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, …"
+   ]
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "reads",
+       "→ list #1"
+      ],
+      [
+       "hedge_after",
+       "50"
+      ],
+      [
+       "other_replica",
+       "20"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (50)<\/b> [20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, …"
+   ]
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "reads",
+       "→ list #1"
+      ],
+      [
+       "hedge_after",
+       "50"
+      ],
+      [
+       "other_replica",
+       "20"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (50)<\/b> [20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, …"
+   ]
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "reads",
+       "→ list #1"
+      ],
+      [
+       "hedge_after",
+       "50"
+      ],
+      [
+       "other_replica",
+       "20"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (50)<\/b> [20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, …"
+   ]
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "reads",
+       "→ list #1"
+      ],
+      [
+       "hedge_after",
+       "50"
+      ],
+      [
+       "other_replica",
+       "20"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (50)<\/b> [20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, …"
+   ]
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "reads",
+       "→ list #1"
+      ],
+      [
+       "hedge_after",
+       "50"
+      ],
+      [
+       "other_replica",
+       "20"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (50)<\/b> [20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, …"
+   ]
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "reads",
+       "→ list #1"
+      ],
+      [
+       "hedge_after",
+       "50"
+      ],
+      [
+       "other_replica",
+       "20"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (50)<\/b> [20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, …"
+   ]
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "reads",
+       "→ list #1"
+      ],
+      [
+       "hedge_after",
+       "50"
+      ],
+      [
+       "other_replica",
+       "20"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (50)<\/b> [20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, …"
+   ]
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "reads",
+       "→ list #1"
+      ],
+      [
+       "hedge_after",
+       "50"
+      ],
+      [
+       "other_replica",
+       "20"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (50)<\/b> [20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, …"
+   ]
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "reads",
+       "→ list #1"
+      ],
+      [
+       "hedge_after",
+       "50"
+      ],
+      [
+       "other_replica",
+       "20"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (50)<\/b> [20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, …"
+   ]
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "reads",
+       "→ list #1"
+      ],
+      [
+       "hedge_after",
+       "50"
+      ],
+      [
+       "other_replica",
+       "20"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (50)<\/b> [20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, …"
+   ]
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "reads",
+       "→ list #1"
+      ],
+      [
+       "hedge_after",
+       "50"
+      ],
+      [
+       "other_replica",
+       "20"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (50)<\/b> [20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, …"
+   ]
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "reads",
+       "→ list #1"
+      ],
+      [
+       "hedge_after",
+       "50"
+      ],
+      [
+       "other_replica",
+       "20"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (50)<\/b> [20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, …"
+   ]
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "reads",
+       "→ list #1"
+      ],
+      [
+       "hedge_after",
+       "50"
+      ],
+      [
+       "other_replica",
+       "20"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (50)<\/b> [20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, …"
+   ]
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "reads",
+       "→ list #1"
+      ],
+      [
+       "hedge_after",
+       "50"
+      ],
+      [
+       "other_replica",
+       "20"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (50)<\/b> [20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, …"
+   ]
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "reads",
+       "→ list #1"
+      ],
+      [
+       "hedge_after",
+       "50"
+      ],
+      [
+       "other_replica",
+       "20"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (50)<\/b> [20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, …"
+   ]
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "reads",
+       "→ list #1"
+      ],
+      [
+       "hedge_after",
+       "50"
+      ],
+      [
+       "other_replica",
+       "20"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (50)<\/b> [20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, …"
+   ]
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "reads",
+       "→ list #1"
+      ],
+      [
+       "hedge_after",
+       "50"
+      ],
+      [
+       "other_replica",
+       "20"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (50)<\/b> [20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, …"
+   ]
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "reads",
+       "→ list #1"
+      ],
+      [
+       "hedge_after",
+       "50"
+      ],
+      [
+       "other_replica",
+       "20"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (50)<\/b> [20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, …"
+   ]
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "<code>hedged<\/code> is created: → list #2. A new list object (#2) is created: [20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, …",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "reads",
+       "→ list #1"
+      ],
+      [
+       "hedge_after",
+       "50"
+      ],
+      [
+       "other_replica",
+       "20"
+      ],
+      [
+       "hedged",
+       "→ list #2"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (50)<\/b> [20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, …",
+    "<b>#2 list (50)<\/b> [20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, …"
+   ],
+   "newVar": "hedged"
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "reads",
+       "→ list #1"
+      ],
+      [
+       "hedge_after",
+       "50"
+      ],
+      [
+       "other_replica",
+       "20"
+      ],
+      [
+       "hedged",
+       "→ list #2"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (50)<\/b> [20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, …",
+    "<b>#2 list (50)<\/b> [20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, …"
+   ],
+   "out": "slowest read: without 800 ms, with hedging 70 ms\n"
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "reads",
+       "→ list #1"
+      ],
+      [
+       "hedge_after",
+       "50"
+      ],
+      [
+       "other_replica",
+       "20"
+      ],
+      [
+       "hedged",
+       "→ list #2"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (50)<\/b> [20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, …",
+    "<b>#2 list (50)<\/b> [20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, …"
+   ],
+   "out": "average: without 51.2 ms, with hedging 22.0 ms\n"
+  },
+  {
+   "line": 6,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "reads",
+       "→ list #1"
+      ],
+      [
+       "hedge_after",
+       "50"
+      ],
+      [
+       "other_replica",
+       "20"
+      ],
+      [
+       "hedged",
+       "→ list #2"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (50)<\/b> [20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, …",
+    "<b>#2 list (50)<\/b> [20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, …"
+   ],
+   "out": "extra reads started: 2\n"
+  }
+ ]
+}</script>
+    </div>
+  </article>
+</section>
+
+<section class="part" id="quiz">
+  <span class="part-label"><b>9</b> Quiz and revision</span>
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <script type="application/json">[
+ {
+  "q": "What does the NameNode send to a reading client?",
+  "options": [
+   "The file data",
+   "Only the file size",
+   "Block IDs and replica locations, sorted by distance",
+   "A list of other clients"
+  ],
+  "answer": 2,
+  "why": "The LocatedBlocks reply: length, blocks, offsets and locations."
+ },
+ {
+  "q": "A client runs on a DataNode that holds a replica. Where does it read from?",
+  "options": [
+   "A random DataNode",
+   "Its own DataNode (distance 0)",
+   "The NameNode",
+   "The DataNode in another rack"
+  ],
+  "answer": 1,
+  "why": "Real log: all 5 blocks from 172.19.0.3, the client's own DataNode."
+ },
+ {
+  "q": "Why did the client in the namenode container read from different DataNodes?",
+  "options": [
+   "All replicas were equally far, so the order was shuffled",
+   "It was misconfigured",
+   "The NameNode was overloaded",
+   "Blocks were missing"
+  ],
+  "answer": 0,
+  "why": "Equal distances are randomised to spread load."
+ },
+ {
+  "q": "How often are checksums stored for HDFS data?",
+  "options": [
+   "Once per file",
+   "Once per block",
+   "Every 64 KB",
+   "Every 512 bytes"
+  ],
+  "answer": 3,
+  "why": "dfs.bytes-per-checksum = 512; the error was reported at 499,712 = 976 × 512."
+ },
+ {
+  "q": "What does the client do on a checksum error?",
+  "options": [
+   "Returns the corrupt data",
+   "Deletes the file",
+   "Reads the data from another replica and reports the bad replica to the NameNode",
+   "Restarts the DataNode"
+  ],
+  "answer": 2,
+  "why": "The output MD5 matched the original, and reportBadBlocks appeared in the NameNode log."
+ },
+ {
+  "q": "After reportBadBlocks, the NameNode:",
+  "options": [
+   "Ignores it",
+   "Copies the block from a good replica and deletes the corrupt one",
+   "Marks the whole file read-only",
+   "Formats the DataNode"
+  ],
+  "answer": 1,
+  "why": "A new replica appeared on datanode-4 six seconds later; the bad files were removed."
+ },
+ {
+  "q": "Which configuration enables reading local block files directly, bypassing the DataNode?",
+  "options": [
+   "dfs.client.read.shortcircuit",
+   "dfs.replication",
+   "dfs.blocksize",
+   "fs.defaultFS"
+  ],
+  "answer": 0,
+  "why": "Short-circuit local reads; false by default."
+ },
+ {
+  "q": "All replicas of a block are corrupt. What happens on read?",
+  "options": [
+   "HDFS repairs it from the NameNode",
+   "The NameNode returns zeros",
+   "The file is silently skipped",
+   "The read fails (BlockMissingException) and fsck reports the file as corrupt"
+  ],
+  "answer": 3,
+  "why": "The NameNode holds no data to repair from."
+ }
+]</script>
+  </div>
+
+  <h3>Quick revision</h3>
+  <div class="revision">
+    <h3>Lesson 6.2 in one screen</h3>
+    <ul><li>Read = <code>open()</code> → <b>getBlockLocations</b> (NameNode) → read each block <b>directly from a DataNode</b> → <code>close()</code>.</li><li>Locations sorted by <b>distance</b>: same node (0) &lt; same rack (2) &lt; other rack (4); ties shuffled.</li><li>Lab: client on dn-2 read all 5 blocks locally; off-cluster client spread across dn-1/2/3.</li><li>Checksums every <b>512 bytes</b>, verified by the reading client (end-to-end).</li><li>Checksum error → next replica + <b>reportBadBlocks</b> → NameNode re-replicates and deletes the bad copy.</li><li>Dead DataNode → next replica; the stream remembers it as dead.</li><li>Extras: short-circuit local reads, hedged reads, block scanner (every 504 h).</li><li>NameNode never sends data.</li></ul>
+  </div>
+
+  <h3>Interview and viva questions</h3>
+  <div class="faq">
+    <details><summary>How does a client read a file from HDFS?</summary><p>It opens the file, which asks the NameNode for the locations of the file's blocks. For each block, the NameNode lists the DataNodes holding replicas sorted by distance from the client. The client reads each block directly from the closest DataNode, verifying checksums, then moves to the next block.</p></details>
+    <details><summary>How does HDFS choose which replica to read?</summary><p>The NameNode sorts replicas by network distance from the client: same node first, then same rack, then other racks, using the rack topology. Replicas at the same distance are shuffled so load is spread. The client tries them in that order.</p></details>
+    <details><summary>How does HDFS detect corrupted data?</summary><p>Writers compute a CRC checksum for every 512 bytes, stored in the .meta file next to each block replica. Readers recompute and compare. DataNodes also verify blocks in the background with the block scanner.</p></details>
+    <details><summary>What happens when a client finds a corrupt block?</summary><p>It reads that part from another replica, so the application still gets correct data, and reports the corrupt replica to the NameNode. The NameNode marks it corrupt, creates a new replica from a good copy and deletes the bad one.</p></details>
+    <details><summary>What are short-circuit local reads?</summary><p>When the client and the replica are on the same machine and dfs.client.read.shortcircuit is enabled (with a domain socket path), the client reads the block file directly from local disk using a file descriptor passed by the DataNode, avoiding the TCP data path.</p></details>
+    <details><summary>Does reading put load on the NameNode?</summary><p>Only for metadata: open and block location lookups. The data transfer itself is between client and DataNodes, which is why HDFS reads scale with the number of DataNodes.</p></details>
+    
+  </div>
+
+  <h3 id="practice">Practice problems</h3>
+  <p class="prob-intro">Read-path exercises using real offsets, IPs and logs from the lab.</p>
+  <div class="probs">
+    <article class="prob"><div class="prob__head"><span class="prob__num">P1</span><span class="prob__tag prob__tag--easy">Easy</span><h4>Distance table</h4></div>
+      <p>Compute the distance from a client on dn-3 (rack2) to dn-1 (rack1), dn-4 (rack2) and dn-3.</p>
+      <div class="prob__io"><div><small>Input</small><pre>client dn-3</pre></div><div><small>Expected output</small><pre>dn-1 4
+dn-4 2
+dn-3 0</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>rack = {&quot;dn-1&quot;: 1, &quot;dn-3&quot;: 2, &quot;dn-4&quot;: 2}
+for dn in [&quot;dn-1&quot;, &quot;dn-4&quot;, &quot;dn-3&quot;]:
+    d = 0 if dn == &quot;dn-3&quot; else 2 if rack[dn] == 2 else 4
+    print(dn, d)</code></pre><div class="output">dn-1 4
+dn-4 2
+dn-3 0</div></div>
+        <p><b>How it works:</b> dn-1: 4 (other rack), dn-4: 2 (same rack), dn-3: 0 (itself).</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P2</span><span class="prob__tag prob__tag--easy">Easy</span><h4>Block for an offset</h4></div>
+      <p>With 1 MB blocks, which block holds byte 1,500,000 of the file, and at what offset inside it?</p>
+      <div class="prob__io"><div><small>Input</small><pre>1,500,000 · 1,048,576</pre></div><div><small>Expected output</small><pre>1 451424</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>print(1500000 // 1048576, 1500000 % 1048576)</code></pre><div class="output">1 451424</div></div>
+        <p><b>How it works:</b> Block 1 (the second), offset 451,424 inside it: blk_1073741827 in our file.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P3</span><span class="prob__tag prob__tag--easy">Easy</span><h4>Count servers</h4></div>
+      <p>Count how many blocks each DataNode served in the real off-cluster read: dn-2, dn-3, dn-3, dn-3, dn-1.</p>
+      <div class="prob__io"><div><small>Input</small><pre>dn-2 · dn-3 · dn-3 · dn-3 · dn-1</pre></div><div><small>Expected output</small><pre>Counter({&#x27;dn-3&#x27;: 3, &#x27;dn-2&#x27;: 1, &#x27;dn-1&#x27;: 1})</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>from collections import Counter
+print(Counter([&quot;dn-2&quot;, &quot;dn-3&quot;, &quot;dn-3&quot;, &quot;dn-3&quot;, &quot;dn-1&quot;]))</code></pre><div class="output">Counter({&#x27;dn-3&#x27;: 3, &#x27;dn-2&#x27;: 1, &#x27;dn-1&#x27;: 1})</div></div>
+        <p><b>How it works:</b> dn-3: 3, dn-2: 1, dn-1: 1. Random among equal distances; over many reads it evens out.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P4</span><span class="prob__tag prob__tag--medium">Medium</span><h4>Which replica healed it?</h4></div>
+      <p>Before: replicas [.3, .4, .6]. After the bad-block report: [.4, .7, .6]. Which replica was removed and which added?</p>
+      <div class="prob__io"><div><small>Input</small><pre>before / after lists</pre></div><div><small>Expected output</small><pre>removed: {&#x27;172.19.0.3&#x27;}  added: {&#x27;172.19.0.7&#x27;}</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>before, after = {&quot;172.19.0.3&quot;, &quot;172.19.0.4&quot;, &quot;172.19.0.6&quot;}, {&quot;172.19.0.4&quot;, &quot;172.19.0.7&quot;, &quot;172.19.0.6&quot;}
+print(&quot;removed:&quot;, before - after, &quot; added:&quot;, after - before)</code></pre><div class="output">removed: {&#x27;172.19.0.3&#x27;}  added: {&#x27;172.19.0.7&#x27;}</div></div>
+        <p><b>How it works:</b> Removed 172.19.0.3 (datanode-2, the corrupted copy); added 172.19.0.7 (datanode-4).</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P5</span><span class="prob__tag prob__tag--medium">Medium</span><h4>Checksum bytes per block</h4></div>
+      <p>How many checksum bytes does a 128 MB block need, and what fraction of the data is that?</p>
+      <div class="prob__io"><div><small>Input</small><pre>134,217,728 bytes · 4 B per 512 B</pre></div><div><small>Expected output</small><pre>1048576 bytes (0.78%)</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>b = 134217728
+c = b // 512 * 4
+print(c, &quot;bytes&quot;, f&quot;({c / b:.2%})&quot;)</code></pre><div class="output">1048576 bytes (0.78%)</div></div>
+        <p><b>How it works:</b> 1,048,576 bytes (1 MB) of checksums per 128 MB block: 0.78% overhead for end-to-end integrity.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P6</span><span class="prob__tag prob__tag--medium">Medium</span><h4>Parse a LocatedBlock</h4></div>
+      <p>From the real LocatedBlock text, extract block ID, size, offset and location IPs.</p>
+      <div class="prob__io"><div><small>Input</small><pre>LocatedBlock{…blk_1073741826_1002; getBlockSize()=1048576; … offset=0; locs=[…]}</pre></div><div><small>Expected output</small><pre>blk_1073741826 1048576 0 [&#x27;172.19.0.3&#x27;, &#x27;172.19.0.4&#x27;, &#x27;172.19.0.6&#x27;]</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>import re
+s = (&quot;LocatedBlock{BP-1507681208-172.19.0.3-1792565333483:blk_1073741826_1002; getBlockSize()=1048576; &quot;
+     &quot;corrupt=false; offset=0; locs=[DatanodeInfoWithStorage[172.19.0.3:9866,DS-1,DISK], &quot;
+     &quot;DatanodeInfoWithStorage[172.19.0.4:9866,DS-2,DISK], DatanodeInfoWithStorage[172.19.0.6:9866,DS-3,DISK]]&quot;)
+print(re.search(r&quot;(blk_\d+)&quot;, s).group(1), re.search(r&quot;getBlockSize\(\)=(\d+)&quot;, s).group(1),
+      re.search(r&quot;offset=(\d+)&quot;, s).group(1), re.findall(r&quot;(\d+\.\d+\.\d+\.\d+):9866&quot;, s))</code></pre><div class="output">blk_1073741826 1048576 0 [&#x27;172.19.0.3&#x27;, &#x27;172.19.0.4&#x27;, &#x27;172.19.0.6&#x27;]</div></div>
+        <p><b>How it works:</b> blk_1073741826, 1048576 bytes at offset 0, replicas on .3, .4 and .6.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P7</span><span class="prob__tag prob__tag--business">Business problem</span><h4>Saving by locality</h4></div>
+      <p>Core network capacity costs Rs 8 lakh per 10 Gbit/s per year. Without locality, a cluster would need 40 Gbit/s of core capacity; with locality, 4 Gbit/s. What is the yearly saving?</p>
+      <div class="prob__io"><div><small>Input</small><pre>Rs 8 lakh per 10 Gbit/s · 40 vs 4 Gbit/s</pre></div><div><small>Expected output</small><pre>Rs 24 lakh per year</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>import math
+cost = lambda g: math.ceil(g / 10) * 8
+print(f&quot;Rs {cost(40) - cost(4)} lakh per year&quot;)</code></pre><div class="output">Rs 24 lakh per year</div></div>
+        <p><b>How it works:</b> Rs 32 lakh − Rs 8 lakh = Rs 24 lakh per year (illustrative prices), just from reading where the data is.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P8</span><span class="prob__tag prob__tag--advanced">Advanced</span><h4>Read with corruption and failover</h4></div>
+      <p>Simulate reading 3 blocks with sorted replicas, where some replicas are corrupt and some DataNodes dead. Return the serving DataNode per block and the list of bad-block reports.</p>
+      <div class="prob__io"><div><small>Input</small><pre>3 blocks · corrupt {(1, dn-2)} · dead {dn-3}</pre></div><div><small>Expected output</small><pre>served: {0: &#x27;dn-2&#x27;, 1: &#x27;dn-1&#x27;, 2: &#x27;dn-2&#x27;}  reported bad: [(1, &#x27;dn-2&#x27;)]</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>locs = {0: [&quot;dn-2&quot;, &quot;dn-1&quot;, &quot;dn-3&quot;], 1: [&quot;dn-2&quot;, &quot;dn-3&quot;, &quot;dn-1&quot;], 2: [&quot;dn-3&quot;, &quot;dn-2&quot;, &quot;dn-1&quot;]}
+corrupt, dead = {(1, &quot;dn-2&quot;)}, {&quot;dn-3&quot;}
+served, reports = {}, []
+for b, nodes in locs.items():
+    for dn in nodes:
+        if dn in dead:
+            continue
+        if (b, dn) in corrupt:
+            reports.append((b, dn)); continue
+        served[b] = dn; break
+print(&quot;served:&quot;, served, &quot; reported bad:&quot;, reports)</code></pre><div class="output">served: {0: &#x27;dn-2&#x27;, 1: &#x27;dn-1&#x27;, 2: &#x27;dn-2&#x27;}  reported bad: [(1, &#x27;dn-2&#x27;)]</div></div>
+        <p><b>How it works:</b> Block 0 from dn-2, block 1 from dn-1 (after the corrupt dn-2 copy and dead dn-3), block 2 from dn-2. One bad-block report: block 1 on dn-2.</p>
+      </details>
+    </article>
+  </div>
+
+  <h3 id="scenarios">Real-world scenario questions (asked in company interviews)</h3>
+  <p class="scn-intro">Read-path questions test whether you understand locality and integrity, two of HDFS's core promises.</p>
+  <div class="scenarios">
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">HDFS · internals</span><span class="scn__tag scn__tag--level">Fresher</span></div>
+      <h4>“Explain how HDFS reads a file”</h4>
+      <p class="scn__situation">The anatomy-of-a-read question.</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> NameNode vs DataNode roles and replica choice.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>Client opens the file; the NameNode returns block locations, each list sorted by distance from the client.</li>
+          <li>The client reads each block directly from the nearest DataNode, verifying 512-byte checksums, then moves to the next block.</li>
+          <li>On failure or checksum error it uses the next replica and reports bad replicas. The NameNode never transfers data.</li>
+        </ul>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Operations · integrity</span><span class="scn__tag scn__tag--level">Experienced</span></div>
+      <h4>Logs show many “Found Checksum error” warnings from one DataNode</h4>
+      <p class="scn__situation">Jobs still succeed, but the warnings keep appearing for different blocks on the same host.</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> that you treat it as a hardware signal.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>Clients are reading around corrupt replicas and HDFS re-replicates them, so data is safe for now.</li>
+          <li>Repeated errors on one host point to a failing disk, controller or memory. Check which volume the blocks are on, SMART data, kernel logs.</li>
+          <li>Mark the volume failed or decommission the node, replace the hardware, and run <code>fsck</code> to confirm no file has lost all good replicas.</li>
+        </ul>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Performance · locality</span><span class="scn__tag scn__tag--level">Experienced</span></div>
+      <h4>Reads from BI tools on the edge node are slow; jobs are fast</h4>
+      <p class="scn__situation">Analysts pull large files to an edge node and complain about speed.</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> remote reads vs local reads.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>The edge node isn't a DataNode, so every read is remote and limited by its network link; jobs read locally on DataNodes.</li>
+          <li>Move the heavy work into the cluster (Hive/Spark queries returning small results) instead of copying raw data out.</li>
+          <li>If raw transfers are needed: faster edge-node networking, parallel readers, or columnar formats so less data is read.</li>
+        </ul>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">HDFS · reliability</span><span class="scn__tag scn__tag--level">Fresher</span></div>
+      <h4>“If a disk silently flips a bit, will my report be wrong?”</h4>
+      <p class="scn__situation">A manager worries about silent data corruption.</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> end-to-end checksums.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>No (unless every replica is bad). Each 512 bytes has a checksum created when the data was written; readers verify it.</li>
+          <li>A mismatch makes the client read another replica and report the bad one, which HDFS replaces.</li>
+          <li>Real demo: one byte changed on disk → “Found Checksum error … at 499712” → output identical to the original.</li>
+        </ul>
+      </div></details>
+    </article>
+
+  </div>
+</section>
+
+<nav class="lesson-nav" id="lesson-nav" aria-label="Lesson navigation"></nav>
+<div class="ad-slot" data-slot="bottom"></div>
+</article>
+
+<aside class="lesson-side">
+  <nav class="toc" aria-label="In this lesson">
+    <h4>In this lesson</h4>
+    <ol>
+      <li><a href="#story">The story</a></li>
+      <li><a href="#definition">Definition</a></li><li><a href="#levels">Beginner → Advanced</a></li>
+      <li><a href="#types">Types and ways to use it</a></li>
+      <li><a href="#steps">Step by step</a></li>
+      <li><a href="#animation">See it happen</a></li>
+      <li><a href="#real-world">Real-world use</a></li>
+      <li><a href="#run">Run the code</a></li><li><a href="#pc">Run on your PC</a></li>
+      <li><a href="#tracer">Line by line</a></li>
+      <li><a href="#worked">Worked examples</a></li>
+      <li><a href="#quiz">Quiz and revision</a></li>
+      <li><a href="#practice">Practice problems</a></li>
+      <li><a href="#scenarios">Industry scenarios</a></li>
+    </ol>
+  </nav>
+  <div class="ad-slot" data-slot="side"></div>
+  <div class="outline" id="outline"></div>
+</aside>
+</div>
+</main>
+
+<footer class="site-footer">
+  <div class="wrap">
+    <div><h4>MyPhatshala</h4><p>Free programming and IT lessons that show what happens behind the screen.</p></div>
+    <div><h4>Learn</h4><a href="../../../../#tracks">All courses</a><a href="../../">Apache Hadoop syllabus</a></div>
+    <div><h4>Site</h4><a href="../../../../about.html">About</a><a href="../../../../contact.html">Contact</a><a href="../../../../privacy.html">Privacy policy</a><a href="../../../../disclaimer.html">Disclaimer</a></div>
+    <div class="copyright">© MyPhatshala. All lesson content, diagrams and animations are original. Please do not copy without permission.</div>
+  </div>
+</footer>
+
+<script src="../../../../data/courses/hadoop.js"></script>
+<script src="../../../../assets/js/lesson.js"></script>
+<script src="../../../../assets/js/ads.js"></script>
+<script src="../../../../assets/js/site.js"></script>
+</body>
+</html>

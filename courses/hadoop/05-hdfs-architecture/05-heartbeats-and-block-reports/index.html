@@ -1,0 +1,3321 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Heartbeats and block reports | MyPhatshala</title>
+<meta name="description" content="How the NameNode knows which DataNodes are alive and what they store: heartbeats every 3 s with commands in the reply, stale (30 s) and dead (10 min 30 s) nodes, full block reports every 6 hours and incremental reports. Real Hadoop 3.5.0 timeline of a frozen DataNode going live → stale → dead → re-registered, last-contact readings from /jmx, triggerBlockReport, Python state machine, quiz and interview scenarios.">
+<meta name="mp:minutes" content="24">
+<link rel="canonical" href="https://myphatshala.in/courses/hadoop/05-hdfs-architecture/05-heartbeats-and-block-reports/">
+<meta property="og:title" content="Heartbeats and block reports · MyPhatshala">
+<meta property="og:description" content="“Present!” every 3 seconds. Watch a frozen DataNode go stale, then dead, then come back, on a real cluster.">
+<link rel="icon" href="../../../../assets/img/logo.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Fraunces:ital,opsz,wght@0,9..144,600;0,9..144,700;1,9..144,600&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../../../../assets/css/style.css">
+<link rel="stylesheet" href="../../../../assets/css/lesson.css">
+<link rel="stylesheet" href="../../../../assets/css/cluster-sim.css">
+<script src="../../../../assets/js/config.js"></script>
+<script>try { const t = localStorage.getItem("mp-theme"); if (t) document.documentElement.dataset.theme = t; } catch (e) {}</script>
+<script type="application/ld+json">{"@context": "https://schema.org", "@type": "LearningResource", "name": "Heartbeats and block reports", "learningResourceType": "Lesson", "educationalLevel": "Intermediate", "isAccessibleForFree": true, "inLanguage": "en", "isPartOf": {"@type": "Course", "name": "Apache Hadoop", "provider": {"@type": "Organization", "name": "MyPhatshala"}}}</script>
+</head>
+<body style="--track:#B45309" data-lesson="05-hdfs-architecture/05-heartbeats-and-block-reports" data-course-root="../../">
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="site-header">
+  <div class="wrap">
+    <a class="brand" href="../../../../" aria-label="MyPhatshala home"><img src="../../../../assets/img/logo.svg" width="34" height="34" alt=""><span>My<b>Phatshala</b></span></a>
+    <nav class="nav" aria-label="Main">
+      <a href="../../../../#tracks">All courses</a>
+      <a href="../../">Apache Hadoop syllabus</a>
+      <button class="theme-btn" id="theme-btn" aria-label="Toggle dark mode"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg></button>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+<section class="lesson-hero">
+  <div class="wrap">
+    <nav class="crumbs" aria-label="Breadcrumb"><a href="../../../../">Home</a><span>›</span><a href="../../../../#track-big-data">Big Data Engineering</a><span>›</span><a href="../../">Apache Hadoop</a><span>›</span><b>Lesson 5.5</b></nav>
+    <h1>Heartbeats and block reports</h1>
+    <p class="lead">The NameNode never polls its DataNodes. It learns everything from two messages they send: a heartbeat every three seconds and block reports listing what they store. This lesson shows both on a real cluster: a DataNode frozen on purpose, the NameNode's view of it changing from live to stale to dead, and the re-registration and block report when it returns.</p>
+    <div class="lesson-meta"><span>Module 5 · HDFS architecture</span><span>⏱ 24 min</span><span>Intermediate</span><span>Real failure timeline</span><span>Cluster Playground</span><span>Runs in your browser (Python)</span><span>8 practice problems</span></div>
+  </div>
+</section>
+
+<div class="wrap lesson-layout">
+<article class="lesson-main">
+<!-- ======================= PART 1: THE STORY ======================= -->
+<section class="part" id="story">
+  <span class="part-label"><b>1</b> The story</span>
+  <h2>“Present, sir!” every three seconds</h2>
+  <div class="story">
+    <p class="narration">Kabir freezes datanode-4 with <code>docker pause</code>: the process is still there, but it can't do anything. He keeps asking the NameNode about it. “Live, last contact 10 seconds ago… 27 seconds… 43… 51…” Still live. Then at 57 seconds: <b>dead</b>. He unpauses it, and six seconds later the NameNode says “live, last contact 0 seconds”. Riya: “How does the NameNode know any of this? It never looks at the DataNodes.”</p>
+
+    <div class="scene">
+      <svg viewBox="0 0 640 180" role="img" aria-label="DataNodes send a heartbeat every 3 seconds and a full block report every 6 hours. The NameNode replies to heartbeats with commands.">
+        <g font-size="10">
+          <rect x="250" y="20" width="140" height="70" rx="10" class="s-board"/><text x="320" y="48" text-anchor="middle" font-weight="700" class="s-chalk">NameNode</text><text x="320" y="68" text-anchor="middle" font-size="8.6" class="s-chalk">listens, never calls</text>
+          <rect x="20" y="110" width="130" height="50" rx="8" class="s-soft-green" style="stroke:var(--green)"/><text x="85" y="140" text-anchor="middle" font-size="9" font-weight="700" class="s-green">datanode-1</text>
+          <rect x="255" y="110" width="130" height="50" rx="8" class="s-soft-green" style="stroke:var(--green)"/><text x="320" y="140" text-anchor="middle" font-size="9" font-weight="700" class="s-green">datanode-2</text>
+          <rect x="490" y="110" width="130" height="50" rx="8" class="s-card2" style="stroke:var(--red);stroke-dasharray:5 4"/><text x="555" y="134" text-anchor="middle" font-size="9" font-weight="700" class="s-ink">datanode-4</text><text x="555" y="150" text-anchor="middle" font-size="8" class="s-red">silent…</text>
+          <path d="M85 110L270 90M320 110V90" style="stroke:var(--green);stroke-width:2;stroke-dasharray:4 3"/><text x="150" y="92" font-size="8.6" class="s-green">♥ every 3 s</text>
+          <path d="M555 110L370 90" style="stroke:var(--red);stroke-width:1.4;stroke-dasharray:2 5"/><text x="480" y="92" font-size="8.6" class="s-red">no heartbeat</text>
+        </g>
+        <text x="320" y="176" text-anchor="middle" font-size="10" class="s-ink2">Silence is the signal: stale after 30 s, dead after 10 min 30 s (our lab: about 60 s).</text>
+        <text x="632" y="176" text-anchor="end" class="s-wm">myphatshala.in</text>
+      </svg>
+    </div>
+
+    <div class="panel panel--right"><div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#DDEFE6"/><path d="M12 64c2-12 10-18 20-18s18 6 20 18z" fill="#F4F1EA"/><path d="M28 46l4 8 4-8" fill="#2F7D5B"/><circle cx="32" cy="28" r="12" fill="#B57A50"/><path d="M20 26c0-8 5-13 12-13s12 5 12 13c-2-3-6-5-12-5s-10 2-12 5z" fill="#5A5A5A"/><path d="M22 32c1 8 5 11 10 11s9-3 10-11c-2 3-6 4-10 4s-8-1-10-4z" fill="#5A5A5A"/><circle cx="27" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><circle cx="37" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><path d="M30.4 29h3.2" stroke="#1B2433" stroke-width="1.4"/><circle cx="27" cy="29" r="1.1" fill="#1B2433"/><circle cx="37" cy="29" r="1.1" fill="#1B2433"/></svg></div><div class="bubble"><b class="who">Arjun Sir</b><p>Like a class register. Every DataNode calls out “present” to the NameNode every 3 seconds: that's a <b>heartbeat</b>, with a few numbers about its disks and load. The NameNode just notes the time. If a DataNode goes quiet, the NameNode doesn't phone it; silence itself is the information.</p></div></div>
+    <div class="panel"><div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#E1E9F7"/><path d="M12 64c2-12 10-18 20-18s18 6 20 18z" fill="#B45309"/><circle cx="32" cy="29" r="12" fill="#A9714A"/><path d="M19 27c0-9 6-14 13-14s13 5 13 14c-2-4-5-6-8-6-3 3-9 4-13 3-2 1-4 2-5 3z" fill="#1E1A17"/><circle cx="27.5" cy="30" r="1.5" fill="#1E1A17"/><circle cx="36.5" cy="30" r="1.5" fill="#1E1A17"/><path d="M27 35.5q5 3.5 10 0" stroke="#1E1A17" stroke-width="1.6" fill="none" stroke-linecap="round"/><rect x="41" y="40" width="10" height="7" rx="1.5" fill="#2E5AAC"/></svg></div><div class="bubble"><b class="who">Kabir</b><p>And how did it know what blocks datanode-4 has, after it came back?</p></div></div>
+    <div class="panel panel--right"><div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#DDEFE6"/><path d="M12 64c2-12 10-18 20-18s18 6 20 18z" fill="#F4F1EA"/><path d="M28 46l4 8 4-8" fill="#2F7D5B"/><circle cx="32" cy="28" r="12" fill="#B57A50"/><path d="M20 26c0-8 5-13 12-13s12 5 12 13c-2-3-6-5-12-5s-10 2-12 5z" fill="#5A5A5A"/><path d="M22 32c1 8 5 11 10 11s9-3 10-11c-2 3-6 4-10 4s-8-1-10-4z" fill="#5A5A5A"/><circle cx="27" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><circle cx="37" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><path d="M30.4 29h3.2" stroke="#1B2433" stroke-width="1.4"/><circle cx="27" cy="29" r="1.1" fill="#1B2433"/><circle cx="37" cy="29" r="1.1" fill="#1B2433"/></svg></div><div class="bubble"><b class="who">Arjun Sir</b><p>That's the second message: the <b>block report</b>. A DataNode lists every block it holds when it registers, then again every 6 hours, plus small updates whenever it gets or deletes a block. Heartbeats say “I'm alive”; block reports say “here's what I have”. And the NameNode's replies to heartbeats are how it gives orders: “copy this block”, “delete that one”.</p></div></div>
+  </div>
+</section>
+
+<!-- ======================= PART 2: DEFINITION ======================= -->
+<section class="part" id="definition">
+  <span class="part-label"><b>2</b> Definition</span>
+  <h2>Heartbeats and block reports</h2>
+  <div class="def">
+    <div class="def__formal"><small>Formal definition (write this in exams)</small>
+      <p>A <b>heartbeat</b> is a periodic RPC from each DataNode to the NameNode (every <code>dfs.heartbeat.interval</code> = <b>3 s</b>) carrying the DataNode's capacity, used and remaining space, number of active transfers and other load figures. It tells the NameNode the DataNode is alive, and the NameNode's <b>reply</b> carries commands for the DataNode, such as replicating a block to another node, deleting (invalidating) blocks, or re-registering. A DataNode not heard from for <code>dfs.namenode.stale.datanode.interval</code> (30 s) is <b>stale</b>; after 2 × <code>dfs.namenode.heartbeat.recheck-interval</code> + 10 × heartbeat interval (<b>10 min 30 s</b> by default) it is declared <b>dead</b> and its replicas are re-replicated. A <b>block report</b> is a list of all block replicas a DataNode stores (ID, length, generation stamp) sent at registration and then every <code>dfs.blockreport.intervalMsec</code> (<b>6 hours</b>); between full reports, <b>incremental block reports</b> announce replicas received or deleted. The NameNode builds and corrects its block map from these reports.</p></div>
+    <div class="def__simple"><small>In simple words</small>
+      <p>Heartbeat: “I'm alive, and here's how full I am” every 3 seconds. Block report: “Here is every block I hold”, when starting and every 6 hours, with small updates in between. The NameNode answers heartbeats with jobs to do.</p></div>
+  </div>
+
+  <h3>Words you'll meet in this lesson</h3>
+  <div class="terms">
+    <div class="term"><b>Heartbeat</b><span>Small RPC every 3 s: alive + capacity and load numbers.</span></div>
+    <div class="term"><b>Heartbeat reply</b><span>The NameNode's answer, carrying commands: replicate, invalidate (delete), etc.</span></div>
+    <div class="term"><b>Last contact</b><span>Seconds since the last heartbeat, shown in <code>dfsadmin -report</code> and the UI.</span></div>
+    <div class="term"><b>Stale node</b><span>No heartbeat for 30 s. Still “live”, but can be avoided for reads/writes.</span></div>
+    <div class="term"><b>Dead node</b><span>No heartbeat for 10 min 30 s (default). Its replicas are re-created elsewhere.</span></div>
+    <div class="term"><b>Full block report</b><span>Every replica on the DataNode. At start-up and every 6 hours.</span></div>
+    <div class="term"><b>Incremental block report</b><span>Only changes: replicas received or deleted since the last report.</span></div>
+    <div class="term"><b>Registration</b><span>A DataNode's first contact: it identifies itself, then sends a full block report.</span></div>
+  </div>
+
+  <h3>Timers checked on Hadoop 3.5.0</h3>
+  <table class="facts" style="table-layout:fixed;overflow-wrap:anywhere">
+    <tr><th>dfs.heartbeat.interval</th><td>3 s</td></tr>
+    <tr><th>dfs.namenode.stale.datanode.interval</th><td>30,000 ms (30 s); in our lab the node was counted stale at about 38 s</td></tr>
+    <tr><th>dfs.namenode.heartbeat.recheck-interval</th><td>300,000 ms (5 min) → dead after 10 min 30 s. Lab: 15,000 ms → dead after about 60 s (seen at 57 s)</td></tr>
+    <tr><th>dfs.blockreport.intervalMsec</th><td>21,600,000 ms (6 hours)</td></tr>
+    <tr><th>dfs.blockreport.initialDelay</th><td>0 s (first report sent right after registration)</td></tr>
+    <tr><th>Avoid stale nodes</th><td><code>dfs.namenode.avoid.read.stale.datanode</code> / <code>…avoid.write…</code>: false by default</td></tr>
+  </table>
+
+  <h3 id="levels">Heartbeats at three levels</h3>
+  <div class="modlab levels"><div class="modlab__bar"><b>Pick your level. New to this? Start at Beginner and climb.</b><button type="button" data-mod="b">Beginner</button><button type="button" data-mod="i">Intermediate</button><button type="button" data-mod="a">Advanced</button></div>
+    <div class="modlab__panel" data-mod="b"><h4><span class="lvl lvl--b">Beginner</span> Attendance and inventory</h4>
+      <ul>
+        <li>Heartbeat = roll call: every 3 seconds each shelf-keeper says “present”, and how much space their shelf has left.</li>
+        <li>Block report = stock-taking: the shelf-keeper lists every book on the shelf. Done when they join, then every 6 hours.</li>
+        <li>The head librarian answers the roll call with tasks: “photocopy book 25 for shelf 3”, “throw away the extra copy of book 7”.</li>
+      </ul>
+
+    </div>
+    <div class="modlab__panel" data-mod="i"><h4><span class="lvl lvl--i">Intermediate</span> What the NameNode does with them</h4>
+      <ul>
+        <li>Updates each DataNode's “last contact” and capacity, which <code>dfsadmin -report</code> shows.</li>
+        <li>Chooses targets for new blocks using reported free space and load.</li>
+        <li>Marks nodes stale, then dead, purely from missing heartbeats.</li>
+        <li>Rebuilds the block map after a restart from full block reports (Lesson 5.6).</li>
+        <li>Finds lost, extra or corrupt replicas by comparing reports with what it expects.</li>
+      </ul>
+
+    </div>
+    <div class="modlab__panel" data-mod="a"><h4><span class="lvl lvl--a">Advanced</span> Large-cluster details</h4>
+      <ul>
+        <li>The NameNode never initiates calls to DataNodes; all commands travel in heartbeat replies. This keeps one NameNode able to manage thousands of nodes.</li>
+        <li>Full block reports from big DataNodes (millions of blocks) are expensive; they are spread out over time and can be split per disk.</li>
+        <li>A busy NameNode may process heartbeats late; the optional <b>lifeline</b> RPC (<code>dfs.namenode.lifeline.rpc-address</code>) keeps busy-but-healthy nodes from being declared dead.</li>
+        <li><code>hdfs dfsadmin -triggerBlockReport host:9867</code> forces a full report, useful after disk repairs.</li>
+      </ul>
+
+    </div>
+  </div>
+  <div class="callout callout--exam"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19V5a2 2 0 0 1 2-2h12v18H6a2 2 0 0 1-2-2zm0 0a2 2 0 0 1 2-2h12"/></svg><p><b>Exam tip:</b> “Explain heartbeat and block report”: heartbeat = DataNode → NameNode every <b>3 s</b>, liveness + storage stats; reply carries commands; no heartbeat for <b>10 min 30 s</b> → dead → re-replication. Block report = list of all blocks on a DataNode, at start-up and every <b>6 h</b> (plus incremental reports); used to build the block map.</p></div>
+</section>
+
+<!-- ======================= PART 3: TYPES AND WAYS TO USE IT ======================= -->
+<section class="part" id="types">
+  <span class="part-label"><b>3</b> Types and ways to use it</span>
+  <h2>The messages between DataNodes and the NameNode</h2>
+  <div class="table-wrap">
+  <table class="compare" style="min-width:600px">
+    <thead><tr><th>Message</th><th>When</th><th>Carries</th><th>NameNode uses it to</th></tr></thead>
+    <tbody>
+      <tr><td><b>Registration</b></td><td>DataNode start, or when asked to re-register</td><td>Identity, storage IDs, cluster ID</td><td>Add the node to the topology</td></tr>
+      <tr><td><b>Heartbeat</b></td><td>Every 3 s</td><td>Capacity, used, remaining, transfers in progress</td><td>Track liveness and load; send commands back</td></tr>
+      <tr><td><b>Full block report</b></td><td>After registration; every 6 h</td><td>Every replica: ID, length, generation stamp</td><td>Build/correct the block map</td></tr>
+      <tr><td><b>Incremental block report</b></td><td>When replicas are received or deleted</td><td>Only the changes</td><td>Keep the block map current between full reports</td></tr>
+      <tr><td><b>Cache report</b></td><td>Periodically, if caching is used</td><td>Blocks cached in memory</td><td>Centralised cache management</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <h3>Commands the NameNode sends back</h3>
+  <div class="cards">
+    <div class="card"><h4>Transfer</h4><p>“Copy block X to DataNode Y”: how re-replication happens.</p><span class="tag">Replicate</span></div>
+    <div class="card"><h4>Invalidate</h4><p>“Delete these replicas”: for deleted files or over-replicated blocks.</p><span class="tag">Delete</span></div>
+    <div class="card"><h4>Recover</h4><p>“Recover this block”: finish or repair a block whose writer died.</p><span class="tag">Recovery</span></div>
+    <div class="card"><h4>Register / shut down</h4><p>Ask the node to re-register, or tell it to stop.</p><span class="tag">Control</span></div>
+  </div>
+  <div class="callout callout--tip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18h6M10 22h4M12 2a7 7 0 0 0-4 12.7V17h8v-2.3A7 7 0 0 0 12 2z"/></svg><p>When a DataNode looks “dead” but its process is running, check the network to the NameNode and the DataNode's log for long GC pauses or disk hangs. A frozen process, like our paused container, is exactly as dead as a stopped one from the NameNode's point of view.</p></div>
+</section>
+
+<!-- ======================= PART 4: STEP BY STEP ======================= -->
+<section class="part" id="steps">
+  <span class="part-label"><b>4</b> Step by step</span>
+  <h2>Watch heartbeats and block reports on the real cluster</h2>
+  <p>Module 5 lab cluster: <code>dfs.namenode.heartbeat.recheck-interval</code> is 15 s, so dead detection takes about 60 s instead of 10 min 30 s. Everything else uses defaults.</p>
+  <ol class="stepper">
+    <li><h4>Read the timers</h4>
+      <div class="code" data-lang="bash" data-file="Terminal"><pre><code>for k in dfs.heartbeat.interval dfs.namenode.heartbeat.recheck-interval \
+         dfs.namenode.stale.datanode.interval dfs.blockreport.intervalMsec; do
+  echo "$k = $(docker compose exec namenode hdfs getconf -confKey $k)"
+done</code></pre><div class="output">dfs.heartbeat.interval = 3
+dfs.namenode.heartbeat.recheck-interval = 15000
+dfs.namenode.stale.datanode.interval = 30000
+dfs.blockreport.intervalMsec = 21600000</div></div>
+      <span class="behind">Seconds for the heartbeat; milliseconds for the others. 21,600,000 ms = 6 hours.</span></li>
+    <li><h4>See each DataNode's last contact</h4>
+      <div class="code" data-lang="bash" data-file="Terminal"><pre><code>docker compose exec namenode bash -c 'curl -s "http://namenode:9870/jmx?qry=Hadoop:service=NameNode,name=NameNodeInfo"' \
+  | python3 -c "import sys,json; b=json.load(sys.stdin)['beans'][0]; [print(n, v['lastContact'], v['numBlocks']) for n,v in json.loads(b['LiveNodes']).items()]"</code></pre><div class="output">ab3b1bedf98a:9866 2 8
+46201bb62e68:9866 1 8
+729c51a07ee2:9866 0 8
+264eb9c0f8e2:9866 0 0</div></div>
+      <span class="behind">Columns: node, seconds since last heartbeat, blocks held. Every DataNode was heard from within the last 3 seconds. The names are the containers' host names (container IDs); <code>729c51a07ee2</code> is datanode-4. One node holds 0 blocks after our earlier experiments: being alive and holding data are separate facts.</span></li>
+    <li><h4>Freeze a DataNode and watch</h4>
+      <div class="code" data-lang="bash" data-file="Terminal"><pre><code>docker pause lab5-datanode-4
+# every few seconds, ask the NameNode about 729c51a07ee2
+# (or run heartbeat_watch.py from Part 4b)</code></pre><div class="output">t=  8s  NameNode says: live  lastContact=10s
+t= 16s  NameNode says: live  lastContact=19s
+t= 25s  NameNode says: live  lastContact=27s
+t= 33s  NameNode says: live  lastContact=35s
+t= 41s  NameNode says: live  lastContact=43s
+t= 49s  NameNode says: live  lastContact=51s
+t= 57s  NameNode says: dead  lastContact=60s
+t= 65s  NameNode says: dead  lastContact=68s
+t= 82s  NameNode says: dead  lastContact=84s</div></div>
+      <span class="behind">“Last contact” simply grows. At 60 s (2 × 15 s + 10 × 3 s) the node moves to the dead list. In another run we also read the NameNode's counters: <code>stale 0</code> up to 32 s, <code>stale 1</code> from 38 s, then <code>dead 1</code> at 64 s.</span></li>
+    <li><h4>Unfreeze it: re-registration and a block report</h4>
+      <div class="code" data-lang="bash" data-file="Terminal"><pre><code>docker unpause lab5-datanode-4
+docker compose logs namenode | grep -E "registerDatanode|processReport" | tail -3</code></pre><div class="output">BLOCK* registerDatanode: from DatanodeRegistration(172.19.0.7:9866, datanodeUuid=1a7e1105-…, infoPort=9864, infoSecurePort=0, ipcPort=9867, …
+BLOCK* processReport 0x283bca9221d1422b with lease ID 0x7921c25a0ab90066: Processing first storage report for DS-e40699e9-… from datanode DatanodeRegistration(172.19.0.7:9866, …
+BLOCK* processReport 0x283bca9221d1422b with lease ID 0x7921c25a0ab90066: from storage DS-e40699e9-… node DatanodeRegistration(172.19.0.7:9866, …</div></div>
+      <span class="behind">The NameNode had forgotten this node, so on its next heartbeat it was told to re-register; then it sent a full block report, and its replicas were back in the block map within seconds (“lastContact 0”).</span></li>
+    <li><h4>Check and trigger a full block report</h4>
+      <div class="code" data-lang="bash" data-file="Terminal"><pre><code>docker compose exec namenode bash -c 'hdfs dfsadmin -report | grep -E "^Name|Last Block Report" | head -2'
+docker compose exec namenode hdfs dfsadmin -triggerBlockReport lab5-datanode-2:9867
+docker compose exec namenode bash -c 'hdfs dfsadmin -report | grep -E "^Name|Last Block Report" | head -2'</code></pre><div class="output">Name: 172.19.0.4:9866 (lab5-datanode-2.lab5_default)
+Last Block Report: Wed Oct 21 06:49:03 UTC 2026
+Triggering a full block report on lab5-datanode-2:9867.
+Name: 172.19.0.4:9866 (lab5-datanode-2.lab5_default)
+Last Block Report: Wed Oct 21 06:59:19 UTC 2026</div></div>
+      <span class="behind">datanode-2's last full report was from its start at 06:49 (the next one was due 6 hours later). The trigger made it report at once. The command uses the DataNode's IPC port, 9867.</span></li>
+  </ol>
+  <div class="callout callout--warn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3 2 21h20L12 3z"/><path d="M12 10v5M12 18v.5"/></svg><p>Don't lower heartbeat and dead-node intervals on real clusters just to “detect failures faster”. Short timers turn GC pauses and network blips into false deaths, which trigger mass re-replication and can overload the cluster. The lab uses short values only so you can watch.</p></div>
+</section>
+
+<!-- ======================= PART 5: SEE IT HAPPEN ======================= -->
+<section class="part" id="animation">
+  <span class="part-label"><b>5</b> See it happen</span>
+  <h2>From live to dead and back</h2>
+  <p>The real readings from step 3 and step 4, alongside what the NameNode is thinking.</p>
+  <div class="anim" data-frames="6">
+    <div class="anim__title">datanode-4 goes silent <span>6 steps</span></div>
+    <div class="anim__views">
+      <div class="view view--see">
+        <span class="view__tag">What you see</span>
+        <svg viewBox="0 0 360 250" role="img" aria-label="NameNode readings over time">
+          <rect x="14" y="14" width="332" height="206" rx="8" class="s-board"/>
+          <text x="26" y="32" font-size="9" class="mono" style="fill:#7F8C86">NameNode view of datanode-4</text>
+          <g data-on="1"><text x="26" y="58" font-size="9" class="mono" style="fill:#9FD3B8">live  lastContact=2s  blocks=8</text><text x="26" y="76" font-size="8.6" class="mono" style="fill:#7F8C86">(heartbeat every 3 s)</text></g>
+          <g data-on="2"><text x="26" y="58" font-size="9" class="mono" style="fill:#7F8C86">$ docker pause lab5-datanode-4</text><text x="26" y="76" font-size="9" class="mono" style="fill:#9FD3B8">t=16s live lastContact=19s</text><text x="26" y="92" font-size="9" class="mono" style="fill:#9FD3B8">t=25s live lastContact=27s</text></g>
+          <g data-on="3"><text x="26" y="58" font-size="9" class="mono" style="fill:#F5C77E">t=38s live 4 · stale 1 · dead 0</text><text x="26" y="76" font-size="9" class="mono" style="fill:#F5C77E">t=49s live lastContact=51s</text></g>
+          <g data-on="4"><text x="26" y="58" font-size="9" class="mono" style="fill:#FF8A80">t=57s dead lastContact=60s</text><text x="26" y="76" font-size="9" class="mono" style="fill:#FF8A80">live 3 · dead 1</text></g>
+          <g data-on="5"><text x="26" y="58" font-size="9" class="mono" style="fill:#7F8C86">$ docker unpause lab5-datanode-4</text><text x="26" y="76" font-size="8.6" class="mono" style="fill:#9FD3B8">registerDatanode: from …172.19.0.7</text><text x="26" y="92" font-size="8.6" class="mono" style="fill:#9FD3B8">processReport: first storage report</text></g>
+          <g data-on="6"><text x="26" y="58" font-size="9" class="mono" style="fill:#9FD3B8">live  lastContact=0s  blocks=8</text><text x="26" y="80" font-size="8.6" class="mono" style="fill:#7F8C86">$ dfsadmin -triggerBlockReport …:9867</text><text x="26" y="96" font-size="8.6" class="mono" style="fill:#9FD3B8">Last Block Report: … 06:59:19</text></g>
+          <text x="352" y="244" text-anchor="end" class="s-wm">myphatshala.in</text>
+        </svg>
+        <ol class="caps" hidden>
+          <li>Normal state: datanode-4 checks in every 3 seconds and holds 8 blocks.</li>
+          <li>The container is frozen. “Last contact” starts growing, but the node is still listed as live.</li>
+          <li>After 30 s of silence it is counted as <b>stale</b>: still live, but suspicious.</li>
+          <li>At about 60 s (lab settings) it is declared <b>dead</b> and drops out of the live count.</li>
+          <li>Unfrozen, it heartbeats again, is told to re-register, and sends a full block report.</li>
+          <li>Live again with all 8 blocks known. Block reports can also be triggered by hand.</li>
+        </ol>
+      </div>
+
+      <div class="view view--behind">
+        <span class="view__tag">Behind the screen</span>
+        <svg viewBox="0 0 360 250" role="img" aria-label="NameNode state machine for a DataNode">
+          <g font-size="9" font-weight="700">
+            <rect x="20" y="40" width="90" height="40" rx="20" class="s-soft-green" style="stroke:var(--green)"/><text x="65" y="64" text-anchor="middle" class="s-green">LIVE</text>
+            <rect x="135" y="40" width="90" height="40" rx="20" class="s-soft-acc" style="stroke:var(--track)"/><text x="180" y="64" text-anchor="middle" class="s-acc">STALE</text>
+            <rect x="250" y="40" width="90" height="40" rx="20" class="s-card2" style="stroke:var(--red)"/><text x="295" y="64" text-anchor="middle" class="s-red">DEAD</text>
+          </g>
+          <path d="M110 60h25M225 60h25" class="s-line"/>
+          <text x="122" y="34" text-anchor="middle" font-size="7.6" class="s-ink2">30 s</text><text x="238" y="34" text-anchor="middle" font-size="7.6" class="s-ink2">10m30s</text>
+          <g data-on="1"><rect x="16" y="36" width="98" height="48" rx="24" style="fill:none;stroke:var(--green);stroke-width:3"/><text x="180" y="130" text-anchor="middle" font-size="9" class="s-ink2">each heartbeat resets the clock</text><text x="180" y="146" text-anchor="middle" font-size="8.6" class="s-ink2">reply may carry commands (copy, delete)</text></g>
+          <g data-on="2"><rect x="16" y="36" width="98" height="48" rx="24" style="fill:none;stroke:var(--green);stroke-width:3"/><text x="180" y="130" text-anchor="middle" font-size="9" class="s-ink2">silence… the clock keeps running</text></g>
+          <g data-on="3"><rect x="131" y="36" width="98" height="48" rx="24" style="fill:none;stroke:var(--track);stroke-width:3"/><text x="180" y="130" text-anchor="middle" font-size="9" class="s-ink2">stale: can be skipped for reads/writes</text><text x="180" y="146" text-anchor="middle" font-size="8.6" class="s-ink2">(if avoid.*.stale.datanode is on)</text></g>
+          <g data-on="4"><rect x="246" y="36" width="98" height="48" rx="24" style="fill:none;stroke:var(--red);stroke-width:3"/><text x="180" y="130" text-anchor="middle" font-size="9" font-weight="700" class="s-red">dead: replicas removed from block map</text><text x="180" y="146" text-anchor="middle" font-size="8.6" class="s-ink2">under-replicated blocks get copied (Lesson 5.3)</text></g>
+          <g data-on="5"><path d="M295 80c0 40-230 40-230 0" style="fill:none;stroke:var(--green);stroke-width:2"/><text x="180" y="138" text-anchor="middle" font-size="9" class="s-ink2">heartbeat → “please re-register”</text><text x="180" y="154" text-anchor="middle" font-size="9" class="s-ink2">→ register → full block report</text></g>
+          <g data-on="6"><rect x="16" y="36" width="98" height="48" rx="24" style="fill:none;stroke:var(--green);stroke-width:3"/><rect x="60" y="176" width="240" height="40" rx="6" class="s-soft-blue" style="stroke:var(--blue)"/><text x="180" y="194" text-anchor="middle" font-size="8.6" class="s-blue">block reports: at start-up, every 6 h,</text><text x="180" y="208" text-anchor="middle" font-size="8.6" class="s-blue">incremental on changes, or on demand</text></g>
+          <text x="352" y="246" text-anchor="end" class="s-wm">myphatshala.in</text>
+        </svg>
+        <ol class="caps" hidden>
+          <li>While heartbeats arrive, the node is LIVE. Each heartbeat is also the NameNode's chance to send it work.</li>
+          <li>The NameNode only measures time since the last heartbeat; it never pings the DataNode.</li>
+          <li>After 30 s the node is STALE. Clients can be steered away from it if the avoid-stale options are enabled.</li>
+          <li>After the dead interval it is DEAD: its replicas no longer count, and re-replication starts.</li>
+          <li>When it speaks again, the NameNode asks it to register again, and its block report restores its replicas to the map.</li>
+          <li>Back to LIVE. Block reports keep the map correct: full ones at start-up and every 6 hours, small incremental ones in between.</li>
+        </ol>
+      </div>
+    </div>
+  </div>
+
+  <h3 id="playground">Try it yourself: heartbeats in the playground</h3>
+  <p>Pink dots are heartbeats. Stop a node and use <b>Skip to timeout</b> to jump to the 10 min 30 s dead-node limit.</p>
+  <div class="csim"><script type="application/json">{"title": "Silence means dead", "intro": "<p>Each DataNode shows the time since its last heartbeat (♥). Stop one and watch the counter grow until the NameNode gives up on it.<\/p>", "racks": 2, "nodes": 3, "features": ["fail", "fsck"], "preload": [{"name": "irctc_bookings.log", "sizeMB": 640}], "try": [{"text": "Watch the pink heartbeat dots, then click a DataNode to stop it: its “♥ … ago” counter keeps growing.", "on": "node-stop"}, {"text": "Press <b>Skip to timeout<\/b>: the node becomes DEAD at 10 min 30 s.", "on": "node-dead"}, {"text": "Wait for re-replication in the Event log: the NameNode sends copy commands in heartbeat replies.", "on": "rereplicated"}, {"text": "Start the node again by clicking it: it re-joins.", "on": "node-start"}]}</script></div>
+</section>
+
+<!-- ======================= PART 6: REAL-WORLD USE ======================= -->
+<section class="part" id="real-world">
+  <span class="part-label"><b>6</b> Real-world use</span>
+  <h2>Heartbeats and reports at work</h2>
+
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="20" y="20" width="80" height="50" rx="6" class="s-board"/><text x="60" y="42" text-anchor="middle" font-size="8.6" class="mono" style="fill:#FF8A80">dead nodes: 1</text><text x="60" y="58" text-anchor="middle" font-size="8.6" class="mono" style="fill:#F5C77E">page on-call</text></svg></div>
+    <div><h4>1. Alerts on dead and stale nodes</h4>
+      <p>Monitoring reads <code>NumDeadDataNodes</code> and <code>NumStaleDataNodes</code> from the NameNode's <code>/jmx</code>. One dead node is routine; several at once usually means a rack or network problem worth waking someone up for.</p>
+      <div class="uc-flow"><span>/jmx</span><i>→</i><span class="java">Dead/stale counts</span><i>→</i><span>Alert</span></div></div>
+  </div>
+
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="20" y="20" width="80" height="50" rx="6" class="s-soft-acc" style="stroke:var(--track)"/><text x="60" y="42" text-anchor="middle" font-size="8.6" font-weight="700" class="s-acc">GC pause 40 s</text><text x="60" y="58" text-anchor="middle" font-size="8.6" class="s-ink">“flapping” node</text></svg></div>
+    <div><h4>2. Diagnosing flapping DataNodes</h4>
+      <p>A DataNode that keeps going stale and coming back often has long Java garbage-collection pauses, a hung disk or network drops. Engineers compare its “last contact” history with GC and kernel logs.</p>
+      <div class="uc-flow"><span>Stale again and again</span><i>→</i><span class="java">GC / disk / network</span><i>→</i><span>Fix the node</span></div></div>
+  </div>
+
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="20" y="20" width="80" height="50" rx="6" class="s-soft-blue" style="stroke:var(--blue)"/><text x="60" y="42" text-anchor="middle" font-size="8.6" font-weight="700" class="s-blue">report storm</text><text x="60" y="58" text-anchor="middle" font-size="8.6" class="s-ink">after restart</text></svg></div>
+    <div><h4>3. Block report storms</h4>
+      <p>After a full cluster restart, thousands of DataNodes send full block reports at once. Big clusters tune report leases and splitting so the NameNode isn't overwhelmed, which shortens safe mode (Lesson 5.6).</p>
+      <div class="uc-flow"><span>Restart</span><i>→</i><span class="java">Reports in waves</span><i>→</i><span>NameNode stays responsive</span></div></div>
+  </div>
+
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="20" y="20" width="80" height="50" rx="6" class="s-soft-green" style="stroke:var(--green)"/><text x="60" y="42" text-anchor="middle" font-size="8.6" font-weight="700" class="s-green">disk replaced</text><text x="60" y="58" text-anchor="middle" font-size="8.6" class="s-ink">trigger report</text></svg></div>
+    <div><h4>4. After disk repairs</h4>
+      <p>When a failed disk is replaced or a data folder restored, admins run <code>dfsadmin -triggerBlockReport</code> so the NameNode learns the node's real contents now instead of in up to 6 hours.</p>
+      <div class="uc-flow"><span>Repair</span><i>→</i><span class="java">Trigger report</span><i>→</i><span>Block map correct</span></div></div>
+  </div>
+  <p class="muted">Simplified; organisations differ in tools and policies.</p>
+</section>
+
+
+<div class="ad-slot" data-slot="mid"></div>
+
+<section class="part" id="run">
+  <span class="part-label"><b>7</b> Run the code</span>
+  <h2>The NameNode's view of a DataNode</h2>
+  <p>This function classifies a DataNode from the seconds since its last heartbeat, using the real default thresholds. Run it for the readings from the lab, then try the challenges.</p>
+  <div class="code" data-lang="python" data-file="main.py"><pre><code>HEARTBEAT = 3            # dfs.heartbeat.interval (s)
+STALE = 30               # dfs.namenode.stale.datanode.interval (s)
+RECHECK = 300            # dfs.namenode.heartbeat.recheck-interval (s)
+DEAD = 2 * RECHECK + 10 * HEARTBEAT
+
+def state(last_contact):
+    if last_contact &gt;= DEAD:
+        return &quot;DEAD&quot;
+    if last_contact &gt;= STALE:
+        return &quot;STALE&quot;
+    return &quot;LIVE&quot;
+
+print(&quot;dead after&quot;, DEAD, &quot;seconds&quot;)
+for seconds in [2, 27, 43, 300, 629, 630, 900]:
+    print(f&quot;last contact {seconds:&gt;3}s -&gt; {state(seconds)}&quot;)</code></pre><div class="output">dead after 630 seconds
+last contact   2s -&gt; LIVE
+last contact  27s -&gt; LIVE
+last contact  43s -&gt; STALE
+last contact 300s -&gt; STALE
+last contact 629s -&gt; STALE
+last contact 630s -&gt; DEAD
+last contact 900s -&gt; DEAD</div></div>
+  <ul class="anno"><li><code>DEAD = 2 * RECHECK + 10 * HEARTBEAT</code><span>The famous 10 min 30 s: 2 × 300 s + 10 × 3 s = 630 s.</span></li><li><code>if last_contact &gt;= STALE:</code><span>Stale nodes are still live; they can be avoided for reads and writes if the avoid-stale options are on.</span></li></ul>
+  <div class="runner">
+    <script type="application/json">{
+ "lang": "python",
+ "file": "main.py",
+ "tasks": [
+  {
+   "label": "1 · Classify readings",
+   "hint": "Press <b>Run<\/b>. Then set <code>RECHECK = 15<\/code> (our lab) and check that 51 s is still live but 60 s is dead.",
+   "code": "HEARTBEAT = 3            # dfs.heartbeat.interval (s)\nSTALE = 30               # dfs.namenode.stale.datanode.interval (s)\nRECHECK = 300            # dfs.namenode.heartbeat.recheck-interval (s)\nDEAD = 2 * RECHECK + 10 * HEARTBEAT\n\ndef state(last_contact):\n    if last_contact >= DEAD:\n        return \"DEAD\"\n    if last_contact >= STALE:\n        return \"STALE\"\n    return \"LIVE\"\n\nprint(\"dead after\", DEAD, \"seconds\")\nfor seconds in [2, 27, 43, 300, 629, 630, 900]:\n    print(f\"last contact {seconds:>3}s -> {state(seconds)}\")\n"
+  },
+  {
+   "label": "2 · Heartbeats per day",
+   "hint": "<b>Predict first:<\/b> how many heartbeats does one DataNode send per day? And a 1,000-node cluster per second?",
+   "code": "per_day = 24 * 3600 // 3\nprint(\"one DataNode:\", f\"{per_day:,}\", \"heartbeats/day\")\nprint(\"1000 nodes:\", 1000 // 3, \"heartbeats per second at the NameNode\")\n"
+  },
+  {
+   "label": "3 · Block report schedule",
+   "hint": "A DataNode registered at 06:49:03. With a 6-hour interval, when are its next three full reports due?",
+   "code": "from datetime import datetime, timedelta\nstart = datetime(2026, 10, 21, 6, 49, 3)\nfor i in range(1, 4):\n    print(\"report\", i, (start + timedelta(hours=6 * i)).strftime(\"%d %b %H:%M:%S\"))\n"
+  },
+  {
+   "label": "4 · Missed heartbeats",
+   "hint": "How many heartbeats has a node missed when it is declared dead with the default settings?",
+   "code": "dead_after = 2 * 300 + 10 * 3\nprint(dead_after // 3, \"missed heartbeats\")\n"
+  },
+  {
+   "label": "5 · Spot the error",
+   "hint": "This check marks a node dead as soon as it is stale. Fix the order of the conditions.",
+   "code": "def state(t, stale=30, dead=630):\n    if t >= stale:\n        return \"STALE\"\n    if t >= dead:\n        return \"DEAD\"\n    return \"LIVE\"\nprint(state(700))\n"
+  }
+ ]
+}</script>
+  </div>
+  <h3 id="pc">Run it on your PC: watch a DataNode die and come back</h3>
+  <p>This script freezes datanode-4 with <code>docker pause</code> (no heartbeats, but the process stays), asks the NameNode about it every 8 seconds for 80 seconds, then unfreezes it. Save it as <code>heartbeat_watch.py</code> in the <code>hdfs-lab</code> folder and run it while the lab cluster is up.</p>
+  <div class="pcrun"><h4>Live → dead → live, from the NameNode's side</h4>
+  <div class="code" data-lang="bash" data-file="heartbeat_watch.py"><pre><code># heartbeat_watch.py: freeze one DataNode and watch the NameNode&#x27;s view of it
+# change from live to stale to dead. Run in the hdfs-lab folder.
+import json
+import subprocess
+import time
+
+DN = &quot;lab5-datanode-4&quot;
+URL = &quot;http://namenode:9870/jmx?qry=Hadoop:service=NameNode,name=NameNodeInfo&quot;
+
+def sh(*cmd):
+    return subprocess.run(cmd, capture_output=True, text=True).stdout
+
+def nn_view(host):
+    info = json.loads(sh(&quot;docker&quot;, &quot;compose&quot;, &quot;exec&quot;, &quot;-T&quot;, &quot;namenode&quot;, &quot;curl&quot;, &quot;-s&quot;, URL))[&quot;beans&quot;][0]
+    for state in (&quot;LiveNodes&quot;, &quot;DeadNodes&quot;):
+        for name, node in json.loads(info[state]).items():
+            if name.startswith(host):
+                return state[:-5].lower(), node[&quot;lastContact&quot;]
+    return &quot;unknown&quot;, None
+
+host = sh(&quot;docker&quot;, &quot;inspect&quot;, &quot;-f&quot;, &quot;{{.Config.Hostname}}&quot;, DN).strip()
+sh(&quot;docker&quot;, &quot;pause&quot;, DN)                      # the process freezes: no more heartbeats
+start = time.time()
+try:
+    while time.time() - start &lt; 80:
+        time.sleep(8)
+        state, last = nn_view(host)
+        print(f&quot;t={time.time() - start:3.0f}s  NameNode says: {state:5} lastContact={last}s&quot;)
+finally:
+    sh(&quot;docker&quot;, &quot;unpause&quot;, DN)
+time.sleep(6)
+print(&quot;after unpause:&quot;, nn_view(host))
+
+# In the hdfs-lab folder:
+#   python3 heartbeat_watch.py</code></pre><div class="output">t=  8s  NameNode says: live  lastContact=10s
+t= 16s  NameNode says: live  lastContact=19s
+t= 25s  NameNode says: live  lastContact=27s
+t= 33s  NameNode says: live  lastContact=35s
+t= 41s  NameNode says: live  lastContact=43s
+t= 49s  NameNode says: live  lastContact=51s
+t= 57s  NameNode says: dead  lastContact=60s
+t= 65s  NameNode says: dead  lastContact=68s
+t= 74s  NameNode says: dead  lastContact=76s
+t= 82s  NameNode says: dead  lastContact=84s
+after unpause: (&#x27;live&#x27;, 0)</div></div>
+  <p class="muted">Real output with the lab's 15 s recheck interval. With default settings the same script would need to run for more than 10 minutes to see “dead”. The block re-replication this triggers is covered in Lesson 5.3.</p></div>
+</section>
+
+<section class="part" id="tracer">
+  <span class="part-label"><b>8</b> Line by line</span>
+  <h2>Rebuilding a block map from reports</h2>
+  <p>Follow the NameNode as two full block reports and one incremental report arrive. Watch the block map grow and change.</p>
+  <div class="tracer">
+    <script type="application/json">{
+ "lang": "python",
+ "code": [
+  "block_map = {}",
+  "reports = [(\"full\", \"dn1\", [\"b1\", \"b2\"]),",
+  "           (\"full\", \"dn2\", [\"b1\", \"b3\"]),",
+  "           (\"incremental\", \"dn2\", [\"+b2\", \"-b3\"])]",
+  "for kind, dn, items in reports:",
+  "    for item in items:",
+  "        blk = item.lstrip(\"+-\")",
+  "        if item.startswith(\"-\"):",
+  "            block_map[blk].remove(dn)",
+  "        else:",
+  "            block_map.setdefault(blk, []).append(dn)",
+  "print(block_map)"
+ ],
+ "steps": [
+  {
+   "line": 1,
+   "phase": "Python",
+   "note": "<code>block_map<\/code> is created: → dict #1.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "block_map",
+       "→ dict #1"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (0)<\/b> {}"
+   ],
+   "newVar": "block_map"
+  },
+  {
+   "line": 2,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "block_map",
+       "→ dict #1"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (0)<\/b> {}"
+   ]
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "block_map",
+       "→ dict #1"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (0)<\/b> {}"
+   ]
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "block_map",
+       "→ dict #1"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (0)<\/b> {}"
+   ]
+  },
+  {
+   "line": 2,
+   "phase": "Python",
+   "note": "<code>reports<\/code> is created: → list #2. A new list object (#2) is created: [→ tuple #3, → tuple #4, → tuple #5] A new tuple object (#3) is created: (&#x27;full&#x27;, &#x27;dn1&#x27;, → list #6) A new tuple object (#4) is created: (&#x27;full&#x27;, &#x27;dn2&#x27;, → list #7) A new tuple object (#5) is created: (&#x27;incremental&#x27;, &#x27;dn2&#x27;, → list #8) A new list object (#6) is created: [&#x27;b1&#x27;, &#x27;b2&#x27;] A new list object (#7) is created: [&#x27;b1&#x27;, &#x27;b3&#x27;] A new list object (#8) is created: [&#x27;+b2&#x27;, &#x27;-b3&#x27;]",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "block_map",
+       "→ dict #1"
+      ],
+      [
+       "reports",
+       "→ list #2"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (0)<\/b> {}",
+    "<b>#2 list (3)<\/b> [→ tuple #3, → tuple #4, → tuple #5]",
+    "<b>#3 tuple (3)<\/b> (&#x27;full&#x27;, &#x27;dn1&#x27;, → list #6)",
+    "<b>#4 tuple (3)<\/b> (&#x27;full&#x27;, &#x27;dn2&#x27;, → list #7)",
+    "<b>#5 tuple (3)<\/b> (&#x27;incremental&#x27;, &#x27;dn2&#x27;, → list #8)",
+    "<b>#6 list (2)<\/b> [&#x27;b1&#x27;, &#x27;b2&#x27;]",
+    "<b>#7 list (2)<\/b> [&#x27;b1&#x27;, &#x27;b3&#x27;]",
+    "<b>#8 list (2)<\/b> [&#x27;+b2&#x27;, &#x27;-b3&#x27;]"
+   ],
+   "newVar": "reports"
+  },
+  {
+   "line": 5,
+   "phase": "Report",
+   "note": "Full reports list everything; incremental ones only changes. <code>kind<\/code> is created: &#x27;full&#x27;. <code>dn<\/code> is created: &#x27;dn1&#x27;. <code>items<\/code> is created: → list #6.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "block_map",
+       "→ dict #1"
+      ],
+      [
+       "reports",
+       "→ list #2"
+      ],
+      [
+       "kind",
+       "'full'"
+      ],
+      [
+       "dn",
+       "'dn1'"
+      ],
+      [
+       "items",
+       "→ list #6"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (0)<\/b> {}",
+    "<b>#2 list (3)<\/b> [→ tuple #3, → tuple #4, → tuple #5]",
+    "<b>#3 tuple (3)<\/b> (&#x27;full&#x27;, &#x27;dn1&#x27;, → list #6)",
+    "<b>#4 tuple (3)<\/b> (&#x27;full&#x27;, &#x27;dn2&#x27;, → list #7)",
+    "<b>#5 tuple (3)<\/b> (&#x27;incremental&#x27;, &#x27;dn2&#x27;, → list #8)",
+    "<b>#6 list (2)<\/b> [&#x27;b1&#x27;, &#x27;b2&#x27;]",
+    "<b>#7 list (2)<\/b> [&#x27;b1&#x27;, &#x27;b3&#x27;]",
+    "<b>#8 list (2)<\/b> [&#x27;+b2&#x27;, &#x27;-b3&#x27;]"
+   ],
+   "newVar": "items"
+  },
+  {
+   "line": 6,
+   "phase": "Python",
+   "note": "<code>item<\/code> is created: &#x27;b1&#x27;.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "block_map",
+       "→ dict #1"
+      ],
+      [
+       "reports",
+       "→ list #2"
+      ],
+      [
+       "kind",
+       "'full'"
+      ],
+      [
+       "dn",
+       "'dn1'"
+      ],
+      [
+       "items",
+       "→ list #6"
+      ],
+      [
+       "item",
+       "'b1'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (0)<\/b> {}",
+    "<b>#2 list (3)<\/b> [→ tuple #3, → tuple #4, → tuple #5]",
+    "<b>#3 tuple (3)<\/b> (&#x27;full&#x27;, &#x27;dn1&#x27;, → list #6)",
+    "<b>#4 tuple (3)<\/b> (&#x27;full&#x27;, &#x27;dn2&#x27;, → list #7)",
+    "<b>#5 tuple (3)<\/b> (&#x27;incremental&#x27;, &#x27;dn2&#x27;, → list #8)",
+    "<b>#6 list (2)<\/b> [&#x27;b1&#x27;, &#x27;b2&#x27;]",
+    "<b>#7 list (2)<\/b> [&#x27;b1&#x27;, &#x27;b3&#x27;]",
+    "<b>#8 list (2)<\/b> [&#x27;+b2&#x27;, &#x27;-b3&#x27;]"
+   ],
+   "newVar": "item"
+  },
+  {
+   "line": 7,
+   "phase": "Python",
+   "note": "<code>blk<\/code> is created: &#x27;b1&#x27;.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "block_map",
+       "→ dict #1"
+      ],
+      [
+       "reports",
+       "→ list #2"
+      ],
+      [
+       "kind",
+       "'full'"
+      ],
+      [
+       "dn",
+       "'dn1'"
+      ],
+      [
+       "items",
+       "→ list #6"
+      ],
+      [
+       "item",
+       "'b1'"
+      ],
+      [
+       "blk",
+       "'b1'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (0)<\/b> {}",
+    "<b>#2 list (3)<\/b> [→ tuple #3, → tuple #4, → tuple #5]",
+    "<b>#3 tuple (3)<\/b> (&#x27;full&#x27;, &#x27;dn1&#x27;, → list #6)",
+    "<b>#4 tuple (3)<\/b> (&#x27;full&#x27;, &#x27;dn2&#x27;, → list #7)",
+    "<b>#5 tuple (3)<\/b> (&#x27;incremental&#x27;, &#x27;dn2&#x27;, → list #8)",
+    "<b>#6 list (2)<\/b> [&#x27;b1&#x27;, &#x27;b2&#x27;]",
+    "<b>#7 list (2)<\/b> [&#x27;b1&#x27;, &#x27;b3&#x27;]",
+    "<b>#8 list (2)<\/b> [&#x27;+b2&#x27;, &#x27;-b3&#x27;]"
+   ],
+   "newVar": "blk"
+  },
+  {
+   "line": 8,
+   "phase": "Deleted",
+   "note": "A replica the DataNode removed is dropped from the map. The condition is <b>False<\/b>, so the indented block is skipped.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "block_map",
+       "→ dict #1"
+      ],
+      [
+       "reports",
+       "→ list #2"
+      ],
+      [
+       "kind",
+       "'full'"
+      ],
+      [
+       "dn",
+       "'dn1'"
+      ],
+      [
+       "items",
+       "→ list #6"
+      ],
+      [
+       "item",
+       "'b1'"
+      ],
+      [
+       "blk",
+       "'b1'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (0)<\/b> {}",
+    "<b>#2 list (3)<\/b> [→ tuple #3, → tuple #4, → tuple #5]",
+    "<b>#3 tuple (3)<\/b> (&#x27;full&#x27;, &#x27;dn1&#x27;, → list #6)",
+    "<b>#4 tuple (3)<\/b> (&#x27;full&#x27;, &#x27;dn2&#x27;, → list #7)",
+    "<b>#5 tuple (3)<\/b> (&#x27;incremental&#x27;, &#x27;dn2&#x27;, → list #8)",
+    "<b>#6 list (2)<\/b> [&#x27;b1&#x27;, &#x27;b2&#x27;]",
+    "<b>#7 list (2)<\/b> [&#x27;b1&#x27;, &#x27;b3&#x27;]",
+    "<b>#8 list (2)<\/b> [&#x27;+b2&#x27;, &#x27;-b3&#x27;]"
+   ]
+  },
+  {
+   "line": 11,
+   "phase": "Python",
+   "note": "Object #1 dict now holds {&#x27;b1&#x27;: → list #9} A new list object (#9) is created: [&#x27;dn1&#x27;]",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "block_map",
+       "→ dict #1"
+      ],
+      [
+       "reports",
+       "→ list #2"
+      ],
+      [
+       "kind",
+       "'full'"
+      ],
+      [
+       "dn",
+       "'dn1'"
+      ],
+      [
+       "items",
+       "→ list #6"
+      ],
+      [
+       "item",
+       "'b1'"
+      ],
+      [
+       "blk",
+       "'b1'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (1)<\/b> {&#x27;b1&#x27;: → list #9}",
+    "<b>#2 list (3)<\/b> [→ tuple #3, → tuple #4, → tuple #5]",
+    "<b>#3 tuple (3)<\/b> (&#x27;full&#x27;, &#x27;dn1&#x27;, → list #6)",
+    "<b>#4 tuple (3)<\/b> (&#x27;full&#x27;, &#x27;dn2&#x27;, → list #7)",
+    "<b>#5 tuple (3)<\/b> (&#x27;incremental&#x27;, &#x27;dn2&#x27;, → list #8)",
+    "<b>#6 list (2)<\/b> [&#x27;b1&#x27;, &#x27;b2&#x27;]",
+    "<b>#7 list (2)<\/b> [&#x27;b1&#x27;, &#x27;b3&#x27;]",
+    "<b>#8 list (2)<\/b> [&#x27;+b2&#x27;, &#x27;-b3&#x27;]",
+    "<b>#9 list (1)<\/b> [&#x27;dn1&#x27;]"
+   ]
+  },
+  {
+   "line": 6,
+   "phase": "Python",
+   "note": "<code>item<\/code> changes to &#x27;b2&#x27;.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "block_map",
+       "→ dict #1"
+      ],
+      [
+       "reports",
+       "→ list #2"
+      ],
+      [
+       "kind",
+       "'full'"
+      ],
+      [
+       "dn",
+       "'dn1'"
+      ],
+      [
+       "items",
+       "→ list #6"
+      ],
+      [
+       "item",
+       "'b2'"
+      ],
+      [
+       "blk",
+       "'b1'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (1)<\/b> {&#x27;b1&#x27;: → list #9}",
+    "<b>#2 list (3)<\/b> [→ tuple #3, → tuple #4, → tuple #5]",
+    "<b>#3 tuple (3)<\/b> (&#x27;full&#x27;, &#x27;dn1&#x27;, → list #6)",
+    "<b>#4 tuple (3)<\/b> (&#x27;full&#x27;, &#x27;dn2&#x27;, → list #7)",
+    "<b>#5 tuple (3)<\/b> (&#x27;incremental&#x27;, &#x27;dn2&#x27;, → list #8)",
+    "<b>#6 list (2)<\/b> [&#x27;b1&#x27;, &#x27;b2&#x27;]",
+    "<b>#7 list (2)<\/b> [&#x27;b1&#x27;, &#x27;b3&#x27;]",
+    "<b>#8 list (2)<\/b> [&#x27;+b2&#x27;, &#x27;-b3&#x27;]",
+    "<b>#9 list (1)<\/b> [&#x27;dn1&#x27;]"
+   ],
+   "newVar": "item"
+  },
+  {
+   "line": 7,
+   "phase": "Python",
+   "note": "<code>blk<\/code> changes to &#x27;b2&#x27;.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "block_map",
+       "→ dict #1"
+      ],
+      [
+       "reports",
+       "→ list #2"
+      ],
+      [
+       "kind",
+       "'full'"
+      ],
+      [
+       "dn",
+       "'dn1'"
+      ],
+      [
+       "items",
+       "→ list #6"
+      ],
+      [
+       "item",
+       "'b2'"
+      ],
+      [
+       "blk",
+       "'b2'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (1)<\/b> {&#x27;b1&#x27;: → list #9}",
+    "<b>#2 list (3)<\/b> [→ tuple #3, → tuple #4, → tuple #5]",
+    "<b>#3 tuple (3)<\/b> (&#x27;full&#x27;, &#x27;dn1&#x27;, → list #6)",
+    "<b>#4 tuple (3)<\/b> (&#x27;full&#x27;, &#x27;dn2&#x27;, → list #7)",
+    "<b>#5 tuple (3)<\/b> (&#x27;incremental&#x27;, &#x27;dn2&#x27;, → list #8)",
+    "<b>#6 list (2)<\/b> [&#x27;b1&#x27;, &#x27;b2&#x27;]",
+    "<b>#7 list (2)<\/b> [&#x27;b1&#x27;, &#x27;b3&#x27;]",
+    "<b>#8 list (2)<\/b> [&#x27;+b2&#x27;, &#x27;-b3&#x27;]",
+    "<b>#9 list (1)<\/b> [&#x27;dn1&#x27;]"
+   ],
+   "newVar": "blk"
+  },
+  {
+   "line": 8,
+   "phase": "Python",
+   "note": "The condition is <b>False<\/b>, so the indented block is skipped.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "block_map",
+       "→ dict #1"
+      ],
+      [
+       "reports",
+       "→ list #2"
+      ],
+      [
+       "kind",
+       "'full'"
+      ],
+      [
+       "dn",
+       "'dn1'"
+      ],
+      [
+       "items",
+       "→ list #6"
+      ],
+      [
+       "item",
+       "'b2'"
+      ],
+      [
+       "blk",
+       "'b2'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (1)<\/b> {&#x27;b1&#x27;: → list #9}",
+    "<b>#2 list (3)<\/b> [→ tuple #3, → tuple #4, → tuple #5]",
+    "<b>#3 tuple (3)<\/b> (&#x27;full&#x27;, &#x27;dn1&#x27;, → list #6)",
+    "<b>#4 tuple (3)<\/b> (&#x27;full&#x27;, &#x27;dn2&#x27;, → list #7)",
+    "<b>#5 tuple (3)<\/b> (&#x27;incremental&#x27;, &#x27;dn2&#x27;, → list #8)",
+    "<b>#6 list (2)<\/b> [&#x27;b1&#x27;, &#x27;b2&#x27;]",
+    "<b>#7 list (2)<\/b> [&#x27;b1&#x27;, &#x27;b3&#x27;]",
+    "<b>#8 list (2)<\/b> [&#x27;+b2&#x27;, &#x27;-b3&#x27;]",
+    "<b>#9 list (1)<\/b> [&#x27;dn1&#x27;]"
+   ]
+  },
+  {
+   "line": 11,
+   "phase": "Python",
+   "note": "Object #1 dict now holds {&#x27;b1&#x27;: → list #9, &#x27;b2&#x27;: → list #10} A new list object (#10) is created: [&#x27;dn1&#x27;]",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "block_map",
+       "→ dict #1"
+      ],
+      [
+       "reports",
+       "→ list #2"
+      ],
+      [
+       "kind",
+       "'full'"
+      ],
+      [
+       "dn",
+       "'dn1'"
+      ],
+      [
+       "items",
+       "→ list #6"
+      ],
+      [
+       "item",
+       "'b2'"
+      ],
+      [
+       "blk",
+       "'b2'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (2)<\/b> {&#x27;b1&#x27;: → list #9, &#x27;b2&#x27;: → list #10}",
+    "<b>#2 list (3)<\/b> [→ tuple #3, → tuple #4, → tuple #5]",
+    "<b>#3 tuple (3)<\/b> (&#x27;full&#x27;, &#x27;dn1&#x27;, → list #6)",
+    "<b>#4 tuple (3)<\/b> (&#x27;full&#x27;, &#x27;dn2&#x27;, → list #7)",
+    "<b>#5 tuple (3)<\/b> (&#x27;incremental&#x27;, &#x27;dn2&#x27;, → list #8)",
+    "<b>#6 list (2)<\/b> [&#x27;b1&#x27;, &#x27;b2&#x27;]",
+    "<b>#7 list (2)<\/b> [&#x27;b1&#x27;, &#x27;b3&#x27;]",
+    "<b>#8 list (2)<\/b> [&#x27;+b2&#x27;, &#x27;-b3&#x27;]",
+    "<b>#9 list (1)<\/b> [&#x27;dn1&#x27;]",
+    "<b>#10 list (1)<\/b> [&#x27;dn1&#x27;]"
+   ]
+  },
+  {
+   "line": 6,
+   "phase": "Python",
+   "note": "Nothing is left to loop over, so the loop ends and Python moves on.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "block_map",
+       "→ dict #1"
+      ],
+      [
+       "reports",
+       "→ list #2"
+      ],
+      [
+       "kind",
+       "'full'"
+      ],
+      [
+       "dn",
+       "'dn1'"
+      ],
+      [
+       "items",
+       "→ list #6"
+      ],
+      [
+       "item",
+       "'b2'"
+      ],
+      [
+       "blk",
+       "'b2'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (2)<\/b> {&#x27;b1&#x27;: → list #9, &#x27;b2&#x27;: → list #10}",
+    "<b>#2 list (3)<\/b> [→ tuple #3, → tuple #4, → tuple #5]",
+    "<b>#3 tuple (3)<\/b> (&#x27;full&#x27;, &#x27;dn1&#x27;, → list #6)",
+    "<b>#4 tuple (3)<\/b> (&#x27;full&#x27;, &#x27;dn2&#x27;, → list #7)",
+    "<b>#5 tuple (3)<\/b> (&#x27;incremental&#x27;, &#x27;dn2&#x27;, → list #8)",
+    "<b>#6 list (2)<\/b> [&#x27;b1&#x27;, &#x27;b2&#x27;]",
+    "<b>#7 list (2)<\/b> [&#x27;b1&#x27;, &#x27;b3&#x27;]",
+    "<b>#8 list (2)<\/b> [&#x27;+b2&#x27;, &#x27;-b3&#x27;]",
+    "<b>#9 list (1)<\/b> [&#x27;dn1&#x27;]",
+    "<b>#10 list (1)<\/b> [&#x27;dn1&#x27;]"
+   ]
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "<code>dn<\/code> changes to &#x27;dn2&#x27;. <code>items<\/code> changes to → list #7.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "block_map",
+       "→ dict #1"
+      ],
+      [
+       "reports",
+       "→ list #2"
+      ],
+      [
+       "kind",
+       "'full'"
+      ],
+      [
+       "dn",
+       "'dn2'"
+      ],
+      [
+       "items",
+       "→ list #7"
+      ],
+      [
+       "item",
+       "'b2'"
+      ],
+      [
+       "blk",
+       "'b2'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (2)<\/b> {&#x27;b1&#x27;: → list #9, &#x27;b2&#x27;: → list #10}",
+    "<b>#2 list (3)<\/b> [→ tuple #3, → tuple #4, → tuple #5]",
+    "<b>#3 tuple (3)<\/b> (&#x27;full&#x27;, &#x27;dn1&#x27;, → list #6)",
+    "<b>#4 tuple (3)<\/b> (&#x27;full&#x27;, &#x27;dn2&#x27;, → list #7)",
+    "<b>#5 tuple (3)<\/b> (&#x27;incremental&#x27;, &#x27;dn2&#x27;, → list #8)",
+    "<b>#6 list (2)<\/b> [&#x27;b1&#x27;, &#x27;b2&#x27;]",
+    "<b>#7 list (2)<\/b> [&#x27;b1&#x27;, &#x27;b3&#x27;]",
+    "<b>#8 list (2)<\/b> [&#x27;+b2&#x27;, &#x27;-b3&#x27;]",
+    "<b>#9 list (1)<\/b> [&#x27;dn1&#x27;]",
+    "<b>#10 list (1)<\/b> [&#x27;dn1&#x27;]"
+   ],
+   "newVar": "items"
+  },
+  {
+   "line": 6,
+   "phase": "Python",
+   "note": "<code>item<\/code> changes to &#x27;b1&#x27;.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "block_map",
+       "→ dict #1"
+      ],
+      [
+       "reports",
+       "→ list #2"
+      ],
+      [
+       "kind",
+       "'full'"
+      ],
+      [
+       "dn",
+       "'dn2'"
+      ],
+      [
+       "items",
+       "→ list #7"
+      ],
+      [
+       "item",
+       "'b1'"
+      ],
+      [
+       "blk",
+       "'b2'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (2)<\/b> {&#x27;b1&#x27;: → list #9, &#x27;b2&#x27;: → list #10}",
+    "<b>#2 list (3)<\/b> [→ tuple #3, → tuple #4, → tuple #5]",
+    "<b>#3 tuple (3)<\/b> (&#x27;full&#x27;, &#x27;dn1&#x27;, → list #6)",
+    "<b>#4 tuple (3)<\/b> (&#x27;full&#x27;, &#x27;dn2&#x27;, → list #7)",
+    "<b>#5 tuple (3)<\/b> (&#x27;incremental&#x27;, &#x27;dn2&#x27;, → list #8)",
+    "<b>#6 list (2)<\/b> [&#x27;b1&#x27;, &#x27;b2&#x27;]",
+    "<b>#7 list (2)<\/b> [&#x27;b1&#x27;, &#x27;b3&#x27;]",
+    "<b>#8 list (2)<\/b> [&#x27;+b2&#x27;, &#x27;-b3&#x27;]",
+    "<b>#9 list (1)<\/b> [&#x27;dn1&#x27;]",
+    "<b>#10 list (1)<\/b> [&#x27;dn1&#x27;]"
+   ],
+   "newVar": "item"
+  },
+  {
+   "line": 7,
+   "phase": "Python",
+   "note": "<code>blk<\/code> changes to &#x27;b1&#x27;.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "block_map",
+       "→ dict #1"
+      ],
+      [
+       "reports",
+       "→ list #2"
+      ],
+      [
+       "kind",
+       "'full'"
+      ],
+      [
+       "dn",
+       "'dn2'"
+      ],
+      [
+       "items",
+       "→ list #7"
+      ],
+      [
+       "item",
+       "'b1'"
+      ],
+      [
+       "blk",
+       "'b1'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (2)<\/b> {&#x27;b1&#x27;: → list #9, &#x27;b2&#x27;: → list #10}",
+    "<b>#2 list (3)<\/b> [→ tuple #3, → tuple #4, → tuple #5]",
+    "<b>#3 tuple (3)<\/b> (&#x27;full&#x27;, &#x27;dn1&#x27;, → list #6)",
+    "<b>#4 tuple (3)<\/b> (&#x27;full&#x27;, &#x27;dn2&#x27;, → list #7)",
+    "<b>#5 tuple (3)<\/b> (&#x27;incremental&#x27;, &#x27;dn2&#x27;, → list #8)",
+    "<b>#6 list (2)<\/b> [&#x27;b1&#x27;, &#x27;b2&#x27;]",
+    "<b>#7 list (2)<\/b> [&#x27;b1&#x27;, &#x27;b3&#x27;]",
+    "<b>#8 list (2)<\/b> [&#x27;+b2&#x27;, &#x27;-b3&#x27;]",
+    "<b>#9 list (1)<\/b> [&#x27;dn1&#x27;]",
+    "<b>#10 list (1)<\/b> [&#x27;dn1&#x27;]"
+   ],
+   "newVar": "blk"
+  },
+  {
+   "line": 8,
+   "phase": "Python",
+   "note": "The condition is <b>False<\/b>, so the indented block is skipped.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "block_map",
+       "→ dict #1"
+      ],
+      [
+       "reports",
+       "→ list #2"
+      ],
+      [
+       "kind",
+       "'full'"
+      ],
+      [
+       "dn",
+       "'dn2'"
+      ],
+      [
+       "items",
+       "→ list #7"
+      ],
+      [
+       "item",
+       "'b1'"
+      ],
+      [
+       "blk",
+       "'b1'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (2)<\/b> {&#x27;b1&#x27;: → list #9, &#x27;b2&#x27;: → list #10}",
+    "<b>#2 list (3)<\/b> [→ tuple #3, → tuple #4, → tuple #5]",
+    "<b>#3 tuple (3)<\/b> (&#x27;full&#x27;, &#x27;dn1&#x27;, → list #6)",
+    "<b>#4 tuple (3)<\/b> (&#x27;full&#x27;, &#x27;dn2&#x27;, → list #7)",
+    "<b>#5 tuple (3)<\/b> (&#x27;incremental&#x27;, &#x27;dn2&#x27;, → list #8)",
+    "<b>#6 list (2)<\/b> [&#x27;b1&#x27;, &#x27;b2&#x27;]",
+    "<b>#7 list (2)<\/b> [&#x27;b1&#x27;, &#x27;b3&#x27;]",
+    "<b>#8 list (2)<\/b> [&#x27;+b2&#x27;, &#x27;-b3&#x27;]",
+    "<b>#9 list (1)<\/b> [&#x27;dn1&#x27;]",
+    "<b>#10 list (1)<\/b> [&#x27;dn1&#x27;]"
+   ]
+  },
+  {
+   "line": 11,
+   "phase": "Python",
+   "note": "Object #9 list now holds [&#x27;dn1&#x27;, &#x27;dn2&#x27;]",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "block_map",
+       "→ dict #1"
+      ],
+      [
+       "reports",
+       "→ list #2"
+      ],
+      [
+       "kind",
+       "'full'"
+      ],
+      [
+       "dn",
+       "'dn2'"
+      ],
+      [
+       "items",
+       "→ list #7"
+      ],
+      [
+       "item",
+       "'b1'"
+      ],
+      [
+       "blk",
+       "'b1'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (2)<\/b> {&#x27;b1&#x27;: → list #9, &#x27;b2&#x27;: → list #10}",
+    "<b>#2 list (3)<\/b> [→ tuple #3, → tuple #4, → tuple #5]",
+    "<b>#3 tuple (3)<\/b> (&#x27;full&#x27;, &#x27;dn1&#x27;, → list #6)",
+    "<b>#4 tuple (3)<\/b> (&#x27;full&#x27;, &#x27;dn2&#x27;, → list #7)",
+    "<b>#5 tuple (3)<\/b> (&#x27;incremental&#x27;, &#x27;dn2&#x27;, → list #8)",
+    "<b>#6 list (2)<\/b> [&#x27;b1&#x27;, &#x27;b2&#x27;]",
+    "<b>#7 list (2)<\/b> [&#x27;b1&#x27;, &#x27;b3&#x27;]",
+    "<b>#8 list (2)<\/b> [&#x27;+b2&#x27;, &#x27;-b3&#x27;]",
+    "<b>#9 list (2)<\/b> [&#x27;dn1&#x27;, &#x27;dn2&#x27;]",
+    "<b>#10 list (1)<\/b> [&#x27;dn1&#x27;]"
+   ]
+  },
+  {
+   "line": 6,
+   "phase": "Python",
+   "note": "<code>item<\/code> changes to &#x27;b3&#x27;.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "block_map",
+       "→ dict #1"
+      ],
+      [
+       "reports",
+       "→ list #2"
+      ],
+      [
+       "kind",
+       "'full'"
+      ],
+      [
+       "dn",
+       "'dn2'"
+      ],
+      [
+       "items",
+       "→ list #7"
+      ],
+      [
+       "item",
+       "'b3'"
+      ],
+      [
+       "blk",
+       "'b1'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (2)<\/b> {&#x27;b1&#x27;: → list #9, &#x27;b2&#x27;: → list #10}",
+    "<b>#2 list (3)<\/b> [→ tuple #3, → tuple #4, → tuple #5]",
+    "<b>#3 tuple (3)<\/b> (&#x27;full&#x27;, &#x27;dn1&#x27;, → list #6)",
+    "<b>#4 tuple (3)<\/b> (&#x27;full&#x27;, &#x27;dn2&#x27;, → list #7)",
+    "<b>#5 tuple (3)<\/b> (&#x27;incremental&#x27;, &#x27;dn2&#x27;, → list #8)",
+    "<b>#6 list (2)<\/b> [&#x27;b1&#x27;, &#x27;b2&#x27;]",
+    "<b>#7 list (2)<\/b> [&#x27;b1&#x27;, &#x27;b3&#x27;]",
+    "<b>#8 list (2)<\/b> [&#x27;+b2&#x27;, &#x27;-b3&#x27;]",
+    "<b>#9 list (2)<\/b> [&#x27;dn1&#x27;, &#x27;dn2&#x27;]",
+    "<b>#10 list (1)<\/b> [&#x27;dn1&#x27;]"
+   ],
+   "newVar": "item"
+  },
+  {
+   "line": 7,
+   "phase": "Python",
+   "note": "<code>blk<\/code> changes to &#x27;b3&#x27;.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "block_map",
+       "→ dict #1"
+      ],
+      [
+       "reports",
+       "→ list #2"
+      ],
+      [
+       "kind",
+       "'full'"
+      ],
+      [
+       "dn",
+       "'dn2'"
+      ],
+      [
+       "items",
+       "→ list #7"
+      ],
+      [
+       "item",
+       "'b3'"
+      ],
+      [
+       "blk",
+       "'b3'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (2)<\/b> {&#x27;b1&#x27;: → list #9, &#x27;b2&#x27;: → list #10}",
+    "<b>#2 list (3)<\/b> [→ tuple #3, → tuple #4, → tuple #5]",
+    "<b>#3 tuple (3)<\/b> (&#x27;full&#x27;, &#x27;dn1&#x27;, → list #6)",
+    "<b>#4 tuple (3)<\/b> (&#x27;full&#x27;, &#x27;dn2&#x27;, → list #7)",
+    "<b>#5 tuple (3)<\/b> (&#x27;incremental&#x27;, &#x27;dn2&#x27;, → list #8)",
+    "<b>#6 list (2)<\/b> [&#x27;b1&#x27;, &#x27;b2&#x27;]",
+    "<b>#7 list (2)<\/b> [&#x27;b1&#x27;, &#x27;b3&#x27;]",
+    "<b>#8 list (2)<\/b> [&#x27;+b2&#x27;, &#x27;-b3&#x27;]",
+    "<b>#9 list (2)<\/b> [&#x27;dn1&#x27;, &#x27;dn2&#x27;]",
+    "<b>#10 list (1)<\/b> [&#x27;dn1&#x27;]"
+   ],
+   "newVar": "blk"
+  },
+  {
+   "line": 8,
+   "phase": "Python",
+   "note": "The condition is <b>False<\/b>, so the indented block is skipped.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "block_map",
+       "→ dict #1"
+      ],
+      [
+       "reports",
+       "→ list #2"
+      ],
+      [
+       "kind",
+       "'full'"
+      ],
+      [
+       "dn",
+       "'dn2'"
+      ],
+      [
+       "items",
+       "→ list #7"
+      ],
+      [
+       "item",
+       "'b3'"
+      ],
+      [
+       "blk",
+       "'b3'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (2)<\/b> {&#x27;b1&#x27;: → list #9, &#x27;b2&#x27;: → list #10}",
+    "<b>#2 list (3)<\/b> [→ tuple #3, → tuple #4, → tuple #5]",
+    "<b>#3 tuple (3)<\/b> (&#x27;full&#x27;, &#x27;dn1&#x27;, → list #6)",
+    "<b>#4 tuple (3)<\/b> (&#x27;full&#x27;, &#x27;dn2&#x27;, → list #7)",
+    "<b>#5 tuple (3)<\/b> (&#x27;incremental&#x27;, &#x27;dn2&#x27;, → list #8)",
+    "<b>#6 list (2)<\/b> [&#x27;b1&#x27;, &#x27;b2&#x27;]",
+    "<b>#7 list (2)<\/b> [&#x27;b1&#x27;, &#x27;b3&#x27;]",
+    "<b>#8 list (2)<\/b> [&#x27;+b2&#x27;, &#x27;-b3&#x27;]",
+    "<b>#9 list (2)<\/b> [&#x27;dn1&#x27;, &#x27;dn2&#x27;]",
+    "<b>#10 list (1)<\/b> [&#x27;dn1&#x27;]"
+   ]
+  },
+  {
+   "line": 11,
+   "phase": "Python",
+   "note": "Object #1 dict now holds {&#x27;b1&#x27;: → list #9, &#x27;b2&#x27;: → list #10, &#x27;b3&#x27;: → list #11} A new list object (#11) is created: [&#x27;dn2&#x27;]",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "block_map",
+       "→ dict #1"
+      ],
+      [
+       "reports",
+       "→ list #2"
+      ],
+      [
+       "kind",
+       "'full'"
+      ],
+      [
+       "dn",
+       "'dn2'"
+      ],
+      [
+       "items",
+       "→ list #7"
+      ],
+      [
+       "item",
+       "'b3'"
+      ],
+      [
+       "blk",
+       "'b3'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;b1&#x27;: → list #9, &#x27;b2&#x27;: → list #10, &#x27;b3&#x27;: → list #11}",
+    "<b>#2 list (3)<\/b> [→ tuple #3, → tuple #4, → tuple #5]",
+    "<b>#3 tuple (3)<\/b> (&#x27;full&#x27;, &#x27;dn1&#x27;, → list #6)",
+    "<b>#4 tuple (3)<\/b> (&#x27;full&#x27;, &#x27;dn2&#x27;, → list #7)",
+    "<b>#5 tuple (3)<\/b> (&#x27;incremental&#x27;, &#x27;dn2&#x27;, → list #8)",
+    "<b>#6 list (2)<\/b> [&#x27;b1&#x27;, &#x27;b2&#x27;]",
+    "<b>#7 list (2)<\/b> [&#x27;b1&#x27;, &#x27;b3&#x27;]",
+    "<b>#8 list (2)<\/b> [&#x27;+b2&#x27;, &#x27;-b3&#x27;]",
+    "<b>#9 list (2)<\/b> [&#x27;dn1&#x27;, &#x27;dn2&#x27;]",
+    "<b>#10 list (1)<\/b> [&#x27;dn1&#x27;]",
+    "<b>#11 list (1)<\/b> [&#x27;dn2&#x27;]"
+   ]
+  },
+  {
+   "line": 6,
+   "phase": "Python",
+   "note": "Nothing is left to loop over, so the loop ends and Python moves on.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "block_map",
+       "→ dict #1"
+      ],
+      [
+       "reports",
+       "→ list #2"
+      ],
+      [
+       "kind",
+       "'full'"
+      ],
+      [
+       "dn",
+       "'dn2'"
+      ],
+      [
+       "items",
+       "→ list #7"
+      ],
+      [
+       "item",
+       "'b3'"
+      ],
+      [
+       "blk",
+       "'b3'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;b1&#x27;: → list #9, &#x27;b2&#x27;: → list #10, &#x27;b3&#x27;: → list #11}",
+    "<b>#2 list (3)<\/b> [→ tuple #3, → tuple #4, → tuple #5]",
+    "<b>#3 tuple (3)<\/b> (&#x27;full&#x27;, &#x27;dn1&#x27;, → list #6)",
+    "<b>#4 tuple (3)<\/b> (&#x27;full&#x27;, &#x27;dn2&#x27;, → list #7)",
+    "<b>#5 tuple (3)<\/b> (&#x27;incremental&#x27;, &#x27;dn2&#x27;, → list #8)",
+    "<b>#6 list (2)<\/b> [&#x27;b1&#x27;, &#x27;b2&#x27;]",
+    "<b>#7 list (2)<\/b> [&#x27;b1&#x27;, &#x27;b3&#x27;]",
+    "<b>#8 list (2)<\/b> [&#x27;+b2&#x27;, &#x27;-b3&#x27;]",
+    "<b>#9 list (2)<\/b> [&#x27;dn1&#x27;, &#x27;dn2&#x27;]",
+    "<b>#10 list (1)<\/b> [&#x27;dn1&#x27;]",
+    "<b>#11 list (1)<\/b> [&#x27;dn2&#x27;]"
+   ]
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "<code>kind<\/code> changes to &#x27;incremental&#x27;. <code>items<\/code> changes to → list #8.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "block_map",
+       "→ dict #1"
+      ],
+      [
+       "reports",
+       "→ list #2"
+      ],
+      [
+       "kind",
+       "'incremental'"
+      ],
+      [
+       "dn",
+       "'dn2'"
+      ],
+      [
+       "items",
+       "→ list #8"
+      ],
+      [
+       "item",
+       "'b3'"
+      ],
+      [
+       "blk",
+       "'b3'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;b1&#x27;: → list #9, &#x27;b2&#x27;: → list #10, &#x27;b3&#x27;: → list #11}",
+    "<b>#2 list (3)<\/b> [→ tuple #3, → tuple #4, → tuple #5]",
+    "<b>#3 tuple (3)<\/b> (&#x27;full&#x27;, &#x27;dn1&#x27;, → list #6)",
+    "<b>#4 tuple (3)<\/b> (&#x27;full&#x27;, &#x27;dn2&#x27;, → list #7)",
+    "<b>#5 tuple (3)<\/b> (&#x27;incremental&#x27;, &#x27;dn2&#x27;, → list #8)",
+    "<b>#6 list (2)<\/b> [&#x27;b1&#x27;, &#x27;b2&#x27;]",
+    "<b>#7 list (2)<\/b> [&#x27;b1&#x27;, &#x27;b3&#x27;]",
+    "<b>#8 list (2)<\/b> [&#x27;+b2&#x27;, &#x27;-b3&#x27;]",
+    "<b>#9 list (2)<\/b> [&#x27;dn1&#x27;, &#x27;dn2&#x27;]",
+    "<b>#10 list (1)<\/b> [&#x27;dn1&#x27;]",
+    "<b>#11 list (1)<\/b> [&#x27;dn2&#x27;]"
+   ],
+   "newVar": "items"
+  },
+  {
+   "line": 6,
+   "phase": "Python",
+   "note": "<code>item<\/code> changes to &#x27;+b2&#x27;.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "block_map",
+       "→ dict #1"
+      ],
+      [
+       "reports",
+       "→ list #2"
+      ],
+      [
+       "kind",
+       "'incremental'"
+      ],
+      [
+       "dn",
+       "'dn2'"
+      ],
+      [
+       "items",
+       "→ list #8"
+      ],
+      [
+       "item",
+       "'+b2'"
+      ],
+      [
+       "blk",
+       "'b3'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;b1&#x27;: → list #9, &#x27;b2&#x27;: → list #10, &#x27;b3&#x27;: → list #11}",
+    "<b>#2 list (3)<\/b> [→ tuple #3, → tuple #4, → tuple #5]",
+    "<b>#3 tuple (3)<\/b> (&#x27;full&#x27;, &#x27;dn1&#x27;, → list #6)",
+    "<b>#4 tuple (3)<\/b> (&#x27;full&#x27;, &#x27;dn2&#x27;, → list #7)",
+    "<b>#5 tuple (3)<\/b> (&#x27;incremental&#x27;, &#x27;dn2&#x27;, → list #8)",
+    "<b>#6 list (2)<\/b> [&#x27;b1&#x27;, &#x27;b2&#x27;]",
+    "<b>#7 list (2)<\/b> [&#x27;b1&#x27;, &#x27;b3&#x27;]",
+    "<b>#8 list (2)<\/b> [&#x27;+b2&#x27;, &#x27;-b3&#x27;]",
+    "<b>#9 list (2)<\/b> [&#x27;dn1&#x27;, &#x27;dn2&#x27;]",
+    "<b>#10 list (1)<\/b> [&#x27;dn1&#x27;]",
+    "<b>#11 list (1)<\/b> [&#x27;dn2&#x27;]"
+   ],
+   "newVar": "item"
+  },
+  {
+   "line": 7,
+   "phase": "Python",
+   "note": "<code>blk<\/code> changes to &#x27;b2&#x27;.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "block_map",
+       "→ dict #1"
+      ],
+      [
+       "reports",
+       "→ list #2"
+      ],
+      [
+       "kind",
+       "'incremental'"
+      ],
+      [
+       "dn",
+       "'dn2'"
+      ],
+      [
+       "items",
+       "→ list #8"
+      ],
+      [
+       "item",
+       "'+b2'"
+      ],
+      [
+       "blk",
+       "'b2'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;b1&#x27;: → list #9, &#x27;b2&#x27;: → list #10, &#x27;b3&#x27;: → list #11}",
+    "<b>#2 list (3)<\/b> [→ tuple #3, → tuple #4, → tuple #5]",
+    "<b>#3 tuple (3)<\/b> (&#x27;full&#x27;, &#x27;dn1&#x27;, → list #6)",
+    "<b>#4 tuple (3)<\/b> (&#x27;full&#x27;, &#x27;dn2&#x27;, → list #7)",
+    "<b>#5 tuple (3)<\/b> (&#x27;incremental&#x27;, &#x27;dn2&#x27;, → list #8)",
+    "<b>#6 list (2)<\/b> [&#x27;b1&#x27;, &#x27;b2&#x27;]",
+    "<b>#7 list (2)<\/b> [&#x27;b1&#x27;, &#x27;b3&#x27;]",
+    "<b>#8 list (2)<\/b> [&#x27;+b2&#x27;, &#x27;-b3&#x27;]",
+    "<b>#9 list (2)<\/b> [&#x27;dn1&#x27;, &#x27;dn2&#x27;]",
+    "<b>#10 list (1)<\/b> [&#x27;dn1&#x27;]",
+    "<b>#11 list (1)<\/b> [&#x27;dn2&#x27;]"
+   ],
+   "newVar": "blk"
+  },
+  {
+   "line": 8,
+   "phase": "Python",
+   "note": "The condition is <b>False<\/b>, so the indented block is skipped.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "block_map",
+       "→ dict #1"
+      ],
+      [
+       "reports",
+       "→ list #2"
+      ],
+      [
+       "kind",
+       "'incremental'"
+      ],
+      [
+       "dn",
+       "'dn2'"
+      ],
+      [
+       "items",
+       "→ list #8"
+      ],
+      [
+       "item",
+       "'+b2'"
+      ],
+      [
+       "blk",
+       "'b2'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;b1&#x27;: → list #9, &#x27;b2&#x27;: → list #10, &#x27;b3&#x27;: → list #11}",
+    "<b>#2 list (3)<\/b> [→ tuple #3, → tuple #4, → tuple #5]",
+    "<b>#3 tuple (3)<\/b> (&#x27;full&#x27;, &#x27;dn1&#x27;, → list #6)",
+    "<b>#4 tuple (3)<\/b> (&#x27;full&#x27;, &#x27;dn2&#x27;, → list #7)",
+    "<b>#5 tuple (3)<\/b> (&#x27;incremental&#x27;, &#x27;dn2&#x27;, → list #8)",
+    "<b>#6 list (2)<\/b> [&#x27;b1&#x27;, &#x27;b2&#x27;]",
+    "<b>#7 list (2)<\/b> [&#x27;b1&#x27;, &#x27;b3&#x27;]",
+    "<b>#8 list (2)<\/b> [&#x27;+b2&#x27;, &#x27;-b3&#x27;]",
+    "<b>#9 list (2)<\/b> [&#x27;dn1&#x27;, &#x27;dn2&#x27;]",
+    "<b>#10 list (1)<\/b> [&#x27;dn1&#x27;]",
+    "<b>#11 list (1)<\/b> [&#x27;dn2&#x27;]"
+   ]
+  },
+  {
+   "line": 11,
+   "phase": "Python",
+   "note": "Object #10 list now holds [&#x27;dn1&#x27;, &#x27;dn2&#x27;]",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "block_map",
+       "→ dict #1"
+      ],
+      [
+       "reports",
+       "→ list #2"
+      ],
+      [
+       "kind",
+       "'incremental'"
+      ],
+      [
+       "dn",
+       "'dn2'"
+      ],
+      [
+       "items",
+       "→ list #8"
+      ],
+      [
+       "item",
+       "'+b2'"
+      ],
+      [
+       "blk",
+       "'b2'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;b1&#x27;: → list #9, &#x27;b2&#x27;: → list #10, &#x27;b3&#x27;: → list #11}",
+    "<b>#2 list (3)<\/b> [→ tuple #3, → tuple #4, → tuple #5]",
+    "<b>#3 tuple (3)<\/b> (&#x27;full&#x27;, &#x27;dn1&#x27;, → list #6)",
+    "<b>#4 tuple (3)<\/b> (&#x27;full&#x27;, &#x27;dn2&#x27;, → list #7)",
+    "<b>#5 tuple (3)<\/b> (&#x27;incremental&#x27;, &#x27;dn2&#x27;, → list #8)",
+    "<b>#6 list (2)<\/b> [&#x27;b1&#x27;, &#x27;b2&#x27;]",
+    "<b>#7 list (2)<\/b> [&#x27;b1&#x27;, &#x27;b3&#x27;]",
+    "<b>#8 list (2)<\/b> [&#x27;+b2&#x27;, &#x27;-b3&#x27;]",
+    "<b>#9 list (2)<\/b> [&#x27;dn1&#x27;, &#x27;dn2&#x27;]",
+    "<b>#10 list (2)<\/b> [&#x27;dn1&#x27;, &#x27;dn2&#x27;]",
+    "<b>#11 list (1)<\/b> [&#x27;dn2&#x27;]"
+   ]
+  },
+  {
+   "line": 6,
+   "phase": "Python",
+   "note": "<code>item<\/code> changes to &#x27;-b3&#x27;.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "block_map",
+       "→ dict #1"
+      ],
+      [
+       "reports",
+       "→ list #2"
+      ],
+      [
+       "kind",
+       "'incremental'"
+      ],
+      [
+       "dn",
+       "'dn2'"
+      ],
+      [
+       "items",
+       "→ list #8"
+      ],
+      [
+       "item",
+       "'-b3'"
+      ],
+      [
+       "blk",
+       "'b2'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;b1&#x27;: → list #9, &#x27;b2&#x27;: → list #10, &#x27;b3&#x27;: → list #11}",
+    "<b>#2 list (3)<\/b> [→ tuple #3, → tuple #4, → tuple #5]",
+    "<b>#3 tuple (3)<\/b> (&#x27;full&#x27;, &#x27;dn1&#x27;, → list #6)",
+    "<b>#4 tuple (3)<\/b> (&#x27;full&#x27;, &#x27;dn2&#x27;, → list #7)",
+    "<b>#5 tuple (3)<\/b> (&#x27;incremental&#x27;, &#x27;dn2&#x27;, → list #8)",
+    "<b>#6 list (2)<\/b> [&#x27;b1&#x27;, &#x27;b2&#x27;]",
+    "<b>#7 list (2)<\/b> [&#x27;b1&#x27;, &#x27;b3&#x27;]",
+    "<b>#8 list (2)<\/b> [&#x27;+b2&#x27;, &#x27;-b3&#x27;]",
+    "<b>#9 list (2)<\/b> [&#x27;dn1&#x27;, &#x27;dn2&#x27;]",
+    "<b>#10 list (2)<\/b> [&#x27;dn1&#x27;, &#x27;dn2&#x27;]",
+    "<b>#11 list (1)<\/b> [&#x27;dn2&#x27;]"
+   ],
+   "newVar": "item"
+  },
+  {
+   "line": 7,
+   "phase": "Python",
+   "note": "<code>blk<\/code> changes to &#x27;b3&#x27;.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "block_map",
+       "→ dict #1"
+      ],
+      [
+       "reports",
+       "→ list #2"
+      ],
+      [
+       "kind",
+       "'incremental'"
+      ],
+      [
+       "dn",
+       "'dn2'"
+      ],
+      [
+       "items",
+       "→ list #8"
+      ],
+      [
+       "item",
+       "'-b3'"
+      ],
+      [
+       "blk",
+       "'b3'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;b1&#x27;: → list #9, &#x27;b2&#x27;: → list #10, &#x27;b3&#x27;: → list #11}",
+    "<b>#2 list (3)<\/b> [→ tuple #3, → tuple #4, → tuple #5]",
+    "<b>#3 tuple (3)<\/b> (&#x27;full&#x27;, &#x27;dn1&#x27;, → list #6)",
+    "<b>#4 tuple (3)<\/b> (&#x27;full&#x27;, &#x27;dn2&#x27;, → list #7)",
+    "<b>#5 tuple (3)<\/b> (&#x27;incremental&#x27;, &#x27;dn2&#x27;, → list #8)",
+    "<b>#6 list (2)<\/b> [&#x27;b1&#x27;, &#x27;b2&#x27;]",
+    "<b>#7 list (2)<\/b> [&#x27;b1&#x27;, &#x27;b3&#x27;]",
+    "<b>#8 list (2)<\/b> [&#x27;+b2&#x27;, &#x27;-b3&#x27;]",
+    "<b>#9 list (2)<\/b> [&#x27;dn1&#x27;, &#x27;dn2&#x27;]",
+    "<b>#10 list (2)<\/b> [&#x27;dn1&#x27;, &#x27;dn2&#x27;]",
+    "<b>#11 list (1)<\/b> [&#x27;dn2&#x27;]"
+   ],
+   "newVar": "blk"
+  },
+  {
+   "line": 8,
+   "phase": "Python",
+   "note": "The condition is <b>True<\/b>, so the indented block runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "block_map",
+       "→ dict #1"
+      ],
+      [
+       "reports",
+       "→ list #2"
+      ],
+      [
+       "kind",
+       "'incremental'"
+      ],
+      [
+       "dn",
+       "'dn2'"
+      ],
+      [
+       "items",
+       "→ list #8"
+      ],
+      [
+       "item",
+       "'-b3'"
+      ],
+      [
+       "blk",
+       "'b3'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;b1&#x27;: → list #9, &#x27;b2&#x27;: → list #10, &#x27;b3&#x27;: → list #11}",
+    "<b>#2 list (3)<\/b> [→ tuple #3, → tuple #4, → tuple #5]",
+    "<b>#3 tuple (3)<\/b> (&#x27;full&#x27;, &#x27;dn1&#x27;, → list #6)",
+    "<b>#4 tuple (3)<\/b> (&#x27;full&#x27;, &#x27;dn2&#x27;, → list #7)",
+    "<b>#5 tuple (3)<\/b> (&#x27;incremental&#x27;, &#x27;dn2&#x27;, → list #8)",
+    "<b>#6 list (2)<\/b> [&#x27;b1&#x27;, &#x27;b2&#x27;]",
+    "<b>#7 list (2)<\/b> [&#x27;b1&#x27;, &#x27;b3&#x27;]",
+    "<b>#8 list (2)<\/b> [&#x27;+b2&#x27;, &#x27;-b3&#x27;]",
+    "<b>#9 list (2)<\/b> [&#x27;dn1&#x27;, &#x27;dn2&#x27;]",
+    "<b>#10 list (2)<\/b> [&#x27;dn1&#x27;, &#x27;dn2&#x27;]",
+    "<b>#11 list (1)<\/b> [&#x27;dn2&#x27;]"
+   ]
+  },
+  {
+   "line": 9,
+   "phase": "Python",
+   "note": "Object #11 list now holds []",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "block_map",
+       "→ dict #1"
+      ],
+      [
+       "reports",
+       "→ list #2"
+      ],
+      [
+       "kind",
+       "'incremental'"
+      ],
+      [
+       "dn",
+       "'dn2'"
+      ],
+      [
+       "items",
+       "→ list #8"
+      ],
+      [
+       "item",
+       "'-b3'"
+      ],
+      [
+       "blk",
+       "'b3'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;b1&#x27;: → list #9, &#x27;b2&#x27;: → list #10, &#x27;b3&#x27;: → list #11}",
+    "<b>#2 list (3)<\/b> [→ tuple #3, → tuple #4, → tuple #5]",
+    "<b>#3 tuple (3)<\/b> (&#x27;full&#x27;, &#x27;dn1&#x27;, → list #6)",
+    "<b>#4 tuple (3)<\/b> (&#x27;full&#x27;, &#x27;dn2&#x27;, → list #7)",
+    "<b>#5 tuple (3)<\/b> (&#x27;incremental&#x27;, &#x27;dn2&#x27;, → list #8)",
+    "<b>#6 list (2)<\/b> [&#x27;b1&#x27;, &#x27;b2&#x27;]",
+    "<b>#7 list (2)<\/b> [&#x27;b1&#x27;, &#x27;b3&#x27;]",
+    "<b>#8 list (2)<\/b> [&#x27;+b2&#x27;, &#x27;-b3&#x27;]",
+    "<b>#9 list (2)<\/b> [&#x27;dn1&#x27;, &#x27;dn2&#x27;]",
+    "<b>#10 list (2)<\/b> [&#x27;dn1&#x27;, &#x27;dn2&#x27;]",
+    "<b>#11 list (0)<\/b> []"
+   ]
+  },
+  {
+   "line": 6,
+   "phase": "Python",
+   "note": "Nothing is left to loop over, so the loop ends and Python moves on.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "block_map",
+       "→ dict #1"
+      ],
+      [
+       "reports",
+       "→ list #2"
+      ],
+      [
+       "kind",
+       "'incremental'"
+      ],
+      [
+       "dn",
+       "'dn2'"
+      ],
+      [
+       "items",
+       "→ list #8"
+      ],
+      [
+       "item",
+       "'-b3'"
+      ],
+      [
+       "blk",
+       "'b3'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;b1&#x27;: → list #9, &#x27;b2&#x27;: → list #10, &#x27;b3&#x27;: → list #11}",
+    "<b>#2 list (3)<\/b> [→ tuple #3, → tuple #4, → tuple #5]",
+    "<b>#3 tuple (3)<\/b> (&#x27;full&#x27;, &#x27;dn1&#x27;, → list #6)",
+    "<b>#4 tuple (3)<\/b> (&#x27;full&#x27;, &#x27;dn2&#x27;, → list #7)",
+    "<b>#5 tuple (3)<\/b> (&#x27;incremental&#x27;, &#x27;dn2&#x27;, → list #8)",
+    "<b>#6 list (2)<\/b> [&#x27;b1&#x27;, &#x27;b2&#x27;]",
+    "<b>#7 list (2)<\/b> [&#x27;b1&#x27;, &#x27;b3&#x27;]",
+    "<b>#8 list (2)<\/b> [&#x27;+b2&#x27;, &#x27;-b3&#x27;]",
+    "<b>#9 list (2)<\/b> [&#x27;dn1&#x27;, &#x27;dn2&#x27;]",
+    "<b>#10 list (2)<\/b> [&#x27;dn1&#x27;, &#x27;dn2&#x27;]",
+    "<b>#11 list (0)<\/b> []"
+   ]
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "Nothing is left to loop over, so the loop ends and Python moves on.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "block_map",
+       "→ dict #1"
+      ],
+      [
+       "reports",
+       "→ list #2"
+      ],
+      [
+       "kind",
+       "'incremental'"
+      ],
+      [
+       "dn",
+       "'dn2'"
+      ],
+      [
+       "items",
+       "→ list #8"
+      ],
+      [
+       "item",
+       "'-b3'"
+      ],
+      [
+       "blk",
+       "'b3'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;b1&#x27;: → list #9, &#x27;b2&#x27;: → list #10, &#x27;b3&#x27;: → list #11}",
+    "<b>#2 list (3)<\/b> [→ tuple #3, → tuple #4, → tuple #5]",
+    "<b>#3 tuple (3)<\/b> (&#x27;full&#x27;, &#x27;dn1&#x27;, → list #6)",
+    "<b>#4 tuple (3)<\/b> (&#x27;full&#x27;, &#x27;dn2&#x27;, → list #7)",
+    "<b>#5 tuple (3)<\/b> (&#x27;incremental&#x27;, &#x27;dn2&#x27;, → list #8)",
+    "<b>#6 list (2)<\/b> [&#x27;b1&#x27;, &#x27;b2&#x27;]",
+    "<b>#7 list (2)<\/b> [&#x27;b1&#x27;, &#x27;b3&#x27;]",
+    "<b>#8 list (2)<\/b> [&#x27;+b2&#x27;, &#x27;-b3&#x27;]",
+    "<b>#9 list (2)<\/b> [&#x27;dn1&#x27;, &#x27;dn2&#x27;]",
+    "<b>#10 list (2)<\/b> [&#x27;dn1&#x27;, &#x27;dn2&#x27;]",
+    "<b>#11 list (0)<\/b> []"
+   ]
+  },
+  {
+   "line": 12,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "block_map",
+       "→ dict #1"
+      ],
+      [
+       "reports",
+       "→ list #2"
+      ],
+      [
+       "kind",
+       "'incremental'"
+      ],
+      [
+       "dn",
+       "'dn2'"
+      ],
+      [
+       "items",
+       "→ list #8"
+      ],
+      [
+       "item",
+       "'-b3'"
+      ],
+      [
+       "blk",
+       "'b3'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;b1&#x27;: → list #9, &#x27;b2&#x27;: → list #10, &#x27;b3&#x27;: → list #11}",
+    "<b>#2 list (3)<\/b> [→ tuple #3, → tuple #4, → tuple #5]",
+    "<b>#3 tuple (3)<\/b> (&#x27;full&#x27;, &#x27;dn1&#x27;, → list #6)",
+    "<b>#4 tuple (3)<\/b> (&#x27;full&#x27;, &#x27;dn2&#x27;, → list #7)",
+    "<b>#5 tuple (3)<\/b> (&#x27;incremental&#x27;, &#x27;dn2&#x27;, → list #8)",
+    "<b>#6 list (2)<\/b> [&#x27;b1&#x27;, &#x27;b2&#x27;]",
+    "<b>#7 list (2)<\/b> [&#x27;b1&#x27;, &#x27;b3&#x27;]",
+    "<b>#8 list (2)<\/b> [&#x27;+b2&#x27;, &#x27;-b3&#x27;]",
+    "<b>#9 list (2)<\/b> [&#x27;dn1&#x27;, &#x27;dn2&#x27;]",
+    "<b>#10 list (2)<\/b> [&#x27;dn1&#x27;, &#x27;dn2&#x27;]",
+    "<b>#11 list (0)<\/b> []"
+   ],
+   "out": "{'b1': ['dn1', 'dn2'], 'b2': ['dn1', 'dn2'], 'b3': []}\n"
+  }
+ ]
+}</script>
+  </div>
+
+<h3 id="worked">Worked examples: real problems, solved and traced in memory</h3>
+  <p class="wx-intro">Three calculations about heartbeats and reports that platform teams make: NameNode load, timer trade-offs, and the cost of a false death. Each runs live and is traced in memory.</p>
+  <article class="wx">
+    <div class="wx__head"><span class="wx__num">Example 1</span><span class="lvl lvl--b">Beginner</span><span class="wx__tag">Load · NameNode</span></div>
+    <h4>How many messages does the NameNode handle?</h4>
+    <div class="wx__problem"><p class="wx__label">Problem statement</p><p>A cluster has 600 DataNodes. Each sends a heartbeat every 3 s and a full block report every 6 hours, and on average 2 incremental reports per second while jobs run. How many messages per second reach the NameNode from DataNodes?</p></div>
+    <div class="prob__io"><div><small>Input</small><pre>600 nodes · heartbeat 3 s · full report 6 h · 2 incremental/s per node</pre></div><div><small>Expected output</small><pre>heartbeats 200/s, full reports 0.028/s, incremental 1200/s
+total ~1400 messages per second</pre></div></div>
+    <div class="wx__approach"><p class="wx__label">Approach</p><ol><li>Heartbeats/s = nodes / 3.</li><li>Full reports/s = nodes / (6 × 3600).</li><li>Incremental/s = nodes × 2. Add them up.</li></ol></div>
+    <p class="wx__label">Solution: run it live</p>
+    <div class="runner">
+    <script type="application/json">{
+ "lang": "python",
+ "file": "main.py",
+ "tasks": [
+  {
+   "label": "Solution",
+   "hint": "Full reports are rare but huge (one entry per replica); incremental reports are frequent but tiny. Both matter for NameNode sizing.",
+   "code": "nodes = 600\nhb = nodes / 3\nfull = nodes / (6 * 3600)\ninc = nodes * 2\nprint(f\"heartbeats {hb:.0f}/s, full reports {full:.3f}/s, incremental {inc:.0f}/s\")\nprint(f\"total ~{hb + full + inc:.0f} messages per second\")\n"
+  }
+ ]
+}</script>
+    </div>
+    <p class="wx__label">What happens in memory, step by step</p>
+    <p class="wx__how">Recorded from a real Python run: press <b>Next</b> to execute one line at a time. Watch variables change in each frame, and lists and dictionaries (numbered #1, #2 …) fill up as objects.</p>
+    <div class="tracer">
+    <script type="application/json">{
+ "lang": "python",
+ "code": [
+  "nodes = 600",
+  "hb = nodes / 3",
+  "full = nodes / (6 * 3600)",
+  "inc = nodes * 2",
+  "print(f\"heartbeats {hb:.0f}/s, full reports {full:.3f}/s, incremental {inc:.0f}/s\")",
+  "print(f\"total ~{hb + full + inc:.0f} messages per second\")"
+ ],
+ "steps": [
+  {
+   "line": 1,
+   "phase": "Python",
+   "note": "<code>nodes<\/code> is created: 600.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "nodes",
+       "600"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "nodes"
+  },
+  {
+   "line": 2,
+   "phase": "Python",
+   "note": "<code>hb<\/code> is created: 200.0.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "nodes",
+       "600"
+      ],
+      [
+       "hb",
+       "200.0"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "hb"
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "<code>full<\/code> is created: 0.0278.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "nodes",
+       "600"
+      ],
+      [
+       "hb",
+       "200.0"
+      ],
+      [
+       "full",
+       "0.0278"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "full"
+  },
+  {
+   "line": 4,
+   "phase": "Incremental",
+   "note": "Busy clusters send far more small block updates than heartbeats. <code>inc<\/code> is created: 1200.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "nodes",
+       "600"
+      ],
+      [
+       "hb",
+       "200.0"
+      ],
+      [
+       "full",
+       "0.0278"
+      ],
+      [
+       "inc",
+       "1200"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "inc"
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "nodes",
+       "600"
+      ],
+      [
+       "hb",
+       "200.0"
+      ],
+      [
+       "full",
+       "0.0278"
+      ],
+      [
+       "inc",
+       "1200"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "out": "heartbeats 200/s, full reports 0.028/s, incremental 1200/s\n"
+  },
+  {
+   "line": 6,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "nodes",
+       "600"
+      ],
+      [
+       "hb",
+       "200.0"
+      ],
+      [
+       "full",
+       "0.0278"
+      ],
+      [
+       "inc",
+       "1200"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "out": "total ~1400 messages per second\n"
+  }
+ ]
+}</script>
+    </div>
+  </article>
+  <article class="wx">
+    <div class="wx__head"><span class="wx__num">Example 2</span><span class="lvl lvl--i">Intermediate</span><span class="wx__tag">Tuning · trade-off</span></div>
+    <h4>Faster detection vs false alarms</h4>
+    <div class="wx__problem"><p class="wx__label">Problem statement</p><p>A team wants faster dead-node detection. With recheck intervals of 300, 120 and 30 s, compute the dead time. Then, if the cluster sees GC pauses up to 90 s about once a week per node across 500 nodes, which settings would declare healthy nodes dead?</p></div>
+    <div class="prob__io"><div><small>Input</small><pre>recheck 300 / 120 / 30 s · heartbeat 3 s · GC pauses ≤ 90 s</pre></div><div><small>Expected output</small><pre>recheck 300s: dead after 630s, false deaths/week ~0
+recheck 120s: dead after 270s, false deaths/week ~0
+recheck  30s: dead after  90s, false deaths/week ~500</pre></div></div>
+    <div class="wx__approach"><p class="wx__label">Approach</p><ol><li>Dead time = 2 × recheck + 10 × 3.</li><li>A pause longer than the dead time causes a false death.</li><li>Count false deaths per week.</li></ol></div>
+    <p class="wx__label">Solution: run it live</p>
+    <div class="runner">
+    <script type="application/json">{
+ "lang": "python",
+ "file": "main.py",
+ "tasks": [
+  {
+   "label": "Solution",
+   "hint": "Each false death triggers re-replication of terabytes. That is why defaults are conservative and stale-node avoidance is used for faster reaction instead.",
+   "code": "pause, nodes = 90, 500\nfor recheck in [300, 120, 30]:\n    dead = 2 * recheck + 30\n    false = nodes if pause >= dead else 0\n    print(f\"recheck {recheck:>3}s: dead after {dead:>3}s, false deaths/week ~{false}\")\n"
+  }
+ ]
+}</script>
+    </div>
+    <p class="wx__label">What happens in memory, step by step</p>
+    <p class="wx__how">Recorded from a real Python run: press <b>Next</b> to execute one line at a time. Watch variables change in each frame, and lists and dictionaries (numbered #1, #2 …) fill up as objects.</p>
+    <div class="tracer">
+    <script type="application/json">{
+ "lang": "python",
+ "code": [
+  "pause, nodes = 90, 500",
+  "for recheck in [300, 120, 30]:",
+  "    dead = 2 * recheck + 30",
+  "    false = nodes if pause >= dead else 0",
+  "    print(f\"recheck {recheck:>3}s: dead after {dead:>3}s, false deaths/week ~{false}\")"
+ ],
+ "steps": [
+  {
+   "line": 1,
+   "phase": "Python",
+   "note": "<code>pause<\/code> is created: 90. <code>nodes<\/code> is created: 500.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "pause",
+       "90"
+      ],
+      [
+       "nodes",
+       "500"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "nodes"
+  },
+  {
+   "line": 2,
+   "phase": "Python",
+   "note": "<code>recheck<\/code> is created: 300.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "pause",
+       "90"
+      ],
+      [
+       "nodes",
+       "500"
+      ],
+      [
+       "recheck",
+       "300"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "recheck"
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "<code>dead<\/code> is created: 630.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "pause",
+       "90"
+      ],
+      [
+       "nodes",
+       "500"
+      ],
+      [
+       "recheck",
+       "300"
+      ],
+      [
+       "dead",
+       "630"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "dead"
+  },
+  {
+   "line": 4,
+   "phase": "Compare",
+   "note": "With recheck 30 s the dead time is exactly 90 s, so a 90 s pause is enough to kill the node. <code>false<\/code> is created: 0.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "pause",
+       "90"
+      ],
+      [
+       "nodes",
+       "500"
+      ],
+      [
+       "recheck",
+       "300"
+      ],
+      [
+       "dead",
+       "630"
+      ],
+      [
+       "false",
+       "0"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "false"
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "pause",
+       "90"
+      ],
+      [
+       "nodes",
+       "500"
+      ],
+      [
+       "recheck",
+       "300"
+      ],
+      [
+       "dead",
+       "630"
+      ],
+      [
+       "false",
+       "0"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "out": "recheck 300s: dead after 630s, false deaths/week ~0\n"
+  },
+  {
+   "line": 2,
+   "phase": "Python",
+   "note": "<code>recheck<\/code> changes to 120.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "pause",
+       "90"
+      ],
+      [
+       "nodes",
+       "500"
+      ],
+      [
+       "recheck",
+       "120"
+      ],
+      [
+       "dead",
+       "630"
+      ],
+      [
+       "false",
+       "0"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "recheck"
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "<code>dead<\/code> changes to 270.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "pause",
+       "90"
+      ],
+      [
+       "nodes",
+       "500"
+      ],
+      [
+       "recheck",
+       "120"
+      ],
+      [
+       "dead",
+       "270"
+      ],
+      [
+       "false",
+       "0"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "dead"
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "pause",
+       "90"
+      ],
+      [
+       "nodes",
+       "500"
+      ],
+      [
+       "recheck",
+       "120"
+      ],
+      [
+       "dead",
+       "270"
+      ],
+      [
+       "false",
+       "0"
+      ]
+     ]
+    }
+   ],
+   "heap": []
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "pause",
+       "90"
+      ],
+      [
+       "nodes",
+       "500"
+      ],
+      [
+       "recheck",
+       "120"
+      ],
+      [
+       "dead",
+       "270"
+      ],
+      [
+       "false",
+       "0"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "out": "recheck 120s: dead after 270s, false deaths/week ~0\n"
+  },
+  {
+   "line": 2,
+   "phase": "Python",
+   "note": "<code>recheck<\/code> changes to 30.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "pause",
+       "90"
+      ],
+      [
+       "nodes",
+       "500"
+      ],
+      [
+       "recheck",
+       "30"
+      ],
+      [
+       "dead",
+       "270"
+      ],
+      [
+       "false",
+       "0"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "recheck"
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "<code>dead<\/code> changes to 90.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "pause",
+       "90"
+      ],
+      [
+       "nodes",
+       "500"
+      ],
+      [
+       "recheck",
+       "30"
+      ],
+      [
+       "dead",
+       "90"
+      ],
+      [
+       "false",
+       "0"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "dead"
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "<code>false<\/code> changes to 500.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "pause",
+       "90"
+      ],
+      [
+       "nodes",
+       "500"
+      ],
+      [
+       "recheck",
+       "30"
+      ],
+      [
+       "dead",
+       "90"
+      ],
+      [
+       "false",
+       "500"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "false"
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "pause",
+       "90"
+      ],
+      [
+       "nodes",
+       "500"
+      ],
+      [
+       "recheck",
+       "30"
+      ],
+      [
+       "dead",
+       "90"
+      ],
+      [
+       "false",
+       "500"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "out": "recheck  30s: dead after  90s, false deaths/week ~500\n"
+  },
+  {
+   "line": 2,
+   "phase": "Python",
+   "note": "Nothing is left to loop over, so the loop ends and Python moves on.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "pause",
+       "90"
+      ],
+      [
+       "nodes",
+       "500"
+      ],
+      [
+       "recheck",
+       "30"
+      ],
+      [
+       "dead",
+       "90"
+      ],
+      [
+       "false",
+       "500"
+      ]
+     ]
+    }
+   ],
+   "heap": []
+  }
+ ]
+}</script>
+    </div>
+  </article>
+  <article class="wx">
+    <div class="wx__head"><span class="wx__num">Example 3</span><span class="lvl lvl--a">Advanced</span><span class="wx__tag">Operations · re-registration</span></div>
+    <h4>How long until a returning node's data counts again?</h4>
+    <div class="wx__problem"><p class="wx__label">Problem statement</p><p>A DataNode with 12 lakh replicas comes back after a network outage. It re-registers on its next heartbeat, then sends a full block report that the NameNode processes at 4 lakh replicas per second. How long until all its replicas are back in the block map?</p></div>
+    <div class="prob__io"><div><small>Input</small><pre>12,00,000 replicas · heartbeat 3 s · 4,00,000 replicas/s</pre></div><div><small>Expected output</small><pre>about 6 seconds</pre></div></div>
+    <div class="wx__approach"><p class="wx__label">Approach</p><ol><li>Worst-case wait for the next heartbeat: 3 s.</li><li>Processing time = replicas / rate.</li><li>Add them.</li></ol></div>
+    <p class="wx__label">Solution: run it live</p>
+    <div class="runner">
+    <script type="application/json">{
+ "lang": "python",
+ "file": "main.py",
+ "tasks": [
+  {
+   "label": "Solution",
+   "hint": "In our lab the node had 8 blocks, so it was “live, lastContact 0” within 6 seconds of unpausing.",
+   "code": "replicas, rate, hb = 12_00_000, 4_00_000, 3\nprint(f\"about {hb + replicas / rate:.0f} seconds\")\n"
+  }
+ ]
+}</script>
+    </div>
+    <p class="wx__label">What happens in memory, step by step</p>
+    <p class="wx__how">Recorded from a real Python run: press <b>Next</b> to execute one line at a time. Watch variables change in each frame, and lists and dictionaries (numbered #1, #2 …) fill up as objects.</p>
+    <div class="tracer">
+    <script type="application/json">{
+ "lang": "python",
+ "code": [
+  "replicas, rate, hb = 12_00_000, 4_00_000, 3",
+  "print(f\"about {hb + replicas / rate:.0f} seconds\")"
+ ],
+ "steps": [
+  {
+   "line": 1,
+   "phase": "Python",
+   "note": "<code>replicas<\/code> is created: 1200000. <code>rate<\/code> is created: 400000. <code>hb<\/code> is created: 3.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "replicas",
+       "1200000"
+      ],
+      [
+       "rate",
+       "400000"
+      ],
+      [
+       "hb",
+       "3"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "hb"
+  },
+  {
+   "line": 2,
+   "phase": "Report",
+   "note": "Block reports are processed in batches by the NameNode. The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "replicas",
+       "1200000"
+      ],
+      [
+       "rate",
+       "400000"
+      ],
+      [
+       "hb",
+       "3"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "out": "about 6 seconds\n"
+  }
+ ]
+}</script>
+    </div>
+  </article>
+</section>
+
+<section class="part" id="quiz">
+  <span class="part-label"><b>9</b> Quiz and revision</span>
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <script type="application/json">[
+ {
+  "q": "How often does a DataNode send a heartbeat by default?",
+  "options": [
+   "Every 30 seconds",
+   "Every 6 hours",
+   "Every 3 seconds",
+   "Only at start-up"
+  ],
+  "answer": 2,
+  "why": "dfs.heartbeat.interval = 3 s."
+ },
+ {
+  "q": "How does the NameNode send commands (like “copy this block”) to a DataNode?",
+  "options": [
+   "It opens a connection to the DataNode",
+   "In the reply to the DataNode's heartbeat",
+   "By email",
+   "Through YARN"
+  ],
+  "answer": 1,
+  "why": "The NameNode never initiates calls; commands ride on heartbeat replies."
+ },
+ {
+  "q": "With default settings, when is a silent DataNode declared dead?",
+  "options": [
+   "10 min 30 s",
+   "3 s",
+   "30 s",
+   "6 hours"
+  ],
+  "answer": 0,
+  "why": "2 × 5 min + 10 × 3 s. After 30 s it is only “stale”."
+ },
+ {
+  "q": "What is in a full block report?",
+  "options": [
+   "File names and owners",
+   "The DataNode's CPU usage",
+   "Heartbeat timestamps",
+   "Every block replica the DataNode stores (ID, length, generation stamp)"
+  ],
+  "answer": 3,
+  "why": "File names live in the NameNode namespace; DataNodes only know blocks."
+ },
+ {
+  "q": "How often are full block reports sent by default?",
+  "options": [
+   "Every 3 s",
+   "Every hour",
+   "Every 6 hours (plus at start-up)",
+   "Once a week"
+  ],
+  "answer": 2,
+  "why": "dfs.blockreport.intervalMsec = 21,600,000 ms; incremental reports fill the gaps."
+ },
+ {
+  "q": "A paused (frozen) DataNode process, from the NameNode's point of view, is:",
+  "options": [
+   "Healthy, because the process exists",
+   "The same as a stopped one: no heartbeats, so eventually dead",
+   "Decommissioned",
+   "In safe mode"
+  ],
+  "answer": 1,
+  "why": "We saw it go dead at about 60 s with lab settings."
+ },
+ {
+  "q": "What does hdfs dfsadmin -triggerBlockReport host:9867 do?",
+  "options": [
+   "Makes that DataNode send a full block report now",
+   "Restarts the DataNode",
+   "Deletes old blocks",
+   "Formats the DataNode"
+  ],
+  "answer": 0,
+  "why": "The “Last Block Report” time changed from 06:49:03 to 06:59:19."
+ },
+ {
+  "q": "Why not set the dead-node timeout to 10 seconds?",
+  "options": [
+   "It is not allowed",
+   "It uses more disk",
+   "DataNodes would stop",
+   "Short pauses (GC, network blips) would cause false deaths and huge re-replication"
+  ],
+  "answer": 3,
+  "why": "Conservative timers avoid expensive false alarms."
+ }
+]</script>
+  </div>
+
+  <h3>Quick revision</h3>
+  <div class="revision">
+    <h3>Lesson 5.5 in one screen</h3>
+    <ul><li><b>Heartbeat</b>: DataNode → NameNode every <b>3 s</b>: alive + capacity/load. Reply carries <b>commands</b>.</li><li>The NameNode never calls DataNodes; it only measures silence.</li><li><b>Stale</b> after 30 s; <b>dead</b> after 2 × recheck (5 min) + 10 × 3 s = <b>10 min 30 s</b>.</li><li><b>Full block report</b>: all replicas, at registration and every <b>6 h</b>. <b>Incremental</b>: changes in between.</li><li>Block reports build the block map (not saved in the fsimage).</li><li>Commands: transfer (replicate), invalidate (delete), recover, re-register.</li><li>Check: “Last contact”, “Last Block Report” in <code>dfsadmin -report</code>; <code>/jmx</code> LiveNodes/DeadNodes.</li><li><code>hdfs dfsadmin -triggerBlockReport host:9867</code> forces a report.</li></ul>
+  </div>
+
+  <h3>Interview and viva questions</h3>
+  <div class="faq">
+    <details><summary>What is a heartbeat in Hadoop?</summary><p>A small periodic message (every 3 seconds by default) from each DataNode to the NameNode saying it is alive, with its storage capacity, usage and load. The NameNode uses the reply to send the DataNode commands.</p></details>
+    <details><summary>What happens if the NameNode stops receiving heartbeats from a DataNode?</summary><p>After 30 seconds the node is marked stale; after 10 minutes 30 seconds (default) it is marked dead. Its replicas are then removed from the block map and the affected blocks are re-replicated from other copies.</p></details>
+    <details><summary>What is a block report?</summary><p>A list of all the block replicas stored on a DataNode, sent when it registers and then every 6 hours by default. Incremental block reports announce new and deleted replicas in between. The NameNode uses them to know where each block is.</p></details>
+    <details><summary>Why does a DataNode need to send block reports if the NameNode chose where blocks go?</summary><p>Because reality can differ: disks fail, files are corrupted or deleted, nodes return with old replicas, and block locations are not stored in the fsimage. Reports are the source of truth for which replicas exist.</p></details>
+    <details><summary>How is the dead-node timeout calculated?</summary><p>2 × dfs.namenode.heartbeat.recheck-interval + 10 × dfs.heartbeat.interval. With defaults: 2 × 300 s + 10 × 3 s = 630 s.</p></details>
+    <details><summary>Can the NameNode contact a DataNode directly?</summary><p>No. In the DataNode protocol the DataNode always initiates the RPC (heartbeats, reports); the NameNode responds, putting any commands in its replies.</p></details>
+    
+  </div>
+
+  <h3 id="practice">Practice problems</h3>
+  <p class="prob-intro">Timer and report exercises using the real readings from the lab cluster.</p>
+  <div class="probs">
+    <article class="prob"><div class="prob__head"><span class="prob__num">P1</span><span class="prob__tag prob__tag--easy">Easy</span><h4>Lab dead time</h4></div>
+      <p>Compute the dead-node time for the lab (recheck 15 s, heartbeat 3 s).</p>
+      <div class="prob__io"><div><small>Input</small><pre>15 s · 3 s</pre></div><div><small>Expected output</small><pre>60 s</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>print(2 * 15 + 10 * 3, &quot;s&quot;)</code></pre><div class="output">60 s</div></div>
+        <p><b>How it works:</b> 60 s, matching the real timeline (live at 51 s, dead at 57–60 s).</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P2</span><span class="prob__tag prob__tag--easy">Easy</span><h4>Milliseconds to hours</h4></div>
+      <p>Convert dfs.blockreport.intervalMsec = 21600000 to hours.</p>
+      <div class="prob__io"><div><small>Input</small><pre>21,600,000 ms</pre></div><div><small>Expected output</small><pre>6.0 hours</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>print(21600000 / 1000 / 3600, &quot;hours&quot;)</code></pre><div class="output">6.0 hours</div></div>
+        <p><b>How it works:</b> 6.0 hours.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P3</span><span class="prob__tag prob__tag--easy">Easy</span><h4>Stale or not</h4></div>
+      <p>With a 30 s stale interval, classify last-contact readings 27, 35 and 51 s.</p>
+      <div class="prob__io"><div><small>Input</small><pre>27 · 35 · 51</pre></div><div><small>Expected output</small><pre>27 fresh
+35 stale
+51 stale</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>for s in [27, 35, 51]:
+    print(s, &quot;stale&quot; if s &gt;= 30 else &quot;fresh&quot;)</code></pre><div class="output">27 fresh
+35 stale
+51 stale</div></div>
+        <p><b>How it works:</b> 27 s fresh; 35 and 51 s stale (but still live until the dead limit).</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P4</span><span class="prob__tag prob__tag--medium">Medium</span><h4>Parse the JMX reading</h4></div>
+      <p>From the real JMX line "729c51a07ee2:9866 lastContact=51s blocks=8", extract the host and the seconds.</p>
+      <div class="prob__io"><div><small>Input</small><pre>729c51a07ee2:9866 lastContact=51s blocks=8</pre></div><div><small>Expected output</small><pre>729c51a07ee2 51</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>line = &quot;729c51a07ee2:9866 lastContact=51s blocks=8&quot;
+host = line.split(&quot;:&quot;)[0]
+seconds = int(line.split(&quot;lastContact=&quot;)[1].split(&quot;s&quot;)[0])
+print(host, seconds)</code></pre><div class="output">729c51a07ee2 51</div></div>
+        <p><b>How it works:</b> Host 729c51a07ee2 (datanode-4), 51 seconds since its last heartbeat.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P5</span><span class="prob__tag prob__tag--medium">Medium</span><h4>Apply an incremental report</h4></div>
+      <p>Apply the incremental report +b4, -b1 from dn3 to the block map.</p>
+      <div class="prob__io"><div><small>Input</small><pre>b1:[dn1,dn3] · b4:[dn2]</pre></div><div><small>Expected output</small><pre>{&#x27;b1&#x27;: [&#x27;dn1&#x27;], &#x27;b4&#x27;: [&#x27;dn2&#x27;, &#x27;dn3&#x27;]}</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>bm = {&quot;b1&quot;: [&quot;dn1&quot;, &quot;dn3&quot;], &quot;b4&quot;: [&quot;dn2&quot;]}
+for item in [&quot;+b4&quot;, &quot;-b1&quot;]:
+    blk = item[1:]
+    if item[0] == &quot;+&quot;:
+        bm.setdefault(blk, []).append(&quot;dn3&quot;)
+    else:
+        bm[blk].remove(&quot;dn3&quot;)
+print(bm)</code></pre><div class="output">{&#x27;b1&#x27;: [&#x27;dn1&#x27;], &#x27;b4&#x27;: [&#x27;dn2&#x27;, &#x27;dn3&#x27;]}</div></div>
+        <p><b>How it works:</b> b1 keeps only dn1, b4 gains dn3. Incremental reports keep the map current between full reports.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P6</span><span class="prob__tag prob__tag--medium">Medium</span><h4>Heartbeat load</h4></div>
+      <p>How many heartbeats per second does a NameNode receive from 3,000 DataNodes?</p>
+      <div class="prob__io"><div><small>Input</small><pre>3000 nodes · 3 s</pre></div><div><small>Expected output</small><pre>1000.0 per second</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>print(3000 / 3, &quot;per second&quot;)</code></pre><div class="output">1000.0 per second</div></div>
+        <p><b>How it works:</b> 1,000 heartbeats per second, each answered, which is why heartbeat handling must be cheap.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P7</span><span class="prob__tag prob__tag--business">Business problem</span><h4>False death cost</h4></div>
+      <p>A false dead-node event re-replicates 20 TB at 4 GB/s cluster-wide and slows jobs by 20% during copying. How long are jobs slowed?</p>
+      <div class="prob__io"><div><small>Input</small><pre>20 TB · 4 GB/s</pre></div><div><small>Expected output</small><pre>85 minutes of slower jobs</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>seconds = 20 * 1024 / 4
+print(f&quot;{seconds / 60:.0f} minutes of slower jobs&quot;)</code></pre><div class="output">85 minutes of slower jobs</div></div>
+        <p><b>How it works:</b> About 85 minutes of degraded performance for nothing, if the node comes back right after. Hence conservative timeouts.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P8</span><span class="prob__tag prob__tag--advanced">Advanced</span><h4>Timeline classifier</h4></div>
+      <p>Given (t, lastContact) samples, print the first time the node becomes stale and dead, for stale 30 s and dead 60 s.</p>
+      <div class="prob__io"><div><small>Input</small><pre>real lab samples</pre></div><div><small>Expected output</small><pre>stale first seen at t = 33 s; dead first seen at t = 57 s</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>samples = [(8, 10), (16, 19), (25, 27), (33, 35), (41, 43), (49, 51), (57, 60), (65, 68)]
+stale = next(t for t, lc in samples if lc &gt;= 30)
+dead = next(t for t, lc in samples if lc &gt;= 60)
+print(&quot;stale first seen at t =&quot;, stale, &quot;s; dead first seen at t =&quot;, dead, &quot;s&quot;)</code></pre><div class="output">stale first seen at t = 33 s; dead first seen at t = 57 s</div></div>
+        <p><b>How it works:</b> Stale at t = 33 s (last contact 35 s) and dead at t = 57 s (60 s), consistent with the thresholds and the real readings.</p>
+      </details>
+    </article>
+  </div>
+
+  <h3 id="scenarios">Real-world scenario questions (asked in company interviews)</h3>
+  <p class="scn-intro">Heartbeat questions check whether you understand how the NameNode can manage thousands of nodes cheaply.</p>
+  <div class="scenarios">
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">HDFS · concepts</span><span class="scn__tag scn__tag--level">Fresher</span></div>
+      <h4>“How does the NameNode know a DataNode has failed?”</h4>
+      <p class="scn__situation">Asked in almost every HDFS interview.</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> heartbeats, timeouts and consequences.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>DataNodes send heartbeats every 3 s. The NameNode tracks time since the last one.</li>
+          <li>After 30 s the node is stale; after 10 min 30 s (2 × recheck + 10 heartbeats) it is declared dead.</li>
+          <li>Then its replicas are removed from the block map, and under-replicated blocks are copied from surviving replicas, with commands sent in other DataNodes' heartbeat replies.</li>
+        </ul>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Operations · flapping</span><span class="scn__tag scn__tag--level">Experienced</span></div>
+      <h4>A DataNode keeps going dead and coming back</h4>
+      <p class="scn__situation">The NameNode UI shows one node dead several times a day, each time followed by re-replication and then excess deletions.</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> systematic debugging.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>Correlate dead times with the DataNode's GC log (long pauses), kernel/disk logs (hung I/O), and network errors.</li>
+          <li>Common fixes: right-size the DataNode heap and GC settings, replace the failing disk, fix the NIC/switch port.</li>
+          <li>Meanwhile, consider decommissioning the node so it stops causing re-replication storms.</li>
+        </ul>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Design · protocol</span><span class="scn__tag scn__tag--level">Experienced</span></div>
+      <h4>Why do DataNodes call the NameNode, not the other way round?</h4>
+      <p class="scn__situation">A system design follow-up question.</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> scalability reasoning.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>With thousands of DataNodes, the NameNode would need many outgoing connections and timeouts to poll them; instead each node pushes a tiny message on a schedule.</li>
+          <li>Failure detection becomes trivial: silence. No connection management for dead nodes.</li>
+          <li>Commands piggyback on replies, so there is no extra round trip.</li>
+          <li>The same push model is used by YARN NodeManagers to the ResourceManager.</li>
+        </ul>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Operations · repair</span><span class="scn__tag scn__tag--level">Fresher</span></div>
+      <h4>After replacing a disk, the NameNode still shows old block counts</h4>
+      <p class="scn__situation">A disk on a DataNode was replaced and its data restored from another copy, but the NameNode's numbers look out of date.</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> block report timing.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>The next full block report may be hours away (every 6 h).</li>
+          <li>Run <code>hdfs dfsadmin -triggerBlockReport host:9867</code>, then check “Last Block Report” and the block counts in <code>dfsadmin -report</code>.</li>
+          <li>Verify with <code>hdfs fsck /</code> that no blocks are missing or corrupt.</li>
+        </ul>
+      </div></details>
+    </article>
+
+  </div>
+</section>
+
+<nav class="lesson-nav" id="lesson-nav" aria-label="Lesson navigation"></nav>
+<div class="ad-slot" data-slot="bottom"></div>
+</article>
+
+<aside class="lesson-side">
+  <nav class="toc" aria-label="In this lesson">
+    <h4>In this lesson</h4>
+    <ol>
+      <li><a href="#story">The story</a></li>
+      <li><a href="#definition">Definition</a></li><li><a href="#levels">Beginner → Advanced</a></li>
+      <li><a href="#types">Types and ways to use it</a></li>
+      <li><a href="#steps">Step by step</a></li>
+      <li><a href="#animation">See it happen</a></li>
+      <li><a href="#real-world">Real-world use</a></li>
+      <li><a href="#run">Run the code</a></li><li><a href="#pc">Run on your PC</a></li>
+      <li><a href="#tracer">Line by line</a></li>
+      <li><a href="#worked">Worked examples</a></li>
+      <li><a href="#quiz">Quiz and revision</a></li>
+      <li><a href="#practice">Practice problems</a></li>
+      <li><a href="#scenarios">Industry scenarios</a></li>
+    </ol>
+  </nav>
+  <div class="ad-slot" data-slot="side"></div>
+  <div class="outline" id="outline"></div>
+</aside>
+</div>
+</main>
+
+<footer class="site-footer">
+  <div class="wrap">
+    <div><h4>MyPhatshala</h4><p>Free programming and IT lessons that show what happens behind the screen.</p></div>
+    <div><h4>Learn</h4><a href="../../../../#tracks">All courses</a><a href="../../">Apache Hadoop syllabus</a></div>
+    <div><h4>Site</h4><a href="../../../../about.html">About</a><a href="../../../../contact.html">Contact</a><a href="../../../../privacy.html">Privacy policy</a><a href="../../../../disclaimer.html">Disclaimer</a></div>
+    <div class="copyright">© MyPhatshala. All lesson content, diagrams and animations are original. Please do not copy without permission.</div>
+  </div>
+</footer>
+
+<script src="../../../../data/courses/hadoop.js"></script>
+<script src="../../../../assets/js/lesson.js"></script>
+<script src="../../../../assets/js/cluster-sim.js"></script>
+<script src="../../../../assets/js/ads.js"></script>
+<script src="../../../../assets/js/site.js"></script>
+</body>
+</html>

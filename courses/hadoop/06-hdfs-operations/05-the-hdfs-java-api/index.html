@@ -1,0 +1,2031 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The HDFS Java API | MyPhatshala</title>
+<meta name="description" content="Use HDFS from your own Java code with the Hadoop FileSystem API: Configuration, FileSystem.get, create, open, getFileStatus, getFileBlockLocations, listStatus, rename and delete, with real output from two programs on a Hadoop 3.5.0 cluster. Counting 300,000 orders in 1.3 s, 403 MB in 5.9 s through one client, a data bug the API won&#x27;t catch, and the same file over WebHDFS with its 307 redirect to a DataNode. Python model of the API, quiz and interview scenarios.">
+<meta name="mp:minutes" content="26">
+<link rel="canonical" href="https://myphatshala.in/courses/hadoop/06-hdfs-operations/05-the-hdfs-java-api/">
+<meta property="og:title" content="The HDFS Java API · MyPhatshala">
+<meta property="og:description" content="Every hdfs dfs command is a small Java program. Write your own with the FileSystem API, with real outputs.">
+<link rel="icon" href="../../../../assets/img/logo.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Fraunces:ital,opsz,wght@0,9..144,600;0,9..144,700;1,9..144,600&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../../../../assets/css/style.css">
+<link rel="stylesheet" href="../../../../assets/css/lesson.css">
+<script src="../../../../assets/js/config.js"></script>
+<script>try { const t = localStorage.getItem("mp-theme"); if (t) document.documentElement.dataset.theme = t; } catch (e) {}</script>
+<script type="application/ld+json">{"@context": "https://schema.org", "@type": "LearningResource", "name": "The HDFS Java API", "learningResourceType": "Lesson", "educationalLevel": "Intermediate", "isAccessibleForFree": true, "inLanguage": "en", "isPartOf": {"@type": "Course", "name": "Apache Hadoop", "provider": {"@type": "Organization", "name": "MyPhatshala"}}}</script>
+</head>
+<body style="--track:#B45309" data-lesson="06-hdfs-operations/05-the-hdfs-java-api" data-course-root="../../">
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="site-header">
+  <div class="wrap">
+    <a class="brand" href="../../../../" aria-label="MyPhatshala home"><img src="../../../../assets/img/logo.svg" width="34" height="34" alt=""><span>My<b>Phatshala</b></span></a>
+    <nav class="nav" aria-label="Main">
+      <a href="../../../../#tracks">All courses</a>
+      <a href="../../">Apache Hadoop syllabus</a>
+      <button class="theme-btn" id="theme-btn" aria-label="Toggle dark mode"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg></button>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+<section class="lesson-hero">
+  <div class="wrap">
+    <nav class="crumbs" aria-label="Breadcrumb"><a href="../../../../">Home</a><span>›</span><a href="../../../../#track-big-data">Big Data Engineering</a><span>›</span><a href="../../">Apache Hadoop</a><span>›</span><b>Lesson 6.5</b></nav>
+    <h1>The HDFS Java API</h1>
+    <p class="lead">The shell is great for people; programs need an API. This lesson writes and runs two Java programs against the lab cluster with the Hadoop FileSystem API: one that writes, reads, inspects, renames and deletes a file, and one that counts items in a big file. Then the same file is read over plain HTTP with WebHDFS. Every output is real.</p>
+    <div class="lesson-meta"><span>Module 6 · HDFS operations</span><span>⏱ 26 min</span><span>Intermediate</span><span>Real Java programs</span><span>WebHDFS with curl</span><span>Runs in your browser (Python)</span><span>8 practice problems</span></div>
+  </div>
+</section>
+
+<div class="wrap lesson-layout">
+<article class="lesson-main">
+<!-- ======================= PART 1: THE STORY ======================= -->
+<section class="part" id="story">
+  <span class="part-label"><b>1</b> The story</span>
+  <h2>When the shell is not enough</h2>
+  <div class="story">
+    <p class="narration">The canteen app's backend, written in Java, must save every order batch into HDFS and read daily totals back. Riya's first version calls <code>hdfs dfs -put</code> from Java with <code>Runtime.exec()</code>. It works, but each call starts a new JVM: 1.8 seconds per batch, and errors arrive as text she has to parse. Arjun shows her that every <code>hdfs dfs</code> command is itself a small Java program built on one class, <code>FileSystem</code>, and her backend can use that class directly.</p>
+
+    <div class="scene">
+      <svg viewBox="0 0 640 190" role="img" aria-label="Your program, the hdfs dfs shell, Spark and Hive all use the FileSystem API; it talks to the NameNode for metadata and to DataNodes for data. The same API can point at local disk or cloud storage.">
+        <g font-size="10">
+          <rect x="16" y="16" width="130" height="34" rx="8" class="s-soft-acc" style="stroke:var(--track)"/><text x="81" y="37" text-anchor="middle" font-weight="700" class="s-acc">your Java app</text>
+          <rect x="16" y="58" width="130" height="34" rx="8" class="s-card2"/><text x="81" y="79" text-anchor="middle" class="s-ink">hdfs dfs (FsShell)</text>
+          <rect x="16" y="100" width="130" height="34" rx="8" class="s-card2"/><text x="81" y="121" text-anchor="middle" class="s-ink">MapReduce, Spark, Hive</text>
+          <path d="M146 33h40M146 75h40M146 117h40" style="fill:none;stroke:var(--track);stroke-width:2"/>
+          <rect x="186" y="16" width="150" height="118" rx="10" class="s-board"/>
+          <text x="261" y="44" text-anchor="middle" font-weight="700" class="s-chalk">FileSystem API</text>
+          <g font-size="8.6" class="mono" style="fill:#9FD3B8"><text x="198" y="66">create  open  append</text><text x="198" y="82">listStatus  rename</text><text x="198" y="98">delete  getFileStatus</text><text x="198" y="114">getFileBlockLocations</text></g>
+          <path d="M336 50h50M336 100h50" style="fill:none;stroke:var(--blue);stroke-width:2"/>
+          <rect x="386" y="24" width="112" height="40" rx="8" class="s-board"/><text x="442" y="48" text-anchor="middle" font-weight="700" class="s-chalk">NameNode</text>
+          <rect x="386" y="80" width="112" height="40" rx="8" class="s-soft-green" style="stroke:var(--green)"/><text x="442" y="104" text-anchor="middle" class="s-green">DataNodes</text>
+          <text x="566" y="40" text-anchor="middle" font-size="8.6" class="s-ink2">hdfs://</text>
+          <text x="566" y="70" text-anchor="middle" font-size="8.6" class="s-ink2">file://</text>
+          <text x="566" y="100" text-anchor="middle" font-size="8.6" class="s-ink2">s3a://  abfs://</text>
+          <text x="566" y="122" text-anchor="middle" font-size="8.6" class="s-ink2">same code, other storage</text>
+        </g>
+        <text x="320" y="166" text-anchor="middle" font-size="10" class="s-ink2">metadata calls go to the NameNode; bytes stream to and from DataNodes</text>
+        <text x="632" y="184" text-anchor="end" class="s-wm">myphatshala.in</text>
+      </svg>
+    </div>
+
+    <div class="panel panel--right"><div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#DDEFE6"/><path d="M12 64c2-12 10-18 20-18s18 6 20 18z" fill="#F4F1EA"/><path d="M28 46l4 8 4-8" fill="#2F7D5B"/><circle cx="32" cy="28" r="12" fill="#B57A50"/><path d="M20 26c0-8 5-13 12-13s12 5 12 13c-2-3-6-5-12-5s-10 2-12 5z" fill="#5A5A5A"/><path d="M22 32c1 8 5 11 10 11s9-3 10-11c-2 3-6 4-10 4s-8-1-10-4z" fill="#5A5A5A"/><circle cx="27" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><circle cx="37" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><path d="M30.4 29h3.2" stroke="#1B2433" stroke-width="1.4"/><circle cx="27" cy="29" r="1.1" fill="#1B2433"/><circle cx="37" cy="29" r="1.1" fill="#1B2433"/></svg></div><div class="bubble"><b class="who">Arjun Sir</b><p>Everything you did with the shell, you can do from code: <code>fs.create()</code> is <code>-put</code>, <code>fs.open()</code> is <code>-cat</code>, <code>fs.rename()</code> is <code>-mv</code>. The JVM starts once, connections are reused, and errors are real Java exceptions.</p></div></div>
+    <div class="panel"><div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#FCE6D6"/><path d="M14 64c2-12 9-18 18-18s16 6 18 18z" fill="#2E5AAC"/><circle cx="32" cy="29" r="12" fill="#C68B5E"/><path d="M19 29c0-10 6-15 13-15s13 5 13 15c-3-5-7-8-13-8s-10 3-13 8z" fill="#2A1B14"/><path d="M43 27c3 6 3 14 0 20" stroke="#2A1B14" stroke-width="4" fill="none" stroke-linecap="round"/><circle cx="27.5" cy="30" r="1.5" fill="#2A1B14"/><circle cx="36.5" cy="30" r="1.5" fill="#2A1B14"/><path d="M28 35q4 3 8 0" stroke="#2A1B14" stroke-width="1.6" fill="none" stroke-linecap="round"/><circle cx="32" cy="24" r="1.2" fill="#D64545"/></svg></div><div class="bubble"><b class="who">Riya</b><p>Is it different from writing a normal file?</p></div></div>
+    <div class="panel panel--right"><div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#DDEFE6"/><path d="M12 64c2-12 10-18 20-18s18 6 20 18z" fill="#F4F1EA"/><path d="M28 46l4 8 4-8" fill="#2F7D5B"/><circle cx="32" cy="28" r="12" fill="#B57A50"/><path d="M20 26c0-8 5-13 12-13s12 5 12 13c-2-3-6-5-12-5s-10 2-12 5z" fill="#5A5A5A"/><path d="M22 32c1 8 5 11 10 11s9-3 10-11c-2 3-6 4-10 4s-8-1-10-4z" fill="#5A5A5A"/><circle cx="27" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><circle cx="37" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><path d="M30.4 29h3.2" stroke="#1B2433" stroke-width="1.4"/><circle cx="27" cy="29" r="1.1" fill="#1B2433"/><circle cx="37" cy="29" r="1.1" fill="#1B2433"/></svg></div><div class="bubble"><b class="who">Arjun Sir</b><p>Almost the same streams you know from Java. The difference is what happens underneath: a <code>create</code> asks the NameNode, the bytes go through the write pipeline from Lesson 6.1, and <code>open</code> reads from the nearest DataNode as in Lesson 6.2. Spark and Hive use this same class, which is why they can read HDFS and S3 with the same code.</p></div></div>
+  </div>
+</section>
+
+<!-- ======================= PART 2: DEFINITION ======================= -->
+<section class="part" id="definition">
+  <span class="part-label"><b>2</b> Definition</span>
+  <h2>The Hadoop FileSystem API</h2>
+  <div class="def">
+    <div class="def__formal"><small>Formal definition (write this in exams)</small>
+      <p>The <b>Hadoop FileSystem API</b> (<code>org.apache.hadoop.fs</code>) is the Java interface through which all Hadoop clients access storage. <code>FileSystem.get(Configuration)</code> returns an implementation chosen by the URI scheme of <code>fs.defaultFS</code> or of a <code>Path</code>; for <code>hdfs://</code> it is <code>DistributedFileSystem</code>, which uses a <code>DFSClient</code> to call the NameNode over RPC and to stream data to and from DataNodes. Files are created with <code>create()</code> (returning an <code>FSDataOutputStream</code> that supports <code>hflush()</code> and <code>hsync()</code>) and read with <code>open()</code> (returning a seekable <code>FSDataInputStream</code>). Metadata is returned as <code>FileStatus</code> and block placement as <code>BlockLocation</code>; namespace operations include <code>mkdirs</code>, <code>listStatus</code>, <code>rename</code> and <code>delete</code>.</p></div>
+    <div class="def__simple"><small>In simple words</small>
+      <p>A Java library that lets your program open, write, list, rename and delete HDFS files, the way the shell does, but inside your own application.</p></div>
+  </div>
+
+  <h3>Words you'll meet in this lesson</h3>
+  <div class="terms">
+    <div class="term"><b>Configuration</b><span>Loads core-site.xml and hdfs-site.xml from the classpath; <code>fs.defaultFS</code> says where HDFS is.</span></div>
+    <div class="term"><b>FileSystem</b><span>The abstract class; get one with <code>FileSystem.get(conf)</code>.</span></div>
+    <div class="term"><b>Path</b><span>A file or folder name, absolute or relative, optionally a full URI.</span></div>
+    <div class="term"><b>FSDataOutputStream</b><span>What <code>create()</code> returns; <code>hflush()</code> makes data visible to readers.</span></div>
+    <div class="term"><b>FSDataInputStream</b><span>What <code>open()</code> returns; supports <code>seek(offset)</code>.</span></div>
+    <div class="term"><b>FileStatus</b><span>Length, replication, block size, owner, permission, times.</span></div>
+    <div class="term"><b>BlockLocation</b><span>Offset, length and hosts of one block.</span></div>
+    <div class="term"><b>WebHDFS</b><span>The same operations over HTTP/JSON, for non-Java programs.</span></div>
+  </div>
+
+  <h3>API facts worth remembering</h3>
+  <table class="facts" style="table-layout:fixed;overflow-wrap:anywhere">
+    <tr><th>FileSystem.get(conf)</th><td>Returns a <b>cached, shared</b> instance per scheme, authority and user; closing it closes it for the whole JVM</td></tr>
+    <tr><th>rename()</th><td>Returns <code>false</code> on many failures instead of throwing: always check it</td></tr>
+    <tr><th>delete(path, true)</th><td>Recursive and permanent: the API does <b>not</b> use the trash</td></tr>
+    <tr><th>create(path, true)</th><td><code>true</code> = overwrite an existing file</td></tr>
+    <tr><th>Visibility</th><td>Other readers see written data after <code>hflush()</code> or <code>close()</code></td></tr>
+    <tr><th>Classpath</th><td><code>hadoop classpath</code> prints the jars to compile and run with</td></tr>
+  </table>
+
+  <h3 id="levels">The API at three levels</h3>
+  <div class="modlab levels"><div class="modlab__bar"><b>Pick your level. New to this? Start at Beginner and climb.</b><button type="button" data-mod="b">Beginner</button><button type="button" data-mod="i">Intermediate</button><button type="button" data-mod="a">Advanced</button></div>
+    <div class="modlab__panel" data-mod="b"><h4><span class="lvl lvl--b">Beginner</span> Like Java file handling you already know</h4>
+      <ul>
+        <li><code>Path</code> is like <code>java.io.File</code>, <code>open()</code>/<code>create()</code> give streams.</li>
+        <li>You wrap them in a <code>BufferedReader</code> or write bytes, as usual.</li>
+        <li>Always close streams (try-with-resources).</li>
+      </ul>
+
+    </div>
+    <div class="modlab__panel" data-mod="i"><h4><span class="lvl lvl--i">Intermediate</span> Everyday use</h4>
+      <ul>
+        <li>Upload: <code>fs.copyFromLocalFile(src, dst)</code>, or <code>create()</code> and write.</li>
+        <li>Check before reading: <code>fs.exists(p)</code>, <code>fs.getFileStatus(p).getLen()</code>.</li>
+        <li>Walk a tree: <code>fs.listFiles(dir, true)</code> (recursive iterator, includes block locations).</li>
+        <li>Publish results: write into a temporary folder, then one <code>fs.rename()</code>.</li>
+      </ul>
+
+    </div>
+    <div class="modlab__panel" data-mod="a"><h4><span class="lvl lvl--a">Advanced</span> What library and framework authors care about</h4>
+      <ul>
+        <li><code>getFileBlockLocations</code> is how MapReduce and Spark place tasks near data.</li>
+        <li><code>hflush()</code> vs <code>hsync()</code>: visible to readers vs also forced to disk on DataNodes.</li>
+        <li>Seek + read lets a reader start in the middle of a file: that is how input splits work.</li>
+        <li>Use <code>FileSystem.newInstance()</code> if your code must close its own instance without affecting others.</li>
+        <li>On a secure cluster, the same code needs a Kerberos login (<code>UserGroupInformation</code>).</li>
+      </ul>
+
+    </div>
+  </div>
+  <div class="callout callout--exam"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19V5a2 2 0 0 1 2-2h12v18H6a2 2 0 0 1-2-2zm0 0a2 2 0 0 1 2-2h12"/></svg><p><b>Exam tip:</b> “Write a Java program to read a file from HDFS.” Steps: create a <code>Configuration</code>; <code>FileSystem fs = FileSystem.get(conf)</code>; <code>FSDataInputStream in = fs.open(new Path(...))</code>; read lines with a <code>BufferedReader</code> (or <code>IOUtils.copyBytes(in, System.out, 4096, false)</code>); close the stream. Mention that <code>open()</code> gets block locations from the NameNode and reads from DataNodes.</p></div>
+</section>
+
+<!-- ======================= PART 3: TYPES AND WAYS TO USE IT ======================= -->
+<section class="part" id="types">
+  <span class="part-label"><b>3</b> Types and ways to use it</span>
+  <h2>API methods, shell commands and what happens underneath</h2>
+  <div class="table-wrap">
+  <table class="compare" style="min-width:640px">
+    <thead><tr><th>FileSystem method</th><th>Shell equivalent</th><th>Talks to</th></tr></thead>
+    <tbody>
+      <tr><td><code>mkdirs(p)</code></td><td><code>-mkdir -p</code></td><td>NameNode</td></tr>
+      <tr><td><code>create(p, overwrite)</code> + write + close</td><td><code>-put</code></td><td>NameNode, then DataNode pipeline</td></tr>
+      <tr><td><code>append(p)</code></td><td><code>-appendToFile</code></td><td>NameNode, then DataNodes</td></tr>
+      <tr><td><code>open(p)</code> + read</td><td><code>-cat</code>, <code>-get</code></td><td>NameNode (locations), then DataNodes</td></tr>
+      <tr><td><code>getFileStatus(p)</code></td><td><code>-stat</code>, <code>-ls</code> one file</td><td>NameNode</td></tr>
+      <tr><td><code>listStatus(dir)</code>, <code>listFiles(dir, recursive)</code></td><td><code>-ls</code>, <code>-ls -R</code></td><td>NameNode</td></tr>
+      <tr><td><code>getFileBlockLocations(st, 0, len)</code></td><td><code>fsck -blocks -locations</code></td><td>NameNode</td></tr>
+      <tr><td><code>rename(src, dst)</code></td><td><code>-mv</code></td><td>NameNode</td></tr>
+      <tr><td><code>delete(p, recursive)</code></td><td><code>-rm -r -skipTrash</code></td><td>NameNode (blocks freed later)</td></tr>
+      <tr><td><code>setReplication(p, n)</code></td><td><code>-setrep</code></td><td>NameNode</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <h3>Ways to reach HDFS from a program</h3>
+  <div class="cards">
+    <div class="card"><h4>Java FileSystem API</h4><p>Native and fastest; what Hadoop's own tools use. This lesson.</p><span class="tag">Java, Scala</span></div>
+    <div class="card"><h4>WebHDFS (REST)</h4><p>HTTP + JSON on the NameNode port 9870, redirecting to DataNodes on 9864. Any language, even curl.</p><span class="tag">Any language</span></div>
+    <div class="card"><h4>libhdfs / pyarrow</h4><p>A C library over the Java client; Python's <code>pyarrow.fs.HadoopFileSystem</code> uses it.</p><span class="tag">C, Python</span></div>
+    <div class="card"><h4>Through a framework</h4><p>Spark, Hive, Flink read <code>hdfs://</code> paths with this API inside; you rarely see it.</p><span class="tag">Most common</span></div>
+  </div>
+  <div class="callout callout--tip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18h6M10 22h4M12 2a7 7 0 0 0-4 12.7V17h8v-2.3A7 7 0 0 0 12 2z"/></svg><p>When you change <code>hdfs://</code> to <code>s3a://bucket/</code> in a path, the same code talks to cloud storage, if the connector jar and credentials are configured. That portability is the main reason the API is an abstract <code>FileSystem</code> class.</p></div>
+</section>
+
+<!-- ======================= PART 4: STEP BY STEP ======================= -->
+<section class="part" id="steps">
+  <span class="part-label"><b>4</b> Step by step</span>
+  <h2>Two real programs on the lab cluster</h2>
+  <p>Both Java files are in “Run it on your PC” below. We compiled and ran them inside the namenode container, where Java and the Hadoop jars are already installed.</p>
+  <ol class="stepper">
+    <li><h4>Compile and package</h4>
+      <div class="code" data-lang="bash" data-file="Terminal"><pre><code>javac -cp $(hadoop classpath) HdfsBasics.java ItemCount.java
+jar cf hdfs-demo.jar *.class
+hadoop jar hdfs-demo.jar HdfsBasics</code></pre><div class="output">Connected to: hdfs://namenode</div></div>
+      <span class="behind"><code>hadoop classpath</code> lists every Hadoop jar. <code>hadoop jar</code> runs the class with that classpath and the cluster's configuration, so <code>new Configuration()</code> finds <code>fs.defaultFS=hdfs://namenode</code> and <code>FileSystem.get()</code> returns a DistributedFileSystem.</span></li>
+    <li><h4>Write and read back</h4>
+      <div class="code" data-lang="java" data-file="HdfsBasics.java (part)"><pre><code>try (FSDataOutputStream out = fs.create(file, true)) {
+    out.write("order_id,item,amount\n".getBytes(StandardCharsets.UTF_8));
+    out.write("3001,samosa,18\n3002,chai,15\n".getBytes(StandardCharsets.UTF_8));
+}
+try (FSDataInputStream in = fs.open(file); BufferedReader r = ...) {
+    while ((line = r.readLine()) != null) System.out.println("  read: " + line);
+}</code></pre><div class="output">  read: order_id,item,amount
+  read: 3001,samosa,18
+  read: 3002,chai,15</div></div>
+      <span class="behind"><code>create</code> = NameNode create + addBlock; the bytes went through a 3-DataNode pipeline; closing the stream completed the file. <code>open</code> fetched block locations and streamed from a DataNode.</span></li>
+    <li><h4>Metadata and block locations</h4>
+      <div class="code" data-lang="java" data-file="HdfsBasics.java (part)"><pre><code>FileStatus st = fs.getFileStatus(file);
+for (BlockLocation b : fs.getFileBlockLocations(bs, 0, bs.getLen())) ...</code></pre><div class="output">orders.csv  49 bytes  replication 3  block size 128 MB  owner hadoop
+  block at offset 0 length 134,217,728 on ab3b1bedf98a, 46201bb62e68, 264eb9c0f8e2
+  block at offset 134,217,728 length 6,542,542 on ab3b1bedf98a, 46201bb62e68, 264eb9c0f8e2</div></div>
+      <span class="behind">The hosts are Docker container IDs: datanode-1, datanode-2 and datanode-3. <code>orders_x30.csv</code> (140,760,270 bytes) has a full 128 MB block plus a 6.5 MB tail block. A job scheduler uses exactly this list to run tasks next to the data.</span></li>
+    <li><h4>List, rename, delete</h4>
+      <div class="code" data-lang="java" data-file="HdfsBasics.java (part)"><pre><code>System.out.println("rename: " + fs.rename(file, renamed));
+System.out.println("exists after rename: " + fs.exists(file));
+System.out.println("delete: " + fs.delete(dir, true));</code></pre><div class="output">  ls: hdfs://namenode/user/hadoop/api_demo/orders.csv
+rename: true
+exists after rename: false
+delete: true</div></div>
+      <span class="behind">Both return booleans. A rename to a missing parent folder returns <code>false</code> without an exception, so check it. <code>delete(dir, true)</code> removed the folder and the file permanently: the API skips the trash.</span></li>
+    <li><h4>Count items in one file</h4>
+      <div class="code" data-lang="bash" data-file="Terminal"><pre><code>hadoop jar hdfs-demo.jar ItemCount /user/hadoop/data/canteen_orders.csv</code></pre><div class="output">chai      50,170
+dosa      49,948
+idli      49,984
+poha      49,891
+samosa    50,021
+vada pav  49,986
+took 1327 ms in one JVM</div></div>
+      <span class="behind">300,000 orders (4.5 MB) streamed through one client in 1.3 seconds, including connecting. The program reads the file block after block like <code>-cat</code> does.</span></li>
+    <li><h4>Same program, 90× the data, and a bug</h4>
+      <div class="code" data-lang="bash" data-file="Terminal"><pre><code>hadoop jar hdfs-demo.jar ItemCount /user/hadoop/data/orders_x90.csv</code></pre><div class="output">chai      4,515,300
+dosa      4,495,320
+idli      4,498,560
+item      89
+poha      4,490,190
+samosa    4,501,890
+vada pav  4,498,740
+took 5890 ms in one JVM</div></div>
+      <span class="behind">403 MB took 5.9 s: about 68 MB/s through one client. A 4 TB file would take about 17 hours this way, which is why MapReduce (Module 8) runs one reader per block in parallel. And “item 89”: <code>orders_x90.csv</code> was made by concatenating the file 90 times, so 89 header lines sit inside the data. HDFS stores bytes; cleaning data is the program's job.</span></li>
+    <li><h4>The same file over HTTP: WebHDFS</h4>
+      <div class="code" data-lang="bash" data-file="Terminal"><pre><code>curl -s "http://namenode:9870/webhdfs/v1/user/hadoop/canteen/raw/day1.csv?op=GETFILESTATUS&amp;user.name=hadoop"
+curl -s -i "http://namenode:9870/webhdfs/v1/user/hadoop/canteen/raw/day1.csv?op=OPEN&amp;user.name=hadoop" | grep -iE "^HTTP|^Location"</code></pre><div class="output">{"FileStatus":{"accessTime":1792579946689,"blockSize":134217728,"childrenNum":0,"fileId":16425,"group":"supergroup","length":47,"modificationTime":1792575484677,"owner":"hadoop","pathSuffix":"","permission":"640","replication":3,"storagePolicy":0,"type":"FILE"}}
+HTTP/1.1 307 Temporary Redirect
+Location: http://46201bb62e68:9864/webhdfs/v1/user/hadoop/canteen/raw/day1.csv?op=OPEN&amp;user.name=hadoop&amp;namenoderpcaddress=namenode:8020&amp;offset=0</div></div>
+      <span class="behind">The NameNode answers metadata itself but never sends file data: for OPEN it redirects (HTTP 307) to a DataNode (datanode-2, port 9864). The same split as the Java client, in plain HTTP.</span></li>
+  </ol>
+  <div class="callout callout--warn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3 2 21h20L12 3z"/><path d="M12 10v5M12 18v.5"/></svg><p>Don't call <code>fs.close()</code> on the instance from <code>FileSystem.get()</code> in a long-running server: it is shared, and other parts of the application will start failing with “Filesystem closed”. Close streams, keep the FileSystem open (or use <code>FileSystem.newInstance()</code>). Our short demo programs close it on exit, which is fine.</p></div>
+</section>
+
+<!-- ======================= PART 5: SEE IT HAPPEN ======================= -->
+<section class="part" id="animation">
+  <span class="part-label"><b>5</b> See it happen</span>
+  <h2>Six API calls, and who answers each</h2>
+  <p>The calls from <code>HdfsBasics</code>, in order.</p>
+  <div class="anim" data-frames="6">
+    <div class="anim__title">From Java call to NameNode and DataNodes <span>6 steps</span></div>
+    <div class="anim__views">
+      <div class="view view--see">
+        <span class="view__tag">What you see</span>
+        <svg viewBox="0 0 360 250" role="img" aria-label="Java calls and their output">
+          <rect x="14" y="14" width="332" height="206" rx="8" class="s-board"/>
+          <text x="26" y="32" font-size="9" class="mono" style="fill:#7F8C86">HdfsBasics.java</text>
+          <g data-on="1"><text x="26" y="56" font-size="8.6" class="mono" style="fill:#F5C77E">fs = FileSystem.get(conf);</text><text x="26" y="80" font-size="8.6" class="mono" style="fill:#9FD3B8">Connected to: hdfs://namenode</text></g>
+          <g data-on="2"><text x="26" y="56" font-size="8.6" class="mono" style="fill:#F5C77E">out = fs.create(file, true);</text><text x="26" y="80" font-size="8.6" class="mono" style="fill:#7F8C86">(no output)</text></g>
+          <g data-on="3"><text x="26" y="56" font-size="8.6" class="mono" style="fill:#F5C77E">out.write(...); out.close();</text><text x="26" y="80" font-size="8.6" class="mono" style="fill:#7F8C86">(no output: 49 bytes stored)</text></g>
+          <g data-on="4"><text x="26" y="56" font-size="8.6" class="mono" style="fill:#F5C77E">in = fs.open(file);</text><text x="26" y="80" font-size="8.6" class="mono" style="fill:#7F8C86">(no output yet)</text></g>
+          <g data-on="5"><text x="26" y="56" font-size="8.6" class="mono" style="fill:#F5C77E">r.readLine() ...</text><text x="26" y="80" font-size="8.6" class="mono" style="fill:#9FD3B8">read: order_id,item,amount</text><text x="26" y="96" font-size="8.6" class="mono" style="fill:#9FD3B8">read: 3001,samosa,18</text><text x="26" y="112" font-size="8.6" class="mono" style="fill:#9FD3B8">read: 3002,chai,15</text></g>
+          <g data-on="6"><text x="26" y="56" font-size="8.6" class="mono" style="fill:#F5C77E">fs.rename(...); fs.delete(dir, true);</text><text x="26" y="80" font-size="8.6" class="mono" style="fill:#9FD3B8">rename: true</text><text x="26" y="96" font-size="8.6" class="mono" style="fill:#9FD3B8">delete: true</text></g>
+          <text x="352" y="244" text-anchor="end" class="s-wm">myphatshala.in</text>
+        </svg>
+        <ol class="caps" hidden>
+          <li><code>FileSystem.get</code> reads the configuration and connects.</li>
+          <li><code>create</code> returns an output stream.</li>
+          <li>Writing and closing stores the file.</li>
+          <li><code>open</code> returns an input stream.</li>
+          <li>Reading prints the three lines.</li>
+          <li>Rename and delete both return true.</li>
+        </ol>
+      </div>
+
+      <div class="view view--behind">
+        <span class="view__tag">Behind the screen</span>
+        <svg viewBox="0 0 360 250" role="img" aria-label="Client JVM, NameNode and DataNodes">
+          <rect x="14" y="20" width="96" height="150" rx="8" class="s-soft-acc" style="stroke:var(--track)"/>
+          <text x="62" y="40" text-anchor="middle" font-size="9" font-weight="700" class="s-acc">your JVM</text>
+          <text x="62" y="62" text-anchor="middle" font-size="8.6" class="s-ink">FileSystem</text>
+          <text x="62" y="76" text-anchor="middle" font-size="8.6" class="s-ink2">= Distributed-</text>
+          <text x="62" y="90" text-anchor="middle" font-size="8.6" class="s-ink2">FileSystem</text>
+          <text x="62" y="112" text-anchor="middle" font-size="8.6" class="s-ink">DFSClient</text>
+          <rect x="200" y="20" width="140" height="40" rx="6" class="s-board"/><text x="270" y="44" text-anchor="middle" font-size="9" font-weight="700" class="s-chalk">NameNode :8020</text>
+          <rect x="200" y="100" width="40" height="36" rx="6" class="s-soft-green" style="stroke:var(--green)"/><text x="220" y="122" text-anchor="middle" font-size="8.6" class="s-green">dn1</text>
+          <rect x="250" y="100" width="40" height="36" rx="6" class="s-soft-green" style="stroke:var(--green)"/><text x="270" y="122" text-anchor="middle" font-size="8.6" class="s-green">dn2</text>
+          <rect x="300" y="100" width="40" height="36" rx="6" class="s-soft-green" style="stroke:var(--green)"/><text x="320" y="122" text-anchor="middle" font-size="8.6" class="s-green">dn3</text>
+          <g data-on="1"><text x="180" y="196" text-anchor="middle" font-size="9" class="s-ink2">fs.defaultFS = hdfs://namenode → DistributedFileSystem</text></g>
+          <g data-on="2"><path d="M110 40h90" style="fill:none;stroke:var(--track);stroke-width:2.4"/><text x="155" y="34" text-anchor="middle" font-size="8.6" class="s-acc">create</text><text x="180" y="196" text-anchor="middle" font-size="9" class="s-ink2">RPC create: a new, empty file in the namespace</text></g>
+          <g data-on="3"><path d="M110 50h90" style="fill:none;stroke:var(--track);stroke-width:2"/><path d="M110 118h90M240 118h10M290 118h10" style="fill:none;stroke:var(--blue);stroke-width:3"/><text x="180" y="196" text-anchor="middle" font-size="9" class="s-ink2">addBlock, pipeline dn1→dn2→dn3, then complete</text></g>
+          <g data-on="4"><path d="M110 40h90" style="fill:none;stroke:var(--track);stroke-width:2.4"/><text x="155" y="34" text-anchor="middle" font-size="8.6" class="s-acc">getBlockLocations</text><text x="180" y="196" text-anchor="middle" font-size="9" class="s-ink2">NameNode returns sorted replica locations</text></g>
+          <g data-on="5"><path d="M200 128H110" style="fill:none;stroke:var(--blue);stroke-width:3"/><text x="180" y="196" text-anchor="middle" font-size="9" class="s-ink2">bytes stream from one DataNode, checksums verified</text></g>
+          <g data-on="6"><path d="M110 40h90" style="fill:none;stroke:var(--track);stroke-width:2.4"/><text x="155" y="34" text-anchor="middle" font-size="8.6" class="s-acc">rename, delete</text><text x="180" y="196" text-anchor="middle" font-size="9" class="s-ink2">metadata only; blocks deleted later by DataNodes</text></g>
+          <text x="352" y="246" text-anchor="end" class="s-wm">myphatshala.in</text>
+        </svg>
+        <ol class="caps" hidden>
+          <li>The configuration's <code>fs.defaultFS</code> picks DistributedFileSystem, which wraps a DFSClient.</li>
+          <li><code>create</code> is one RPC to the NameNode: the file exists, still empty and open for writing.</li>
+          <li><code>write</code> + <code>close</code>: addBlock, the DataNode pipeline (Lesson 6.1), then complete.</li>
+          <li><code>open</code> asks the NameNode where the blocks are (Lesson 6.2).</li>
+          <li>Reading streams bytes directly from a DataNode.</li>
+          <li><code>rename</code> and <code>delete</code> touch only the NameNode.</li>
+        </ol>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ======================= PART 6: REAL-WORLD USE ======================= -->
+<section class="part" id="real-world">
+  <span class="part-label"><b>6</b> Real-world use</span>
+  <h2>The API at work</h2>
+
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="20" y="20" width="80" height="50" rx="6" class="s-soft-acc" style="stroke:var(--track)"/><text x="60" y="42" text-anchor="middle" font-size="8.6" font-weight="700" class="s-acc">ingest service</text><text x="60" y="58" text-anchor="middle" font-size="8.6" class="s-ink">hflush()</text></svg></div>
+    <div><h4>1. Ingestion services</h4>
+      <p>Services that collect events (from Kafka, logs or apps) keep an HDFS file open, write records and call <code>hflush()</code> regularly so readers see recent data, then roll to a new file every hour.</p>
+      <div class="uc-flow"><span>Events</span><i>→</i><span class="java">create + write + hflush</span><i>→</i><span>Hourly files</span></div></div>
+  </div>
+
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="20" y="20" width="80" height="50" rx="6" class="s-board"/><text x="60" y="42" text-anchor="middle" font-size="8.6" class="mono" style="fill:#9FD3B8">hdfs:// → s3a://</text><text x="60" y="58" text-anchor="middle" font-size="8.6" class="mono" style="fill:#F5C77E">same code</text></svg></div>
+    <div><h4>2. Moving to the cloud</h4>
+      <p>Teams migrating from on-premise Hadoop to cloud object stores often change only paths and configuration: Spark and Hive jobs keep working because they talk to the <code>FileSystem</code> abstraction.</p>
+      <div class="uc-flow"><span>hdfs:// paths</span><i>→</i><span class="java">FileSystem API</span><i>→</i><span>s3a:// paths</span></div></div>
+  </div>
+
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="20" y="20" width="80" height="50" rx="6" class="s-soft-blue" style="stroke:var(--blue)"/><text x="60" y="42" text-anchor="middle" font-size="8.6" font-weight="700" class="s-blue">WebHDFS</text><text x="60" y="58" text-anchor="middle" font-size="8.6" class="s-ink">Python, dashboards</text></svg></div>
+    <div><h4>3. Non-Java tools</h4>
+      <p>Dashboards and Python scripts read result files through WebHDFS or HttpFS (a gateway that also hides the DataNodes), with no Hadoop installation on the client.</p>
+      <div class="uc-flow"><span>Python app</span><i>→</i><span class="java">HTTP/JSON</span><i>→</i><span>HDFS</span></div></div>
+  </div>
+
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="20" y="20" width="80" height="50" rx="6" class="s-card2"/><text x="60" y="42" text-anchor="middle" font-size="8.6" font-weight="700" class="s-ink">small-file report</text><text x="60" y="58" text-anchor="middle" font-size="8.6" class="s-ink2">listFiles(…, true)</text></svg></div>
+    <div><h4>4. Housekeeping tools</h4>
+      <p>Admins write small Java tools that walk the namespace once with <code>listFiles(dir, true)</code> to find small files, old data or wrong replication, far faster than thousands of shell calls.</p>
+      <div class="uc-flow"><span>listFiles</span><i>→</i><span class="java">Filter in Java</span><i>→</i><span>Report or fix</span></div></div>
+  </div>
+  <p class="muted">Simplified; organisations differ in tools and policies.</p>
+</section>
+
+
+<div class="ad-slot" data-slot="mid"></div>
+
+<section class="part" id="run">
+  <span class="part-label"><b>7</b> Run the code</span>
+  <h2>The FileSystem API, modelled in Python</h2>
+  <p>The Java API can't run in your browser, so this Python class copies its shape: <code>create</code>, <code>open</code>, <code>get_file_status</code>, <code>get_file_block_locations</code>, <code>rename</code> and <code>delete</code>, with a NameNode namespace and 128 MB blocks placed on DataNodes. Run it, then try the tasks.</p>
+  <div class="code" data-lang="python" data-file="main.py"><pre><code>BLOCK = 128 * 1024 * 1024
+
+class FileSystem:
+    def __init__(self, datanodes):
+        self.ns = {}                       # path -&gt; (length, replication, blocks)
+        self.dns = datanodes
+        self.next_dn = 0
+
+    def create(self, path, data_len, replication=3):
+        blocks = []
+        for off in range(0, data_len, BLOCK):
+            hosts = [self.dns[(self.next_dn + i) % len(self.dns)] for i in range(replication)]
+            self.next_dn += 1
+            blocks.append((off, min(BLOCK, data_len - off), hosts))
+        self.ns[path] = (data_len, replication, blocks)
+
+    def get_file_status(self, path):
+        length, rep, blocks = self.ns[path]
+        return {&quot;path&quot;: path, &quot;len&quot;: length, &quot;replication&quot;: rep, &quot;blocksize&quot;: BLOCK}
+
+    def get_file_block_locations(self, path):
+        return self.ns[path][2]
+
+    def rename(self, src, dst):            # returns False instead of raising, like Java
+        if src not in self.ns or dst in self.ns:
+            return False
+        self.ns[dst] = self.ns.pop(src)
+        return True
+
+    def delete(self, path):
+        return self.ns.pop(path, None) is not None
+
+fs = FileSystem([&quot;datanode-1&quot;, &quot;datanode-2&quot;, &quot;datanode-3&quot;])
+fs.create(&quot;/user/hadoop/data/orders_x30.csv&quot;, 140_760_270)
+print(fs.get_file_status(&quot;/user/hadoop/data/orders_x30.csv&quot;))
+for off, length, hosts in fs.get_file_block_locations(&quot;/user/hadoop/data/orders_x30.csv&quot;):
+    print(f&quot;  block at offset {off:,} length {length:,} on {&#x27;, &#x27;.join(hosts)}&quot;)
+print(&quot;rename:&quot;, fs.rename(&quot;/user/hadoop/data/orders_x30.csv&quot;, &quot;/user/hadoop/data/old.csv&quot;))
+print(&quot;rename again:&quot;, fs.rename(&quot;/user/hadoop/data/orders_x30.csv&quot;, &quot;/user/hadoop/data/old.csv&quot;))</code></pre><div class="output">{&#x27;path&#x27;: &#x27;/user/hadoop/data/orders_x30.csv&#x27;, &#x27;len&#x27;: 140760270, &#x27;replication&#x27;: 3, &#x27;blocksize&#x27;: 134217728}
+  block at offset 0 length 134,217,728 on datanode-1, datanode-2, datanode-3
+  block at offset 134,217,728 length 6,542,542 on datanode-2, datanode-3, datanode-1
+rename: True
+rename again: False</div></div>
+  <ul class="anno"><li><code>        for off in range(0, data_len, BLOCK):</code><span>The file is cut into 128 MB blocks; the last one is shorter. The real file gave 134,217,728 + 6,542,542 bytes.</span></li><li><code>    def rename(self, src, dst):            # returns False instead of raising, like Java</code><span>Java's fs.rename() also returns a boolean. The real program printed rename: true. Code that ignores a false silently loses track of files.</span></li><li><code>    def get_file_block_locations(self, path):</code><span>Only metadata: the NameNode knows the hosts of every block. Schedulers use this to run tasks next to the data.</span></li></ul>
+  <div class="runner">
+    <script type="application/json">{
+ "lang": "python",
+ "file": "main.py",
+ "tasks": [
+  {
+   "label": "1 · Status, blocks, rename",
+   "hint": "Press <b>Run<\/b>. Why does the second rename print <code>False<\/code>?",
+   "code": "BLOCK = 128 * 1024 * 1024\n\nclass FileSystem:\n    def __init__(self, datanodes):\n        self.ns = {}                       # path -> (length, replication, blocks)\n        self.dns = datanodes\n        self.next_dn = 0\n\n    def create(self, path, data_len, replication=3):\n        blocks = []\n        for off in range(0, data_len, BLOCK):\n            hosts = [self.dns[(self.next_dn + i) % len(self.dns)] for i in range(replication)]\n            self.next_dn += 1\n            blocks.append((off, min(BLOCK, data_len - off), hosts))\n        self.ns[path] = (data_len, replication, blocks)\n\n    def get_file_status(self, path):\n        length, rep, blocks = self.ns[path]\n        return {\"path\": path, \"len\": length, \"replication\": rep, \"blocksize\": BLOCK}\n\n    def get_file_block_locations(self, path):\n        return self.ns[path][2]\n\n    def rename(self, src, dst):            # returns False instead of raising, like Java\n        if src not in self.ns or dst in self.ns:\n            return False\n        self.ns[dst] = self.ns.pop(src)\n        return True\n\n    def delete(self, path):\n        return self.ns.pop(path, None) is not None\n\nfs = FileSystem([\"datanode-1\", \"datanode-2\", \"datanode-3\"])\nfs.create(\"/user/hadoop/data/orders_x30.csv\", 140_760_270)\nprint(fs.get_file_status(\"/user/hadoop/data/orders_x30.csv\"))\nfor off, length, hosts in fs.get_file_block_locations(\"/user/hadoop/data/orders_x30.csv\"):\n    print(f\"  block at offset {off:,} length {length:,} on {', '.join(hosts)}\")\nprint(\"rename:\", fs.rename(\"/user/hadoop/data/orders_x30.csv\", \"/user/hadoop/data/old.csv\"))\nprint(\"rename again:\", fs.rename(\"/user/hadoop/data/orders_x30.csv\", \"/user/hadoop/data/old.csv\"))\n"
+  },
+  {
+   "label": "2 · Blocks of other files",
+   "hint": "<b>Predict first:<\/b> how many blocks does orders_x90.csv (422,280,810 bytes, shown as 402.7 M by -du -h) have, and how long is the last one?",
+   "code": "BLOCK = 128 * 1024 * 1024\nsize = 422_280_810\nfull, last = divmod(size, BLOCK)\nprint(\"blocks:\", full + (1 if last else 0), \" last block:\", f\"{last:,}\" if last else \"full\")\n"
+  },
+  {
+   "label": "3 · Seek into the middle",
+   "hint": "An input stream can <code>seek()<\/code>. Which block and offset inside it does byte 300,000,000 fall in?",
+   "code": "BLOCK = 128 * 1024 * 1024\npos = 300_000_000\nprint(\"block\", pos // BLOCK, \"offset inside it\", f\"{pos % BLOCK:,}\")\n"
+  },
+  {
+   "label": "4 · Count items like ItemCount",
+   "hint": "The same logic as ItemCount.java on a few lines. Then add a check that skips repeated header lines.",
+   "code": "lines = [\"order_id,item,amount\", \"1,chai,15\", \"2,dosa,45\", \"order_id,item,amount\", \"3,chai,15\"]\ncounts = {}\nfor line in lines[1:]:\n    item = line.split(\",\")[1]\n    counts[item] = counts.get(item, 0) + 1\nprint(counts)\n"
+  },
+  {
+   "label": "5 · Spot the error",
+   "hint": "This reads the status of a file that was already renamed. In Java this is a <code>FileNotFoundException<\/code>. Use the new name.",
+   "code": "ns = {\"/data/old.csv\": 140760270}\nprint(ns[\"/data/orders_x30.csv\"])\n"
+  }
+ ]
+}</script>
+  </div>
+  <h3 id="pc">Run it on your PC: Java against HDFS</h3>
+  <p>Save these files in the <code>hdfs-lab</code> folder. The namenode container already has Java and the Hadoop jars, so we copy the files in, compile there with <code>javac -cp $(hadoop classpath)</code>, package a jar and run it with <code>hadoop jar</code>. The exact commands are at the end of the first file.</p>
+  <div class="pcrun"><h4>Write, read, inspect, rename, delete</h4>
+  <div class="code" data-lang="bash" data-file="HdfsBasics.java"><pre><code>import java.io.BufferedReader;
+import java.io.InputStreamReader;
+import java.nio.charset.StandardCharsets;
+
+import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.fs.BlockLocation;
+import org.apache.hadoop.fs.FSDataInputStream;
+import org.apache.hadoop.fs.FSDataOutputStream;
+import org.apache.hadoop.fs.FileStatus;
+import org.apache.hadoop.fs.FileSystem;
+import org.apache.hadoop.fs.Path;
+
+public class HdfsBasics {
+    public static void main(String[] args) throws Exception {
+        Configuration conf = new Configuration();          // reads core-site.xml, hdfs-site.xml
+        try (FileSystem fs = FileSystem.get(conf)) {
+            System.out.println(&quot;Connected to: &quot; + fs.getUri());
+
+            Path dir = new Path(&quot;/user/hadoop/api_demo&quot;);
+            fs.mkdirs(dir);
+
+            // write a small file
+            Path file = new Path(dir, &quot;orders.csv&quot;);
+            try (FSDataOutputStream out = fs.create(file, true)) {   // true = overwrite
+                out.write(&quot;order_id,item,amount\n&quot;.getBytes(StandardCharsets.UTF_8));
+                out.write(&quot;3001,samosa,18\n3002,chai,15\n&quot;.getBytes(StandardCharsets.UTF_8));
+            }
+
+            // read it back
+            try (FSDataInputStream in = fs.open(file);
+                 BufferedReader r = new BufferedReader(new InputStreamReader(in, StandardCharsets.UTF_8))) {
+                String line;
+                while ((line = r.readLine()) != null) {
+                    System.out.println(&quot;  read: &quot; + line);
+                }
+            }
+
+            // metadata, as the NameNode stores it
+            FileStatus st = fs.getFileStatus(file);
+            System.out.printf(&quot;%s  %d bytes  replication %d  block size %d MB  owner %s%n&quot;,
+                    st.getPath().getName(), st.getLen(), st.getReplication(),
+                    st.getBlockSize() / (1024 * 1024), st.getOwner());
+
+            // where are the blocks of a big file?
+            Path big = new Path(&quot;/user/hadoop/data/orders_x30.csv&quot;);
+            FileStatus bs = fs.getFileStatus(big);
+            for (BlockLocation b : fs.getFileBlockLocations(bs, 0, bs.getLen())) {
+                System.out.printf(&quot;  block at offset %,d length %,d on %s%n&quot;,
+                        b.getOffset(), b.getLength(), String.join(&quot;, &quot;, b.getHosts()));
+            }
+
+            // list, rename, delete
+            for (FileStatus s : fs.listStatus(dir)) {
+                System.out.println(&quot;  ls: &quot; + s.getPath());
+            }
+            Path renamed = new Path(dir, &quot;orders_old.csv&quot;);
+            System.out.println(&quot;rename: &quot; + fs.rename(file, renamed));
+            System.out.println(&quot;exists after rename: &quot; + fs.exists(file));
+            System.out.println(&quot;delete: &quot; + fs.delete(dir, true));             // true = recursive
+        }
+    }
+}
+
+// In the hdfs-lab folder:
+//   docker cp HdfsBasics.java lab5-namenode-1:/tmp/
+//   docker cp ItemCount.java lab5-namenode-1:/tmp/
+//   docker exec -it lab5-namenode-1 bash
+// Then inside the container:
+//   cd /tmp
+//   javac -cp $(hadoop classpath) HdfsBasics.java ItemCount.java
+//   jar cf hdfs-demo.jar *.class
+//   hadoop jar hdfs-demo.jar HdfsBasics</code></pre><div class="output">Connected to: hdfs://namenode
+  read: order_id,item,amount
+  read: 3001,samosa,18
+  read: 3002,chai,15
+orders.csv  49 bytes  replication 3  block size 128 MB  owner hadoop
+  block at offset 0 length 134,217,728 on ab3b1bedf98a, 46201bb62e68, 264eb9c0f8e2
+  block at offset 134,217,728 length 6,542,542 on ab3b1bedf98a, 46201bb62e68, 264eb9c0f8e2
+  ls: hdfs://namenode/user/hadoop/api_demo/orders.csv
+rename: true
+exists after rename: false
+delete: true</div></div>
+  <p class="muted">Real output. The hosts are the container IDs of datanode-1, -2 and -3 (yours will differ). orders_x30.csv is canteen_orders.csv repeated 30 times; if you don't have it: for i in $(seq 30); do cat canteen_orders.csv; done | hdfs dfs -put - /user/hadoop/data/orders_x30.csv</p></div>
+  <div class="pcrun"><h4>Count orders per item, streaming one file</h4>
+  <div class="code" data-lang="bash" data-file="ItemCount.java"><pre><code>import java.io.BufferedReader;
+import java.io.InputStreamReader;
+import java.nio.charset.StandardCharsets;
+import java.util.Map;
+import java.util.TreeMap;
+
+import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.fs.FSDataInputStream;
+import org.apache.hadoop.fs.FileSystem;
+import org.apache.hadoop.fs.Path;
+
+/** Count orders per item by streaming one HDFS file through a single client. */
+public class ItemCount {
+    public static void main(String[] args) throws Exception {
+        Path path = new Path(args[0]);
+        Map&lt;String, Integer&gt; counts = new TreeMap&lt;&gt;();
+        long start = System.currentTimeMillis();
+        try (FileSystem fs = FileSystem.get(new Configuration());
+             FSDataInputStream in = fs.open(path);
+             BufferedReader r = new BufferedReader(new InputStreamReader(in, StandardCharsets.UTF_8))) {
+            r.readLine();                                         // skip the header
+            String line;
+            while ((line = r.readLine()) != null) {
+                String item = line.split(&quot;,&quot;)[1];
+                counts.merge(item, 1, Integer::sum);
+            }
+        }
+        counts.forEach((item, n) -&gt; System.out.printf(&quot;%-9s %,d%n&quot;, item, n));
+        System.out.println(&quot;took &quot; + (System.currentTimeMillis() - start) + &quot; ms in one JVM&quot;);
+    }
+}
+
+// Inside the namenode container, in /tmp:
+//   hadoop jar hdfs-demo.jar ItemCount /user/hadoop/data/canteen_orders.csv
+//   hadoop jar hdfs-demo.jar ItemCount /user/hadoop/data/orders_x90.csv</code></pre><div class="output">chai      50,170
+dosa      49,948
+idli      49,984
+poha      49,891
+samosa    50,021
+vada pav  49,986
+took 1327 ms in one JVM
+
+chai      4,515,300
+dosa      4,495,320
+idli      4,498,560
+item      89
+poha      4,490,190
+samosa    4,501,890
+vada pav  4,498,740
+took 5890 ms in one JVM</div></div>
+  <p class="muted">Real output for the 4.5 MB and the 403 MB file. “item 89” comes from header lines inside the concatenated file: a data bug, not an HDFS one.</p></div>
+  <div class="pcrun"><h4>The same file over HTTP (WebHDFS)</h4>
+  <div class="code" data-lang="bash" data-file="webhdfs.sh"><pre><code>#!/usr/bin/env bash
+# webhdfs.sh: the same file system over plain HTTP (REST). No Java, no Hadoop client needed.
+# Run inside the namenode container:  bash webhdfs.sh
+NN=http://namenode:9870/webhdfs/v1
+F=/user/hadoop/canteen/raw/day1.csv
+echo &quot;--- GETFILESTATUS (metadata, answered by the NameNode)&quot;
+curl -s &quot;$NN$F?op=GETFILESTATUS&amp;user.name=hadoop&quot;; echo
+echo &quot;--- OPEN without following redirects&quot;
+curl -s -i &quot;$NN$F?op=OPEN&amp;user.name=hadoop&quot; | grep -iE &quot;^HTTP|^Location&quot;
+echo &quot;--- OPEN, following the redirect to the DataNode (-L)&quot;
+curl -s -L &quot;$NN$F?op=OPEN&amp;user.name=hadoop&quot;
+
+# In the hdfs-lab folder:
+#   docker cp webhdfs.sh lab5-namenode-1:/tmp/
+#   docker exec lab5-namenode-1 bash /tmp/webhdfs.sh</code></pre><div class="output">--- GETFILESTATUS (metadata, answered by the NameNode)
+{&quot;FileStatus&quot;:{&quot;accessTime&quot;:1792579946689,&quot;blockSize&quot;:134217728,&quot;childrenNum&quot;:0,&quot;fileId&quot;:16425,&quot;group&quot;:&quot;supergroup&quot;,&quot;length&quot;:47,&quot;modificationTime&quot;:1792575484677,&quot;owner&quot;:&quot;hadoop&quot;,&quot;pathSuffix&quot;:&quot;&quot;,&quot;permission&quot;:&quot;640&quot;,&quot;replication&quot;:3,&quot;storagePolicy&quot;:0,&quot;type&quot;:&quot;FILE&quot;}}
+--- OPEN without following redirects
+HTTP/1.1 307 Temporary Redirect
+Location: http://46201bb62e68:9864/webhdfs/v1/user/hadoop/canteen/raw/day1.csv?op=OPEN&amp;user.name=hadoop&amp;namenoderpcaddress=namenode:8020&amp;offset=0
+--- OPEN, following the redirect to the DataNode (-L)
+order_id,item,amount
+2001,chai,15
+2002,dosa,45</div></div>
+  <p class="muted">Real output. The NameNode answers GETFILESTATUS itself and redirects OPEN (HTTP 307) to a DataNode on port 9864.</p></div>
+</section>
+
+<section class="part" id="tracer">
+  <span class="part-label"><b>8</b> Line by line</span>
+  <h2>Reading a file block by block, as open() does</h2>
+  <p>A simplified reader: ask for block locations once, then read each block from its first (nearest) host until the file's length is reached.</p>
+  <div class="tracer">
+    <script type="application/json">{
+ "lang": "python",
+ "code": [
+  "locations = [(0, 100, [\"dn-1\", \"dn-2\"]), (100, 100, [\"dn-3\", \"dn-1\"]), (200, 40, [\"dn-2\", \"dn-3\"])]",
+  "pos, served = 0, []",
+  "for off, length, hosts in locations:",
+  "    served.append((hosts[0], off, off + length))",
+  "    pos = off + length",
+  "print(\"read\", pos, \"bytes:\", served)"
+ ],
+ "steps": [
+  {
+   "line": 1,
+   "phase": "Locations",
+   "note": "One getBlockLocations call returns offsets, lengths and hosts. <code>locations<\/code> is created: → list #1.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "locations",
+       "→ list #1"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (3)<\/b> [→ tuple #2, → tuple #3, → tuple #4]",
+    "<b>#2 tuple (3)<\/b> (0, 100, → list #5)",
+    "<b>#3 tuple (3)<\/b> (100, 100, → list #6)",
+    "<b>#4 tuple (3)<\/b> (200, 40, → list #7)",
+    "<b>#5 list (2)<\/b> [&#x27;dn-1&#x27;, &#x27;dn-2&#x27;]",
+    "<b>#6 list (2)<\/b> [&#x27;dn-3&#x27;, &#x27;dn-1&#x27;]",
+    "<b>#7 list (2)<\/b> [&#x27;dn-2&#x27;, &#x27;dn-3&#x27;]"
+   ],
+   "newVar": "locations"
+  },
+  {
+   "line": 2,
+   "phase": "Python",
+   "note": "<code>pos<\/code> is created: 0. <code>served<\/code> is created: → list #8. A new list object (#8) is created: []",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "locations",
+       "→ list #1"
+      ],
+      [
+       "pos",
+       "0"
+      ],
+      [
+       "served",
+       "→ list #8"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (3)<\/b> [→ tuple #2, → tuple #3, → tuple #4]",
+    "<b>#2 tuple (3)<\/b> (0, 100, → list #5)",
+    "<b>#3 tuple (3)<\/b> (100, 100, → list #6)",
+    "<b>#4 tuple (3)<\/b> (200, 40, → list #7)",
+    "<b>#5 list (2)<\/b> [&#x27;dn-1&#x27;, &#x27;dn-2&#x27;]",
+    "<b>#6 list (2)<\/b> [&#x27;dn-3&#x27;, &#x27;dn-1&#x27;]",
+    "<b>#7 list (2)<\/b> [&#x27;dn-2&#x27;, &#x27;dn-3&#x27;]",
+    "<b>#8 list (0)<\/b> []"
+   ],
+   "newVar": "served"
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "<code>off<\/code> is created: 0. <code>length<\/code> is created: 100. <code>hosts<\/code> is created: → list #5.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "locations",
+       "→ list #1"
+      ],
+      [
+       "pos",
+       "0"
+      ],
+      [
+       "served",
+       "→ list #8"
+      ],
+      [
+       "off",
+       "0"
+      ],
+      [
+       "length",
+       "100"
+      ],
+      [
+       "hosts",
+       "→ list #5"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (3)<\/b> [→ tuple #2, → tuple #3, → tuple #4]",
+    "<b>#2 tuple (3)<\/b> (0, 100, → list #5)",
+    "<b>#3 tuple (3)<\/b> (100, 100, → list #6)",
+    "<b>#4 tuple (3)<\/b> (200, 40, → list #7)",
+    "<b>#5 list (2)<\/b> [&#x27;dn-1&#x27;, &#x27;dn-2&#x27;]",
+    "<b>#6 list (2)<\/b> [&#x27;dn-3&#x27;, &#x27;dn-1&#x27;]",
+    "<b>#7 list (2)<\/b> [&#x27;dn-2&#x27;, &#x27;dn-3&#x27;]",
+    "<b>#8 list (0)<\/b> []"
+   ],
+   "newVar": "hosts"
+  },
+  {
+   "line": 4,
+   "phase": "Per block",
+   "note": "The stream switches DataNodes at block boundaries; your code just keeps reading. Object #8 list now holds [→ tuple #9] A new tuple object (#9) is created: (&#x27;dn-1&#x27;, 0, 100)",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "locations",
+       "→ list #1"
+      ],
+      [
+       "pos",
+       "0"
+      ],
+      [
+       "served",
+       "→ list #8"
+      ],
+      [
+       "off",
+       "0"
+      ],
+      [
+       "length",
+       "100"
+      ],
+      [
+       "hosts",
+       "→ list #5"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (3)<\/b> [→ tuple #2, → tuple #3, → tuple #4]",
+    "<b>#2 tuple (3)<\/b> (0, 100, → list #5)",
+    "<b>#3 tuple (3)<\/b> (100, 100, → list #6)",
+    "<b>#4 tuple (3)<\/b> (200, 40, → list #7)",
+    "<b>#5 list (2)<\/b> [&#x27;dn-1&#x27;, &#x27;dn-2&#x27;]",
+    "<b>#6 list (2)<\/b> [&#x27;dn-3&#x27;, &#x27;dn-1&#x27;]",
+    "<b>#7 list (2)<\/b> [&#x27;dn-2&#x27;, &#x27;dn-3&#x27;]",
+    "<b>#8 list (1)<\/b> [→ tuple #9]",
+    "<b>#9 tuple (3)<\/b> (&#x27;dn-1&#x27;, 0, 100)"
+   ]
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "<code>pos<\/code> changes to 100.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "locations",
+       "→ list #1"
+      ],
+      [
+       "pos",
+       "100"
+      ],
+      [
+       "served",
+       "→ list #8"
+      ],
+      [
+       "off",
+       "0"
+      ],
+      [
+       "length",
+       "100"
+      ],
+      [
+       "hosts",
+       "→ list #5"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (3)<\/b> [→ tuple #2, → tuple #3, → tuple #4]",
+    "<b>#2 tuple (3)<\/b> (0, 100, → list #5)",
+    "<b>#3 tuple (3)<\/b> (100, 100, → list #6)",
+    "<b>#4 tuple (3)<\/b> (200, 40, → list #7)",
+    "<b>#5 list (2)<\/b> [&#x27;dn-1&#x27;, &#x27;dn-2&#x27;]",
+    "<b>#6 list (2)<\/b> [&#x27;dn-3&#x27;, &#x27;dn-1&#x27;]",
+    "<b>#7 list (2)<\/b> [&#x27;dn-2&#x27;, &#x27;dn-3&#x27;]",
+    "<b>#8 list (1)<\/b> [→ tuple #9]",
+    "<b>#9 tuple (3)<\/b> (&#x27;dn-1&#x27;, 0, 100)"
+   ],
+   "newVar": "pos"
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "<code>off<\/code> changes to 100. <code>hosts<\/code> changes to → list #6.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "locations",
+       "→ list #1"
+      ],
+      [
+       "pos",
+       "100"
+      ],
+      [
+       "served",
+       "→ list #8"
+      ],
+      [
+       "off",
+       "100"
+      ],
+      [
+       "length",
+       "100"
+      ],
+      [
+       "hosts",
+       "→ list #6"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (3)<\/b> [→ tuple #2, → tuple #3, → tuple #4]",
+    "<b>#2 tuple (3)<\/b> (0, 100, → list #5)",
+    "<b>#3 tuple (3)<\/b> (100, 100, → list #6)",
+    "<b>#4 tuple (3)<\/b> (200, 40, → list #7)",
+    "<b>#5 list (2)<\/b> [&#x27;dn-1&#x27;, &#x27;dn-2&#x27;]",
+    "<b>#6 list (2)<\/b> [&#x27;dn-3&#x27;, &#x27;dn-1&#x27;]",
+    "<b>#7 list (2)<\/b> [&#x27;dn-2&#x27;, &#x27;dn-3&#x27;]",
+    "<b>#8 list (1)<\/b> [→ tuple #9]",
+    "<b>#9 tuple (3)<\/b> (&#x27;dn-1&#x27;, 0, 100)"
+   ],
+   "newVar": "hosts"
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "Object #8 list now holds [→ tuple #9, → tuple #10] A new tuple object (#10) is created: (&#x27;dn-3&#x27;, 100, 200)",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "locations",
+       "→ list #1"
+      ],
+      [
+       "pos",
+       "100"
+      ],
+      [
+       "served",
+       "→ list #8"
+      ],
+      [
+       "off",
+       "100"
+      ],
+      [
+       "length",
+       "100"
+      ],
+      [
+       "hosts",
+       "→ list #6"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (3)<\/b> [→ tuple #2, → tuple #3, → tuple #4]",
+    "<b>#2 tuple (3)<\/b> (0, 100, → list #5)",
+    "<b>#3 tuple (3)<\/b> (100, 100, → list #6)",
+    "<b>#4 tuple (3)<\/b> (200, 40, → list #7)",
+    "<b>#5 list (2)<\/b> [&#x27;dn-1&#x27;, &#x27;dn-2&#x27;]",
+    "<b>#6 list (2)<\/b> [&#x27;dn-3&#x27;, &#x27;dn-1&#x27;]",
+    "<b>#7 list (2)<\/b> [&#x27;dn-2&#x27;, &#x27;dn-3&#x27;]",
+    "<b>#8 list (2)<\/b> [→ tuple #9, → tuple #10]",
+    "<b>#9 tuple (3)<\/b> (&#x27;dn-1&#x27;, 0, 100)",
+    "<b>#10 tuple (3)<\/b> (&#x27;dn-3&#x27;, 100, 200)"
+   ]
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "<code>pos<\/code> changes to 200.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "locations",
+       "→ list #1"
+      ],
+      [
+       "pos",
+       "200"
+      ],
+      [
+       "served",
+       "→ list #8"
+      ],
+      [
+       "off",
+       "100"
+      ],
+      [
+       "length",
+       "100"
+      ],
+      [
+       "hosts",
+       "→ list #6"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (3)<\/b> [→ tuple #2, → tuple #3, → tuple #4]",
+    "<b>#2 tuple (3)<\/b> (0, 100, → list #5)",
+    "<b>#3 tuple (3)<\/b> (100, 100, → list #6)",
+    "<b>#4 tuple (3)<\/b> (200, 40, → list #7)",
+    "<b>#5 list (2)<\/b> [&#x27;dn-1&#x27;, &#x27;dn-2&#x27;]",
+    "<b>#6 list (2)<\/b> [&#x27;dn-3&#x27;, &#x27;dn-1&#x27;]",
+    "<b>#7 list (2)<\/b> [&#x27;dn-2&#x27;, &#x27;dn-3&#x27;]",
+    "<b>#8 list (2)<\/b> [→ tuple #9, → tuple #10]",
+    "<b>#9 tuple (3)<\/b> (&#x27;dn-1&#x27;, 0, 100)",
+    "<b>#10 tuple (3)<\/b> (&#x27;dn-3&#x27;, 100, 200)"
+   ],
+   "newVar": "pos"
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "<code>off<\/code> changes to 200. <code>length<\/code> changes to 40. <code>hosts<\/code> changes to → list #7.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "locations",
+       "→ list #1"
+      ],
+      [
+       "pos",
+       "200"
+      ],
+      [
+       "served",
+       "→ list #8"
+      ],
+      [
+       "off",
+       "200"
+      ],
+      [
+       "length",
+       "40"
+      ],
+      [
+       "hosts",
+       "→ list #7"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (3)<\/b> [→ tuple #2, → tuple #3, → tuple #4]",
+    "<b>#2 tuple (3)<\/b> (0, 100, → list #5)",
+    "<b>#3 tuple (3)<\/b> (100, 100, → list #6)",
+    "<b>#4 tuple (3)<\/b> (200, 40, → list #7)",
+    "<b>#5 list (2)<\/b> [&#x27;dn-1&#x27;, &#x27;dn-2&#x27;]",
+    "<b>#6 list (2)<\/b> [&#x27;dn-3&#x27;, &#x27;dn-1&#x27;]",
+    "<b>#7 list (2)<\/b> [&#x27;dn-2&#x27;, &#x27;dn-3&#x27;]",
+    "<b>#8 list (2)<\/b> [→ tuple #9, → tuple #10]",
+    "<b>#9 tuple (3)<\/b> (&#x27;dn-1&#x27;, 0, 100)",
+    "<b>#10 tuple (3)<\/b> (&#x27;dn-3&#x27;, 100, 200)"
+   ],
+   "newVar": "hosts"
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "Object #8 list now holds [→ tuple #9, → tuple #10, → tuple #11] A new tuple object (#11) is created: (&#x27;dn-2&#x27;, 200, 240)",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "locations",
+       "→ list #1"
+      ],
+      [
+       "pos",
+       "200"
+      ],
+      [
+       "served",
+       "→ list #8"
+      ],
+      [
+       "off",
+       "200"
+      ],
+      [
+       "length",
+       "40"
+      ],
+      [
+       "hosts",
+       "→ list #7"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (3)<\/b> [→ tuple #2, → tuple #3, → tuple #4]",
+    "<b>#2 tuple (3)<\/b> (0, 100, → list #5)",
+    "<b>#3 tuple (3)<\/b> (100, 100, → list #6)",
+    "<b>#4 tuple (3)<\/b> (200, 40, → list #7)",
+    "<b>#5 list (2)<\/b> [&#x27;dn-1&#x27;, &#x27;dn-2&#x27;]",
+    "<b>#6 list (2)<\/b> [&#x27;dn-3&#x27;, &#x27;dn-1&#x27;]",
+    "<b>#7 list (2)<\/b> [&#x27;dn-2&#x27;, &#x27;dn-3&#x27;]",
+    "<b>#8 list (3)<\/b> [→ tuple #9, → tuple #10, → tuple #11]",
+    "<b>#9 tuple (3)<\/b> (&#x27;dn-1&#x27;, 0, 100)",
+    "<b>#10 tuple (3)<\/b> (&#x27;dn-3&#x27;, 100, 200)",
+    "<b>#11 tuple (3)<\/b> (&#x27;dn-2&#x27;, 200, 240)"
+   ]
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "<code>pos<\/code> changes to 240.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "locations",
+       "→ list #1"
+      ],
+      [
+       "pos",
+       "240"
+      ],
+      [
+       "served",
+       "→ list #8"
+      ],
+      [
+       "off",
+       "200"
+      ],
+      [
+       "length",
+       "40"
+      ],
+      [
+       "hosts",
+       "→ list #7"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (3)<\/b> [→ tuple #2, → tuple #3, → tuple #4]",
+    "<b>#2 tuple (3)<\/b> (0, 100, → list #5)",
+    "<b>#3 tuple (3)<\/b> (100, 100, → list #6)",
+    "<b>#4 tuple (3)<\/b> (200, 40, → list #7)",
+    "<b>#5 list (2)<\/b> [&#x27;dn-1&#x27;, &#x27;dn-2&#x27;]",
+    "<b>#6 list (2)<\/b> [&#x27;dn-3&#x27;, &#x27;dn-1&#x27;]",
+    "<b>#7 list (2)<\/b> [&#x27;dn-2&#x27;, &#x27;dn-3&#x27;]",
+    "<b>#8 list (3)<\/b> [→ tuple #9, → tuple #10, → tuple #11]",
+    "<b>#9 tuple (3)<\/b> (&#x27;dn-1&#x27;, 0, 100)",
+    "<b>#10 tuple (3)<\/b> (&#x27;dn-3&#x27;, 100, 200)",
+    "<b>#11 tuple (3)<\/b> (&#x27;dn-2&#x27;, 200, 240)"
+   ],
+   "newVar": "pos"
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "Nothing is left to loop over, so the loop ends and Python moves on.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "locations",
+       "→ list #1"
+      ],
+      [
+       "pos",
+       "240"
+      ],
+      [
+       "served",
+       "→ list #8"
+      ],
+      [
+       "off",
+       "200"
+      ],
+      [
+       "length",
+       "40"
+      ],
+      [
+       "hosts",
+       "→ list #7"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (3)<\/b> [→ tuple #2, → tuple #3, → tuple #4]",
+    "<b>#2 tuple (3)<\/b> (0, 100, → list #5)",
+    "<b>#3 tuple (3)<\/b> (100, 100, → list #6)",
+    "<b>#4 tuple (3)<\/b> (200, 40, → list #7)",
+    "<b>#5 list (2)<\/b> [&#x27;dn-1&#x27;, &#x27;dn-2&#x27;]",
+    "<b>#6 list (2)<\/b> [&#x27;dn-3&#x27;, &#x27;dn-1&#x27;]",
+    "<b>#7 list (2)<\/b> [&#x27;dn-2&#x27;, &#x27;dn-3&#x27;]",
+    "<b>#8 list (3)<\/b> [→ tuple #9, → tuple #10, → tuple #11]",
+    "<b>#9 tuple (3)<\/b> (&#x27;dn-1&#x27;, 0, 100)",
+    "<b>#10 tuple (3)<\/b> (&#x27;dn-3&#x27;, 100, 200)",
+    "<b>#11 tuple (3)<\/b> (&#x27;dn-2&#x27;, 200, 240)"
+   ]
+  },
+  {
+   "line": 6,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "locations",
+       "→ list #1"
+      ],
+      [
+       "pos",
+       "240"
+      ],
+      [
+       "served",
+       "→ list #8"
+      ],
+      [
+       "off",
+       "200"
+      ],
+      [
+       "length",
+       "40"
+      ],
+      [
+       "hosts",
+       "→ list #7"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (3)<\/b> [→ tuple #2, → tuple #3, → tuple #4]",
+    "<b>#2 tuple (3)<\/b> (0, 100, → list #5)",
+    "<b>#3 tuple (3)<\/b> (100, 100, → list #6)",
+    "<b>#4 tuple (3)<\/b> (200, 40, → list #7)",
+    "<b>#5 list (2)<\/b> [&#x27;dn-1&#x27;, &#x27;dn-2&#x27;]",
+    "<b>#6 list (2)<\/b> [&#x27;dn-3&#x27;, &#x27;dn-1&#x27;]",
+    "<b>#7 list (2)<\/b> [&#x27;dn-2&#x27;, &#x27;dn-3&#x27;]",
+    "<b>#8 list (3)<\/b> [→ tuple #9, → tuple #10, → tuple #11]",
+    "<b>#9 tuple (3)<\/b> (&#x27;dn-1&#x27;, 0, 100)",
+    "<b>#10 tuple (3)<\/b> (&#x27;dn-3&#x27;, 100, 200)",
+    "<b>#11 tuple (3)<\/b> (&#x27;dn-2&#x27;, 200, 240)"
+   ],
+   "out": "read 240 bytes: [('dn-1', 0, 100), ('dn-3', 100, 200), ('dn-2', 200, 240)]\n"
+  }
+ ]
+}</script>
+  </div>
+
+<h3 id="worked">Worked examples: real problems, solved and traced in memory</h3>
+  <p class="wx-intro">Three API questions with numbers: what one JVM saves over shell calls, how fast one client can scan, and how many readers you need. Each runs live and is traced in memory.</p>
+  <article class="wx">
+    <div class="wx__head"><span class="wx__num">Example 1</span><span class="lvl lvl--b">Beginner</span><span class="wx__tag">API · JVM start-up</span></div>
+    <h4>API instead of shell calls</h4>
+    <div class="wx__problem"><p class="wx__label">Problem statement</p><p>A backend saves 2,000 small order batches a day. Through <code>hdfs dfs -put</code> each call costs about 1.8 s of JVM start-up; through the API in a running service, about 0.02 s each. How much time is saved per day?</p></div>
+    <div class="prob__io"><div><small>Input</small><pre>2,000 calls · 1.8 s vs 0.02 s</pre></div><div><small>Expected output</small><pre>shell 60 min, API 40 s, saved 59 min per day</pre></div></div>
+    <div class="wx__approach"><p class="wx__label">Approach</p><ol><li>Shell total = calls × 1.8 s.</li><li>API total = calls × 0.02 s.</li><li>Difference in minutes.</li></ol></div>
+    <p class="wx__label">Solution: run it live</p>
+    <div class="runner">
+    <script type="application/json">{
+ "lang": "python",
+ "file": "main.py",
+ "tasks": [
+  {
+   "label": "Solution",
+   "hint": "60 minutes vs 40 seconds. For one-off admin work the shell is fine; for applications use the API.",
+   "code": "calls = 2000\nshell, api = calls * 1.8, calls * 0.02\nprint(f\"shell {shell / 60:.0f} min, API {api:.0f} s, saved {(shell - api) / 60:.0f} min per day\")\n"
+  }
+ ]
+}</script>
+    </div>
+    <p class="wx__label">What happens in memory, step by step</p>
+    <p class="wx__how">Recorded from a real Python run: press <b>Next</b> to execute one line at a time. Watch variables change in each frame, and lists and dictionaries (numbered #1, #2 …) fill up as objects.</p>
+    <div class="tracer">
+    <script type="application/json">{
+ "lang": "python",
+ "code": [
+  "calls = 2000",
+  "shell, api = calls * 1.8, calls * 0.02",
+  "print(f\"shell {shell / 60:.0f} min, API {api:.0f} s, saved {(shell - api) / 60:.0f} min per day\")"
+ ],
+ "steps": [
+  {
+   "line": 1,
+   "phase": "Python",
+   "note": "<code>calls<\/code> is created: 2000.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "calls",
+       "2000"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "calls"
+  },
+  {
+   "line": 2,
+   "phase": "Per call",
+   "note": "The JVM starts once in a service; each API call is just RPCs. <code>shell<\/code> is created: 3600.0. <code>api<\/code> is created: 40.0.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "calls",
+       "2000"
+      ],
+      [
+       "shell",
+       "3600.0"
+      ],
+      [
+       "api",
+       "40.0"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "api"
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "calls",
+       "2000"
+      ],
+      [
+       "shell",
+       "3600.0"
+      ],
+      [
+       "api",
+       "40.0"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "out": "shell 60 min, API 40 s, saved 59 min per day\n"
+  }
+ ]
+}</script>
+    </div>
+  </article>
+  <article class="wx">
+    <div class="wx__head"><span class="wx__num">Example 2</span><span class="lvl lvl--i">Intermediate</span><span class="wx__tag">Throughput · one client</span></div>
+    <h4>How long does one reader take?</h4>
+    <div class="wx__problem"><p class="wx__label">Problem statement</p><p>ItemCount read 403 MB in 5.89 s. At that speed, how long would one client take for 1 TB, and for 4 TB?</p></div>
+    <div class="prob__io"><div><small>Input</small><pre>402.7 MB in 5.89 s</pre></div><div><small>Expected output</small><pre>1 TB: 4.3 hours at 68 MB/s
+4 TB: 17.0 hours at 68 MB/s</pre></div></div>
+    <div class="wx__approach"><p class="wx__label">Approach</p><ol><li>Speed = MB ÷ seconds.</li><li>Time = size ÷ speed.</li><li>Convert to hours.</li></ol></div>
+    <p class="wx__label">Solution: run it live</p>
+    <div class="runner">
+    <script type="application/json">{
+ "lang": "python",
+ "file": "main.py",
+ "tasks": [
+  {
+   "label": "Solution",
+   "hint": "About 4.3 and 17 hours. One client is limited by one network link and one CPU; that is the problem MapReduce solves.",
+   "code": "speed = 402.7 / 5.89                     # MB/s\nfor tb in [1, 4]:\n    hours = tb * 1024 * 1024 / speed / 3600\n    print(f\"{tb} TB: {hours:.1f} hours at {speed:.0f} MB/s\")\n"
+  }
+ ]
+}</script>
+    </div>
+    <p class="wx__label">What happens in memory, step by step</p>
+    <p class="wx__how">Recorded from a real Python run: press <b>Next</b> to execute one line at a time. Watch variables change in each frame, and lists and dictionaries (numbered #1, #2 …) fill up as objects.</p>
+    <div class="tracer">
+    <script type="application/json">{
+ "lang": "python",
+ "code": [
+  "speed = 402.7 / 5.89                     # MB/s",
+  "for tb in [1, 4]:",
+  "    hours = tb * 1024 * 1024 / speed / 3600",
+  "    print(f\"{tb} TB: {hours:.1f} hours at {speed:.0f} MB/s\")"
+ ],
+ "steps": [
+  {
+   "line": 1,
+   "phase": "Measured",
+   "note": "Real lab number, one JVM, one stream. <code>speed<\/code> is created: 68.3701.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "speed",
+       "68.3701"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "speed"
+  },
+  {
+   "line": 2,
+   "phase": "Python",
+   "note": "<code>tb<\/code> is created: 1.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "speed",
+       "68.3701"
+      ],
+      [
+       "tb",
+       "1"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "tb"
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "<code>hours<\/code> is created: 4.2602.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "speed",
+       "68.3701"
+      ],
+      [
+       "tb",
+       "1"
+      ],
+      [
+       "hours",
+       "4.2602"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "hours"
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "speed",
+       "68.3701"
+      ],
+      [
+       "tb",
+       "1"
+      ],
+      [
+       "hours",
+       "4.2602"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "out": "1 TB: 4.3 hours at 68 MB/s\n"
+  },
+  {
+   "line": 2,
+   "phase": "Python",
+   "note": "<code>tb<\/code> changes to 4.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "speed",
+       "68.3701"
+      ],
+      [
+       "tb",
+       "4"
+      ],
+      [
+       "hours",
+       "4.2602"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "tb"
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "<code>hours<\/code> changes to 17.0408.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "speed",
+       "68.3701"
+      ],
+      [
+       "tb",
+       "4"
+      ],
+      [
+       "hours",
+       "17.0408"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "hours"
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "speed",
+       "68.3701"
+      ],
+      [
+       "tb",
+       "4"
+      ],
+      [
+       "hours",
+       "17.0408"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "out": "4 TB: 17.0 hours at 68 MB/s\n"
+  },
+  {
+   "line": 2,
+   "phase": "Python",
+   "note": "Nothing is left to loop over, so the loop ends and Python moves on.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "speed",
+       "68.3701"
+      ],
+      [
+       "tb",
+       "4"
+      ],
+      [
+       "hours",
+       "17.0408"
+      ]
+     ]
+    }
+   ],
+   "heap": []
+  }
+ ]
+}</script>
+    </div>
+  </article>
+  <article class="wx">
+    <div class="wx__head"><span class="wx__num">Example 3</span><span class="lvl lvl--a">Advanced</span><span class="wx__tag">Parallelism · blocks</span></div>
+    <h4>How many parallel readers for a 1-hour target?</h4>
+    <div class="wx__problem"><p class="wx__label">Problem statement</p><p>A 4 TB file has 128 MB blocks. If each reader handles whole blocks at 68 MB/s, how many parallel readers are needed to finish within one hour, and how many blocks does each read?</p></div>
+    <div class="prob__io"><div><small>Input</small><pre>4 TB · 128 MB blocks · 68 MB/s · 1 hour</pre></div><div><small>Expected output</small><pre>32,768 blocks, 18 readers, about 1821 blocks each</pre></div></div>
+    <div class="wx__approach"><p class="wx__label">Approach</p><ol><li>Blocks = size ÷ 128 MB.</li><li>One reader reads 68 × 3600 MB per hour.</li><li>Readers = ceil(size ÷ per-reader capacity); blocks each = blocks ÷ readers.</li></ol></div>
+    <p class="wx__label">Solution: run it live</p>
+    <div class="runner">
+    <script type="application/json">{
+ "lang": "python",
+ "file": "main.py",
+ "tasks": [
+  {
+   "label": "Solution",
+   "hint": "32,768 blocks, 18 readers. Using getFileBlockLocations, each reader can run on a node that holds its blocks: that is a MapReduce map task.",
+   "code": "import math\nsize_mb = 4 * 1024 * 1024\nblocks = size_mb // 128\nper_reader = 68 * 3600\nreaders = math.ceil(size_mb / per_reader)\nprint(f\"{blocks:,} blocks, {readers} readers, about {math.ceil(blocks / readers)} blocks each\")\n"
+  }
+ ]
+}</script>
+    </div>
+    <p class="wx__label">What happens in memory, step by step</p>
+    <p class="wx__how">Recorded from a real Python run: press <b>Next</b> to execute one line at a time. Watch variables change in each frame, and lists and dictionaries (numbered #1, #2 …) fill up as objects.</p>
+    <div class="tracer">
+    <script type="application/json">{
+ "lang": "python",
+ "code": [
+  "import math",
+  "size_mb = 4 * 1024 * 1024",
+  "blocks = size_mb // 128",
+  "per_reader = 68 * 3600",
+  "readers = math.ceil(size_mb / per_reader)",
+  "print(f\"{blocks:,} blocks, {readers} readers, about {math.ceil(blocks / readers)} blocks each\")"
+ ],
+ "steps": [
+  {
+   "line": 1,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": []
+    }
+   ],
+   "heap": []
+  },
+  {
+   "line": 2,
+   "phase": "Python",
+   "note": "<code>size_mb<\/code> is created: 4194304.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "size_mb",
+       "4194304"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "size_mb"
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "<code>blocks<\/code> is created: 32768.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "size_mb",
+       "4194304"
+      ],
+      [
+       "blocks",
+       "32768"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "blocks"
+  },
+  {
+   "line": 4,
+   "phase": "Capacity",
+   "note": "What one reader can do in an hour. <code>per_reader<\/code> is created: 244800.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "size_mb",
+       "4194304"
+      ],
+      [
+       "blocks",
+       "32768"
+      ],
+      [
+       "per_reader",
+       "244800"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "per_reader"
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "<code>readers<\/code> is created: 18.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "size_mb",
+       "4194304"
+      ],
+      [
+       "blocks",
+       "32768"
+      ],
+      [
+       "per_reader",
+       "244800"
+      ],
+      [
+       "readers",
+       "18"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "readers"
+  },
+  {
+   "line": 6,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "size_mb",
+       "4194304"
+      ],
+      [
+       "blocks",
+       "32768"
+      ],
+      [
+       "per_reader",
+       "244800"
+      ],
+      [
+       "readers",
+       "18"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "out": "32,768 blocks, 18 readers, about 1821 blocks each\n"
+  }
+ ]
+}</script>
+    </div>
+  </article>
+</section>
+
+<section class="part" id="quiz">
+  <span class="part-label"><b>9</b> Quiz and revision</span>
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <script type="application/json">[
+ {
+  "q": "Which call gives you a FileSystem object for the cluster in the configuration?",
+  "options": [
+   "new FileSystem()",
+   "Path.open()",
+   "FileSystem.get(conf)",
+   "HDFS.connect()"
+  ],
+  "answer": 2,
+  "why": "The scheme of fs.defaultFS (hdfs://) selects DistributedFileSystem. Real: Connected to: hdfs://namenode."
+ },
+ {
+  "q": "What does fs.open(path) return?",
+  "options": [
+   "A String with the file contents",
+   "An FSDataInputStream that can seek",
+   "A list of blocks",
+   "A FileStatus"
+  ],
+  "answer": 1,
+  "why": "You read it like any Java stream; it fetches block locations and reads from DataNodes."
+ },
+ {
+  "q": "What does fs.rename(src, dst) return if it fails because the destination folder does not exist?",
+  "options": [
+   "false",
+   "It throws an exception always",
+   "null",
+   "It creates the folder"
+  ],
+  "answer": 0,
+  "why": "Many rename failures just return false: always check the result."
+ },
+ {
+  "q": "Does fs.delete(path, true) move files to the trash?",
+  "options": [
+   "Yes, always",
+   "Only for folders",
+   "Only if replication is 3",
+   "No, it deletes permanently"
+  ],
+  "answer": 3,
+  "why": "Trash is a shell feature (or use the Trash class explicitly)."
+ },
+ {
+  "q": "Which method tells a scheduler where to run tasks near the data?",
+  "options": [
+   "getFileStatus",
+   "listStatus",
+   "getFileBlockLocations",
+   "getUri"
+  ],
+  "answer": 2,
+  "why": "Real output listed the hosts of both blocks of orders_x30.csv."
+ },
+ {
+  "q": "Why is closing the FileSystem from FileSystem.get() dangerous in a server?",
+  "options": [
+   "It deletes files",
+   "The instance is cached and shared, so other code gets “Filesystem closed”",
+   "It stops the NameNode",
+   "It is not dangerous"
+  ],
+  "answer": 1,
+  "why": "Use FileSystem.newInstance() if you need your own instance to close."
+ },
+ {
+  "q": "In WebHDFS, what does the NameNode reply to op=OPEN?",
+  "options": [
+   "HTTP 307 redirect to a DataNode",
+   "The file bytes",
+   "HTTP 404",
+   "A list of blocks in JSON"
+  ],
+  "answer": 0,
+  "why": "Real: HTTP/1.1 307 Temporary Redirect, Location: http://46201bb62e68:9864/..."
+ },
+ {
+  "q": "ItemCount printed “item 89” for orders_x90.csv. What is the cause?",
+  "options": [
+   "HDFS corrupted the file",
+   "A block was missing",
+   "A Java bug in BufferedReader",
+   "The file contains 89 extra header lines from concatenation"
+  ],
+  "answer": 3,
+  "why": "HDFS stores bytes as written; data quality is the program's job."
+ }
+]</script>
+  </div>
+
+  <h3>Quick revision</h3>
+  <div class="revision">
+    <h3>Lesson 6.5 in one screen</h3>
+    <ul><li><code>Configuration</code> → <code>FileSystem.get(conf)</code> → <code>DistributedFileSystem</code> for <code>hdfs://</code>.</li><li>Write: <code>create(path, overwrite)</code> → <code>write</code> → <code>close</code> (or <code>hflush</code> to make data visible).</li><li>Read: <code>open(path)</code> → seekable stream; reads from DataNodes.</li><li>Metadata: <code>getFileStatus</code>, <code>listStatus</code>, <code>listFiles(dir, true)</code>, <code>getFileBlockLocations</code>.</li><li><code>rename</code> and <code>delete</code> return booleans; <code>delete</code> skips the trash.</li><li>Lab: 300,000 orders in 1.3 s; 403 MB in 5.9 s (≈68 MB/s) through one client.</li><li>WebHDFS: REST on port 9870, OPEN redirects (307) to a DataNode on 9864.</li><li>Run with <code>javac -cp $(hadoop classpath)</code> and <code>hadoop jar app.jar Class</code>.</li></ul>
+  </div>
+
+  <h3>Interview and viva questions</h3>
+  <div class="faq">
+    <details><summary>How do you read a file from HDFS in Java?</summary><p>Create a Configuration, get a FileSystem with FileSystem.get(conf), call fs.open(new Path("/path")) to get an FSDataInputStream, wrap it in a BufferedReader (or copy it with IOUtils.copyBytes), and close the stream. The client gets block locations from the NameNode and reads the bytes directly from DataNodes.</p></details>
+    <details><summary>How do you write a file to HDFS in Java?</summary><p>Call fs.create(path, overwrite) to get an FSDataOutputStream, write bytes, and close it. Closing completes the file on the NameNode. Use hflush() to make written data visible to readers before closing, and hsync() to also force it to disk on the DataNodes.</p></details>
+    <details><summary>What is the difference between FileSystem.get() and FileSystem.newInstance()?</summary><p>get() returns a cached instance shared across the JVM for the same scheme, authority and user; closing it affects every user of that instance. newInstance() always returns a new instance that you own and may close.</p></details>
+    <details><summary>What is WebHDFS?</summary><p>A REST API for HDFS served by the NameNode (port 9870 in Hadoop 3) and DataNodes (port 9864). Metadata operations are answered by the NameNode; for reading and writing data it redirects the client to a DataNode. It lets any language use HDFS over HTTP.</p></details>
+    <details><summary>How does Spark know where HDFS blocks are?</summary><p>Through the same FileSystem API: getFileBlockLocations (or listFiles with locations) returns the hosts of each block, and the scheduler prefers to run a task on one of those hosts.</p></details>
+    <details><summary>Can the same Java code access S3?</summary><p>Yes, if the S3A connector is on the classpath and configured: FileSystem.get(URI.create("s3a://bucket/"), conf) returns an S3AFileSystem with the same methods. Some semantics differ (for example rename is a copy on object stores, not an atomic metadata change).</p></details>
+    
+  </div>
+
+  <h3 id="practice">Practice problems</h3>
+  <p class="prob-intro">API exercises using the real outputs from the lab programs.</p>
+  <div class="probs">
+    <article class="prob"><div class="prob__head"><span class="prob__num">P1</span><span class="prob__tag prob__tag--easy">Easy</span><h4>Bytes in the demo file</h4></div>
+      <p>HdfsBasics wrote the header and two order lines (with newline characters). Confirm the 49 bytes it reported.</p>
+      <div class="prob__io"><div><small>Input</small><pre>&quot;order_id,item,amount\n3001,samosa,18\n3002,chai,15\n&quot;</pre></div><div><small>Expected output</small><pre>49 bytes</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>data = &quot;order_id,item,amount\n&quot; + &quot;3001,samosa,18\n3002,chai,15\n&quot;
+print(len(data.encode(&quot;utf-8&quot;)), &quot;bytes&quot;)</code></pre><div class="output">49 bytes</div></div>
+        <p><b>How it works:</b> 49 bytes: 21 + 15 + 13, exactly the length getFileStatus reported.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P2</span><span class="prob__tag prob__tag--easy">Easy</span><h4>Check the total</h4></div>
+      <p>Add the six ItemCount results for canteen_orders.csv.</p>
+      <div class="prob__io"><div><small>Input</small><pre>50,170 · 49,948 · 49,984 · 49,891 · 50,021 · 49,986</pre></div><div><small>Expected output</small><pre>300000</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>print(sum([50170, 49948, 49984, 49891, 50021, 49986]))</code></pre><div class="output">300000</div></div>
+        <p><b>How it works:</b> 300,000 orders: every data line counted once, the header skipped.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P3</span><span class="prob__tag prob__tag--easy">Easy</span><h4>Block lengths</h4></div>
+      <p>orders_x30.csv is 140,760,270 bytes. Compute its block lengths with 128 MB blocks.</p>
+      <div class="prob__io"><div><small>Input</small><pre>140,760,270 bytes</pre></div><div><small>Expected output</small><pre>[134217728, 6542542]</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>size, block = 140_760_270, 128 * 1024 * 1024
+print([min(block, size - off) for off in range(0, size, block)])</code></pre><div class="output">[134217728, 6542542]</div></div>
+        <p><b>How it works:</b> [134217728, 6542542]: the two BlockLocations printed by the real program.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P4</span><span class="prob__tag prob__tag--medium">Medium</span><h4>Ratio for x90</h4></div>
+      <p>orders_x90.csv is the 300,000-order file 90 times. Check that each item's count is exactly 90× and explain “item 89”.</p>
+      <div class="prob__io"><div><small>Input</small><pre>x1 and x90 counts</pre></div><div><small>Expected output</small><pre>True header lines inside: 89</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>x1 = {&quot;chai&quot;: 50170, &quot;dosa&quot;: 49948, &quot;idli&quot;: 49984, &quot;poha&quot;: 49891, &quot;samosa&quot;: 50021, &quot;vada pav&quot;: 49986}
+x90 = {&quot;chai&quot;: 4515300, &quot;dosa&quot;: 4495320, &quot;idli&quot;: 4498560, &quot;poha&quot;: 4490190, &quot;samosa&quot;: 4501890, &quot;vada pav&quot;: 4498740}
+print(all(x90[k] == 90 * x1[k] for k in x1), &quot;header lines inside:&quot;, 90 - 1)</code></pre><div class="output">True header lines inside: 89</div></div>
+        <p><b>How it works:</b> True: every count is exactly 90×. The first header was skipped, the other 89 copies were counted as an item called “item”.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P5</span><span class="prob__tag prob__tag--medium">Medium</span><h4>Parse WebHDFS JSON</h4></div>
+      <p>From the real GETFILESTATUS reply, print length, replication, permission and block size in MB.</p>
+      <div class="prob__io"><div><small>Input</small><pre>{&quot;FileStatus&quot;:{…}}</pre></div><div><small>Expected output</small><pre>47 3 640 128 MB</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>import json
+reply = &#x27;{&quot;FileStatus&quot;:{&quot;accessTime&quot;:1792579946689,&quot;blockSize&quot;:134217728,&quot;childrenNum&quot;:0,&quot;fileId&quot;:16425,&quot;group&quot;:&quot;supergroup&quot;,&quot;length&quot;:47,&quot;modificationTime&quot;:1792575484677,&quot;owner&quot;:&quot;hadoop&quot;,&quot;pathSuffix&quot;:&quot;&quot;,&quot;permission&quot;:&quot;640&quot;,&quot;replication&quot;:3,&quot;storagePolicy&quot;:0,&quot;type&quot;:&quot;FILE&quot;}}&#x27;
+st = json.loads(reply)[&quot;FileStatus&quot;]
+print(st[&quot;length&quot;], st[&quot;replication&quot;], st[&quot;permission&quot;], st[&quot;blockSize&quot;] // 2**20, &quot;MB&quot;)</code></pre><div class="output">47 3 640 128 MB</div></div>
+        <p><b>How it works:</b> 47 bytes, replication 3, permission 640 (set with chmod in Lesson 6.3), 128 MB blocks.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P6</span><span class="prob__tag prob__tag--medium">Medium</span><h4>Where does the redirect go?</h4></div>
+      <p>Extract host, port, offset and NameNode address from the real 307 Location header.</p>
+      <div class="prob__io"><div><small>Input</small><pre>Location: http://46201bb62e68:9864/…</pre></div><div><small>Expected output</small><pre>46201bb62e68 9864 0 namenode:8020</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>from urllib.parse import urlparse, parse_qs
+loc = &quot;http://46201bb62e68:9864/webhdfs/v1/user/hadoop/canteen/raw/day1.csv?op=OPEN&amp;user.name=hadoop&amp;namenoderpcaddress=namenode:8020&amp;offset=0&quot;
+u = urlparse(loc); q = parse_qs(u.query)
+print(u.hostname, u.port, q[&quot;offset&quot;][0], q[&quot;namenoderpcaddress&quot;][0])</code></pre><div class="output">46201bb62e68 9864 0 namenode:8020</div></div>
+        <p><b>How it works:</b> DataNode 46201bb62e68 (datanode-2) on port 9864, offset 0, and the NameNode RPC address the DataNode should use.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P7</span><span class="prob__tag prob__tag--business">Business problem</span><h4>Service vs shell for an app</h4></div>
+      <p>An app team pays Rs 12 per vCPU-hour. Their shell-based uploader uses 1 vCPU fully for 60 minutes a day (mostly JVM start-ups); an API-based version needs 2 minutes. What is the yearly saving, and what else improves?</p>
+      <div class="prob__io"><div><small>Input</small><pre>60 vs 2 min/day · Rs 12/vCPU-hour</pre></div><div><small>Expected output</small><pre>Rs 4,234 per year</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>rate = 12
+saved_hours = (60 - 2) / 60 * 365
+print(f&quot;Rs {saved_hours * rate:,.0f} per year&quot;)</code></pre><div class="output">Rs 4,234 per year</div></div>
+        <p><b>How it works:</b> About Rs 4,234 a year in compute (illustrative), but the bigger wins are proper exceptions instead of parsing text, and uploads that finish in milliseconds.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P8</span><span class="prob__tag prob__tag--advanced">Advanced</span><h4>Locality-aware task plan</h4></div>
+      <p>Given block locations (like getFileBlockLocations returns) and 3 worker nodes, assign each block to a worker that holds a replica, keeping the load as even as possible. Print the plan and how many blocks are local.</p>
+      <div class="prob__io"><div><small>Input</small><pre>6 blocks · hosts per block</pre></div><div><small>Expected output</small><pre>{&#x27;dn-1&#x27;: [(0, &#x27;local&#x27;), (4, &#x27;local&#x27;)], &#x27;dn-2&#x27;: [(1, &#x27;local&#x27;), (3, &#x27;local&#x27;)], &#x27;dn-3&#x27;: [(2, &#x27;local&#x27;), (5, &#x27;local&#x27;)]}
+local: 6 of 6</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>locs = {0: [&quot;dn-1&quot;, &quot;dn-2&quot;, &quot;dn-3&quot;], 1: [&quot;dn-1&quot;, &quot;dn-2&quot;, &quot;dn-3&quot;], 2: [&quot;dn-1&quot;, &quot;dn-3&quot;, &quot;dn-4&quot;],
+        3: [&quot;dn-2&quot;, &quot;dn-4&quot;, &quot;dn-5&quot;], 4: [&quot;dn-1&quot;, &quot;dn-5&quot;, &quot;dn-2&quot;], 5: [&quot;dn-4&quot;, &quot;dn-5&quot;, &quot;dn-3&quot;]}
+workers = {&quot;dn-1&quot;: [], &quot;dn-2&quot;: [], &quot;dn-3&quot;: []}
+for b, hosts in locs.items():
+    local = [w for w in workers if w in hosts]
+    pick = min(local or workers, key=lambda w: len(workers[w]))
+    workers[pick].append((b, &quot;local&quot; if pick in hosts else &quot;remote&quot;))
+print(workers)
+print(&quot;local:&quot;, sum(t == &quot;local&quot; for v in workers.values() for _, t in v), &quot;of&quot;, len(locs))</code></pre><div class="output">{&#x27;dn-1&#x27;: [(0, &#x27;local&#x27;), (4, &#x27;local&#x27;)], &#x27;dn-2&#x27;: [(1, &#x27;local&#x27;), (3, &#x27;local&#x27;)], &#x27;dn-3&#x27;: [(2, &#x27;local&#x27;), (5, &#x27;local&#x27;)]}
+local: 6 of 6</div></div>
+        <p><b>How it works:</b> Every block finds a worker with a local replica here, two blocks each. This is the core idea of MapReduce scheduling (Module 8): move the computation to the data.</p>
+      </details>
+    </article>
+  </div>
+
+  <h3 id="scenarios">Real-world scenario questions (asked in company interviews)</h3>
+  <p class="scn-intro">API questions check whether you can go beyond the shell and understand what client code really does.</p>
+  <div class="scenarios">
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">HDFS · Java</span><span class="scn__tag scn__tag--level">Fresher</span></div>
+      <h4>“Write code to copy a local file to HDFS”</h4>
+      <p class="scn__situation">A whiteboard coding question.</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> Configuration, FileSystem, Path, closing resources.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li><code>Configuration conf = new Configuration(); FileSystem fs = FileSystem.get(conf);</code></li>
+          <li><code>fs.copyFromLocalFile(new Path("orders.csv"), new Path("/user/hadoop/raw/"));</code>, or <code>fs.create()</code> plus <code>IOUtils.copyBytes()</code> from a local input stream.</li>
+          <li>Close streams with try-with-resources; mention that the bytes go through the DataNode write pipeline.</li>
+        </ul>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Production · bug</span><span class="scn__tag scn__tag--level">Experienced</span></div>
+      <h4>A web service fails with “java.io.IOException: Filesystem closed”</h4>
+      <p class="scn__situation">It happens randomly, after some requests finish.</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> the FileSystem cache.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>Some code calls <code>fs.close()</code> on an instance from <code>FileSystem.get()</code>, which is cached and shared by all threads.</li>
+          <li>Fix: never close the shared instance (close only streams), or use <code>FileSystem.newInstance()</code> where code must own and close its instance.</li>
+        </ul>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Design</span><span class="scn__tag scn__tag--level">Experienced</span></div>
+      <h4>A Python dashboard must read results from HDFS</h4>
+      <p class="scn__situation">No Hadoop installation on the dashboard servers, and a firewall in between.</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> WebHDFS vs HttpFS.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>WebHDFS works over HTTP, but OPEN redirects to DataNodes on port 9864, so every DataNode must be reachable.</li>
+          <li>Through a firewall, use <b>HttpFS</b>: a gateway that streams the data itself, so only one host and port are opened.</li>
+          <li>Keep results small (aggregated by Hive or Spark) so the dashboard never pulls raw data.</li>
+        </ul>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Performance</span><span class="scn__tag scn__tag--level">Fresher</span></div>
+      <h4>“My Java program takes 17 hours to scan 4 TB. Why?”</h4>
+      <p class="scn__situation">A single program reads a big file from start to end.</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> single client vs parallel processing.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>One client reads one stream: in our lab about 68 MB/s, so 4 TB ≈ 17 hours.</li>
+          <li>HDFS can serve many readers at once. Split the work by blocks (getFileBlockLocations) and run readers on the nodes that hold them: that is MapReduce or Spark.</li>
+        </ul>
+      </div></details>
+    </article>
+
+  </div>
+</section>
+
+<nav class="lesson-nav" id="lesson-nav" aria-label="Lesson navigation"></nav>
+<div class="ad-slot" data-slot="bottom"></div>
+</article>
+
+<aside class="lesson-side">
+  <nav class="toc" aria-label="In this lesson">
+    <h4>In this lesson</h4>
+    <ol>
+      <li><a href="#story">The story</a></li>
+      <li><a href="#definition">Definition</a></li><li><a href="#levels">Beginner → Advanced</a></li>
+      <li><a href="#types">Types and ways to use it</a></li>
+      <li><a href="#steps">Step by step</a></li>
+      <li><a href="#animation">See it happen</a></li>
+      <li><a href="#real-world">Real-world use</a></li>
+      <li><a href="#run">Run the code</a></li><li><a href="#pc">Run on your PC</a></li>
+      <li><a href="#tracer">Line by line</a></li>
+      <li><a href="#worked">Worked examples</a></li>
+      <li><a href="#quiz">Quiz and revision</a></li>
+      <li><a href="#practice">Practice problems</a></li>
+      <li><a href="#scenarios">Industry scenarios</a></li>
+    </ol>
+  </nav>
+  <div class="ad-slot" data-slot="side"></div>
+  <div class="outline" id="outline"></div>
+</aside>
+</div>
+</main>
+
+<footer class="site-footer">
+  <div class="wrap">
+    <div><h4>MyPhatshala</h4><p>Free programming and IT lessons that show what happens behind the screen.</p></div>
+    <div><h4>Learn</h4><a href="../../../../#tracks">All courses</a><a href="../../">Apache Hadoop syllabus</a></div>
+    <div><h4>Site</h4><a href="../../../../about.html">About</a><a href="../../../../contact.html">Contact</a><a href="../../../../privacy.html">Privacy policy</a><a href="../../../../disclaimer.html">Disclaimer</a></div>
+    <div class="copyright">© MyPhatshala. All lesson content, diagrams and animations are original. Please do not copy without permission.</div>
+  </div>
+</footer>
+
+<script src="../../../../data/courses/hadoop.js"></script>
+<script src="../../../../assets/js/lesson.js"></script>
+<script src="../../../../assets/js/ads.js"></script>
+<script src="../../../../assets/js/site.js"></script>
+</body>
+</html>

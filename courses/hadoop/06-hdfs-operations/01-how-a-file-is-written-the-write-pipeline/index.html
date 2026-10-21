@@ -1,0 +1,1435 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>How a file is written: the write pipeline | MyPhatshala</title>
+<meta name="description" content="The anatomy of an HDFS write, from real Hadoop 3.5.0 logs: create, addBlock, the DataNode pipeline, 64 KB packets of 512-byte checksummed chunks, the ack queue, completeFile and the _COPYING_ rename. Two real failures: a DataNode killed mid-block (generation stamp bump, pipeline continues on two nodes, later re-replication) and a pipeline setup failure (firstBadLink, excluded node, abandoned block). Python pipeline simulator, quiz and interview scenarios.">
+<meta name="mp:minutes" content="28">
+<link rel="canonical" href="https://myphatshala.in/courses/hadoop/06-hdfs-operations/01-how-a-file-is-written-the-write-pipeline/">
+<meta property="og:title" content="How a file is written: the write pipeline · MyPhatshala">
+<meta property="og:description" content="Three copies, but the client sends each byte once. Read a real HDFS write pipeline in the logs, including a DataNode killed mid-write.">
+<link rel="icon" href="../../../../assets/img/logo.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Fraunces:ital,opsz,wght@0,9..144,600;0,9..144,700;1,9..144,600&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../../../../assets/css/style.css">
+<link rel="stylesheet" href="../../../../assets/css/lesson.css">
+<script src="../../../../assets/js/config.js"></script>
+<script>try { const t = localStorage.getItem("mp-theme"); if (t) document.documentElement.dataset.theme = t; } catch (e) {}</script>
+<script type="application/ld+json">{"@context": "https://schema.org", "@type": "LearningResource", "name": "How a file is written: the write pipeline", "learningResourceType": "Lesson", "educationalLevel": "Intermediate", "isAccessibleForFree": true, "inLanguage": "en", "isPartOf": {"@type": "Course", "name": "Apache Hadoop", "provider": {"@type": "Organization", "name": "MyPhatshala"}}}</script>
+</head>
+<body style="--track:#B45309" data-lesson="06-hdfs-operations/01-how-a-file-is-written-the-write-pipeline" data-course-root="../../">
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="site-header">
+  <div class="wrap">
+    <a class="brand" href="../../../../" aria-label="MyPhatshala home"><img src="../../../../assets/img/logo.svg" width="34" height="34" alt=""><span>My<b>Phatshala</b></span></a>
+    <nav class="nav" aria-label="Main">
+      <a href="../../../../#tracks">All courses</a>
+      <a href="../../">Apache Hadoop syllabus</a>
+      <button class="theme-btn" id="theme-btn" aria-label="Toggle dark mode"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg></button>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+<section class="lesson-hero">
+  <div class="wrap">
+    <nav class="crumbs" aria-label="Breadcrumb"><a href="../../../../">Home</a><span>›</span><a href="../../../../#track-big-data">Big Data Engineering</a><span>›</span><a href="../../">Apache Hadoop</a><span>›</span><b>Lesson 6.1</b></nav>
+    <h1>How a file is written: the write pipeline</h1>
+    <p class="lead">When you write a file to HDFS with replication 3, your client uploads the data only once: the DataNodes copy it along a pipeline. This lesson follows a real 134 MB upload through the client, NameNode and DataNode logs, packet by packet, and then breaks it on purpose by killing DataNodes during a write to show how HDFS recovers without failing the upload.</p>
+    <div class="lesson-meta"><span>Module 6 · HDFS operations</span><span>⏱ 28 min</span><span>Intermediate</span><span>Real client + DataNode logs</span><span>Failure during write</span><span>Runs in your browser (Python)</span><span>8 practice problems</span></div>
+  </div>
+</section>
+
+<div class="wrap lesson-layout">
+<article class="lesson-main">
+<!-- ======================= PART 1: THE STORY ======================= -->
+<section class="part" id="story">
+  <span class="part-label"><b>1</b> The story</span>
+  <h2>One upload, three copies, one trip</h2>
+  <div class="story">
+    <p class="narration">Riya uploads 134 MB of canteen orders from datanode-1 with <code>hdfs dfs -put</code>. It finishes in under three seconds, and fsck shows three replicas of every block. Kabir does the arithmetic: “Three copies of 134 MB is 402 MB. Did the client really send 402 MB in three seconds?” Then he switches on debug logging and reads the client's diary: <code>pipeline = [172.19.0.4, 172.19.0.6, 172.19.0.7]</code>, 2,186 packets, and after each packet: <code>reply: SUCCESS reply: SUCCESS reply: SUCCESS</code>.</p>
+
+    <div class="scene">
+      <svg viewBox="0 0 640 190" role="img" aria-label="The client sends each packet once to the first DataNode, which stores it and forwards it to the second, which forwards it to the third. Acknowledgements flow back the other way.">
+        <g font-size="10">
+          <rect x="16" y="60" width="104" height="60" rx="10" class="s-soft-acc" style="stroke:var(--track)"/><text x="68" y="86" text-anchor="middle" font-weight="700" class="s-acc">Client</text><text x="68" y="102" text-anchor="middle" font-size="8.6" class="s-ink">hdfs dfs -put</text>
+          <rect x="170" y="60" width="120" height="60" rx="10" class="s-soft-green" style="stroke:var(--green)"/><text x="230" y="86" text-anchor="middle" font-weight="700" class="s-green">datanode-1</text><text x="230" y="102" text-anchor="middle" font-size="8.6" class="s-ink">rack1</text>
+          <rect x="340" y="60" width="120" height="60" rx="10" class="s-soft-green" style="stroke:var(--green)"/><text x="400" y="86" text-anchor="middle" font-weight="700" class="s-green">datanode-3</text><text x="400" y="102" text-anchor="middle" font-size="8.6" class="s-ink">rack2</text>
+          <rect x="510" y="60" width="114" height="60" rx="10" class="s-soft-green" style="stroke:var(--green)"/><text x="567" y="86" text-anchor="middle" font-weight="700" class="s-green">datanode-4</text><text x="567" y="102" text-anchor="middle" font-size="8.6" class="s-ink">rack2</text>
+          <path d="M120 78h50M290 78h50M460 78h50" style="stroke:var(--blue);stroke-width:2.4"/>
+          <text x="145" y="70" text-anchor="middle" font-size="8.6" class="s-blue">packet</text><text x="315" y="70" text-anchor="middle" font-size="8.6" class="s-blue">forward</text><text x="485" y="70" text-anchor="middle" font-size="8.6" class="s-blue">forward</text>
+          <path d="M170 104h-50M340 104h-50M510 104h-50" style="stroke:var(--green);stroke-width:1.6;stroke-dasharray:4 3"/>
+          <text x="315" y="138" text-anchor="middle" font-size="8.6" class="s-green">ack ← ack ← ack</text>
+          <rect x="230" y="12" width="180" height="30" rx="8" class="s-board"/><text x="320" y="31" text-anchor="middle" font-size="9" class="s-chalk">NameNode: “use dn-1, dn-3, dn-4”</text>
+        </g>
+        <text x="320" y="170" text-anchor="middle" font-size="10" class="s-ink2">The client uploads each byte once. The DataNodes pass it along like a bucket chain.</text>
+        <text x="632" y="182" text-anchor="end" class="s-wm">myphatshala.in</text>
+      </svg>
+    </div>
+
+    <div class="panel panel--right"><div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#DDEFE6"/><path d="M12 64c2-12 10-18 20-18s18 6 20 18z" fill="#F4F1EA"/><path d="M28 46l4 8 4-8" fill="#2F7D5B"/><circle cx="32" cy="28" r="12" fill="#B57A50"/><path d="M20 26c0-8 5-13 12-13s12 5 12 13c-2-3-6-5-12-5s-10 2-12 5z" fill="#5A5A5A"/><path d="M22 32c1 8 5 11 10 11s9-3 10-11c-2 3-6 4-10 4s-8-1-10-4z" fill="#5A5A5A"/><circle cx="27" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><circle cx="37" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><path d="M30.4 29h3.2" stroke="#1B2433" stroke-width="1.4"/><circle cx="27" cy="29" r="1.1" fill="#1B2433"/><circle cx="37" cy="29" r="1.1" fill="#1B2433"/></svg></div><div class="bubble"><b class="who">Arjun Sir</b><p>No. The client sent each byte <b>once</b>. The NameNode only chose three DataNodes; the client then opened a <b>pipeline</b>: it streams 64 KB packets to the first DataNode, which writes each packet to its disk <i>and</i> forwards it to the second, which does the same for the third. Each packet's acknowledgement travels back down the chain.</p></div></div>
+    <div class="panel"><div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#FCE6D6"/><path d="M14 64c2-12 9-18 18-18s16 6 18 18z" fill="#2E5AAC"/><circle cx="32" cy="29" r="12" fill="#C68B5E"/><path d="M19 29c0-10 6-15 13-15s13 5 13 15c-3-5-7-8-13-8s-10 3-13 8z" fill="#2A1B14"/><path d="M43 27c3 6 3 14 0 20" stroke="#2A1B14" stroke-width="4" fill="none" stroke-linecap="round"/><circle cx="27.5" cy="30" r="1.5" fill="#2A1B14"/><circle cx="36.5" cy="30" r="1.5" fill="#2A1B14"/><path d="M28 35q4 3 8 0" stroke="#2A1B14" stroke-width="1.6" fill="none" stroke-linecap="round"/><circle cx="32" cy="24" r="1.2" fill="#D64545"/></svg></div><div class="bubble"><b class="who">Riya</b><p>So the network load is shared by the DataNodes.</p></div></div>
+    <div class="panel panel--right"><div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#DDEFE6"/><path d="M12 64c2-12 10-18 20-18s18 6 20 18z" fill="#F4F1EA"/><path d="M28 46l4 8 4-8" fill="#2F7D5B"/><circle cx="32" cy="28" r="12" fill="#B57A50"/><path d="M20 26c0-8 5-13 12-13s12 5 12 13c-2-3-6-5-12-5s-10 2-12 5z" fill="#5A5A5A"/><path d="M22 32c1 8 5 11 10 11s9-3 10-11c-2 3-6 4-10 4s-8-1-10-4z" fill="#5A5A5A"/><circle cx="27" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><circle cx="37" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><path d="M30.4 29h3.2" stroke="#1B2433" stroke-width="1.4"/><circle cx="27" cy="29" r="1.1" fill="#1B2433"/><circle cx="37" cy="29" r="1.1" fill="#1B2433"/></svg></div><div class="bubble"><b class="who">Arjun Sir</b><p>Exactly, and the copies are made at the same time, not one after another. Today we'll read the real logs of this pipeline: the NameNode choosing nodes, the packets, the acknowledgements, and what happens when we kill a DataNode in the middle of a block.</p></div></div>
+  </div>
+</section>
+
+<!-- ======================= PART 2: DEFINITION ======================= -->
+<section class="part" id="definition">
+  <span class="part-label"><b>2</b> Definition</span>
+  <h2>The HDFS write pipeline</h2>
+  <div class="def">
+    <div class="def__formal"><small>Formal definition (write this in exams)</small>
+      <p>To write a file, the client calls <b>create</b> on the NameNode, which checks permissions and that the file doesn't exist, records it in the namespace (with a lease for the writer) and returns an output stream. As data is written, the client's <code>DataStreamer</code> asks the NameNode to <b>allocate a block</b>; the NameNode returns a new block ID and a list of DataNodes chosen by the placement policy, ordered as a <b>pipeline</b>. The client splits data into <b>packets</b> (about 64 KB of data, made of 512-byte chunks each with a 4-byte checksum) and sends them to the first DataNode, which stores and forwards each packet to the next, and so on. Acknowledgements return in the reverse direction; the client keeps each packet in an <b>ack queue</b> until all DataNodes in the pipeline have acknowledged it. When a block is full the pipeline is closed and a new block is allocated. Finally the client calls <b>complete</b>, and the NameNode closes the file once the minimum replication is reached. If a DataNode fails, the client removes it, the NameNode <b>bumps the block's generation stamp</b>, and writing continues on the remaining DataNodes; the block is re-replicated later.</p></div>
+    <div class="def__simple"><small>In simple words</small>
+      <p>The NameNode picks three DataNodes. The client sends the data in small packets to the first one, which passes them to the second, which passes them to the third. Each packet is confirmed by all three before the client forgets it.</p></div>
+  </div>
+
+  <h3>Words you'll meet in this lesson</h3>
+  <div class="terms">
+    <div class="term"><b>Pipeline</b><span>The ordered chain of DataNodes that receive one block, e.g. dn-1 → dn-3 → dn-4.</span></div>
+    <div class="term"><b>Packet</b><span>Unit sent down the pipeline: up to 64,512 data bytes (126 chunks).</span></div>
+    <div class="term"><b>Chunk</b><span>512 bytes of data + 4-byte checksum = 516 bytes.</span></div>
+    <div class="term"><b>Ack</b><span>Acknowledgement of one packet; returns from the last DataNode to the client.</span></div>
+    <div class="term"><b>Data queue / ack queue</b><span>Packets waiting to be sent / sent but not yet acknowledged by everyone.</span></div>
+    <div class="term"><b>Lease</b><span>The NameNode's record that one client is writing a file. Only one writer at a time.</span></div>
+    <div class="term"><b>_COPYING_</b><span><code>hdfs dfs -put</code> writes to <code>name._COPYING_</code> and renames it when done.</span></div>
+    <div class="term"><b>Generation stamp</b><span>Version number of a block (<code>_1023</code>). Bumped during recovery so stale replicas are recognised.</span></div>
+  </div>
+
+  <h3>Write facts (Hadoop 3.5.0, measured in the lab)</h3>
+  <table class="facts" style="table-layout:fixed;overflow-wrap:anywhere">
+    <tr><th>Packet</th><td><code>dfs.client-write-packet-size</code> = 65,536; real log: 126 chunks × 516 bytes = 65,016 bytes, 64,512 of them data</td></tr>
+    <tr><th>Our 134 MB upload</th><td>2 blocks, 2,186 packets, every one acknowledged by 3 DataNodes, about 2.6 s</td></tr>
+    <tr><th>Pipeline order</th><td>Local DataNode first (if the writer runs on one), then other nodes, each hop to the nearest remaining node</td></tr>
+    <tr><th>File visible</th><td>As soon as created; length grows block by block; final after <code>complete</code></td></tr>
+    <tr><th>Close condition</th><td>Each block has at least <code>dfs.namenode.replication.min</code> (1) replica; the rest catch up</td></tr>
+    <tr><th>On DataNode failure</th><td>Policy <code>dfs.client.block.write.replace-datanode-on-failure.policy</code> = DEFAULT (may add a replacement node)</td></tr>
+  </table>
+
+  <h3 id="levels">The write pipeline at three levels</h3>
+  <div class="modlab levels"><div class="modlab__bar"><b>Pick your level. New to this? Start at Beginner and climb.</b><button type="button" data-mod="b">Beginner</button><button type="button" data-mod="i">Intermediate</button><button type="button" data-mod="a">Advanced</button></div>
+    <div class="modlab__panel" data-mod="b"><h4><span class="lvl lvl--b">Beginner</span> A bucket chain</h4>
+      <ul>
+        <li>Villagers pass buckets of water hand to hand. Each person also fills their own pot from every bucket before passing it on.</li>
+        <li>The water carrier (client) walks only to the first person. The supervisor (NameNode) just decided who stands in the chain.</li>
+        <li>When the last person shouts “got it”, the shout travels back, and the carrier knows that bucket is safe.</li>
+      </ul>
+
+    </div>
+    <div class="modlab__panel" data-mod="i"><h4><span class="lvl lvl--i">Intermediate</span> Step by step</h4>
+      <ul>
+        <li><b>create</b>: NameNode checks and records the file; client gets a lease.</li>
+        <li><b>addBlock</b>: NameNode returns block ID + 3 DataNodes (placement policy, Lesson 5.3).</li>
+        <li><b>Pipeline setup</b>: client connects to DN1, which connects to DN2, which connects to DN3.</li>
+        <li><b>Streaming</b>: packets flow down; each DataNode verifies checksums, writes to disk, forwards; acks flow up.</li>
+        <li><b>Next block</b>: when 128 MB are written, close the pipeline and repeat addBlock.</li>
+        <li><b>complete</b>: NameNode marks the file closed; <code>put</code> renames <code>._COPYING_</code> to the final name.</li>
+      </ul>
+
+    </div>
+    <div class="modlab__panel" data-mod="a"><h4><span class="lvl lvl--a">Advanced</span> Failures and guarantees</h4>
+      <ul>
+        <li><b>Setup failure</b> (a DataNode can't be reached): the client abandons the block, excludes that node, and asks for a new block.</li>
+        <li><b>Failure while streaming</b>: unacknowledged packets go back to the data queue, the bad DataNode is removed, the NameNode bumps the generation stamp, and streaming resumes on the survivors; under-replication is fixed afterwards.</li>
+        <li><b>Visibility</b>: readers see data up to the last completed block, or what <code>hflush()</code> has pushed; <code>hsync()</code> also forces it to disk.</li>
+        <li>Single writer, append only: HDFS files can't be edited in the middle.</li>
+      </ul>
+
+    </div>
+  </div>
+  <div class="callout callout--exam"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19V5a2 2 0 0 1 2-2h12v18H6a2 2 0 0 1-2-2zm0 0a2 2 0 0 1 2-2h12"/></svg><p><b>Exam tip:</b> “Explain the anatomy of a file write in HDFS”: client → <code>create()</code> → NameNode checks and adds the file → client's DataStreamer asks for blocks → NameNode returns a list of DataNodes → <b>pipeline</b> DN1 → DN2 → DN3 → data sent as <b>packets</b>; <b>ack queue</b> holds packets until all DataNodes acknowledge → <code>close()</code> → <code>complete()</code> on the NameNode. Mention failure handling and the default rack-aware placement.</p></div>
+</section>
+
+<!-- ======================= PART 3: TYPES AND WAYS TO USE IT ======================= -->
+<section class="part" id="types">
+  <span class="part-label"><b>3</b> Types and ways to use it</span>
+  <h2>Who talks to whom during a write</h2>
+  <div class="table-wrap">
+  <table class="compare" style="min-width:600px">
+    <thead><tr><th>Step</th><th>Between</th><th>Carries</th><th>Seen in our logs as</th></tr></thead>
+    <tbody>
+      <tr><td>create</td><td>Client → NameNode</td><td>Path, permissions, replication, block size</td><td><code>cmd=create src=…orders_x30.csv._COPYING_</code></td></tr>
+      <tr><td>addBlock</td><td>Client → NameNode</td><td>Request for a new block</td><td><code>BLOCK* allocate blk_1073741840_1016, replicas=…</code></td></tr>
+      <tr><td>Pipeline + packets</td><td>Client → DN1 → DN2 → DN3</td><td>Data + checksums</td><td><code>Receiving … src: /172.19.0.4 dest: /172.19.0.6</code></td></tr>
+      <tr><td>Acks</td><td>DN3 → DN2 → DN1 → Client</td><td>Per-packet status</td><td><code>reply: SUCCESS reply: SUCCESS reply: SUCCESS</code></td></tr>
+      <tr><td>Block received</td><td>DataNodes → NameNode</td><td>Incremental block report</td><td><code>addStoredBlock: … is added to blk_…</code></td></tr>
+      <tr><td>complete / rename</td><td>Client → NameNode</td><td>Close the file</td><td><code>completeFile</code>, <code>cmd=rename</code></td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <h3>Ways to write to HDFS</h3>
+  <div class="cards">
+    <div class="card"><h4>hdfs dfs -put</h4><p>Copies a local file; writes to <code>._COPYING_</code> and renames at the end.</p><span class="tag">Shell</span></div>
+    <div class="card"><h4>FileSystem.create()</h4><p>The Java API used by every tool (Lesson 6.5).</p><span class="tag">API</span></div>
+    <div class="card"><h4>Jobs (MapReduce, Spark, Hive)</h4><p>Each task writes its own file through the same pipeline, in parallel.</p><span class="tag">Engines</span></div>
+    <div class="card"><h4>append / hflush</h4><p>Add to the end of a closed file, or make data visible while still writing (logs, streams).</p><span class="tag">Special</span></div>
+  </div>
+  <div class="callout callout--tip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18h6M10 22h4M12 2a7 7 0 0 0-4 12.7V17h8v-2.3A7 7 0 0 0 12 2z"/></svg><p>Writing from a machine that is a DataNode puts the first replica on that machine's own disk. That's fast, but if all your ingestion runs on one DataNode, its disks fill first. Spread ingestion clients, or write from edge nodes.</p></div>
+</section>
+
+<!-- ======================= PART 4: STEP BY STEP ======================= -->
+<section class="part" id="steps">
+  <span class="part-label"><b>4</b> Step by step</span>
+  <h2>Read the pipeline in real logs</h2>
+  <p>On the Module 5 lab cluster (4 DataNodes at the time of these runs; a 5th is added in Lesson 6.4). IP addresses at the time: datanode-1 = 172.19.0.4, datanode-2 = .3, datanode-3 = .6, datanode-4 = .7. The upload runs on datanode-1 with client debug logging switched on (the log configuration is inside <code>write_trace.py</code>, Part 4b).</p>
+  <ol class="stepper">
+    <li><h4>Upload with debug logging</h4>
+      <div class="code" data-lang="bash" data-file="Terminal (in datanode-1)"><pre><code>for i in $(seq 30); do cat /tmp/canteen_orders.csv; done &gt; /tmp/orders_x30.csv
+HADOOP_CLIENT_OPTS="-Dlog4j.configuration=file:/tmp/dbg.properties" \
+  hdfs dfs -put -f /tmp/orders_x30.csv /user/hadoop/data/orders_x30.csv</code></pre><div class="output">09:32:52,867 DEBUG DataStreamer - stage=PIPELINE_SETUP_CREATE, block==null
+09:32:52,956 DEBUG DataStreamer - pipeline = [DatanodeInfoWithStorage[172.19.0.4:9866,…], DatanodeInfoWithStorage[172.19.0.6:9866,…], DatanodeInfoWithStorage[172.19.0.7:9866,…]], blk_1073741840_1016
+09:32:52,962 DEBUG DataStreamer - Connecting to datanode 172.19.0.4:9866
+09:32:53,055 DEBUG DataStreamer - blk_1073741840_1016 sending packet seqno: 0 offsetInBlock: 0 lastPacketInBlock: false lastByteOffsetInBlock: 64512
+09:32:53,058 DEBUG DataStreamer - blk_1073741840_1016 sending packet seqno: 1 offsetInBlock: 64512 lastPacketInBlock: false lastByteOffsetInBlock: 129024
+09:32:53,213 DEBUG DataStreamer - DFSClient seqno: 0 reply: SUCCESS reply: SUCCESS reply: SUCCESS downstreamAckTimeNanos: 1840487 flag: 0 flag: 0 flag: 0
+…
+09:32:55,680 DEBUG DataStreamer - blk_1073741840_1016 sending packet seqno: 2082 offsetInBlock: 134217728 lastPacketInBlock: true lastByteOffsetInBlock: 134217728
+09:32:55,726 DEBUG DataStreamer - Closing old block BP-1507681208-…:blk_1073741840_1016
+09:32:55,838 DEBUG DataStreamer - pipeline = [DatanodeInfoWithStorage[172.19.0.4:9866,…], DatanodeInfoWithStorage[172.19.0.7:9866,…], DatanodeInfoWithStorage[172.19.0.6:9866,…]], blk_1073741841_1017</div></div>
+      <span class="behind">The client connects only to the first DataNode (its own, .4). Each packet carries 64,512 data bytes; the ack for packet 0 lists three SUCCESS replies, one per DataNode. Packet 2082 is the empty “last packet” that closes the block at exactly 134,217,728 bytes; then a new pipeline is built for block 2.</span></li>
+    <li><h4>The NameNode's side</h4>
+      <div class="code" data-lang="bash" data-file="Terminal"><pre><code>docker compose logs namenode | grep -E "orders_x30|blk_1073741840|blk_1073741841"</code></pre><div class="output">audit - allowed=true ugi=hadoop ip=/172.19.0.4 cmd=create src=/user/hadoop/data/orders_x30.csv._COPYING_ perm=hadoop:supergroup:rw-r--r--
+StateChange - BLOCK* allocate blk_1073741840_1016, replicas=172.19.0.4:9866, 172.19.0.6:9866, 172.19.0.7:9866 for /user/hadoop/data/orders_x30.csv._COPYING_
+BlockStateChange - BLOCK* addStoredBlock: 172.19.0.7:9866 is added to blk_1073741840_1016 (size=134217728)
+BlockStateChange - BLOCK* addStoredBlock: 172.19.0.6:9866 is added to blk_1073741840_1016 (size=134217728)
+BlockStateChange - BLOCK* addStoredBlock: 172.19.0.4:9866 is added to blk_1073741840_1016 (size=134217728)
+StateChange - BLOCK* allocate blk_1073741841_1017, replicas=172.19.0.4:9866, 172.19.0.7:9866, 172.19.0.6:9866 for …._COPYING_
+StateChange - DIR* completeFile: /user/hadoop/data/orders_x30.csv._COPYING_ is closed by DFSClient_NONMAPREDUCE_2053878093_1
+audit - allowed=true ugi=hadoop ip=/172.19.0.4 cmd=rename src=…/orders_x30.csv._COPYING_ dst=/user/hadoop/data/orders_x30.csv</div></div>
+      <span class="behind">create → allocate (with three chosen DataNodes) → each DataNode reports the finished replica (the <b>last</b> one in the pipeline finishes first) → next block → completeFile → rename. No data in any of these messages.</span></li>
+    <li><h4>Each DataNode's side</h4>
+      <div class="code" data-lang="bash" data-file="Terminal"><pre><code>docker logs lab5-datanode-1 | grep blk_1073741840     # and datanode-3, datanode-4</code></pre><div class="output">== datanode-1 (172.19.0.4)
+Receiving …:blk_1073741840_1016 src: /172.19.0.4:54570 dest: /172.19.0.4:9866
+PacketResponder: …:blk_1073741840_1016, type=HAS_DOWNSTREAM_IN_PIPELINE, downstreams=2:[172.19.0.6:9866, 172.19.0.7:9866] terminating
+== datanode-3 (172.19.0.6)
+Receiving …:blk_1073741840_1016 src: /172.19.0.4:44414 dest: /172.19.0.6:9866
+PacketResponder: …:blk_1073741840_1016, type=HAS_DOWNSTREAM_IN_PIPELINE, downstreams=1:[172.19.0.7:9866] terminating
+== datanode-4 (172.19.0.7)
+Receiving …:blk_1073741840_1016 src: /172.19.0.6:49840 dest: /172.19.0.7:9866
+PacketResponder: …:blk_1073741840_1016, type=LAST_IN_PIPELINE terminating</div></div>
+      <span class="behind">The chain is visible in the <code>src</code> addresses: datanode-3 received from datanode-1 (.4), datanode-4 from datanode-3 (.6). Each knows how many DataNodes are downstream of it.</span></li>
+    <li><h4>Kill a DataNode in the middle of a block</h4>
+      <div class="code" data-lang="bash" data-file="Terminal"><pre><code># upload 422 MB from datanode-1; after packet 200 of the first block:
+docker kill lab5-datanode-3</code></pre><div class="output">09:34:40,734 DEBUG DataStreamer - pipeline = [172.19.0.4:9866, 172.19.0.7:9866, 172.19.0.6:9866], blk_1073741847_1023
+09:34:41,910 WARN  DataStreamer - Exception for BP-…:blk_1073741847_1023
+java.io.IOException: Bad response ERROR for BP-…:blk_1073741847_1023 from datanode DatanodeInfoWithStorage[172.19.0.6:9866,…]
+09:34:42,010 WARN  DataStreamer - Error Recovery for BP-…:blk_1073741847_1023 in pipeline [172.19.0.4:9866, 172.19.0.7:9866, 172.19.0.6:9866] …
+09:34:42,127 DEBUG DataStreamer - pipeline = [172.19.0.4:9866, 172.19.0.7:9866], blk_1073741847_1023
+NameNode: bumpBlockGenerationStamp(…:blk_1073741847_1024, client=DFSClient_NONMAPREDUCE_1852730810_1) success
+NameNode: updatePipeline(blk_1073741847_1023, newGS=1024, newLength=40061952, newNodes=[172.19.0.4:9866, 172.19.0.7:9866], …)
+NameNode: BLOCK* addStoredBlock: 172.19.0.7:9866 is added to blk_1073741847_1024 (size=134217728)
+NameNode: BLOCK* addStoredBlock: 172.19.0.4:9866 is added to blk_1073741847_1024 (size=134217728)
+NameNode: BLOCK* addStoredBlock: 172.19.0.3:9866 is added to blk_1073741847_1024 (size=134217728)   (19 s later)
+EXIT=0</div></div>
+      <span class="behind">The upload succeeded. After 40,061,952 bytes the pipeline lost datanode-3; the client kept going with two DataNodes, the generation stamp changed from 1023 to 1024 (so the dead node's partial replica is recognised as stale), and the NameNode later copied the block to datanode-2 to get back to three replicas. (DatanodeInfo strings shortened.)</span></li>
+    <li><h4>And a failure while setting up a pipeline</h4>
+      <div class="code" data-lang="bash" data-file="Terminal"><pre><code># another upload; datanode-4 killed just before the second block</code></pre><div class="output">WARN  DataStreamer - Exception in createBlockOutputStream blk_1073741843_1019
+java.io.IOException: Got error, status=ERROR, status message , ack with firstBadLink as 172.19.0.7:9866
+WARN  DataStreamer - Excluding datanode DatanodeInfoWithStorage[172.19.0.7:9866,…]
+DEBUG DataStreamer - pipeline = [172.19.0.4:9866, 172.19.0.3:9866, 172.19.0.6:9866], blk_1073741844_1020</div></div>
+      <span class="behind">Before any data flowed, datanode-1 reported that the next link (.7) was bad. The client abandoned block …843, told the NameNode to exclude .7, and got a new block …844 with datanode-2 (.3) instead. The final file has blocks …842, …844, …845, …846: block …843 never existed.</span></li>
+  </ol>
+  <div class="callout callout--warn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3 2 21h20L12 3z"/><path d="M12 10v5M12 18v.5"/></svg><p>A write with replication 3 can succeed with fewer than 3 replicas if DataNodes fail during it; HDFS fixes the replica count afterwards. Data is still safe on the survivors, but check <code>fsck</code> for under-replicated blocks after cluster trouble, especially on small clusters.</p></div>
+</section>
+
+<!-- ======================= PART 5: SEE IT HAPPEN ======================= -->
+<section class="part" id="animation">
+  <span class="part-label"><b>5</b> See it happen</span>
+  <h2>A block travels down the pipeline</h2>
+  <p>The first block of <code>orders_x30.csv</code>, using the real log lines from step 1 to 3.</p>
+  <div class="anim" data-frames="6">
+    <div class="anim__title">Writing blk_1073741840 <span>6 steps</span></div>
+    <div class="anim__views">
+      <div class="view view--see">
+        <span class="view__tag">What you see</span>
+        <svg viewBox="0 0 360 250" role="img" aria-label="Client and NameNode log lines">
+          <rect x="14" y="14" width="332" height="206" rx="8" class="s-board"/>
+          <text x="26" y="32" font-size="9" class="mono" style="fill:#7F8C86">logs, 09:32:52 – 09:32:55</text>
+          <g data-on="1"><text x="26" y="56" font-size="8.6" class="mono" style="fill:#9FD3B8">audit: cmd=create</text><text x="26" y="70" font-size="8.6" class="mono" style="fill:#9FD3B8">  src=…/orders_x30.csv._COPYING_</text></g>
+          <g data-on="2"><text x="26" y="56" font-size="8.6" class="mono" style="fill:#9FD3B8">BLOCK* allocate blk_1073741840_1016,</text><text x="26" y="70" font-size="8.6" class="mono" style="fill:#9FD3B8">  replicas=.4, .6, .7</text></g>
+          <g data-on="3"><text x="26" y="56" font-size="8.6" class="mono" style="fill:#7F8C86">Connecting to datanode 172.19.0.4</text><text x="26" y="72" font-size="8.6" class="mono" style="fill:#9FD3B8">dn-3: Receiving … src: /172.19.0.4</text><text x="26" y="86" font-size="8.6" class="mono" style="fill:#9FD3B8">dn-4: Receiving … src: /172.19.0.6</text></g>
+          <g data-on="4"><text x="26" y="56" font-size="8.6" class="mono" style="fill:#7F8C86">sending packet seqno: 0 … 64512</text><text x="26" y="72" font-size="8.6" class="mono" style="fill:#9FD3B8">seqno: 0 reply: SUCCESS reply: SUCCESS</text><text x="26" y="86" font-size="8.6" class="mono" style="fill:#9FD3B8">        reply: SUCCESS</text></g>
+          <g data-on="5"><text x="26" y="56" font-size="8.6" class="mono" style="fill:#7F8C86">sending packet seqno: 2082</text><text x="26" y="70" font-size="8.6" class="mono" style="fill:#7F8C86">  lastPacketInBlock: true</text><text x="26" y="88" font-size="8.6" class="mono" style="fill:#9FD3B8">addStoredBlock: .7, then .6, then .4</text><text x="26" y="102" font-size="8.6" class="mono" style="fill:#9FD3B8">  (size=134217728)</text></g>
+          <g data-on="6"><text x="26" y="56" font-size="8.6" class="mono" style="fill:#9FD3B8">… second block, 6,542,542 bytes …</text><text x="26" y="72" font-size="8.6" class="mono" style="fill:#9FD3B8">DIR* completeFile: …._COPYING_</text><text x="26" y="86" font-size="8.6" class="mono" style="fill:#9FD3B8">audit: cmd=rename → orders_x30.csv</text></g>
+          <text x="352" y="244" text-anchor="end" class="s-wm">myphatshala.in</text>
+        </svg>
+        <ol class="caps" hidden>
+          <li>The client asks the NameNode to create the file (under a temporary name).</li>
+          <li>The client asks for a block; the NameNode picks three DataNodes: the local one (.4) and two in the other rack.</li>
+          <li>The client connects only to .4. Each DataNode connects to the next one.</li>
+          <li>Packets stream down; each packet is acknowledged by all three DataNodes.</li>
+          <li>After 2,083 packets the block is full. Each DataNode tells the NameNode it has a finished replica.</li>
+          <li>The second block repeats the process; then the file is completed and renamed.</li>
+        </ol>
+      </div>
+
+      <div class="view view--behind">
+        <span class="view__tag">Behind the screen</span>
+        <svg viewBox="0 0 360 250" role="img" aria-label="Pipeline diagram">
+          <rect x="120" y="14" width="120" height="34" rx="6" class="s-board"/><text x="180" y="35" text-anchor="middle" font-size="9" font-weight="700" class="s-chalk">NameNode</text>
+          <rect x="14" y="100" width="70" height="44" rx="6" class="s-soft-acc" style="stroke:var(--track)"/><text x="49" y="126" text-anchor="middle" font-size="8.6" font-weight="700" class="s-acc">client</text>
+          <rect x="104" y="100" width="70" height="44" rx="6" class="s-soft-green" style="stroke:var(--green)"/><text x="139" y="120" text-anchor="middle" font-size="8.6" font-weight="700" class="s-green">dn-1</text><text x="139" y="134" text-anchor="middle" font-size="7.6" class="s-ink">.4 rack1</text>
+          <rect x="194" y="100" width="70" height="44" rx="6" class="s-soft-green" style="stroke:var(--green)"/><text x="229" y="120" text-anchor="middle" font-size="8.6" font-weight="700" class="s-green">dn-3</text><text x="229" y="134" text-anchor="middle" font-size="7.6" class="s-ink">.6 rack2</text>
+          <rect x="284" y="100" width="64" height="44" rx="6" class="s-soft-green" style="stroke:var(--green)"/><text x="316" y="120" text-anchor="middle" font-size="8.6" font-weight="700" class="s-green">dn-4</text><text x="316" y="134" text-anchor="middle" font-size="7.6" class="s-ink">.7 rack2</text>
+          <g data-on="1"><path d="M49 100V48h71" style="fill:none;stroke:var(--track);stroke-width:2"/><text x="180" y="190" text-anchor="middle" font-size="9" class="s-ink2">create: namespace entry + lease</text></g>
+          <g data-on="2"><path d="M49 100V48h71" style="fill:none;stroke:var(--track);stroke-width:2"/><text x="180" y="190" text-anchor="middle" font-size="9" class="s-ink2">addBlock → block ID + [dn-1, dn-3, dn-4]</text></g>
+          <g data-on="3"><path d="M84 116h20M174 116h20M264 116h20" style="stroke:var(--ink);stroke-width:1.6;stroke-dasharray:3 3"/><text x="180" y="190" text-anchor="middle" font-size="9" class="s-ink2">pipeline set up hop by hop</text></g>
+          <g data-on="4"><path d="M84 112h20M174 112h20M264 112h20" style="stroke:var(--blue);stroke-width:3"/><path d="M104 132H84M194 132h-20M284 132h-20" style="stroke:var(--green);stroke-width:1.6;stroke-dasharray:4 3"/><rect x="40" y="160" width="280" height="24" rx="4" class="s-card2"/><text x="180" y="176" text-anchor="middle" font-size="8.6" class="s-ink">ack queue: packet waits until 3 acks arrive</text></g>
+          <g data-on="5"><path d="M316 100V60l-76-20M229 100V64l-50-16M139 100V60l40-12" style="fill:none;stroke:var(--green);stroke-width:1.4;stroke-dasharray:3 3"/><text x="180" y="190" text-anchor="middle" font-size="9" class="s-ink2">replicas reported (last DataNode first)</text></g>
+          <g data-on="6"><path d="M49 100V48h71" style="fill:none;stroke:var(--track);stroke-width:2"/><text x="180" y="190" text-anchor="middle" font-size="9" class="s-ink2">complete → file closed → rename</text><text x="180" y="206" text-anchor="middle" font-size="8.6" class="s-ink2">client uploaded 134 MB once; 402 MB stored</text></g>
+          <text x="352" y="246" text-anchor="end" class="s-wm">myphatshala.in</text>
+        </svg>
+        <ol class="caps" hidden>
+          <li>Only metadata goes to the NameNode: the file is created and the client gets a lease.</li>
+          <li>For each block, the NameNode chooses DataNodes using the rack-aware policy.</li>
+          <li>The client opens a connection to dn-1, which opens one to dn-3, which opens one to dn-4.</li>
+          <li>Data (blue) flows down; acks (green) flow back. A packet leaves the ack queue only when all three have it.</li>
+          <li>When the block is complete, each DataNode reports its replica to the NameNode in an incremental block report.</li>
+          <li>The file is closed. The client's network sent the data once; the DataNodes shared the copying.</li>
+        </ol>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ======================= PART 6: REAL-WORLD USE ======================= -->
+<section class="part" id="real-world">
+  <span class="part-label"><b>6</b> Real-world use</span>
+  <h2>The write pipeline at work</h2>
+
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="20" y="20" width="80" height="50" rx="6" class="s-soft-acc" style="stroke:var(--track)"/><text x="60" y="42" text-anchor="middle" font-size="8.6" font-weight="700" class="s-acc">edge node</text><text x="60" y="58" text-anchor="middle" font-size="8.6" class="s-ink">bulk ingestion</text></svg></div>
+    <div><h4>1. Bulk ingestion from edge nodes</h4>
+      <p>Daily exports land on an edge node and are pushed with <code>hdfs dfs -put</code> or DistCp. The edge node's network link limits speed, but each byte leaves it only once; replication is the DataNodes' work.</p>
+      <div class="uc-flow"><span>Edge node</span><i>→</i><span class="java">Pipeline</span><i>→</i><span>3 replicas</span></div></div>
+  </div>
+
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="20" y="20" width="80" height="50" rx="6" class="s-soft-blue" style="stroke:var(--blue)"/><text x="60" y="42" text-anchor="middle" font-size="8.6" font-weight="700" class="s-blue">hflush</text><text x="60" y="58" text-anchor="middle" font-size="8.6" class="s-ink">streaming logs</text></svg></div>
+    <div><h4>2. Logs written while still open</h4>
+      <p>Log collectors and streaming sinks keep a file open for minutes and call <code>hflush()</code> regularly so readers can see recent lines before the file is closed.</p>
+      <div class="uc-flow"><span>Write</span><i>→</i><span class="java">hflush</span><i>→</i><span>Visible to readers</span></div></div>
+  </div>
+
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="20" y="20" width="80" height="50" rx="6" class="s-card2"/><text x="60" y="42" text-anchor="middle" font-size="8.6" font-weight="700" class="s-ink">slow node</text><text x="60" y="58" text-anchor="middle" font-size="8.6" class="s-ink2">slows pipeline</text></svg></div>
+    <div><h4>3. One slow disk slows many writes</h4>
+      <p>A pipeline moves at the speed of its slowest DataNode. Operations teams watch per-DataNode write latency and exclude or repair slow nodes, because one bad disk can delay every job that writes through it.</p>
+      <div class="uc-flow"><span>Slow disk</span><i>→</i><span class="java">Slow acks</span><i>→</i><span>Slow jobs</span></div></div>
+  </div>
+
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="20" y="20" width="80" height="50" rx="6" class="s-soft-green" style="stroke:var(--green)"/><text x="60" y="42" text-anchor="middle" font-size="8.6" font-weight="700" class="s-green">recovery</text><text x="60" y="58" text-anchor="middle" font-size="8.6" class="s-ink">job keeps running</text></svg></div>
+    <div><h4>4. Jobs survive DataNode failures</h4>
+      <p>When a DataNode dies during a big job, thousands of task writes recover their pipelines exactly as in step 4 and carry on; the NameNode restores full replication afterwards. Users usually never notice.</p>
+      <div class="uc-flow"><span>Node dies</span><i>→</i><span class="java">Pipelines recover</span><i>→</i><span>Re-replication later</span></div></div>
+  </div>
+  <p class="muted">Simplified; organisations differ in tools and policies.</p>
+</section>
+
+
+<div class="ad-slot" data-slot="mid"></div>
+
+<section class="part" id="run">
+  <span class="part-label"><b>7</b> Run the code</span>
+  <h2>Simulate a pipeline with acknowledgements</h2>
+  <p>This program sends packets down a three-DataNode pipeline. Each packet stays in the ack queue until every DataNode has stored it. Watch which packets are still unacknowledged at each step.</p>
+  <div class="code" data-lang="python" data-file="main.py"><pre><code>from collections import deque
+
+pipeline = [&quot;dn-1&quot;, &quot;dn-3&quot;, &quot;dn-4&quot;]
+stored = {dn: [] for dn in pipeline}
+data_queue = deque(range(5))          # packet numbers 0..4
+ack_queue = deque()
+
+while data_queue or ack_queue:
+    if data_queue:
+        p = data_queue.popleft()
+        for dn in pipeline:            # dn-1 stores and forwards, and so on
+            stored[dn].append(p)
+        ack_queue.append(p)
+        print(f&quot;sent packet {p}  waiting for acks: {list(ack_queue)}&quot;)
+    if len(ack_queue) &gt; 1 or not data_queue:
+        done = ack_queue.popleft()     # acks come back in order
+        print(f&quot;  ack for packet {done} from {len(pipeline)} DataNodes&quot;)
+
+for dn, packets in stored.items():
+    print(dn, &quot;has&quot;, packets)</code></pre><div class="output">sent packet 0  waiting for acks: [0]
+sent packet 1  waiting for acks: [0, 1]
+  ack for packet 0 from 3 DataNodes
+sent packet 2  waiting for acks: [1, 2]
+  ack for packet 1 from 3 DataNodes
+sent packet 3  waiting for acks: [2, 3]
+  ack for packet 2 from 3 DataNodes
+sent packet 4  waiting for acks: [3, 4]
+  ack for packet 3 from 3 DataNodes
+  ack for packet 4 from 3 DataNodes
+dn-1 has [0, 1, 2, 3, 4]
+dn-3 has [0, 1, 2, 3, 4]
+dn-4 has [0, 1, 2, 3, 4]</div></div>
+  <ul class="anno"><li><code>for dn in pipeline:            # dn-1 stores and forwards, and so on</code><span>In real HDFS each DataNode writes the packet to disk and forwards it at the same time; the client only sends to dn-1.</span></li><li><code>ack_queue.append(p)</code><span>The client keeps the packet in memory until it is acknowledged, so it can resend it if a DataNode fails.</span></li><li><code>done = ack_queue.popleft()     # acks come back in order</code><span>Acks return in packet order, from the last DataNode back to the client.</span></li></ul>
+  <div class="runner">
+    <script type="application/json">{
+ "lang": "python",
+ "file": "main.py",
+ "tasks": [
+  {
+   "label": "1 · Send five packets",
+   "hint": "Press <b>Run<\/b>. Then change the number of packets to 8.",
+   "code": "from collections import deque\n\npipeline = [\"dn-1\", \"dn-3\", \"dn-4\"]\nstored = {dn: [] for dn in pipeline}\ndata_queue = deque(range(5))          # packet numbers 0..4\nack_queue = deque()\n\nwhile data_queue or ack_queue:\n    if data_queue:\n        p = data_queue.popleft()\n        for dn in pipeline:            # dn-1 stores and forwards, and so on\n            stored[dn].append(p)\n        ack_queue.append(p)\n        print(f\"sent packet {p}  waiting for acks: {list(ack_queue)}\")\n    if len(ack_queue) > 1 or not data_queue:\n        done = ack_queue.popleft()     # acks come back in order\n        print(f\"  ack for packet {done} from {len(pipeline)} DataNodes\")\n\nfor dn, packets in stored.items():\n    print(dn, \"has\", packets)\n"
+  },
+  {
+   "label": "2 · How many packets?",
+   "hint": "<b>Predict first:<\/b> how many data packets does a full 128 MB block need, and the real 140,760,270-byte file? Each full packet carries 64,512 data bytes.",
+   "code": "import math\ndata_per_packet = 64_512\nblock = 134_217_728\nsize = 140_760_270\nb1 = math.ceil(block / data_per_packet)\nb2 = math.ceil((size - block) / data_per_packet)\nprint(\"block 1:\", b1, \"data packets; block 2:\", b2, \"; total\", b1 + b2)\nprint(\"the real log numbered 2,186 packets: data packets plus a few control packets\")\n"
+  },
+  {
+   "label": "3 · Bytes on the wire",
+   "hint": "Compare network traffic leaving the client when it sends 3 copies itself versus using a pipeline, for 1 GB with replication 3.",
+   "code": "gb = 1\nprint(\"client sends every copy:\", gb * 3, \"GB from the client\")\nprint(\"pipeline:\", gb, \"GB from the client,\", gb * 2, \"GB forwarded between DataNodes\")\n"
+  },
+  {
+   "label": "4 · Failure mid-block",
+   "hint": "dn-3 dies after packet 2. Remove it from the pipeline, put unacknowledged packets back, and continue. Which DataNodes end up with every packet?",
+   "code": "pipeline = [\"dn-1\", \"dn-3\", \"dn-4\"]\nstored = {dn: [] for dn in pipeline}\nfor p in range(6):\n    if p == 3 and \"dn-3\" in pipeline:\n        pipeline.remove(\"dn-3\")        # recovery: continue with the survivors\n        print(\"dn-3 failed; new pipeline\", pipeline, \"- generation stamp bumped\")\n    for dn in pipeline:\n        stored[dn].append(p)\nprint({dn: len(ps) for dn, ps in stored.items()})\n"
+  },
+  {
+   "label": "5 · Spot the error",
+   "hint": "This client removes packets from the ack queue as soon as they are sent. Why is that dangerous if a DataNode fails? Make it wait for the ack.",
+   "code": "ack_queue = []\nfor p in range(3):\n    print(\"sent\", p)\n    # bug: forgetting the packet immediately\nprint(\"unacknowledged packets kept for resending:\", ack_queue)\n"
+  }
+ ]
+}</script>
+  </div>
+  <h3 id="pc">Run it on your PC: trace your own write pipeline</h3>
+  <p>This script uploads a 134 MB file from datanode-1 with client debug logging, then summarises the pipelines, packets and acknowledgements from the log. Save it as <code>write_trace.py</code> in the <code>hdfs-lab</code> folder (it needs <code>canteen_orders.csv</code> copied to <code>/tmp</code> inside datanode-1, as in Lesson 5.1).</p>
+  <div class="pcrun"><h4>Pipelines and packets of one upload</h4>
+  <div class="code" data-lang="bash" data-file="write_trace.py"><pre><code># write_trace.py: upload a file from datanode-1 with client debug logging,
+# then summarise what the write pipeline did. Run in the hdfs-lab folder.
+import re
+import subprocess
+
+LOG4J = &quot;&quot;&quot;log4j.rootLogger=WARN, err
+log4j.appender.err=org.apache.log4j.ConsoleAppender
+log4j.appender.err.Target=System.err
+log4j.appender.err.layout=org.apache.log4j.PatternLayout
+log4j.appender.err.layout.ConversionPattern=%d{HH:mm:ss,SSS} %m%n
+log4j.logger.org.apache.hadoop.hdfs.DataStreamer=DEBUG
+&quot;&quot;&quot;
+CLIENT = &quot;lab5-datanode-1&quot;           # a DataNode, so replica 1 is written locally
+
+def sh(cmd):
+    return subprocess.run(cmd, shell=True, capture_output=True, text=True)
+
+sh(f&quot;docker exec -i {CLIENT} bash -c &#x27;cat &gt; /tmp/w.properties&#x27; &lt;&lt;&#x27;X&#x27;\n{LOG4J}X&quot;)
+sh(f&quot;docker exec {CLIENT} bash -c &#x27;for i in $(seq 30); do cat /tmp/canteen_orders.csv; done &gt; /tmp/orders_x30.csv&#x27;&quot;)
+log = sh(f&quot;docker exec {CLIENT} bash -c &#x27;HADOOP_CLIENT_OPTS=-Dlog4j.configuration=file:/tmp/w.properties &quot;
+         f&quot;hdfs dfs -put -f /tmp/orders_x30.csv /user/hadoop/data/orders_x30.csv&#x27;&quot;).stderr
+
+ip_to_name = {}
+for n in sh(&quot;docker ps --format &#x27;{{.Names}}&#x27;&quot;).stdout.split():
+    ip = sh(&quot;docker inspect -f &#x27;{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}&#x27; &quot; + n).stdout.strip()
+    ip_to_name[ip] = n.replace(&quot;lab5-&quot;, &quot;&quot;)
+
+for m in re.finditer(r&quot;pipeline = \[(.*?)\]\], (blk_\d+)&quot;, log):
+    ips = re.findall(r&quot;(\d+\.\d+\.\d+\.\d+):9866&quot;, m.group(1))
+    print(m.group(2), &quot;pipeline:&quot;, &quot; -&gt; &quot;.join(ip_to_name.get(ip, ip) for ip in ips))
+packets = len(re.findall(r&quot;sending packet seqno&quot;, log))
+acks = len(re.findall(r&quot;reply: SUCCESS reply: SUCCESS reply: SUCCESS&quot;, log))
+first = re.search(r&quot;seqno: 0 offsetInBlock: 0 lastPacketInBlock: false lastByteOffsetInBlock: (\d+)&quot;, log)
+times = re.findall(r&quot;^(\d\d:\d\d:\d\d,\d+)&quot;, log, re.M)
+print(f&quot;packets sent: {packets}, acknowledged by all 3 DataNodes: {acks}&quot;)
+print(f&quot;data bytes per full packet: {first.group(1)}&quot;)
+print(f&quot;first log line {times[0]}, last {times[-1]}&quot;)
+
+# In the hdfs-lab folder:
+#   docker cp canteen_orders.csv lab5-datanode-1:/tmp/
+#   python3 write_trace.py</code></pre><div class="output">blk_1073741860 pipeline: datanode-1 -&gt; datanode-3 -&gt; datanode-4
+blk_1073741861 pipeline: datanode-1 -&gt; datanode-2 -&gt; datanode-5
+packets sent: 2186, acknowledged by all 3 DataNodes: 2186
+data bytes per full packet: 64512
+first log line 09:43:26,161, last 09:43:28,775</div></div>
+  <p class="muted">Real output, with 5 DataNodes. The first replica is always on datanode-1 (the writer). The pipeline order follows network distance from the writer, so block 2 visits datanode-2 (same rack) before datanode-5 (other rack); the replicas still cover both racks.</p></div>
+</section>
+
+<section class="part" id="tracer">
+  <span class="part-label"><b>8</b> Line by line</span>
+  <h2>Pipeline recovery, one line at a time</h2>
+  <p>Follow the client when the middle DataNode fails: unacknowledged packets go back to the front of the data queue and the generation stamp changes.</p>
+  <div class="tracer">
+    <script type="application/json">{
+ "lang": "python",
+ "code": [
+  "pipeline = [\"dn-1\", \"dn-3\", \"dn-4\"]",
+  "gen_stamp = 1023",
+  "acked, unacked = [0, 1, 2], [3, 4]",
+  "failed = \"dn-3\"",
+  "pipeline.remove(failed)",
+  "gen_stamp += 1",
+  "resend = unacked",
+  "print(pipeline, \"blk_1073741847_%d\" % gen_stamp, \"resend\", resend)"
+ ],
+ "steps": [
+  {
+   "line": 1,
+   "phase": "Python",
+   "note": "<code>pipeline<\/code> is created: → list #1.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "pipeline",
+       "→ list #1"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (3)<\/b> [&#x27;dn-1&#x27;, &#x27;dn-3&#x27;, &#x27;dn-4&#x27;]"
+   ],
+   "newVar": "pipeline"
+  },
+  {
+   "line": 2,
+   "phase": "Python",
+   "note": "<code>gen_stamp<\/code> is created: 1023.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "pipeline",
+       "→ list #1"
+      ],
+      [
+       "gen_stamp",
+       "1023"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (3)<\/b> [&#x27;dn-1&#x27;, &#x27;dn-3&#x27;, &#x27;dn-4&#x27;]"
+   ],
+   "newVar": "gen_stamp"
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "<code>acked<\/code> is created: → list #2. <code>unacked<\/code> is created: → list #3. A new list object (#2) is created: [0, 1, 2] A new list object (#3) is created: [3, 4]",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "pipeline",
+       "→ list #1"
+      ],
+      [
+       "gen_stamp",
+       "1023"
+      ],
+      [
+       "acked",
+       "→ list #2"
+      ],
+      [
+       "unacked",
+       "→ list #3"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (3)<\/b> [&#x27;dn-1&#x27;, &#x27;dn-3&#x27;, &#x27;dn-4&#x27;]",
+    "<b>#2 list (3)<\/b> [0, 1, 2]",
+    "<b>#3 list (2)<\/b> [3, 4]"
+   ],
+   "newVar": "unacked"
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "<code>failed<\/code> is created: &#x27;dn-3&#x27;.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "pipeline",
+       "→ list #1"
+      ],
+      [
+       "gen_stamp",
+       "1023"
+      ],
+      [
+       "acked",
+       "→ list #2"
+      ],
+      [
+       "unacked",
+       "→ list #3"
+      ],
+      [
+       "failed",
+       "'dn-3'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (3)<\/b> [&#x27;dn-1&#x27;, &#x27;dn-3&#x27;, &#x27;dn-4&#x27;]",
+    "<b>#2 list (3)<\/b> [0, 1, 2]",
+    "<b>#3 list (2)<\/b> [3, 4]"
+   ],
+   "newVar": "failed"
+  },
+  {
+   "line": 5,
+   "phase": "Exclude",
+   "note": "The failed DataNode leaves the pipeline. Object #1 list now holds [&#x27;dn-1&#x27;, &#x27;dn-4&#x27;]",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "pipeline",
+       "→ list #1"
+      ],
+      [
+       "gen_stamp",
+       "1023"
+      ],
+      [
+       "acked",
+       "→ list #2"
+      ],
+      [
+       "unacked",
+       "→ list #3"
+      ],
+      [
+       "failed",
+       "'dn-3'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (2)<\/b> [&#x27;dn-1&#x27;, &#x27;dn-4&#x27;]",
+    "<b>#2 list (3)<\/b> [0, 1, 2]",
+    "<b>#3 list (2)<\/b> [3, 4]"
+   ]
+  },
+  {
+   "line": 6,
+   "phase": "New version",
+   "note": "1023 → 1024, as in the real log. Old partial replicas with 1023 become stale. <code>gen_stamp<\/code> changes to 1024.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "pipeline",
+       "→ list #1"
+      ],
+      [
+       "gen_stamp",
+       "1024"
+      ],
+      [
+       "acked",
+       "→ list #2"
+      ],
+      [
+       "unacked",
+       "→ list #3"
+      ],
+      [
+       "failed",
+       "'dn-3'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (2)<\/b> [&#x27;dn-1&#x27;, &#x27;dn-4&#x27;]",
+    "<b>#2 list (3)<\/b> [0, 1, 2]",
+    "<b>#3 list (2)<\/b> [3, 4]"
+   ],
+   "newVar": "gen_stamp"
+  },
+  {
+   "line": 7,
+   "phase": "Resend",
+   "note": "Packets that never got all their acks are sent again. <code>resend<\/code> is created: → list #3.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "pipeline",
+       "→ list #1"
+      ],
+      [
+       "gen_stamp",
+       "1024"
+      ],
+      [
+       "acked",
+       "→ list #2"
+      ],
+      [
+       "unacked",
+       "→ list #3"
+      ],
+      [
+       "failed",
+       "'dn-3'"
+      ],
+      [
+       "resend",
+       "→ list #3"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (2)<\/b> [&#x27;dn-1&#x27;, &#x27;dn-4&#x27;]",
+    "<b>#2 list (3)<\/b> [0, 1, 2]",
+    "<b>#3 list (2)<\/b> [3, 4]"
+   ],
+   "newVar": "resend"
+  },
+  {
+   "line": 8,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "pipeline",
+       "→ list #1"
+      ],
+      [
+       "gen_stamp",
+       "1024"
+      ],
+      [
+       "acked",
+       "→ list #2"
+      ],
+      [
+       "unacked",
+       "→ list #3"
+      ],
+      [
+       "failed",
+       "'dn-3'"
+      ],
+      [
+       "resend",
+       "→ list #3"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (2)<\/b> [&#x27;dn-1&#x27;, &#x27;dn-4&#x27;]",
+    "<b>#2 list (3)<\/b> [0, 1, 2]",
+    "<b>#3 list (2)<\/b> [3, 4]"
+   ],
+   "out": "['dn-1', 'dn-4'] blk_1073741847_1024 resend [3, 4]\n"
+  }
+ ]
+}</script>
+  </div>
+
+<h3 id="worked">Worked examples: real problems, solved and traced in memory</h3>
+  <p class="wx-intro">Three write-path calculations engineers make: upload time, network load on racks, and how much data is at risk while a pipeline runs short. Each runs live and is traced in memory.</p>
+  <article class="wx">
+    <div class="wx__head"><span class="wx__num">Example 1</span><span class="lvl lvl--b">Beginner</span><span class="wx__tag">Planning · ingestion</span></div>
+    <h4>How long will this upload take?</h4>
+    <div class="wx__problem"><p class="wx__label">Problem statement</p><p>An edge node with a 10 Gbit/s link (about 1,100 MB/s usable) uploads 2 TB of logs with replication 3. DataNode disks are not the bottleneck. Estimate the time, and compare with a client that had to send all 3 copies itself.</p></div>
+    <div class="prob__io"><div><small>Input</small><pre>2 TB · 1,100 MB/s · replication 3</pre></div><div><small>Expected output</small><pre>pipeline: 0.5 h   sending 3 copies itself: 1.6 h</pre></div></div>
+    <div class="wx__approach"><p class="wx__label">Approach</p><ol><li>Pipeline: the client sends the data once.</li><li>Time = size / link speed.</li><li>Without a pipeline it would send 3×.</li></ol></div>
+    <p class="wx__label">Solution: run it live</p>
+    <div class="runner">
+    <script type="application/json">{
+ "lang": "python",
+ "file": "main.py",
+ "tasks": [
+  {
+   "label": "Solution",
+   "hint": "Run 4 upload clients on different edge nodes in parallel: the cluster, not one link, becomes the limit.",
+   "code": "tb_mb = 2 * 1024 * 1024\nrate = 1100\nonce = tb_mb / rate / 3600\nprint(f\"pipeline: {once:.1f} h   sending 3 copies itself: {once * 3:.1f} h\")\n"
+  }
+ ]
+}</script>
+    </div>
+    <p class="wx__label">What happens in memory, step by step</p>
+    <p class="wx__how">Recorded from a real Python run: press <b>Next</b> to execute one line at a time. Watch variables change in each frame, and lists and dictionaries (numbered #1, #2 …) fill up as objects.</p>
+    <div class="tracer">
+    <script type="application/json">{
+ "lang": "python",
+ "code": [
+  "tb_mb = 2 * 1024 * 1024",
+  "rate = 1100",
+  "once = tb_mb / rate / 3600",
+  "print(f\"pipeline: {once:.1f} h   sending 3 copies itself: {once * 3:.1f} h\")"
+ ],
+ "steps": [
+  {
+   "line": 1,
+   "phase": "Python",
+   "note": "<code>tb_mb<\/code> is created: 2097152.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "tb_mb",
+       "2097152"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "tb_mb"
+  },
+  {
+   "line": 2,
+   "phase": "Python",
+   "note": "<code>rate<\/code> is created: 1100.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "tb_mb",
+       "2097152"
+      ],
+      [
+       "rate",
+       "1100"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "rate"
+  },
+  {
+   "line": 3,
+   "phase": "Once",
+   "note": "Replication traffic is between DataNodes, not on the client link. <code>once<\/code> is created: 0.5296.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "tb_mb",
+       "2097152"
+      ],
+      [
+       "rate",
+       "1100"
+      ],
+      [
+       "once",
+       "0.5296"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "once"
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "tb_mb",
+       "2097152"
+      ],
+      [
+       "rate",
+       "1100"
+      ],
+      [
+       "once",
+       "0.5296"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "out": "pipeline: 0.5 h   sending 3 copies itself: 1.6 h\n"
+  }
+ ]
+}</script>
+    </div>
+  </article>
+  <article class="wx">
+    <div class="wx__head"><span class="wx__num">Example 2</span><span class="lvl lvl--i">Intermediate</span><span class="wx__tag">Network · racks</span></div>
+    <h4>Cross-rack traffic for a day of writes</h4>
+    <div class="wx__problem"><p class="wx__label">Problem statement</p><p>Jobs write 30 TB per day with replication 3 from tasks running on DataNodes. With the default placement, each block crosses racks once. How much traffic crosses the core switch per day, and the average rate in Gbit/s?</p></div>
+    <div class="prob__io"><div><small>Input</small><pre>30 TB/day · 1 cross-rack copy per block</pre></div><div><small>Expected output</small><pre>30 TB/day across racks = 3.1 Gbit/s on average</pre></div></div>
+    <div class="wx__approach"><p class="wx__label">Approach</p><ol><li>Cross-rack bytes = data written × 1.</li><li>Average rate = bytes / 86,400 s.</li><li>Convert to Gbit/s.</li></ol></div>
+    <p class="wx__label">Solution: run it live</p>
+    <div class="runner">
+    <script type="application/json">{
+ "lang": "python",
+ "file": "main.py",
+ "tasks": [
+  {
+   "label": "Solution",
+   "hint": "If all three replicas went to different racks, it would double. That is why the default policy keeps two replicas in one rack.",
+   "code": "tb = 30\nbytes_cross = tb * 2**40\ngbit_s = bytes_cross * 8 / 86_400 / 1e9\nprint(f\"{tb} TB/day across racks = {gbit_s:.1f} Gbit/s on average\")\n"
+  }
+ ]
+}</script>
+    </div>
+    <p class="wx__label">What happens in memory, step by step</p>
+    <p class="wx__how">Recorded from a real Python run: press <b>Next</b> to execute one line at a time. Watch variables change in each frame, and lists and dictionaries (numbered #1, #2 …) fill up as objects.</p>
+    <div class="tracer">
+    <script type="application/json">{
+ "lang": "python",
+ "code": [
+  "tb = 30",
+  "bytes_cross = tb * 2**40",
+  "gbit_s = bytes_cross * 8 / 86_400 / 1e9",
+  "print(f\"{tb} TB/day across racks = {gbit_s:.1f} Gbit/s on average\")"
+ ],
+ "steps": [
+  {
+   "line": 1,
+   "phase": "Python",
+   "note": "<code>tb<\/code> is created: 30.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "tb",
+       "30"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "tb"
+  },
+  {
+   "line": 2,
+   "phase": "Python",
+   "note": "<code>bytes_cross<\/code> is created: 32985348833280.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "tb",
+       "30"
+      ],
+      [
+       "bytes_cross",
+       "32985348833280"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "bytes_cross"
+  },
+  {
+   "line": 3,
+   "phase": "Rate",
+   "note": "Peaks are much higher than the daily average. <code>gbit_s<\/code> is created: 3.0542.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "tb",
+       "30"
+      ],
+      [
+       "bytes_cross",
+       "32985348833280"
+      ],
+      [
+       "gbit_s",
+       "3.0542"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "gbit_s"
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "tb",
+       "30"
+      ],
+      [
+       "bytes_cross",
+       "32985348833280"
+      ],
+      [
+       "gbit_s",
+       "3.0542"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "out": "30 TB/day across racks = 3.1 Gbit/s on average\n"
+  }
+ ]
+}</script>
+    </div>
+  </article>
+  <article class="wx">
+    <div class="wx__head"><span class="wx__num">Example 3</span><span class="lvl lvl--a">Advanced</span><span class="wx__tag">Risk · recovery</span></div>
+    <h4>Data with fewer than 3 replicas during failures</h4>
+    <div class="wx__problem"><p class="wx__label">Problem statement</p><p>During a busy hour, 200 pipelines are writing at once, each with on average 60 MB of its current block written. A DataNode that is part of 40 of these pipelines dies. Those pipelines continue with 2 replicas. How much just-written data briefly has only 2 replicas, and how long until re-replication at 500 MB/s cluster-wide?</p></div>
+    <div class="prob__io"><div><small>Input</small><pre>40 affected pipelines · 64 MB average per block when complete · 500 MB/s</pre></div><div><small>Expected output</small><pre>~5,120 MB with 2 replicas, fixed in ~10 s</pre></div></div>
+    <div class="wx__approach"><p class="wx__label">Approach</p><ol><li>Affected blocks finish with 2 replicas: about 40 blocks of up to 128 MB.</li><li>Data at reduced redundancy ≈ 40 × 128 MB.</li><li>Time to fix = data / repair rate.</li></ol></div>
+    <p class="wx__label">Solution: run it live</p>
+    <div class="runner">
+    <script type="application/json">{
+ "lang": "python",
+ "file": "main.py",
+ "tasks": [
+  {
+   "label": "Solution",
+   "hint": "The real lab block was re-replicated 19 s after the write. Small risk windows like this are why replication 3 (not 2) is the default.",
+   "code": "blocks, block_mb, rate = 40, 128, 500\ndata = blocks * block_mb\nprint(f\"~{data:,} MB with 2 replicas, fixed in ~{data / rate:.0f} s\")\n"
+  }
+ ]
+}</script>
+    </div>
+    <p class="wx__label">What happens in memory, step by step</p>
+    <p class="wx__how">Recorded from a real Python run: press <b>Next</b> to execute one line at a time. Watch variables change in each frame, and lists and dictionaries (numbered #1, #2 …) fill up as objects.</p>
+    <div class="tracer">
+    <script type="application/json">{
+ "lang": "python",
+ "code": [
+  "blocks, block_mb, rate = 40, 128, 500",
+  "data = blocks * block_mb",
+  "print(f\"~{data:,} MB with 2 replicas, fixed in ~{data / rate:.0f} s\")"
+ ],
+ "steps": [
+  {
+   "line": 1,
+   "phase": "Python",
+   "note": "<code>blocks<\/code> is created: 40. <code>block_mb<\/code> is created: 128. <code>rate<\/code> is created: 500.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "blocks",
+       "40"
+      ],
+      [
+       "block_mb",
+       "128"
+      ],
+      [
+       "rate",
+       "500"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "rate"
+  },
+  {
+   "line": 2,
+   "phase": "Python",
+   "note": "<code>data<\/code> is created: 5120.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "blocks",
+       "40"
+      ],
+      [
+       "block_mb",
+       "128"
+      ],
+      [
+       "rate",
+       "500"
+      ],
+      [
+       "data",
+       "5120"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "data"
+  },
+  {
+   "line": 3,
+   "phase": "Upper bound",
+   "note": "Assumes each affected block grows to a full 128 MB. The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "blocks",
+       "40"
+      ],
+      [
+       "block_mb",
+       "128"
+      ],
+      [
+       "rate",
+       "500"
+      ],
+      [
+       "data",
+       "5120"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "out": "~5,120 MB with 2 replicas, fixed in ~10 s\n"
+  }
+ ]
+}</script>
+    </div>
+  </article>
+</section>
+
+<section class="part" id="quiz">
+  <span class="part-label"><b>9</b> Quiz and revision</span>
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <script type="application/json">[
+ {
+  "q": "With replication 3, how many times does the client send each byte over the network?",
+  "options": [
+   "Twice",
+   "Three times",
+   "Once",
+   "It depends on the block size"
+  ],
+  "answer": 2,
+  "why": "The client sends to the first DataNode only; DataNodes forward along the pipeline."
+ },
+ {
+  "q": "Who chooses the DataNodes for a new block?",
+  "options": [
+   "The client",
+   "The NameNode, with the block placement policy",
+   "The first DataNode",
+   "YARN"
+  ],
+  "answer": 1,
+  "why": "The addBlock reply lists the DataNodes, e.g. replicas=.4, .6, .7."
+ },
+ {
+  "q": "What is a packet in the write pipeline?",
+  "options": [
+   "A unit of about 64 KB of data with checksums",
+   "A whole block",
+   "One line of the file",
+   "A DataNode heartbeat"
+  ],
+  "answer": 0,
+  "why": "The real log: 64,512 data bytes per packet, 126 chunks of 512 + 4 bytes."
+ },
+ {
+  "q": "When does the client remove a packet from its ack queue?",
+  "options": [
+   "As soon as it is sent",
+   "When the block is full",
+   "When the NameNode says so",
+   "When all DataNodes in the pipeline have acknowledged it"
+  ],
+  "answer": 3,
+  "why": "That way it can resend packets if a DataNode fails."
+ },
+ {
+  "q": "Which direction do acknowledgements travel?",
+  "options": [
+   "From the client to the DataNodes",
+   "From the NameNode to the client",
+   "From the last DataNode back through the others to the client",
+   "They are not used"
+  ],
+  "answer": 2,
+  "why": "DN3 → DN2 → DN1 → client."
+ },
+ {
+  "q": "A DataNode dies in the middle of writing a block. What happens by default?",
+  "options": [
+   "The upload fails",
+   "The client removes it, the generation stamp is bumped, and writing continues on the remaining DataNodes",
+   "All data is rewritten from the start",
+   "The NameNode stops"
+  ],
+  "answer": 1,
+  "why": "Real log: updatePipeline … newGS=1024 … newNodes=[.4, .7], then the upload finished."
+ },
+ {
+  "q": "Why does hdfs dfs -put write to a file ending in ._COPYING_?",
+  "options": [
+   "So readers never see a half-written file under the final name; it is renamed at the end",
+   "To compress it",
+   "Because HDFS needs it for replication",
+   "For encryption"
+  ],
+  "answer": 0,
+  "why": "We saw cmd=create …._COPYING_ and later cmd=rename."
+ },
+ {
+  "q": "Which replica does the NameNode usually hear about first when a block completes?",
+  "options": [
+   "The first in the pipeline",
+   "Always the local one",
+   "None until the file closes",
+   "The last in the pipeline"
+  ],
+  "answer": 3,
+  "why": "addStoredBlock .7, then .6, then .4: the last DataNode finishes first."
+ }
+]</script>
+  </div>
+
+  <h3>Quick revision</h3>
+  <div class="revision">
+    <h3>Lesson 6.1 in one screen</h3>
+    <ul><li>Write = <b>create</b> (NameNode) → <b>addBlock</b> (DataNode list) → <b>pipeline</b> DN1 → DN2 → DN3 → <b>complete</b>.</li><li>Client sends each byte <b>once</b>; DataNodes forward. Replicas are written in parallel.</li><li>Packets: ~64 KB (64,512 data bytes = 126 × 512-byte chunks, each + 4-byte checksum).</li><li>Acks flow back; packets stay in the <b>ack queue</b> until all DataNodes confirm.</li><li>Block full → close pipeline → addBlock again. File visible under <code>._COPYING_</code> until renamed (put).</li><li>DataNode fails mid-block → exclude it, <b>bump generation stamp</b>, continue on survivors; re-replicate later.</li><li>Setup failure → “firstBadLink” → abandon block, exclude node, new block.</li><li>Pipeline order = network distance from the writer; replicas still span racks.</li></ul>
+  </div>
+
+  <h3>Interview and viva questions</h3>
+  <div class="faq">
+    <details><summary>How does a client write a file to HDFS?</summary><p>It asks the NameNode to create the file, then for each block asks for a list of DataNodes. It streams the block as packets to the first DataNode, which stores and forwards them to the second, which forwards to the third. Acknowledgements come back along the pipeline. When all data is written, the client tells the NameNode the file is complete.</p></details>
+    <details><summary>Does the data pass through the NameNode during a write?</summary><p>No. The NameNode only handles metadata: creating the file, allocating blocks and recording finished replicas. Data flows from the client to DataNodes and between DataNodes.</p></details>
+    <details><summary>What happens if a DataNode fails during a write?</summary><p>The client detects the error, removes that DataNode from the pipeline, moves unacknowledged packets back to the data queue, gets a new generation stamp for the block from the NameNode, and continues with the remaining DataNodes (possibly adding a replacement). The NameNode re-replicates the block later.</p></details>
+    <details><summary>What is the generation stamp?</summary><p>A version number attached to each block (the part after the last underscore in blk_1073741847_1024). It is increased during pipeline recovery or append so that replicas left behind on failed DataNodes are recognised as stale and deleted.</p></details>
+    <details><summary>When can other clients read a file that is being written?</summary><p>They can always see the file, and data in completed blocks. Data in the block being written becomes visible after hflush() (or when the block or file is closed). Only one client can write to a file at a time.</p></details>
+    <details><summary>Why is data sent in packets instead of whole blocks?</summary><p>So that DataNodes can start forwarding while still receiving, keeping all three copies moving at once, and so that a failure only requires resending a few small packets, not a whole 128 MB block.</p></details>
+    
+  </div>
+
+  <h3 id="practice">Practice problems</h3>
+  <p class="prob-intro">Pipeline exercises built on the numbers from the real logs.</p>
+  <div class="probs">
+    <article class="prob"><div class="prob__head"><span class="prob__num">P1</span><span class="prob__tag prob__tag--easy">Easy</span><h4>Chunk arithmetic</h4></div>
+      <p>A packet has 126 chunks of 512 data bytes, each with a 4-byte checksum. How many data bytes and total bytes per packet?</p>
+      <div class="prob__io"><div><small>Input</small><pre>126 chunks · 512 + 4 bytes</pre></div><div><small>Expected output</small><pre>64512 data bytes, 65016 bytes with checksums</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>print(126 * 512, &quot;data bytes,&quot;, 126 * 516, &quot;bytes with checksums&quot;)</code></pre><div class="output">64512 data bytes, 65016 bytes with checksums</div></div>
+        <p><b>How it works:</b> 64,512 data bytes and 65,016 bytes in total, exactly the packetSize in the client log.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P2</span><span class="prob__tag prob__tag--easy">Easy</span><h4>Packets per block</h4></div>
+      <p>How many full 64,512-byte packets fill a 134,217,728-byte block?</p>
+      <div class="prob__io"><div><small>Input</small><pre>134,217,728 / 64,512</pre></div><div><small>Expected output</small><pre>2081</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>import math
+print(math.ceil(134217728 / 64512))</code></pre><div class="output">2081</div></div>
+        <p><b>How it works:</b> 2,081 data packets (the last one partly full). The log's sequence numbers for block 1 run 0 to 2082 because it also counts small control packets, such as the empty last packet that closes the block.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P3</span><span class="prob__tag prob__tag--easy">Easy</span><h4>Second block size</h4></div>
+      <p>The file is 140,760,270 bytes with 128 MB blocks. How big is the second block?</p>
+      <div class="prob__io"><div><small>Input</small><pre>140,760,270 − 134,217,728</pre></div><div><small>Expected output</small><pre>6542542</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>print(140760270 - 134217728)</code></pre><div class="output">6542542</div></div>
+        <p><b>How it works:</b> 6,542,542 bytes, matching addStoredBlock … (size=6542542).</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P4</span><span class="prob__tag prob__tag--medium">Medium</span><h4>Order of the chain</h4></div>
+      <p>From the DataNode “Receiving … src: … dest: …” lines, reconstruct the pipeline order.</p>
+      <div class="prob__io"><div><small>Input</small><pre>src/dest pairs from the real logs</pre></div><div><small>Expected output</small><pre>172.19.0.4 -&gt; 172.19.0.6 -&gt; 172.19.0.7</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>pairs = [(&quot;172.19.0.6&quot;, &quot;172.19.0.7&quot;), (&quot;172.19.0.4&quot;, &quot;172.19.0.4&quot;), (&quot;172.19.0.4&quot;, &quot;172.19.0.6&quot;)]
+nxt = {s: d for s, d in pairs if s != d}
+node, chain = &quot;172.19.0.4&quot;, [&quot;172.19.0.4&quot;]
+while node in nxt:
+    node = nxt[node]; chain.append(node)
+print(&quot; -&gt; &quot;.join(chain))</code></pre><div class="output">172.19.0.4 -&gt; 172.19.0.6 -&gt; 172.19.0.7</div></div>
+        <p><b>How it works:</b> 172.19.0.4 → 172.19.0.6 → 172.19.0.7: datanode-1 → datanode-3 → datanode-4.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P5</span><span class="prob__tag prob__tag--medium">Medium</span><h4>Where did recovery happen?</h4></div>
+      <p>updatePipeline reported newLength=40061952. How many packets had been fully acknowledged, and what fraction of the block was written?</p>
+      <div class="prob__io"><div><small>Input</small><pre>40,061,952 bytes · 64,512 per packet · 128 MB block</pre></div><div><small>Expected output</small><pre>621 packets; 30% of the block</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>print(40061952 // 64512, &quot;packets;&quot;, f&quot;{40061952 / 134217728:.0%} of the block&quot;)</code></pre><div class="output">621 packets; 30% of the block</div></div>
+        <p><b>How it works:</b> 621 full packets, about 30% of the block, before datanode-3 died. The rest was written to two DataNodes.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P6</span><span class="prob__tag prob__tag--medium">Medium</span><h4>Abandoned block IDs</h4></div>
+      <p>The final file has blocks …842, …844, …845, …846. Which block ID was abandoned?</p>
+      <div class="prob__io"><div><small>Input</small><pre>842 · 844 · 845 · 846</pre></div><div><small>Expected output</small><pre>[843]</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>ids = [842, 844, 845, 846]
+print([i for i in range(ids[0], ids[-1] + 1) if i not in ids])</code></pre><div class="output">[843]</div></div>
+        <p><b>How it works:</b> …843, the block whose pipeline setup failed with firstBadLink 172.19.0.7.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P7</span><span class="prob__tag prob__tag--business">Business problem</span><h4>Network cost of naive copying</h4></div>
+      <p>A company ingests 5 TB a day from a branch office over a 1 Gbit/s link (about 110 MB/s). With a pipeline the link carries the data once. How many hours a day would the link be busy if it had to carry 3 copies?</p>
+      <div class="prob__io"><div><small>Input</small><pre>5 TB/day · 110 MB/s</pre></div><div><small>Expected output</small><pre>once: 13.2 h/day, three copies: 39.7 h/day</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>hours = 5 * 1024 * 1024 / 110 / 3600
+print(f&quot;once: {hours:.1f} h/day, three copies: {hours * 3:.1f} h/day&quot;)</code></pre><div class="output">once: 13.2 h/day, three copies: 39.7 h/day</div></div>
+        <p><b>How it works:</b> About 13 hours a day once, 40 hours for three copies: impossible. The pipeline makes remote ingestion feasible.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P8</span><span class="prob__tag prob__tag--advanced">Advanced</span><h4>Simulate recovery with resend</h4></div>
+      <p>Simulate 6 packets where dn-3 fails after acknowledging packet 2. Count packets each surviving DataNode stores, including resent ones (stored once each).</p>
+      <div class="prob__io"><div><small>Input</small><pre>6 packets · dn-3 fails after packet 2</pre></div><div><small>Expected output</small><pre>{&#x27;dn-1&#x27;: [0, 1, 2, 3, 4, 5], &#x27;dn-3&#x27;: [0, 1, 2], &#x27;dn-4&#x27;: [0, 1, 2, 3, 4, 5]}</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>pipeline = [&quot;dn-1&quot;, &quot;dn-3&quot;, &quot;dn-4&quot;]
+stored = {d: set() for d in pipeline}
+for p in range(6):
+    if p == 3:
+        pipeline.remove(&quot;dn-3&quot;)
+    for d in pipeline:
+        stored[d].add(p)
+print({d: sorted(s) for d, s in stored.items()})</code></pre><div class="output">{&#x27;dn-1&#x27;: [0, 1, 2, 3, 4, 5], &#x27;dn-3&#x27;: [0, 1, 2], &#x27;dn-4&#x27;: [0, 1, 2, 3, 4, 5]}</div></div>
+        <p><b>How it works:</b> dn-1 and dn-4 hold all 6 packets; dn-3 only 0–2, a stale partial replica that the generation stamp lets HDFS discard.</p>
+      </details>
+    </article>
+  </div>
+
+  <h3 id="scenarios">Real-world scenario questions (asked in company interviews)</h3>
+  <p class="scn-intro">The write path is a favourite deep-dive question. Real log lines make your answer stand out.</p>
+  <div class="scenarios">
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">HDFS · internals</span><span class="scn__tag scn__tag--level">Fresher</span></div>
+      <h4>“Walk me through what happens when I run hdfs dfs -put”</h4>
+      <p class="scn__situation">The classic anatomy-of-a-write question.</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> the order of steps and who talks to whom.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>Client asks the NameNode to create <code>file._COPYING_</code>; NameNode checks permissions and existence and grants a lease.</li>
+          <li>For each block the NameNode returns a block ID and three DataNodes (local, other rack, same rack as the second).</li>
+          <li>Client streams ~64 KB packets to DN1, which stores and forwards to DN2, then DN3; acks return; packets wait in the ack queue until all confirm.</li>
+          <li>After the last block the client calls complete; the NameNode closes the file; put renames it to the final name.</li>
+        </ul>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">HDFS · failure</span><span class="scn__tag scn__tag--level">Experienced</span></div>
+      <h4>A DataNode crashes during a large write. Does the job fail?</h4>
+      <p class="scn__situation">A Spark job is writing 2 TB when a worker node reboots.</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> pipeline recovery details.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>Each affected writer detects the failure (bad ack or timeout), removes the DataNode, puts unacknowledged packets back in its data queue and asks the NameNode to update the pipeline.</li>
+          <li>The NameNode bumps the block's generation stamp so the dead node's partial replica is stale; writing continues on the survivors (a replacement may be added depending on the policy).</li>
+          <li>The NameNode re-replicates the block afterwards. The job continues; only tasks running on the rebooted node itself are retried by YARN/Spark.</li>
+        </ul>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Performance · writes</span><span class="scn__tag scn__tag--level">Experienced</span></div>
+      <h4>Writes became slow cluster-wide after one disk started failing</h4>
+      <p class="scn__situation">Job write stages are 3× slower than last week. No DataNode is dead.</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> that you know a pipeline runs at the speed of its slowest member.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>Every write that includes the slow DataNode waits for its acks, so one bad disk slows many pipelines.</li>
+          <li>Look at DataNode metrics/logs for slow writes (e.g. “Slow BlockReceiver write data to disk” warnings) and the NameNode's slow-node reports.</li>
+          <li>Fix: mark the failing volume bad or decommission the node, replace the disk; consider enabling slow-node detection and exclusion.</li>
+        </ul>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Design · consistency</span><span class="scn__tag scn__tag--level">Fresher</span></div>
+      <h4>“Can two programs write to the same HDFS file at once?”</h4>
+      <p class="scn__situation">A student wants two scripts to append to one log file in HDFS.</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> single-writer semantics and leases.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>No. HDFS gives one writer a lease on a file; a second writer gets an exception until the lease is released or expires.</li>
+          <li>Design instead: each writer writes its own file (e.g. one per task or per hour) in the same directory, and readers process the directory.</li>
+          <li>This is exactly how MapReduce and Spark output works: part-00000, part-00001, …</li>
+        </ul>
+      </div></details>
+    </article>
+
+  </div>
+</section>
+
+<nav class="lesson-nav" id="lesson-nav" aria-label="Lesson navigation"></nav>
+<div class="ad-slot" data-slot="bottom"></div>
+</article>
+
+<aside class="lesson-side">
+  <nav class="toc" aria-label="In this lesson">
+    <h4>In this lesson</h4>
+    <ol>
+      <li><a href="#story">The story</a></li>
+      <li><a href="#definition">Definition</a></li><li><a href="#levels">Beginner → Advanced</a></li>
+      <li><a href="#types">Types and ways to use it</a></li>
+      <li><a href="#steps">Step by step</a></li>
+      <li><a href="#animation">See it happen</a></li>
+      <li><a href="#real-world">Real-world use</a></li>
+      <li><a href="#run">Run the code</a></li><li><a href="#pc">Run on your PC</a></li>
+      <li><a href="#tracer">Line by line</a></li>
+      <li><a href="#worked">Worked examples</a></li>
+      <li><a href="#quiz">Quiz and revision</a></li>
+      <li><a href="#practice">Practice problems</a></li>
+      <li><a href="#scenarios">Industry scenarios</a></li>
+    </ol>
+  </nav>
+  <div class="ad-slot" data-slot="side"></div>
+  <div class="outline" id="outline"></div>
+</aside>
+</div>
+</main>
+
+<footer class="site-footer">
+  <div class="wrap">
+    <div><h4>MyPhatshala</h4><p>Free programming and IT lessons that show what happens behind the screen.</p></div>
+    <div><h4>Learn</h4><a href="../../../../#tracks">All courses</a><a href="../../">Apache Hadoop syllabus</a></div>
+    <div><h4>Site</h4><a href="../../../../about.html">About</a><a href="../../../../contact.html">Contact</a><a href="../../../../privacy.html">Privacy policy</a><a href="../../../../disclaimer.html">Disclaimer</a></div>
+    <div class="copyright">© MyPhatshala. All lesson content, diagrams and animations are original. Please do not copy without permission.</div>
+  </div>
+</footer>
+
+<script src="../../../../data/courses/hadoop.js"></script>
+<script src="../../../../assets/js/lesson.js"></script>
+<script src="../../../../assets/js/ads.js"></script>
+<script src="../../../../assets/js/site.js"></script>
+</body>
+</html>

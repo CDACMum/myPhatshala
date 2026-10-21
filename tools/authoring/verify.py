@@ -84,13 +84,14 @@ for m in re.finditer(r'<div class="code" data-lang="java"([^>]*)><pre><code>(.*?
     if out is not None and 'data-check="skip"' not in attrs:
         if text_of(out).strip() != got.strip(): bad(f'output mismatch\n--- page:\n{text_of(out).strip()}\n--- real:\n{got.strip()}')
 for r in runner:
+    if r.get('lang', 'java') != 'java': continue   # Python lessons: programs are run by pylesson.py at build time
     for t in r['tasks']:
         st, got = run_java(t['code'], t.get('_stdin', ''), r.get('file','Main.java')[:-5])
         exp = t.get('_expect', 'ok')
         if st != exp: bad(f'runner "{t["label"]}": expected {exp}, got {st}: {got[:300]}')
 for t in tracer:
     code = '\n'.join(t['code'])
-    if 'class ' in code and 'main' in code:
+    if t.get('lang', 'java') == 'java' and 'class ' in code and 'main' in code:
         st, got = run_java(code, t.get('_stdin', ''))
         want = ''.join(x.get('out', '') for x in t['steps'])
         if t.get('_expect', 'ok') != st: bad(f'tracer program {st}: {got[:200]}')

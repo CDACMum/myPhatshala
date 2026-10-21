@@ -1,0 +1,4538 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Scale out in practice: how big should a cluster be? | MyPhatshala</title>
+<meta name="description" content="How data engineers size a Hadoop cluster: replication, temp space, headroom, growth, compression and compute windows, step by step with real formulas. Adding nodes, the HDFS balancer, few big vs many small nodes, with animations, a cluster playground, Python calculators, quiz and interview scenarios.">
+<meta name="mp:minutes" content="26">
+<link rel="canonical" href="https://myphatshala.in/courses/hadoop/01-foundations/03-scale-out-in-practice/">
+<meta property="og:title" content="Scale out in practice: how big should a cluster be? · MyPhatshala">
+<meta property="og:description" content="Turn “200 TB growing 40% a year” into a number of nodes and racks, the way platform teams really do it.">
+<link rel="icon" href="../../../../assets/img/logo.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Fraunces:ital,opsz,wght@0,9..144,600;0,9..144,700;1,9..144,600&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../../../../assets/css/style.css">
+<link rel="stylesheet" href="../../../../assets/css/lesson.css">
+<link rel="stylesheet" href="../../../../assets/css/cluster-sim.css">
+<script src="../../../../assets/js/config.js"></script>
+<script>try { const t = localStorage.getItem("mp-theme"); if (t) document.documentElement.dataset.theme = t; } catch (e) {}</script>
+<script type="application/ld+json">{"@context": "https://schema.org", "@type": "LearningResource", "name": "Scale out in practice: how big should a cluster be?", "learningResourceType": "Lesson", "educationalLevel": "Beginner → Advanced", "isAccessibleForFree": true, "inLanguage": "en", "isPartOf": {"@type": "Course", "name": "Apache Hadoop", "provider": {"@type": "Organization", "name": "MyPhatshala"}}}</script>
+</head>
+<body style="--track:#B45309" data-lesson="01-foundations/03-scale-out-in-practice" data-course-root="../../">
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="site-header">
+  <div class="wrap">
+    <a class="brand" href="../../../../" aria-label="MyPhatshala home"><img src="../../../../assets/img/logo.svg" width="34" height="34" alt=""><span>My<b>Phatshala</b></span></a>
+    <nav class="nav" aria-label="Main">
+      <a href="../../../../#tracks">All courses</a>
+      <a href="../../">Apache Hadoop syllabus</a>
+      <button class="theme-btn" id="theme-btn" aria-label="Toggle dark mode"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg></button>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+<section class="lesson-hero">
+  <div class="wrap">
+    <nav class="crumbs" aria-label="Breadcrumb"><a href="../../../../">Home</a><span>›</span><a href="../../../../#track-big-data">Big Data Engineering</a><span>›</span><a href="../../">Apache Hadoop</a><span>›</span><b>Lesson 1.3</b></nav>
+    <h1>Scale out in practice: how big should a cluster be?</h1>
+    <p class="lead">“Add more machines” is the easy part. The real question every data team faces is: how many? This lesson turns business requirements (data size, growth, copies, deadlines) into a number of nodes, with formulas you can reuse in interviews and at work. Then you will add nodes to a full cluster, watch the balancer spread the data, and test in the playground whether three times the nodes really means three times the speed.</p>
+    <div class="lesson-meta"><span>Module 1 · Foundations: before Hadoop</span><span>⏱ 26 min</span><span>Beginner → Advanced</span><span>Cluster Playground</span><span>Runs in your browser (Python)</span><span>Sizing calculator</span><span>8 practice problems</span></div>
+  </div>
+</section>
+
+<div class="wrap lesson-layout">
+<article class="lesson-main">
+<!-- ======================= PART 1: THE STORY ======================= -->
+<section class="part" id="story">
+  <span class="part-label"><b>1</b> The story</span>
+  <h2>“How many servers should we buy?”</h2>
+  <div class="story">
+    <p class="narration">Kabir's internship company, TiffinGo, delivers lunch boxes in five cities. Their order and app-click data is 200 TB today and growing fast. His manager forwards an email from the finance team: “Please tell us by Friday how many servers to buy for the new data platform, and what it will cost for the next three years.” Kabir brings the email to Arjun Sir, looking worried.</p>
+
+    <div class="scene">
+      <svg viewBox="0 0 640 180" role="img" aria-label="Requirements on the left (data size, growth, deadline) feed a sizing calculation in the middle, which outputs a number of nodes and racks on the right.">
+        <g font-size="10">
+          <rect x="10" y="18" width="180" height="138" rx="10" class="s-soft-acc" style="stroke:var(--track);stroke-width:1.5"/>
+          <text x="100" y="40" text-anchor="middle" font-weight="700" class="s-acc">What the business says</text>
+          <text x="24" y="64" font-size="9" class="s-ink">• 200 TB of data today</text>
+          <text x="24" y="84" font-size="9" class="s-ink">• grows 40% a year</text>
+          <text x="24" y="104" font-size="9" class="s-ink">• keep 3 years</text>
+          <text x="24" y="124" font-size="9" class="s-ink">• nightly report by 6 am</text>
+          <text x="24" y="144" font-size="9" class="s-ink">• don't lose data!</text>
+          <path d="M194 87h30" class="s-line"/><path d="M220 83l6 4-6 4" class="s-line"/>
+          <rect x="232" y="18" width="200" height="138" rx="10" class="s-board"/>
+          <text x="332" y="40" text-anchor="middle" font-weight="700" class="s-chalk">Sizing</text>
+          <text x="246" y="64" font-size="9" class="mono" style="fill:#9FD3B8">× 3 copies (replication)</text>
+          <text x="246" y="84" font-size="9" class="mono" style="fill:#9FD3B8">+ 25% temp space</text>
+          <text x="246" y="104" font-size="9" class="mono" style="fill:#9FD3B8">÷ 0.75 keep space free</text>
+          <text x="246" y="124" font-size="9" class="mono" style="fill:#9FD3B8">÷ TB per node</text>
+          <text x="246" y="144" font-size="9" class="mono" style="fill:#F5C77E">check CPU and network</text>
+          <path d="M436 87h30" class="s-line"/><path d="M462 83l6 4-6 4" class="s-line"/>
+          <rect x="474" y="18" width="156" height="138" rx="10" class="s-soft-green" style="stroke:var(--green);stroke-width:1.5"/>
+          <text x="552" y="40" text-anchor="middle" font-weight="700" class="s-green">The answer</text>
+          <text x="552" y="76" text-anchor="middle" font-size="22" font-weight="700" class="s-ink mono">N nodes</text>
+          <text x="552" y="100" text-anchor="middle" font-size="9" class="s-ink2">in R racks</text>
+          <text x="552" y="120" text-anchor="middle" font-size="9" class="s-ink2">+ how many to add</text>
+          <text x="552" y="136" text-anchor="middle" font-size="9" class="s-ink2">each year</text>
+        </g>
+        <text x="320" y="174" text-anchor="middle" font-size="10" class="s-ink2">Scaling out is not “buy lots of servers”. It is a calculation, done before every purchase.</text>
+        <text x="632" y="174" text-anchor="end" class="s-wm">myphatshala.in</text>
+      </svg>
+    </div>
+
+    <div class="panel"><div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#E1E9F7"/><path d="M12 64c2-12 10-18 20-18s18 6 20 18z" fill="#B45309"/><circle cx="32" cy="29" r="12" fill="#A9714A"/><path d="M19 27c0-9 6-14 13-14s13 5 13 14c-2-4-5-6-8-6-3 3-9 4-13 3-2 1-4 2-5 3z" fill="#1E1A17"/><circle cx="27.5" cy="30" r="1.5" fill="#1E1A17"/><circle cx="36.5" cy="30" r="1.5" fill="#1E1A17"/><path d="M27 35.5q5 3.5 10 0" stroke="#1E1A17" stroke-width="1.6" fill="none" stroke-linecap="round"/><rect x="41" y="40" width="10" height="7" rx="1.5" fill="#2E5AAC"/></svg></div><div class="bubble"><b class="who">Kabir</b><p>Sir, 200 TB. Each server has about 144 TB of disk. So two servers, maybe three to be safe?</p></div></div>
+    <div class="panel panel--right"><div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#DDEFE6"/><path d="M12 64c2-12 10-18 20-18s18 6 20 18z" fill="#F4F1EA"/><path d="M28 46l4 8 4-8" fill="#2F7D5B"/><circle cx="32" cy="28" r="12" fill="#B57A50"/><path d="M20 26c0-8 5-13 12-13s12 5 12 13c-2-3-6-5-12-5s-10 2-12 5z" fill="#5A5A5A"/><path d="M22 32c1 8 5 11 10 11s9-3 10-11c-2 3-6 4-10 4s-8-1-10-4z" fill="#5A5A5A"/><circle cx="27" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><circle cx="37" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><path d="M30.4 29h3.2" stroke="#1B2433" stroke-width="1.4"/><circle cx="27" cy="29" r="1.1" fill="#1B2433"/><circle cx="37" cy="29" r="1.1" fill="#1B2433"/></svg></div><div class="bubble"><b class="who">Arjun Sir</b><p>If you send that, the platform will be full on day one. Kabir, what does HDFS do with every block?</p></div></div>
+    <div class="panel"><div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#E1E9F7"/><path d="M12 64c2-12 10-18 20-18s18 6 20 18z" fill="#B45309"/><circle cx="32" cy="29" r="12" fill="#A9714A"/><path d="M19 27c0-9 6-14 13-14s13 5 13 14c-2-4-5-6-8-6-3 3-9 4-13 3-2 1-4 2-5 3z" fill="#1E1A17"/><circle cx="27.5" cy="30" r="1.5" fill="#1E1A17"/><circle cx="36.5" cy="30" r="1.5" fill="#1E1A17"/><path d="M27 35.5q5 3.5 10 0" stroke="#1E1A17" stroke-width="1.6" fill="none" stroke-linecap="round"/><rect x="41" y="40" width="10" height="7" rx="1.5" fill="#2E5AAC"/></svg></div><div class="bubble"><b class="who">Kabir</b><p>Oh. It keeps three copies. So 600 TB… five servers?</p></div></div>
+    <div class="panel panel--right"><div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#DDEFE6"/><path d="M12 64c2-12 10-18 20-18s18 6 20 18z" fill="#F4F1EA"/><path d="M28 46l4 8 4-8" fill="#2F7D5B"/><circle cx="32" cy="28" r="12" fill="#B57A50"/><path d="M20 26c0-8 5-13 12-13s12 5 12 13c-2-3-6-5-12-5s-10 2-12 5z" fill="#5A5A5A"/><path d="M22 32c1 8 5 11 10 11s9-3 10-11c-2 3-6 4-10 4s-8-1-10-4z" fill="#5A5A5A"/><circle cx="27" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><circle cx="37" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><path d="M30.4 29h3.2" stroke="#1B2433" stroke-width="1.4"/><circle cx="27" cy="29" r="1.1" fill="#1B2433"/><circle cx="37" cy="29" r="1.1" fill="#1B2433"/></svg></div><div class="bubble"><b class="who">Arjun Sir</b><p>Closer. But jobs also need space for temporary files, and a cluster that is 100% full stops working well. And the data grows 40% a year. And there's a deadline: the nightly report must be ready by 6 am, so you need enough CPU too.</p></div></div>
+    <div class="panel"><div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#FCE6D6"/><path d="M14 64c2-12 9-18 18-18s16 6 18 18z" fill="#2E5AAC"/><circle cx="32" cy="29" r="12" fill="#C68B5E"/><path d="M19 29c0-10 6-15 13-15s13 5 13 15c-3-5-7-8-13-8s-10 3-13 8z" fill="#2A1B14"/><path d="M43 27c3 6 3 14 0 20" stroke="#2A1B14" stroke-width="4" fill="none" stroke-linecap="round"/><circle cx="27.5" cy="30" r="1.5" fill="#2A1B14"/><circle cx="36.5" cy="30" r="1.5" fill="#2A1B14"/><path d="M28 35q4 3 8 0" stroke="#2A1B14" stroke-width="1.6" fill="none" stroke-linecap="round"/><circle cx="32" cy="24" r="1.2" fill="#D64545"/></svg></div><div class="bubble"><b class="who">Riya</b><p>So scaling out means working out how many machines, not just “add machines”?</p></div></div>
+    <div class="panel panel--right"><div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#DDEFE6"/><path d="M12 64c2-12 10-18 20-18s18 6 20 18z" fill="#F4F1EA"/><path d="M28 46l4 8 4-8" fill="#2F7D5B"/><circle cx="32" cy="28" r="12" fill="#B57A50"/><path d="M20 26c0-8 5-13 12-13s12 5 12 13c-2-3-6-5-12-5s-10 2-12 5z" fill="#5A5A5A"/><path d="M22 32c1 8 5 11 10 11s9-3 10-11c-2 3-6 4-10 4s-8-1-10-4z" fill="#5A5A5A"/><circle cx="27" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><circle cx="37" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><path d="M30.4 29h3.2" stroke="#1B2433" stroke-width="1.4"/><circle cx="27" cy="29" r="1.1" fill="#1B2433"/><circle cx="37" cy="29" r="1.1" fill="#1B2433"/></svg></div><div class="bubble"><b class="who">Arjun Sir</b><p>Exactly. In Big Data Fundamentals you learned <i>why</i> scaling out wins. Today you'll learn how a data engineer actually <b>sizes</b> a Hadoop cluster: storage, compute and growth, with real formulas. And then you'll add nodes to a cluster and watch a job get faster.</p></div></div>
+  </div>
+</section>
+
+<!-- ======================= PART 2: DEFINITION ======================= -->
+<section class="part" id="definition">
+  <span class="part-label"><b>2</b> Definition</span>
+  <h2>Scaling out and cluster sizing</h2>
+  <div class="callout callout--tip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18h6M10 22h4M12 2a7 7 0 0 0-4 12.7V17h8v-2.3A7 7 0 0 0 12 2z"/></svg><p><b>Coming from Big Data Fundamentals?</b> Its lesson <a href="../../../big-data-fundamentals/01-introduction/02-why-one-computer-is-not-enough/">Why one computer is not enough</a> explained <i>why</i> scaling out beats scaling up (cost curve, ceiling, failures). This lesson is the practical next step: <i>how many</i> nodes a Hadoop cluster needs.</p></div>
+  <div class="def">
+    <div class="def__formal"><small>Formal definition (write this in exams)</small>
+      <p><b>Horizontal scaling</b> (scaling out) increases a system's capacity by adding more nodes and spreading data and work across them, rather than making one machine larger. <b>Cluster sizing</b> (capacity planning) is the process of estimating how many nodes, and of what configuration, a cluster needs to meet its requirements for <b>storage</b> (data volume × replication factor + temporary space + free headroom), <b>compute</b> (tasks that must finish within a time window), <b>memory</b> and <b>network</b>, including expected <b>growth</b> over the planning period. The final size is set by whichever requirement needs the most nodes.</p></div>
+    <div class="def__simple"><small>In simple words</small>
+      <p>Scaling out means adding more ordinary computers. Sizing means doing the maths first: how much disk do we really need after copies and spare room, how much CPU to finish the work in time, and how fast will it grow? Work out the nodes needed for each, and buy the biggest of those numbers.</p></div>
+  </div>
+
+  <h3>Words you'll meet in this lesson</h3>
+  <div class="terms">
+    <div class="term"><b>Raw capacity</b><span>Total disk in all nodes added together, before any copies.</span></div>
+    <div class="term"><b>Usable capacity</b><span>What is left for business data after replication, temp space and headroom.</span></div>
+    <div class="term"><b>Replication factor</b><span>How many copies HDFS keeps of each block. Default: 3.</span></div>
+    <div class="term"><b>Headroom</b><span>Free space you keep on purpose (often 20–30%) so the cluster never runs full.</span></div>
+    <div class="term"><b>Temp (intermediate) space</b><span>Disk used by jobs for in-between results, like map outputs. A common rule of thumb is about 25% of raw.</span></div>
+    <div class="term"><b>Wave</b><span>One round of tasks when there are more tasks than slots. 100 tasks on 40 slots = 3 waves.</span></div>
+    <div class="term"><b>Balancer</b><span>An HDFS tool that moves blocks from full nodes to emptier ones, for example after adding nodes.</span></div>
+    <div class="term"><b>Elastic scaling</b><span>Adding and removing nodes as the load changes. Easy in the cloud.</span></div>
+  </div>
+
+  <h3>The sizing formulas</h3>
+  <table class="facts">
+    <tr><th>Raw disk needed</th><td>data × replication ÷ (1 − temp share − headroom). With 3 copies, 25% temp and 25% headroom: <b>data × 3 ÷ 0.5 = data × 6</b></td></tr>
+    <tr><th>Storage nodes</th><td>raw disk needed ÷ disk per node, rounded up</td></tr>
+    <tr><th>Compute nodes</th><td>total task-minutes ÷ (time window × slots per node), rounded up</td></tr>
+    <tr><th>Final size</th><td>the larger of storage nodes and compute nodes, plus spare nodes for failures</td></tr>
+    <tr><th>Growth</th><td>data after <i>n</i> years = today × (1 + growth rate)<sup><i>n</i></sup></td></tr>
+    <tr><th>Compression</th><td>if data is stored compressed (for example 3× smaller as Parquet), divide the data size first</td></tr>
+  </table>
+  <p class="muted">Rules of thumb vary by company and workload. These numbers are a sensible starting point, not a standard.</p>
+
+  <h3 id="levels">Sizing at three levels</h3>
+  <div class="modlab levels"><div class="modlab__bar"><b>Pick your level. New to this? Start at Beginner and climb.</b><button type="button" data-mod="b">Beginner</button><button type="button" data-mod="i">Intermediate</button><button type="button" data-mod="a">Advanced</button></div>
+    <div class="modlab__panel" data-mod="b"><h4><span class="lvl lvl--b">Beginner</span> The tiffin box shelf</h4>
+      <ul>
+        <li>You must store 200 tiffin boxes, and for safety you keep <b>3 identical copies</b> of each: that's 600 boxes.</li>
+        <li>The kitchen also needs some shelf space for boxes that are being packed right now (temp space).</li>
+        <li>And you never fill shelves to the last inch, or you can't move anything (headroom).</li>
+        <li>So you need shelves for about <b>six times</b> the boxes you thought. That's cluster sizing in one line.</li>
+      </ul>
+
+    </div>
+    <div class="modlab__panel" data-mod="i"><h4><span class="lvl lvl--i">Intermediate</span> Storage, compute and the bigger number</h4>
+      <ul>
+        <li><b>Storage-bound clusters</b> keep years of data but run light jobs: size by disk.</li>
+        <li><b>Compute-bound clusters</b> run heavy jobs on less data, or must finish in a short window: size by CPU slots.</li>
+        <li>Compute: if the nightly job is 6,000 task-minutes and each node runs 16 tasks at once, a 2-hour window needs 6,000 ÷ (120 × 16) ≈ 3.2, so <b>4 nodes</b> worth of slots.</li>
+        <li>Then take the <b>bigger</b> of the two answers. Most Hadoop clusters end up storage-bound.</li>
+        <li>Add a few spare nodes so that losing one or two still meets the requirements.</li>
+      </ul>
+
+    </div>
+    <div class="modlab__panel" data-mod="a"><h4><span class="lvl lvl--a">Advanced</span> Trade-offs a senior engineer weighs</h4>
+      <ul>
+        <li><b>Many small nodes vs few big nodes:</b> a node with 24 × 20 TB = 480 TB holds a lot, but when it dies, re-copying 480 TB of replicas takes many hours and heavy network use. Smaller nodes recover faster and spread load more evenly.</li>
+        <li><b>Disks vs cores:</b> keep a sensible ratio (often around one or two disks per few cores) so jobs are not starved of disk bandwidth or CPU.</li>
+        <li><b>Erasure coding</b> (Hadoop 3) can store cold data with about 1.5× overhead instead of 3×, cutting raw disk sharply for old data (Module 7).</li>
+        <li><b>Separate storage and compute:</b> in the cloud, data often lives in object storage (S3, GCS, ADLS), and clusters are sized only for compute, then shut down after the job.</li>
+        <li><b>Diminishing returns:</b> doubling nodes rarely halves job time exactly. The master, the shuffle and the slowest task add a fixed part (Amdahl's law).</li>
+      </ul>
+
+    </div>
+  </div>
+  <div class="callout callout--exam"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19V5a2 2 0 0 1 2-2h12v18H6a2 2 0 0 1-2-2zm0 0a2 2 0 0 1 2-2h12"/></svg><p><b>Exam tip:</b> A typical exam or interview question: “You have X TB growing Y% a year, replication 3. How many nodes of Z TB do you need in 3 years?” Write the formula, show each step (growth → ×3 → temp + headroom → ÷ node size → round up), and state your assumptions.</p></div>
+</section>
+
+<!-- ======================= PART 3: TYPES AND WAYS TO USE IT ======================= -->
+<section class="part" id="types">
+  <span class="part-label"><b>3</b> Types and ways to use it</span>
+  <h2>Ways to grow a cluster</h2>
+  <div class="cards">
+    <div class="card"><h4>Add worker nodes</h4><p>The normal way to scale Hadoop. Install the DataNode and NodeManager, add the host to the topology script, start them. New nodes join while the cluster runs.</p><span class="tag">Scale out</span></div>
+    <div class="card"><h4>Add disks to nodes</h4><p>If nodes have empty disk slots, adding disks raises storage without new servers. Compute stays the same.</p><span class="tag">More storage</span></div>
+    <div class="card"><h4>Bigger nodes</h4><p>Replace old nodes with newer ones that have more cores, RAM and disk. Each node is “scaled up” while the cluster keeps scaling out.</p><span class="tag">Refresh</span></div>
+    <div class="card"><h4>Elastic cloud nodes</h4><p>Add task-only nodes for a busy night or a festive sale, then remove them. Storage can stay in object storage.</p><span class="tag">Pay per hour</span></div>
+    <div class="card"><h4>Tiered storage</h4><p>Move old, rarely used data to cheaper storage (archive disks, erasure coding, cloud archive), keeping fast disks for hot data.</p><span class="tag">Save cost</span></div>
+  </div>
+
+  <h3>Few big nodes vs many small nodes (same total capacity)</h3>
+  <div class="table-wrap">
+  <table class="compare" style="min-width:560px">
+    <thead><tr><th></th><th>10 big nodes (480 TB each)</th><th>40 small nodes (120 TB each)</th></tr></thead>
+    <tbody>
+      <tr><td><b>Rack space and power</b></td><td>Less</td><td>More</td></tr>
+      <tr><td><b>One node fails</b></td><td>10% of the cluster gone; ~480 TB of replicas to re-copy</td><td>2.5% gone; ~120 TB to re-copy</td></tr>
+      <tr><td><b>Parallelism</b></td><td>Fewer disks and NICs to spread work over</td><td>More disks and network ports working at once</td></tr>
+      <tr><td><b>Management</b></td><td>Fewer machines to patch</td><td>More machines, but each is less critical</td></tr>
+      <tr><td><b>Good for</b></td><td>Archive-heavy, cold data</td><td>Busy clusters with many jobs</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <div class="callout callout--tip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18h6M10 22h4M12 2a7 7 0 0 0-4 12.7V17h8v-2.3A7 7 0 0 0 12 2z"/></svg><p>After adding nodes, run the HDFS <b>balancer</b> (<code>hdfs balancer -threshold 10</code>). New nodes start empty; new writes go everywhere, but old blocks stay where they were until the balancer moves them. Jobs on old data won't use the new nodes' disks until then.</p></div>
+</section>
+
+<!-- ======================= PART 4: STEP BY STEP ======================= -->
+<section class="part" id="steps">
+  <span class="part-label"><b>4</b> Step by step</span>
+  <h2>Size TiffinGo's cluster for the next three years</h2>
+  <ol class="stepper">
+    <li><h4>Grow the data to the end of the planning period</h4>
+      <div class="code" data-lang="python" data-file="grow.py"><pre><code>data_tb = 200 * 1.4 ** 3        # 200 TB growing 40% a year, for 3 years
+print(round(data_tb), "TB in year 3")</code></pre><div class="output">549 TB in year 3</div></div>
+      <span class="behind">Growth compounds: 200 → 280 → 392 → 549 TB. Sizing for today's data only means buying again in a few months.</span></li>
+    <li><h4>Apply compression (if any)</h4>
+      <p>TiffinGo will store its clicks as compressed Parquet files, about 3× smaller: 549 ÷ 3 ≈ 183 TB on disk. Orders stay as they are. For simplicity, say <b>300 TB</b> must be stored.</p>
+      <span class="behind">Compression ratios depend on the data. Measure on a sample before you trust a number.</span></li>
+    <li><h4>Multiply by replication</h4>
+      <div class="code" data-lang="python" data-file="copies.py"><pre><code>print(300 * 3, "TB of replicas")</code></pre><div class="output">900 TB of replicas</div></div>
+      <span class="behind">Each block is on three DataNodes, on at least two racks. Every TB of business data uses 3 TB of disk.</span></li>
+    <li><h4>Add temp space and headroom</h4>
+      <div class="code" data-lang="python" data-file="raw.py"><pre><code>raw = 900 / (1 - 0.25 - 0.25)   # 25% temp space, 25% free headroom
+print(raw, "TB raw disk")</code></pre><div class="output">1800.0 TB raw disk</div></div>
+      <span class="behind">Half of each disk is reserved for in-between job data and safety margin. Running HDFS close to 100% full causes failed writes and slow jobs.</span></li>
+    <li><h4>Turn disk into nodes</h4>
+      <div class="code" data-lang="python" data-file="nodes.py"><pre><code>import math
+print(math.ceil(1800 / 144), "storage nodes of 144 TB")</code></pre><div class="output">13 storage nodes of 144 TB</div></div>
+      <span class="behind">Always round <b>up</b>: 12.5 nodes means 13.</span></li>
+    <li><h4>Check compute, then pick the bigger number</h4>
+      <p>The nightly report is 9,000 task-minutes; each node runs 16 tasks at once; the window is 2 hours. 9,000 ÷ (120 × 16) = 4.7, so 5 nodes are enough for compute. Storage needs 13, so storage wins.</p>
+      <span class="behind">Add 2 spare nodes so that a failure or two doesn't break the plan: <b>15 nodes</b>, which fit in 2 racks of 8 (better for rack awareness than 1 rack). Kabir has his answer, with every assumption written down.</span></li>
+  </ol>
+</section>
+
+<!-- ======================= PART 5: SEE IT HAPPEN ======================= -->
+<section class="part" id="animation">
+  <span class="part-label"><b>5</b> See it happen</span>
+  <h2>Adding nodes to a full cluster: the dashboard, and what the blocks do</h2>
+  <p>TiffinGo's cluster is getting full. Watch the admin add three nodes. Left: the dashboard. Right: where the blocks are.</p>
+  <div class="anim" data-frames="6">
+    <div class="anim__title">Scaling out a running cluster <span>6 steps</span></div>
+    <div class="anim__views">
+      <div class="view view--see">
+        <span class="view__tag">What you see</span>
+        <svg viewBox="0 0 360 250" role="img" aria-label="Cluster dashboard showing disk usage and job time">
+          <rect x="14" y="14" width="332" height="206" rx="8" class="s-card2"/>
+          <text x="26" y="34" font-size="10" font-weight="700" class="s-ink">Cluster dashboard</text>
+          <text x="26" y="58" font-size="9" class="s-ink2">HDFS used</text>
+          <rect x="26" y="64" width="300" height="16" rx="4" class="s-card"/>
+          <rect data-on="1" x="26" y="64" width="258" height="16" rx="4" class="s-red"/>
+          <rect data-on="2-3" x="26" y="64" width="172" height="16" rx="4" style="fill:#E0A100"/>
+          <rect data-on="4-6" x="26" y="64" width="172" height="16" rx="4" class="s-green"/>
+          <text data-on="1" x="326" y="98" text-anchor="end" font-size="9" font-weight="700" class="s-red">86% · alert: add capacity</text>
+          <text data-on="2-3" x="326" y="98" text-anchor="end" font-size="9" font-weight="700" style="fill:#B7791F">57% overall</text>
+          <text data-on="4-6" x="326" y="98" text-anchor="end" font-size="9" font-weight="700" class="s-green">57% · balanced</text>
+          <text x="26" y="124" font-size="9" class="s-ink2">Nodes</text>
+          <text data-on="1" x="26" y="142" font-size="12" font-weight="700" class="s-ink mono">6</text>
+          <text data-on="2-6" x="26" y="142" font-size="12" font-weight="700" class="s-ink mono">9</text>
+          <text x="140" y="124" font-size="9" class="s-ink2">Nightly report</text>
+          <text data-on="1-4" x="140" y="142" font-size="12" font-weight="700" class="s-ink mono">96 min</text>
+          <text data-on="5-6" x="140" y="142" font-size="12" font-weight="700" class="s-green mono">64 min</text>
+          <g data-on="3"><rect x="26" y="160" width="300" height="44" rx="6" class="s-soft-acc" style="stroke:#E0A100"/><text x="176" y="178" text-anchor="middle" font-size="9" font-weight="700" style="fill:#B7791F">Old nodes 86% full, new nodes 0%</text><text x="176" y="192" text-anchor="middle" font-size="9" class="s-ink">“Why is the report not faster?”</text></g>
+          <g data-on="4"><rect x="26" y="160" width="300" height="44" rx="6" class="s-board"/><text x="36" y="178" font-size="9" class="mono" style="fill:#9FD3B8">$ hdfs balancer -threshold 10</text><text x="36" y="194" font-size="9" class="mono" style="fill:#9FD3B8">Moving blocks… The cluster is balanced.</text></g>
+          <g data-on="6"><rect x="26" y="160" width="300" height="44" rx="6" class="s-soft-green" style="stroke:var(--green)"/><text x="176" y="178" text-anchor="middle" font-size="9" font-weight="700" class="s-green">50% more nodes → report about 1/3 faster</text><text x="176" y="192" text-anchor="middle" font-size="9" class="s-ink">not exactly 50%: some work doesn't split</text></g>
+          <text x="352" y="244" text-anchor="end" class="s-wm">myphatshala.in</text>
+        </svg>
+        <ol class="caps" hidden>
+          <li>The dashboard turns red: HDFS is <b>86% full</b> on 6 nodes. Time to scale out.</li>
+          <li>Three new nodes are installed and started. Overall usage drops to about 57%.</li>
+          <li>But the old nodes are still 86% full and the new ones are empty. The nightly report is no faster.</li>
+          <li>The admin runs the <b>HDFS balancer</b>, which moves blocks to the new nodes until every node is within 10% of the average.</li>
+          <li>Now the report's tasks are spread over 9 nodes: it drops from 96 to 64 minutes.</li>
+          <li>Half again as many nodes gave about a third less time, not half: part of the job doesn't split. (Times here are illustrative.)</li>
+        </ol>
+      </div>
+
+      <div class="view view--behind">
+        <span class="view__tag">Behind the screen</span>
+        <svg viewBox="0 0 360 250" role="img" aria-label="Disk fill of nine nodes before and after balancing">
+          <text x="180" y="24" text-anchor="middle" font-size="10" font-weight="700" class="s-ink">Disk used on each node</text>
+          <g>
+            <rect x="20" y="40" width="30" height="150" rx="4" class="s-card2"/><rect x="56" y="40" width="30" height="150" rx="4" class="s-card2"/><rect x="92" y="40" width="30" height="150" rx="4" class="s-card2"/>
+            <rect x="128" y="40" width="30" height="150" rx="4" class="s-card2"/><rect x="164" y="40" width="30" height="150" rx="4" class="s-card2"/><rect x="200" y="40" width="30" height="150" rx="4" class="s-card2"/>
+          </g>
+          <g data-on="2-">
+            <rect x="236" y="40" width="30" height="150" rx="4" class="s-card2" style="stroke:var(--green);stroke-width:1.5"/><rect x="272" y="40" width="30" height="150" rx="4" class="s-card2" style="stroke:var(--green);stroke-width:1.5"/><rect x="308" y="40" width="30" height="150" rx="4" class="s-card2" style="stroke:var(--green);stroke-width:1.5"/>
+            <text x="287" y="212" text-anchor="middle" font-size="8.6" font-weight="700" class="s-green">new nodes</text>
+          </g>
+          <g data-on="1-3">
+            <rect x="20" y="61" width="30" height="129" rx="4" class="s-red"/><rect x="56" y="61" width="30" height="129" rx="4" class="s-red"/><rect x="92" y="61" width="30" height="129" rx="4" class="s-red"/>
+            <rect x="128" y="61" width="30" height="129" rx="4" class="s-red"/><rect x="164" y="61" width="30" height="129" rx="4" class="s-red"/><rect x="200" y="61" width="30" height="129" rx="4" class="s-red"/>
+          </g>
+          <g data-on="3"><rect x="236" y="182" width="30" height="8" rx="2" class="s-blue"/><rect x="272" y="182" width="30" height="8" rx="2" class="s-blue"/><rect x="308" y="182" width="30" height="8" rx="2" class="s-blue"/><text x="180" y="230" text-anchor="middle" font-size="9" class="s-ink2">only new writes reach the new nodes</text></g>
+          <g data-on="4">
+            <rect x="20" y="80" width="30" height="110" rx="4" style="fill:#E0A100"/><rect x="56" y="80" width="30" height="110" rx="4" style="fill:#E0A100"/><rect x="92" y="80" width="30" height="110" rx="4" style="fill:#E0A100"/>
+            <rect x="128" y="80" width="30" height="110" rx="4" style="fill:#E0A100"/><rect x="164" y="80" width="30" height="110" rx="4" style="fill:#E0A100"/><rect x="200" y="80" width="30" height="110" rx="4" style="fill:#E0A100"/>
+            <rect x="236" y="130" width="30" height="60" rx="4" style="fill:#E0A100"/><rect x="272" y="130" width="30" height="60" rx="4" style="fill:#E0A100"/><rect x="308" y="130" width="30" height="60" rx="4" style="fill:#E0A100"/>
+            <path d="M200 70c40-30 70-30 100 0" class="s-line"/><path d="M296 64l4 6-7 1" class="s-line"/>
+            <text x="180" y="230" text-anchor="middle" font-size="9" class="s-acc" font-weight="700">balancer moves blocks old → new</text>
+          </g>
+          <g data-on="5-">
+            <rect x="20" y="104" width="30" height="86" rx="4" class="s-green"/><rect x="56" y="104" width="30" height="86" rx="4" class="s-green"/><rect x="92" y="104" width="30" height="86" rx="4" class="s-green"/>
+            <rect x="128" y="104" width="30" height="86" rx="4" class="s-green"/><rect x="164" y="104" width="30" height="86" rx="4" class="s-green"/><rect x="200" y="104" width="30" height="86" rx="4" class="s-green"/>
+            <rect x="236" y="104" width="30" height="86" rx="4" class="s-green"/><rect x="272" y="104" width="30" height="86" rx="4" class="s-green"/><rect x="308" y="104" width="30" height="86" rx="4" class="s-green"/>
+          </g>
+          <g data-on="5"><text x="180" y="230" text-anchor="middle" font-size="9" class="s-green" font-weight="700">every node ~57%: tasks run on all 9</text></g>
+          <g data-on="6"><text x="180" y="230" text-anchor="middle" font-size="9" class="s-ink2">reads, writes and tasks now spread evenly</text></g>
+          <g data-on="1"><text x="180" y="230" text-anchor="middle" font-size="9" class="s-red" font-weight="700">6 nodes at 86%</text></g>
+          <g data-on="2"><text x="180" y="230" text-anchor="middle" font-size="9" class="s-ink2">3 empty nodes join the cluster</text></g>
+          <text x="352" y="244" text-anchor="end" class="s-wm">myphatshala.in</text>
+        </svg>
+        <ol class="caps" hidden>
+          <li>Six DataNodes, each 86% full. Writes start failing on the fullest nodes soon.</li>
+          <li>Three new DataNodes start, register with the NameNode and report zero blocks.</li>
+          <li>HDFS sends <b>new</b> blocks to all nodes, but existing blocks stay where they are. Old data is still read from only six nodes.</li>
+          <li>The <b>balancer</b> copies blocks from over-full nodes to under-full ones and deletes the old copies, slowly, so jobs are not disturbed.</li>
+          <li>All nine nodes now hold about the same share. Tasks for old data can run on any of them.</li>
+          <li>Reads, writes and processing are spread over more disks and more cores. That is scaling out working.</li>
+        </ol>
+      </div>
+    </div>
+  </div>
+
+  <h3 id="playground">Try it yourself: does a bigger cluster really run faster?</h3>
+  <p>The same 4 GB file (32 blocks) is loaded on clusters of 3, 6 and 9 nodes. Each node can run 2 tasks at a time. Run the job on each size and compare the times in <b>Job runs</b>.</p>
+  <div class="csim"><script type="application/json">{"title": "Same job, three cluster sizes", "intro": "<p>Pick a cluster size, run the job, then pick another size and run it again. The <b>Job runs<\/b> tab keeps every result so you can compare.<\/p>", "racks": 3, "nodes": 1, "features": ["job", "scale"], "sizes": [3, 6, 9], "speed": 4, "preload": [{"name": "tiffingo_clicks.json", "sizeMB": 4096}], "try": [{"text": "With <b>3 nodes<\/b> (6 task slots), run the job. 32 map tasks need about 6 waves.", "on": "job-done"}, {"text": "Switch to <b>9 nodes<\/b> and run it again.", "on": "resize"}, {"text": "Open <b>Job runs<\/b>. Did 3× the nodes give 3× the speed? Why not exactly? (The reduce part and start-up time do not shrink.)"}]}</script></div>
+</section>
+
+<!-- ======================= PART 6: REAL-WORLD USE ======================= -->
+<section class="part" id="real-world">
+  <span class="part-label"><b>6</b> Real-world use</span>
+  <h2>Where sizing decisions are made</h2>
+
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="18" y="18" width="84" height="54" rx="6" class="s-card2"/><path d="M28 62V52M44 62V44M60 62V36M76 62V28M92 62V20" style="stroke:var(--track);stroke-width:7;stroke-linecap:round"/></svg></div>
+    <div><h4>1. The yearly hardware budget</h4>
+      <p>On-premises teams (banks, telecoms, government) size clusters once or twice a year, because buying servers takes weeks or months. They forecast data growth and new projects, then order nodes in batches.</p>
+      <div class="uc-flow"><span>Growth forecast</span><i>→</i><span class="java">Sizing sheet</span><i>→</i><span>Purchase order</span></div></div>
+  </div>
+
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><path d="M10 70h100" class="s-line"/><path d="M14 66c20 0 24-8 34-8s14-40 22-40 12 40 24 40 12 8 16 8" style="fill:none;stroke:var(--red);stroke-width:3"/><text x="70" y="14" text-anchor="middle" font-size="8.6" font-weight="700" class="s-red">sale day</text></svg></div>
+    <div><h4>2. Festive sales and big cricket matches</h4>
+      <p>E-commerce and streaming companies see traffic jump many times for a few days. In the cloud they add extra task nodes for those days and remove them after, instead of owning hardware for the peak all year.</p>
+      <div class="uc-flow"><span>Peak forecast</span><i>→</i><span class="java">Temporary nodes</span><i>→</i><span>Remove after</span></div></div>
+  </div>
+
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="16" y="20" width="40" height="50" rx="6" class="s-soft-blue" style="stroke:var(--blue)"/><text x="36" y="49" text-anchor="middle" font-size="8.6" font-weight="700" class="s-blue">S3</text><rect x="66" y="28" width="38" height="34" rx="6" class="s-soft-acc" style="stroke:var(--track)"/><text x="85" y="49" text-anchor="middle" font-size="8.6" font-weight="700" class="s-acc">EMR</text></svg></div>
+    <div><h4>3. Cloud: size compute, not storage</h4>
+      <p>With data in object storage, a managed cluster (such as Amazon EMR or Google Dataproc) is sized just for the job, often with autoscaling, and deleted when the job ends. You pay for storage and for compute hours separately.</p>
+      <div class="uc-flow"><span>Data in object store</span><i>→</i><span class="java">Cluster for 2 hours</span><i>→</i><span>Shut down</span></div></div>
+  </div>
+
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="20" y="16" width="80" height="58" rx="6" class="s-card2"/><rect x="28" y="24" width="64" height="12" rx="3" class="s-green"/><rect x="28" y="40" width="44" height="12" rx="3" style="fill:#E0A100"/><rect x="28" y="56" width="24" height="12" rx="3" class="s-blue"/></svg></div>
+    <div><h4>4. Hot, warm and cold data</h4>
+      <p>A telecom may keep call records for years for regulation, but only the last few weeks are queried often. Old data moves to cheaper, denser storage (or erasure-coded HDFS), so the expensive nodes are sized for hot data only.</p>
+      <div class="uc-flow"><span>New data (hot)</span><i>→</i><span class="java">Age policy</span><i>→</i><span>Archive tier (cold)</span></div></div>
+  </div>
+
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><circle cx="60" cy="45" r="28" class="s-soft-green" style="stroke:var(--green);stroke-width:2"/><text x="60" y="49" text-anchor="middle" font-size="10" font-weight="700" class="s-green">+3</text></svg></div>
+    <div><h4>5. Adding nodes without downtime</h4>
+      <p>Platform teams add nodes to live clusters regularly: install, add to the topology, start the services, then run the balancer at low speed overnight. Users keep working throughout. You'll do it in Module 12.</p>
+      <div class="uc-flow"><span>New servers</span><i>→</i><span class="java">Join + balancer</span><i>→</i><span>Bigger cluster</span></div></div>
+  </div>
+  <p class="muted">Examples are simplified; figures in this lesson are illustrative. Real sizing also considers licences, support contracts, staff and data-centre limits.</p>
+</section>
+
+
+<div class="ad-slot" data-slot="mid"></div>
+
+<section class="part" id="run">
+  <span class="part-label"><b>7</b> Run the code</span>
+  <h2>A cluster sizing calculator</h2>
+  <p>This function turns business requirements into a number of storage nodes, using the formulas from Part 2. Change the inputs and run it again, then try the challenges.</p>
+  <div class="code" data-lang="python" data-file="main.py"><pre><code>import math
+
+def storage_nodes(data_tb, replication=3, temp=0.25, headroom=0.25, node_tb=144):
+    raw_tb = data_tb * replication / (1 - temp - headroom)
+    return raw_tb, math.ceil(raw_tb / node_tb)
+
+for data in [50, 200, 500]:
+    raw, nodes = storage_nodes(data)
+    print(f&quot;{data:&gt;4} TB data -&gt; {raw:&gt;6.0f} TB raw -&gt; {nodes:&gt;3} nodes&quot;)</code></pre><div class="output">  50 TB data -&gt;    300 TB raw -&gt;   3 nodes
+ 200 TB data -&gt;   1200 TB raw -&gt;   9 nodes
+ 500 TB data -&gt;   3000 TB raw -&gt;  21 nodes</div></div>
+  <ul class="anno"><li><code>def storage_nodes(data_tb, replication=3, temp=0.25, headroom=0.25, node_tb=144):</code><span>Default values hold the usual assumptions, so a caller only passes what is different, for example <code>storage_nodes(200, node_tb=240)</code>.</span></li><li><code>raw_tb = data_tb * replication / (1 - temp - headroom)</code><span>With the defaults, this is data × 3 ÷ 0.5 = data × 6.</span></li><li><code>return raw_tb, math.ceil(raw_tb / node_tb)</code><span>Return two values at once (a tuple). <code>math.ceil</code> rounds up: you cannot buy half a node.</span></li></ul>
+  <div class="runner">
+    <script type="application/json">{
+ "lang": "python",
+ "file": "main.py",
+ "tasks": [
+  {
+   "label": "1 · Storage nodes",
+   "hint": "Press <b>Run<\/b>. Then call <code>storage_nodes(200, node_tb=240)<\/code>: bigger nodes, fewer of them.",
+   "code": "import math\n\ndef storage_nodes(data_tb, replication=3, temp=0.25, headroom=0.25, node_tb=144):\n    raw_tb = data_tb * replication / (1 - temp - headroom)\n    return raw_tb, math.ceil(raw_tb / node_tb)\n\nfor data in [50, 200, 500]:\n    raw, nodes = storage_nodes(data)\n    print(f\"{data:>4} TB data -> {raw:>6.0f} TB raw -> {nodes:>3} nodes\")\n"
+  },
+  {
+   "label": "2 · Growth",
+   "hint": "<b>Predict first:<\/b> after 3 years at 40% growth, is 200 TB closer to 400 or 550? Then try 60% growth.",
+   "code": "data = 200\nfor year in range(1, 4):\n    data = data * 1.40\n    print(\"Year\", year, \":\", round(data), \"TB\")\n"
+  },
+  {
+   "label": "3 · Compute nodes",
+   "hint": "A job of 9,000 task-minutes must finish in 120 minutes. Each node runs 16 tasks at once. How many nodes for compute? Halve the window to 60 minutes.",
+   "code": "import math\ntask_minutes = 9000\nwindow = 120\nslots_per_node = 16\n\nnodes = math.ceil(task_minutes / (window * slots_per_node))\nprint(\"Compute needs\", nodes, \"nodes\")\n"
+  },
+  {
+   "label": "4 · The bigger number wins",
+   "hint": "Final size = max(storage, compute) + spares. Make the job 40,000 task-minutes: does compute now decide?",
+   "code": "import math\nstorage = math.ceil(200 * 3 / 0.5 / 144)\ncompute = math.ceil(9000 / (120 * 16))\nspares = 2\nprint(\"Storage:\", storage, \"| Compute:\", compute)\nprint(\"Buy:\", max(storage, compute) + spares, \"nodes\")\n"
+  },
+  {
+   "label": "5 · Spot the error",
+   "hint": "This sizing says 1 node. Something important is missing. Fix the formula (hint: copies and free space).",
+   "code": "import math\ndata_tb = 120\nnode_tb = 144\nprint(\"Nodes needed:\", math.ceil(data_tb / node_tb))\n"
+  }
+ ]
+}</script>
+  </div>
+</section>
+
+<section class="part" id="tracer">
+  <span class="part-label"><b>8</b> Line by line</span>
+  <h2>Growing data year by year, one line at a time</h2>
+  <p>Watch <code>data</code> grow 40% each time round the loop, and see the function called once per year to turn it into nodes. Each call gets its own frame.</p>
+  <div class="tracer">
+    <script type="application/json">{
+ "lang": "python",
+ "code": [
+  "import math",
+  "",
+  "def nodes_for(data_tb):",
+  "    raw = data_tb * 6",
+  "    return math.ceil(raw / 144)",
+  "",
+  "data = 100",
+  "for year in [1, 2, 3]:",
+  "    data = data * 1.4",
+  "    print(\"Year\", year, round(data), \"TB ->\", nodes_for(data), \"nodes\")"
+ ],
+ "steps": [
+  {
+   "line": 1,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": []
+    }
+   ],
+   "heap": []
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "<code>nodes_for<\/code> is created: function nodes_for().",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "nodes_for",
+       "function nodes_for()"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "nodes_for"
+  },
+  {
+   "line": 7,
+   "phase": "Today",
+   "note": "100 TB of business data. <code>data<\/code> is created: 100.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "nodes_for",
+       "function nodes_for()"
+      ],
+      [
+       "data",
+       "100"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "data"
+  },
+  {
+   "line": 8,
+   "phase": "Python",
+   "note": "<code>year<\/code> is created: 1.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "nodes_for",
+       "function nodes_for()"
+      ],
+      [
+       "data",
+       "100"
+      ],
+      [
+       "year",
+       "1"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "year"
+  },
+  {
+   "line": 9,
+   "phase": "Python",
+   "note": "<code>data<\/code> changes to 140.0.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "nodes_for",
+       "function nodes_for()"
+      ],
+      [
+       "data",
+       "140.0"
+      ],
+      [
+       "year",
+       "1"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "data"
+  },
+  {
+   "line": 10,
+   "phase": "Python",
+   "note": "<code>nodes_for()<\/code> is called: a new frame is pushed with <code>data_tb<\/code> = 140.0.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "nodes_for",
+       "function nodes_for()"
+      ],
+      [
+       "data",
+       "140.0"
+      ],
+      [
+       "year",
+       "1"
+      ]
+     ]
+    },
+    {
+     "frame": "nodes_for()",
+     "vars": [
+      [
+       "data_tb",
+       "140.0"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "data_tb"
+  },
+  {
+   "line": 4,
+   "phase": "Formula",
+   "note": "× 3 copies ÷ 0.5 (temp + headroom) = × 6. <code>raw<\/code> is created: 840.0.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "nodes_for",
+       "function nodes_for()"
+      ],
+      [
+       "data",
+       "140.0"
+      ],
+      [
+       "year",
+       "1"
+      ]
+     ]
+    },
+    {
+     "frame": "nodes_for()",
+     "vars": [
+      [
+       "data_tb",
+       "140.0"
+      ],
+      [
+       "raw",
+       "840.0"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "raw"
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "The return value is worked out and handed back to the caller.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "nodes_for",
+       "function nodes_for()"
+      ],
+      [
+       "data",
+       "140.0"
+      ],
+      [
+       "year",
+       "1"
+      ]
+     ]
+    },
+    {
+     "frame": "nodes_for()",
+     "vars": [
+      [
+       "data_tb",
+       "140.0"
+      ],
+      [
+       "raw",
+       "840.0"
+      ]
+     ]
+    }
+   ],
+   "heap": []
+  },
+  {
+   "line": 10,
+   "phase": "Return",
+   "note": "<code>nodes_for()<\/code> returns <b>6<\/b> and its frame is popped. The caller continues on this line with that value.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "nodes_for",
+       "function nodes_for()"
+      ],
+      [
+       "data",
+       "140.0"
+      ],
+      [
+       "year",
+       "1"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "out": "Year 1 140 TB -> 6 nodes\n"
+  },
+  {
+   "line": 8,
+   "phase": "Python",
+   "note": "<code>year<\/code> changes to 2.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "nodes_for",
+       "function nodes_for()"
+      ],
+      [
+       "data",
+       "140.0"
+      ],
+      [
+       "year",
+       "2"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "year"
+  },
+  {
+   "line": 9,
+   "phase": "Python",
+   "note": "<code>data<\/code> changes to 196.0.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "nodes_for",
+       "function nodes_for()"
+      ],
+      [
+       "data",
+       "196.0"
+      ],
+      [
+       "year",
+       "2"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "data"
+  },
+  {
+   "line": 10,
+   "phase": "Python",
+   "note": "<code>nodes_for()<\/code> is called: a new frame is pushed with <code>data_tb<\/code> = 196.0.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "nodes_for",
+       "function nodes_for()"
+      ],
+      [
+       "data",
+       "196.0"
+      ],
+      [
+       "year",
+       "2"
+      ]
+     ]
+    },
+    {
+     "frame": "nodes_for()",
+     "vars": [
+      [
+       "data_tb",
+       "196.0"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "data_tb"
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "<code>raw<\/code> is created: 1176.0.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "nodes_for",
+       "function nodes_for()"
+      ],
+      [
+       "data",
+       "196.0"
+      ],
+      [
+       "year",
+       "2"
+      ]
+     ]
+    },
+    {
+     "frame": "nodes_for()",
+     "vars": [
+      [
+       "data_tb",
+       "196.0"
+      ],
+      [
+       "raw",
+       "1176.0"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "raw"
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "The return value is worked out and handed back to the caller.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "nodes_for",
+       "function nodes_for()"
+      ],
+      [
+       "data",
+       "196.0"
+      ],
+      [
+       "year",
+       "2"
+      ]
+     ]
+    },
+    {
+     "frame": "nodes_for()",
+     "vars": [
+      [
+       "data_tb",
+       "196.0"
+      ],
+      [
+       "raw",
+       "1176.0"
+      ]
+     ]
+    }
+   ],
+   "heap": []
+  },
+  {
+   "line": 10,
+   "phase": "Return",
+   "note": "<code>nodes_for()<\/code> returns <b>9<\/b> and its frame is popped. The caller continues on this line with that value.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "nodes_for",
+       "function nodes_for()"
+      ],
+      [
+       "data",
+       "196.0"
+      ],
+      [
+       "year",
+       "2"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "out": "Year 2 196 TB -> 9 nodes\n"
+  },
+  {
+   "line": 8,
+   "phase": "Python",
+   "note": "<code>year<\/code> changes to 3.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "nodes_for",
+       "function nodes_for()"
+      ],
+      [
+       "data",
+       "196.0"
+      ],
+      [
+       "year",
+       "3"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "year"
+  },
+  {
+   "line": 9,
+   "phase": "Python",
+   "note": "<code>data<\/code> changes to 274.4.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "nodes_for",
+       "function nodes_for()"
+      ],
+      [
+       "data",
+       "274.4"
+      ],
+      [
+       "year",
+       "3"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "data"
+  },
+  {
+   "line": 10,
+   "phase": "Python",
+   "note": "<code>nodes_for()<\/code> is called: a new frame is pushed with <code>data_tb<\/code> = 274.4.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "nodes_for",
+       "function nodes_for()"
+      ],
+      [
+       "data",
+       "274.4"
+      ],
+      [
+       "year",
+       "3"
+      ]
+     ]
+    },
+    {
+     "frame": "nodes_for()",
+     "vars": [
+      [
+       "data_tb",
+       "274.4"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "data_tb"
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "<code>raw<\/code> is created: 1646.4.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "nodes_for",
+       "function nodes_for()"
+      ],
+      [
+       "data",
+       "274.4"
+      ],
+      [
+       "year",
+       "3"
+      ]
+     ]
+    },
+    {
+     "frame": "nodes_for()",
+     "vars": [
+      [
+       "data_tb",
+       "274.4"
+      ],
+      [
+       "raw",
+       "1646.4"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "raw"
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "The return value is worked out and handed back to the caller.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "nodes_for",
+       "function nodes_for()"
+      ],
+      [
+       "data",
+       "274.4"
+      ],
+      [
+       "year",
+       "3"
+      ]
+     ]
+    },
+    {
+     "frame": "nodes_for()",
+     "vars": [
+      [
+       "data_tb",
+       "274.4"
+      ],
+      [
+       "raw",
+       "1646.4"
+      ]
+     ]
+    }
+   ],
+   "heap": []
+  },
+  {
+   "line": 10,
+   "phase": "Return",
+   "note": "<code>nodes_for()<\/code> returns <b>12<\/b> and its frame is popped. The caller continues on this line with that value.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "nodes_for",
+       "function nodes_for()"
+      ],
+      [
+       "data",
+       "274.4"
+      ],
+      [
+       "year",
+       "3"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "out": "Year 3 274 TB -> 12 nodes\n"
+  },
+  {
+   "line": 8,
+   "phase": "Python",
+   "note": "Nothing is left to loop over, so the loop ends and Python moves on.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "nodes_for",
+       "function nodes_for()"
+      ],
+      [
+       "data",
+       "274.4"
+      ],
+      [
+       "year",
+       "3"
+      ]
+     ]
+    }
+   ],
+   "heap": []
+  }
+ ]
+}</script>
+  </div>
+
+<h3 id="worked">Worked examples: real problems, solved and traced in memory</h3>
+  <p class="wx-intro">Three sizing problems from real platform planning: storage only, a deadline, and a three-year plan that adds nodes each year. Each runs live and is traced in memory.</p>
+  <article class="wx">
+    <div class="wx__head"><span class="wx__num">Example 1</span><span class="lvl lvl--b">Beginner</span><span class="wx__tag">Platform planning · storage</span></div>
+    <h4>How many nodes for 80 TB of data?</h4>
+    <div class="wx__problem"><p class="wx__label">Problem statement</p><p>A college research group wants to store <b>80 TB</b> of sensor data in HDFS with replication 3, 25% temp space and 25% headroom. Each node has <b>96 TB</b> raw. How many nodes, and how many racks of 10?</p></div>
+    <div class="prob__io"><div><small>Input</small><pre>80 TB · ×3 · ÷0.5 · 96 TB/node · 10 nodes/rack</pre></div><div><small>Expected output</small><pre>Raw disk: 480.0 TB
+Nodes: 5
+Racks: 2</pre></div></div>
+    <div class="wx__approach"><p class="wx__label">Approach</p><ol><li>Raw = data × 3 ÷ 0.5.</li><li>Nodes = raw ÷ 96, rounded up.</li><li>Racks = nodes ÷ 10, rounded up. Use at least 2 racks so copies can span racks.</li></ol></div>
+    <p class="wx__label">Solution: run it live</p>
+    <div class="runner">
+    <script type="application/json">{
+ "lang": "python",
+ "file": "main.py",
+ "tasks": [
+  {
+   "label": "Solution",
+   "hint": "Use replication 2 instead of 3. How many nodes are saved, and what risk do you take?",
+   "code": "import math\nraw = 80 * 3 / 0.5\nnodes = math.ceil(raw / 96)\nracks = max(2, math.ceil(nodes / 10))\nprint(\"Raw disk:\", raw, \"TB\")\nprint(\"Nodes:\", nodes)\nprint(\"Racks:\", racks)\n"
+  }
+ ]
+}</script>
+    </div>
+    <p class="wx__label">What happens in memory, step by step</p>
+    <p class="wx__how">Recorded from a real Python run: press <b>Next</b> to execute one line at a time. Watch variables change in each frame, and lists and dictionaries (numbered #1, #2 …) fill up as objects.</p>
+    <div class="tracer">
+    <script type="application/json">{
+ "lang": "python",
+ "code": [
+  "import math",
+  "raw = 80 * 3 / 0.5",
+  "nodes = math.ceil(raw / 96)",
+  "racks = max(2, math.ceil(nodes / 10))",
+  "print(\"Raw disk:\", raw, \"TB\")",
+  "print(\"Nodes:\", nodes)",
+  "print(\"Racks:\", racks)"
+ ],
+ "steps": [
+  {
+   "line": 1,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": []
+    }
+   ],
+   "heap": []
+  },
+  {
+   "line": 2,
+   "phase": "Python",
+   "note": "<code>raw<\/code> is created: 480.0.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "raw",
+       "480.0"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "raw"
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "<code>nodes<\/code> is created: 5.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "raw",
+       "480.0"
+      ],
+      [
+       "nodes",
+       "5"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "nodes"
+  },
+  {
+   "line": 4,
+   "phase": "Racks",
+   "note": "<code>max(2, …)<\/code>: one rack would be a single failure domain. <code>racks<\/code> is created: 2.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "raw",
+       "480.0"
+      ],
+      [
+       "nodes",
+       "5"
+      ],
+      [
+       "racks",
+       "2"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "racks"
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "raw",
+       "480.0"
+      ],
+      [
+       "nodes",
+       "5"
+      ],
+      [
+       "racks",
+       "2"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "out": "Raw disk: 480.0 TB\n"
+  },
+  {
+   "line": 6,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "raw",
+       "480.0"
+      ],
+      [
+       "nodes",
+       "5"
+      ],
+      [
+       "racks",
+       "2"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "out": "Nodes: 5\n"
+  },
+  {
+   "line": 7,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "raw",
+       "480.0"
+      ],
+      [
+       "nodes",
+       "5"
+      ],
+      [
+       "racks",
+       "2"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "out": "Racks: 2\n"
+  }
+ ]
+}</script>
+    </div>
+  </article>
+  <article class="wx">
+    <div class="wx__head"><span class="wx__num">Example 2</span><span class="lvl lvl--i">Intermediate</span><span class="wx__tag">Banking · batch window</span></div>
+    <h4>Will the nightly job fit in the window?</h4>
+    <div class="wx__problem"><p class="wx__label">Problem statement</p><p>A bank's risk job has <b>6,000 map tasks</b> of about <b>5 minutes</b> each. The cluster has <b>30 nodes</b> with <b>12 slots</b> each. Reduces take a fixed 20 minutes after the maps. The job must finish within <b>90 minutes</b>. Does it fit, and if not, how many nodes are needed?</p></div>
+    <div class="prob__io"><div><small>Input</small><pre>6,000 tasks × 5 min · 30 nodes × 12 slots · +20 min · 90 min window</pre></div><div><small>Expected output</small><pre>30 nodes: 105 min
+Need 36 nodes: 90 min</pre></div></div>
+    <div class="wx__approach"><p class="wx__label">Approach</p><ol><li>Waves = tasks ÷ (nodes × slots), rounded up.</li><li>Job time = waves × 5 + 20.</li><li>If too slow, add nodes one at a time until it fits.</li></ol></div>
+    <p class="wx__label">Solution: run it live</p>
+    <div class="runner">
+    <script type="application/json">{
+ "lang": "python",
+ "file": "main.py",
+ "tasks": [
+  {
+   "label": "Solution",
+   "hint": "The reduce part is fixed at 20 minutes. If the window were 25 minutes, could any number of nodes meet it? This is Amdahl's law in action.",
+   "code": "import math\n\ndef job_minutes(nodes, tasks=6000, minutes=5, slots=12, reduce_min=20):\n    waves = math.ceil(tasks / (nodes * slots))\n    return waves * minutes + reduce_min\n\nnodes = 30\nprint(nodes, \"nodes:\", job_minutes(nodes), \"min\")\nwhile job_minutes(nodes) > 90:\n    nodes += 1\nprint(\"Need\", nodes, \"nodes:\", job_minutes(nodes), \"min\")\n"
+  }
+ ]
+}</script>
+    </div>
+    <p class="wx__label">What happens in memory, step by step</p>
+    <p class="wx__how">Recorded from a real Python run: press <b>Next</b> to execute one line at a time. Watch variables change in each frame, and lists and dictionaries (numbered #1, #2 …) fill up as objects.</p>
+    <div class="tracer">
+    <script type="application/json">{
+ "lang": "python",
+ "code": [
+  "import math",
+  "",
+  "def job_minutes(nodes, tasks=6000, minutes=5, slots=12, reduce_min=20):",
+  "    waves = math.ceil(tasks / (nodes * slots))",
+  "    return waves * minutes + reduce_min",
+  "",
+  "nodes = 30",
+  "print(nodes, \"nodes:\", job_minutes(nodes), \"min\")",
+  "while job_minutes(nodes) > 90:",
+  "    nodes += 1",
+  "print(\"Need\", nodes, \"nodes:\", job_minutes(nodes), \"min\")"
+ ],
+ "steps": [
+  {
+   "line": 1,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": []
+    }
+   ],
+   "heap": []
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "<code>job_minutes<\/code> is created: function job_minutes().",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "job_minutes",
+       "function job_minutes()"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "job_minutes"
+  },
+  {
+   "line": 7,
+   "phase": "Python",
+   "note": "<code>nodes<\/code> is created: 30.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "job_minutes",
+       "function job_minutes()"
+      ],
+      [
+       "nodes",
+       "30"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "nodes"
+  },
+  {
+   "line": 8,
+   "phase": "Search",
+   "note": "Add one node at a time until the job fits the 90-minute window. <code>job_minutes()<\/code> is called: a new frame is pushed with <code>nodes<\/code> = 30, <code>tasks<\/code> = 6000, <code>minutes<\/code> = 5, <code>slots<\/code> = 12, <code>reduce_min<\/code> = 20.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "job_minutes",
+       "function job_minutes()"
+      ],
+      [
+       "nodes",
+       "30"
+      ]
+     ]
+    },
+    {
+     "frame": "job_minutes()",
+     "vars": [
+      [
+       "nodes",
+       "30"
+      ],
+      [
+       "tasks",
+       "6000"
+      ],
+      [
+       "minutes",
+       "5"
+      ],
+      [
+       "slots",
+       "12"
+      ],
+      [
+       "reduce_min",
+       "20"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "reduce_min"
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "<code>waves<\/code> is created: 17.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "job_minutes",
+       "function job_minutes()"
+      ],
+      [
+       "nodes",
+       "30"
+      ]
+     ]
+    },
+    {
+     "frame": "job_minutes()",
+     "vars": [
+      [
+       "nodes",
+       "30"
+      ],
+      [
+       "tasks",
+       "6000"
+      ],
+      [
+       "minutes",
+       "5"
+      ],
+      [
+       "slots",
+       "12"
+      ],
+      [
+       "reduce_min",
+       "20"
+      ],
+      [
+       "waves",
+       "17"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "waves"
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "The return value is worked out and handed back to the caller.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "job_minutes",
+       "function job_minutes()"
+      ],
+      [
+       "nodes",
+       "30"
+      ]
+     ]
+    },
+    {
+     "frame": "job_minutes()",
+     "vars": [
+      [
+       "nodes",
+       "30"
+      ],
+      [
+       "tasks",
+       "6000"
+      ],
+      [
+       "minutes",
+       "5"
+      ],
+      [
+       "slots",
+       "12"
+      ],
+      [
+       "reduce_min",
+       "20"
+      ],
+      [
+       "waves",
+       "17"
+      ]
+     ]
+    }
+   ],
+   "heap": []
+  },
+  {
+   "line": 8,
+   "phase": "Return",
+   "note": "<code>job_minutes()<\/code> returns <b>105<\/b> and its frame is popped. The caller continues on this line with that value.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "job_minutes",
+       "function job_minutes()"
+      ],
+      [
+       "nodes",
+       "30"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "out": "30 nodes: 105 min\n"
+  },
+  {
+   "line": 9,
+   "phase": "Python",
+   "note": "The condition is <b>True<\/b>, so the indented block runs. <code>job_minutes()<\/code> is called: a new frame is pushed with <code>nodes<\/code> = 30, <code>tasks<\/code> = 6000, <code>minutes<\/code> = 5, <code>slots<\/code> = 12, <code>reduce_min<\/code> = 20.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "job_minutes",
+       "function job_minutes()"
+      ],
+      [
+       "nodes",
+       "30"
+      ]
+     ]
+    },
+    {
+     "frame": "job_minutes()",
+     "vars": [
+      [
+       "nodes",
+       "30"
+      ],
+      [
+       "tasks",
+       "6000"
+      ],
+      [
+       "minutes",
+       "5"
+      ],
+      [
+       "slots",
+       "12"
+      ],
+      [
+       "reduce_min",
+       "20"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "reduce_min"
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "<code>waves<\/code> is created: 17.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "job_minutes",
+       "function job_minutes()"
+      ],
+      [
+       "nodes",
+       "30"
+      ]
+     ]
+    },
+    {
+     "frame": "job_minutes()",
+     "vars": [
+      [
+       "nodes",
+       "30"
+      ],
+      [
+       "tasks",
+       "6000"
+      ],
+      [
+       "minutes",
+       "5"
+      ],
+      [
+       "slots",
+       "12"
+      ],
+      [
+       "reduce_min",
+       "20"
+      ],
+      [
+       "waves",
+       "17"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "waves"
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "The return value is worked out and handed back to the caller.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "job_minutes",
+       "function job_minutes()"
+      ],
+      [
+       "nodes",
+       "30"
+      ]
+     ]
+    },
+    {
+     "frame": "job_minutes()",
+     "vars": [
+      [
+       "nodes",
+       "30"
+      ],
+      [
+       "tasks",
+       "6000"
+      ],
+      [
+       "minutes",
+       "5"
+      ],
+      [
+       "slots",
+       "12"
+      ],
+      [
+       "reduce_min",
+       "20"
+      ],
+      [
+       "waves",
+       "17"
+      ]
+     ]
+    }
+   ],
+   "heap": []
+  },
+  {
+   "line": 9,
+   "phase": "Return",
+   "note": "<code>job_minutes()<\/code> returns <b>105<\/b> and its frame is popped. The caller continues on this line with that value.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "job_minutes",
+       "function job_minutes()"
+      ],
+      [
+       "nodes",
+       "30"
+      ]
+     ]
+    }
+   ],
+   "heap": []
+  },
+  {
+   "line": 10,
+   "phase": "Python",
+   "note": "<code>nodes<\/code> changes to 31.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "job_minutes",
+       "function job_minutes()"
+      ],
+      [
+       "nodes",
+       "31"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "nodes"
+  },
+  {
+   "line": 9,
+   "phase": "Python",
+   "note": "The condition is <b>True<\/b>, so the indented block runs. <code>job_minutes()<\/code> is called: a new frame is pushed with <code>nodes<\/code> = 31, <code>tasks<\/code> = 6000, <code>minutes<\/code> = 5, <code>slots<\/code> = 12, <code>reduce_min<\/code> = 20.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "job_minutes",
+       "function job_minutes()"
+      ],
+      [
+       "nodes",
+       "31"
+      ]
+     ]
+    },
+    {
+     "frame": "job_minutes()",
+     "vars": [
+      [
+       "nodes",
+       "31"
+      ],
+      [
+       "tasks",
+       "6000"
+      ],
+      [
+       "minutes",
+       "5"
+      ],
+      [
+       "slots",
+       "12"
+      ],
+      [
+       "reduce_min",
+       "20"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "reduce_min"
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "<code>waves<\/code> is created: 17.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "job_minutes",
+       "function job_minutes()"
+      ],
+      [
+       "nodes",
+       "31"
+      ]
+     ]
+    },
+    {
+     "frame": "job_minutes()",
+     "vars": [
+      [
+       "nodes",
+       "31"
+      ],
+      [
+       "tasks",
+       "6000"
+      ],
+      [
+       "minutes",
+       "5"
+      ],
+      [
+       "slots",
+       "12"
+      ],
+      [
+       "reduce_min",
+       "20"
+      ],
+      [
+       "waves",
+       "17"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "waves"
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "The return value is worked out and handed back to the caller.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "job_minutes",
+       "function job_minutes()"
+      ],
+      [
+       "nodes",
+       "31"
+      ]
+     ]
+    },
+    {
+     "frame": "job_minutes()",
+     "vars": [
+      [
+       "nodes",
+       "31"
+      ],
+      [
+       "tasks",
+       "6000"
+      ],
+      [
+       "minutes",
+       "5"
+      ],
+      [
+       "slots",
+       "12"
+      ],
+      [
+       "reduce_min",
+       "20"
+      ],
+      [
+       "waves",
+       "17"
+      ]
+     ]
+    }
+   ],
+   "heap": []
+  },
+  {
+   "line": 9,
+   "phase": "Return",
+   "note": "<code>job_minutes()<\/code> returns <b>105<\/b> and its frame is popped. The caller continues on this line with that value.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "job_minutes",
+       "function job_minutes()"
+      ],
+      [
+       "nodes",
+       "31"
+      ]
+     ]
+    }
+   ],
+   "heap": []
+  },
+  {
+   "line": 10,
+   "phase": "Python",
+   "note": "<code>nodes<\/code> changes to 32.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "job_minutes",
+       "function job_minutes()"
+      ],
+      [
+       "nodes",
+       "32"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "nodes"
+  },
+  {
+   "line": 9,
+   "phase": "Python",
+   "note": "The condition is <b>True<\/b>, so the indented block runs. <code>job_minutes()<\/code> is called: a new frame is pushed with <code>nodes<\/code> = 32, <code>tasks<\/code> = 6000, <code>minutes<\/code> = 5, <code>slots<\/code> = 12, <code>reduce_min<\/code> = 20.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "job_minutes",
+       "function job_minutes()"
+      ],
+      [
+       "nodes",
+       "32"
+      ]
+     ]
+    },
+    {
+     "frame": "job_minutes()",
+     "vars": [
+      [
+       "nodes",
+       "32"
+      ],
+      [
+       "tasks",
+       "6000"
+      ],
+      [
+       "minutes",
+       "5"
+      ],
+      [
+       "slots",
+       "12"
+      ],
+      [
+       "reduce_min",
+       "20"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "reduce_min"
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "<code>waves<\/code> is created: 16.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "job_minutes",
+       "function job_minutes()"
+      ],
+      [
+       "nodes",
+       "32"
+      ]
+     ]
+    },
+    {
+     "frame": "job_minutes()",
+     "vars": [
+      [
+       "nodes",
+       "32"
+      ],
+      [
+       "tasks",
+       "6000"
+      ],
+      [
+       "minutes",
+       "5"
+      ],
+      [
+       "slots",
+       "12"
+      ],
+      [
+       "reduce_min",
+       "20"
+      ],
+      [
+       "waves",
+       "16"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "waves"
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "The return value is worked out and handed back to the caller.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "job_minutes",
+       "function job_minutes()"
+      ],
+      [
+       "nodes",
+       "32"
+      ]
+     ]
+    },
+    {
+     "frame": "job_minutes()",
+     "vars": [
+      [
+       "nodes",
+       "32"
+      ],
+      [
+       "tasks",
+       "6000"
+      ],
+      [
+       "minutes",
+       "5"
+      ],
+      [
+       "slots",
+       "12"
+      ],
+      [
+       "reduce_min",
+       "20"
+      ],
+      [
+       "waves",
+       "16"
+      ]
+     ]
+    }
+   ],
+   "heap": []
+  },
+  {
+   "line": 9,
+   "phase": "Return",
+   "note": "<code>job_minutes()<\/code> returns <b>100<\/b> and its frame is popped. The caller continues on this line with that value.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "job_minutes",
+       "function job_minutes()"
+      ],
+      [
+       "nodes",
+       "32"
+      ]
+     ]
+    }
+   ],
+   "heap": []
+  },
+  {
+   "line": 10,
+   "phase": "Python",
+   "note": "<code>nodes<\/code> changes to 33.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "job_minutes",
+       "function job_minutes()"
+      ],
+      [
+       "nodes",
+       "33"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "nodes"
+  },
+  {
+   "line": 9,
+   "phase": "Python",
+   "note": "The condition is <b>True<\/b>, so the indented block runs. <code>job_minutes()<\/code> is called: a new frame is pushed with <code>nodes<\/code> = 33, <code>tasks<\/code> = 6000, <code>minutes<\/code> = 5, <code>slots<\/code> = 12, <code>reduce_min<\/code> = 20.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "job_minutes",
+       "function job_minutes()"
+      ],
+      [
+       "nodes",
+       "33"
+      ]
+     ]
+    },
+    {
+     "frame": "job_minutes()",
+     "vars": [
+      [
+       "nodes",
+       "33"
+      ],
+      [
+       "tasks",
+       "6000"
+      ],
+      [
+       "minutes",
+       "5"
+      ],
+      [
+       "slots",
+       "12"
+      ],
+      [
+       "reduce_min",
+       "20"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "reduce_min"
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "<code>waves<\/code> is created: 16.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "job_minutes",
+       "function job_minutes()"
+      ],
+      [
+       "nodes",
+       "33"
+      ]
+     ]
+    },
+    {
+     "frame": "job_minutes()",
+     "vars": [
+      [
+       "nodes",
+       "33"
+      ],
+      [
+       "tasks",
+       "6000"
+      ],
+      [
+       "minutes",
+       "5"
+      ],
+      [
+       "slots",
+       "12"
+      ],
+      [
+       "reduce_min",
+       "20"
+      ],
+      [
+       "waves",
+       "16"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "waves"
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "The return value is worked out and handed back to the caller.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "job_minutes",
+       "function job_minutes()"
+      ],
+      [
+       "nodes",
+       "33"
+      ]
+     ]
+    },
+    {
+     "frame": "job_minutes()",
+     "vars": [
+      [
+       "nodes",
+       "33"
+      ],
+      [
+       "tasks",
+       "6000"
+      ],
+      [
+       "minutes",
+       "5"
+      ],
+      [
+       "slots",
+       "12"
+      ],
+      [
+       "reduce_min",
+       "20"
+      ],
+      [
+       "waves",
+       "16"
+      ]
+     ]
+    }
+   ],
+   "heap": []
+  },
+  {
+   "line": 9,
+   "phase": "Return",
+   "note": "<code>job_minutes()<\/code> returns <b>100<\/b> and its frame is popped. The caller continues on this line with that value.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "job_minutes",
+       "function job_minutes()"
+      ],
+      [
+       "nodes",
+       "33"
+      ]
+     ]
+    }
+   ],
+   "heap": []
+  },
+  {
+   "line": 10,
+   "phase": "Python",
+   "note": "<code>nodes<\/code> changes to 34.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "job_minutes",
+       "function job_minutes()"
+      ],
+      [
+       "nodes",
+       "34"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "nodes"
+  },
+  {
+   "line": 9,
+   "phase": "Python",
+   "note": "The condition is <b>True<\/b>, so the indented block runs. <code>job_minutes()<\/code> is called: a new frame is pushed with <code>nodes<\/code> = 34, <code>tasks<\/code> = 6000, <code>minutes<\/code> = 5, <code>slots<\/code> = 12, <code>reduce_min<\/code> = 20.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "job_minutes",
+       "function job_minutes()"
+      ],
+      [
+       "nodes",
+       "34"
+      ]
+     ]
+    },
+    {
+     "frame": "job_minutes()",
+     "vars": [
+      [
+       "nodes",
+       "34"
+      ],
+      [
+       "tasks",
+       "6000"
+      ],
+      [
+       "minutes",
+       "5"
+      ],
+      [
+       "slots",
+       "12"
+      ],
+      [
+       "reduce_min",
+       "20"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "reduce_min"
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "<code>waves<\/code> is created: 15.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "job_minutes",
+       "function job_minutes()"
+      ],
+      [
+       "nodes",
+       "34"
+      ]
+     ]
+    },
+    {
+     "frame": "job_minutes()",
+     "vars": [
+      [
+       "nodes",
+       "34"
+      ],
+      [
+       "tasks",
+       "6000"
+      ],
+      [
+       "minutes",
+       "5"
+      ],
+      [
+       "slots",
+       "12"
+      ],
+      [
+       "reduce_min",
+       "20"
+      ],
+      [
+       "waves",
+       "15"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "waves"
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "The return value is worked out and handed back to the caller.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "job_minutes",
+       "function job_minutes()"
+      ],
+      [
+       "nodes",
+       "34"
+      ]
+     ]
+    },
+    {
+     "frame": "job_minutes()",
+     "vars": [
+      [
+       "nodes",
+       "34"
+      ],
+      [
+       "tasks",
+       "6000"
+      ],
+      [
+       "minutes",
+       "5"
+      ],
+      [
+       "slots",
+       "12"
+      ],
+      [
+       "reduce_min",
+       "20"
+      ],
+      [
+       "waves",
+       "15"
+      ]
+     ]
+    }
+   ],
+   "heap": []
+  },
+  {
+   "line": 9,
+   "phase": "Return",
+   "note": "<code>job_minutes()<\/code> returns <b>95<\/b> and its frame is popped. The caller continues on this line with that value.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "job_minutes",
+       "function job_minutes()"
+      ],
+      [
+       "nodes",
+       "34"
+      ]
+     ]
+    }
+   ],
+   "heap": []
+  },
+  {
+   "line": 10,
+   "phase": "Python",
+   "note": "<code>nodes<\/code> changes to 35.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "job_minutes",
+       "function job_minutes()"
+      ],
+      [
+       "nodes",
+       "35"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "nodes"
+  },
+  {
+   "line": 9,
+   "phase": "Python",
+   "note": "The condition is <b>True<\/b>, so the indented block runs. <code>job_minutes()<\/code> is called: a new frame is pushed with <code>nodes<\/code> = 35, <code>tasks<\/code> = 6000, <code>minutes<\/code> = 5, <code>slots<\/code> = 12, <code>reduce_min<\/code> = 20.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "job_minutes",
+       "function job_minutes()"
+      ],
+      [
+       "nodes",
+       "35"
+      ]
+     ]
+    },
+    {
+     "frame": "job_minutes()",
+     "vars": [
+      [
+       "nodes",
+       "35"
+      ],
+      [
+       "tasks",
+       "6000"
+      ],
+      [
+       "minutes",
+       "5"
+      ],
+      [
+       "slots",
+       "12"
+      ],
+      [
+       "reduce_min",
+       "20"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "reduce_min"
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "<code>waves<\/code> is created: 15.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "job_minutes",
+       "function job_minutes()"
+      ],
+      [
+       "nodes",
+       "35"
+      ]
+     ]
+    },
+    {
+     "frame": "job_minutes()",
+     "vars": [
+      [
+       "nodes",
+       "35"
+      ],
+      [
+       "tasks",
+       "6000"
+      ],
+      [
+       "minutes",
+       "5"
+      ],
+      [
+       "slots",
+       "12"
+      ],
+      [
+       "reduce_min",
+       "20"
+      ],
+      [
+       "waves",
+       "15"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "waves"
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "The return value is worked out and handed back to the caller.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "job_minutes",
+       "function job_minutes()"
+      ],
+      [
+       "nodes",
+       "35"
+      ]
+     ]
+    },
+    {
+     "frame": "job_minutes()",
+     "vars": [
+      [
+       "nodes",
+       "35"
+      ],
+      [
+       "tasks",
+       "6000"
+      ],
+      [
+       "minutes",
+       "5"
+      ],
+      [
+       "slots",
+       "12"
+      ],
+      [
+       "reduce_min",
+       "20"
+      ],
+      [
+       "waves",
+       "15"
+      ]
+     ]
+    }
+   ],
+   "heap": []
+  },
+  {
+   "line": 9,
+   "phase": "Return",
+   "note": "<code>job_minutes()<\/code> returns <b>95<\/b> and its frame is popped. The caller continues on this line with that value.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "job_minutes",
+       "function job_minutes()"
+      ],
+      [
+       "nodes",
+       "35"
+      ]
+     ]
+    }
+   ],
+   "heap": []
+  },
+  {
+   "line": 10,
+   "phase": "Python",
+   "note": "<code>nodes<\/code> changes to 36.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "job_minutes",
+       "function job_minutes()"
+      ],
+      [
+       "nodes",
+       "36"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "nodes"
+  },
+  {
+   "line": 9,
+   "phase": "Python",
+   "note": "The condition is <b>False<\/b>, so the indented block is skipped. <code>job_minutes()<\/code> is called: a new frame is pushed with <code>nodes<\/code> = 36, <code>tasks<\/code> = 6000, <code>minutes<\/code> = 5, <code>slots<\/code> = 12, <code>reduce_min<\/code> = 20.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "job_minutes",
+       "function job_minutes()"
+      ],
+      [
+       "nodes",
+       "36"
+      ]
+     ]
+    },
+    {
+     "frame": "job_minutes()",
+     "vars": [
+      [
+       "nodes",
+       "36"
+      ],
+      [
+       "tasks",
+       "6000"
+      ],
+      [
+       "minutes",
+       "5"
+      ],
+      [
+       "slots",
+       "12"
+      ],
+      [
+       "reduce_min",
+       "20"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "reduce_min"
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "<code>waves<\/code> is created: 14.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "job_minutes",
+       "function job_minutes()"
+      ],
+      [
+       "nodes",
+       "36"
+      ]
+     ]
+    },
+    {
+     "frame": "job_minutes()",
+     "vars": [
+      [
+       "nodes",
+       "36"
+      ],
+      [
+       "tasks",
+       "6000"
+      ],
+      [
+       "minutes",
+       "5"
+      ],
+      [
+       "slots",
+       "12"
+      ],
+      [
+       "reduce_min",
+       "20"
+      ],
+      [
+       "waves",
+       "14"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "waves"
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "The return value is worked out and handed back to the caller.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "job_minutes",
+       "function job_minutes()"
+      ],
+      [
+       "nodes",
+       "36"
+      ]
+     ]
+    },
+    {
+     "frame": "job_minutes()",
+     "vars": [
+      [
+       "nodes",
+       "36"
+      ],
+      [
+       "tasks",
+       "6000"
+      ],
+      [
+       "minutes",
+       "5"
+      ],
+      [
+       "slots",
+       "12"
+      ],
+      [
+       "reduce_min",
+       "20"
+      ],
+      [
+       "waves",
+       "14"
+      ]
+     ]
+    }
+   ],
+   "heap": []
+  },
+  {
+   "line": 9,
+   "phase": "Return",
+   "note": "<code>job_minutes()<\/code> returns <b>90<\/b> and its frame is popped. The caller continues on this line with that value.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "job_minutes",
+       "function job_minutes()"
+      ],
+      [
+       "nodes",
+       "36"
+      ]
+     ]
+    }
+   ],
+   "heap": []
+  },
+  {
+   "line": 11,
+   "phase": "Python",
+   "note": "<code>job_minutes()<\/code> is called: a new frame is pushed with <code>nodes<\/code> = 36, <code>tasks<\/code> = 6000, <code>minutes<\/code> = 5, <code>slots<\/code> = 12, <code>reduce_min<\/code> = 20.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "job_minutes",
+       "function job_minutes()"
+      ],
+      [
+       "nodes",
+       "36"
+      ]
+     ]
+    },
+    {
+     "frame": "job_minutes()",
+     "vars": [
+      [
+       "nodes",
+       "36"
+      ],
+      [
+       "tasks",
+       "6000"
+      ],
+      [
+       "minutes",
+       "5"
+      ],
+      [
+       "slots",
+       "12"
+      ],
+      [
+       "reduce_min",
+       "20"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "reduce_min"
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "<code>waves<\/code> is created: 14.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "job_minutes",
+       "function job_minutes()"
+      ],
+      [
+       "nodes",
+       "36"
+      ]
+     ]
+    },
+    {
+     "frame": "job_minutes()",
+     "vars": [
+      [
+       "nodes",
+       "36"
+      ],
+      [
+       "tasks",
+       "6000"
+      ],
+      [
+       "minutes",
+       "5"
+      ],
+      [
+       "slots",
+       "12"
+      ],
+      [
+       "reduce_min",
+       "20"
+      ],
+      [
+       "waves",
+       "14"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "waves"
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "The return value is worked out and handed back to the caller.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "job_minutes",
+       "function job_minutes()"
+      ],
+      [
+       "nodes",
+       "36"
+      ]
+     ]
+    },
+    {
+     "frame": "job_minutes()",
+     "vars": [
+      [
+       "nodes",
+       "36"
+      ],
+      [
+       "tasks",
+       "6000"
+      ],
+      [
+       "minutes",
+       "5"
+      ],
+      [
+       "slots",
+       "12"
+      ],
+      [
+       "reduce_min",
+       "20"
+      ],
+      [
+       "waves",
+       "14"
+      ]
+     ]
+    }
+   ],
+   "heap": []
+  },
+  {
+   "line": 11,
+   "phase": "Return",
+   "note": "<code>job_minutes()<\/code> returns <b>90<\/b> and its frame is popped. The caller continues on this line with that value.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "job_minutes",
+       "function job_minutes()"
+      ],
+      [
+       "nodes",
+       "36"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "out": "Need 36 nodes: 90 min\n"
+  }
+ ]
+}</script>
+    </div>
+  </article>
+  <article class="wx">
+    <div class="wx__head"><span class="wx__num">Example 3</span><span class="lvl lvl--a">Advanced</span><span class="wx__tag">Data platform · 3-year plan</span></div>
+    <h4>How many nodes to add each year?</h4>
+    <div class="wx__problem"><p class="wx__label">Problem statement</p><p>TiffinGo has <b>200 TB</b> today, growing <b>40%</b> a year. Storage uses the ×6 rule (3 copies ÷ 0.5), nodes have <b>144 TB</b>, and they keep <b>2 spare</b> nodes. For each of the next 3 years, print the nodes needed and how many to buy that year.</p></div>
+    <div class="prob__io"><div><small>Input</small><pre>200 TB · +40%/year · ×6 · 144 TB/node · +2 spares · 3 years</pre></div><div><small>Expected output</small><pre>Today: 11 nodes
+Year 1: 280 TB, need 14, buy 3
+Year 2: 392 TB, need 19, buy 5
+Year 3: 549 TB, need 25, buy 6</pre></div></div>
+    <div class="wx__approach"><p class="wx__label">Approach</p><ol><li>Start with the nodes needed for today's data.</li><li>Each year: grow the data, compute the nodes needed, and buy the difference from last year.</li><li>Never buy a negative number (you don't sell nodes when data shrinks).</li></ol></div>
+    <p class="wx__label">Solution: run it live</p>
+    <div class="runner">
+    <script type="application/json">{
+ "lang": "python",
+ "file": "main.py",
+ "tasks": [
+  {
+   "label": "Solution",
+   "hint": "Finance asks to buy everything on day one instead. How many nodes is that, and how many sit idle in year 1?",
+   "code": "import math\n\ndef needed(data_tb):\n    return math.ceil(data_tb * 6 / 144) + 2\n\ndata = 200\nhave = needed(data)\nprint(\"Today:\", have, \"nodes\")\nfor year in [1, 2, 3]:\n    data = data * 1.4\n    need = needed(data)\n    buy = max(0, need - have)\n    have = have + buy\n    print(f\"Year {year}: {data:.0f} TB, need {need}, buy {buy}\")\n"
+  }
+ ]
+}</script>
+    </div>
+    <p class="wx__label">What happens in memory, step by step</p>
+    <p class="wx__how">Recorded from a real Python run: press <b>Next</b> to execute one line at a time. Watch variables change in each frame, and lists and dictionaries (numbered #1, #2 …) fill up as objects.</p>
+    <div class="tracer">
+    <script type="application/json">{
+ "lang": "python",
+ "code": [
+  "import math",
+  "",
+  "def needed(data_tb):",
+  "    return math.ceil(data_tb * 6 / 144) + 2",
+  "",
+  "data = 200",
+  "have = needed(data)",
+  "print(\"Today:\", have, \"nodes\")",
+  "for year in [1, 2, 3]:",
+  "    data = data * 1.4",
+  "    need = needed(data)",
+  "    buy = max(0, need - have)",
+  "    have = have + buy",
+  "    print(f\"Year {year}: {data:.0f} TB, need {need}, buy {buy}\")"
+ ],
+ "steps": [
+  {
+   "line": 1,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": []
+    }
+   ],
+   "heap": []
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "<code>needed<\/code> is created: function needed().",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "needed",
+       "function needed()"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "needed"
+  },
+  {
+   "line": 6,
+   "phase": "Python",
+   "note": "<code>data<\/code> is created: 200.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "needed",
+       "function needed()"
+      ],
+      [
+       "data",
+       "200"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "data"
+  },
+  {
+   "line": 7,
+   "phase": "Start",
+   "note": "Nodes for today's 200 TB, including spares. <code>needed()<\/code> is called: a new frame is pushed with <code>data_tb<\/code> = 200.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "needed",
+       "function needed()"
+      ],
+      [
+       "data",
+       "200"
+      ]
+     ]
+    },
+    {
+     "frame": "needed()",
+     "vars": [
+      [
+       "data_tb",
+       "200"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "data_tb"
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "The return value is worked out and handed back to the caller.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "needed",
+       "function needed()"
+      ],
+      [
+       "data",
+       "200"
+      ]
+     ]
+    },
+    {
+     "frame": "needed()",
+     "vars": [
+      [
+       "data_tb",
+       "200"
+      ]
+     ]
+    }
+   ],
+   "heap": []
+  },
+  {
+   "line": 7,
+   "phase": "Return",
+   "note": "<code>needed()<\/code> returns <b>11<\/b> and its frame is popped. The caller continues on this line with that value.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "needed",
+       "function needed()"
+      ],
+      [
+       "data",
+       "200"
+      ],
+      [
+       "have",
+       "11"
+      ]
+     ]
+    }
+   ],
+   "heap": []
+  },
+  {
+   "line": 8,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "needed",
+       "function needed()"
+      ],
+      [
+       "data",
+       "200"
+      ],
+      [
+       "have",
+       "11"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "out": "Today: 11 nodes\n"
+  },
+  {
+   "line": 9,
+   "phase": "Python",
+   "note": "<code>year<\/code> is created: 1.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "needed",
+       "function needed()"
+      ],
+      [
+       "data",
+       "200"
+      ],
+      [
+       "have",
+       "11"
+      ],
+      [
+       "year",
+       "1"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "year"
+  },
+  {
+   "line": 10,
+   "phase": "Python",
+   "note": "<code>data<\/code> changes to 280.0.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "needed",
+       "function needed()"
+      ],
+      [
+       "data",
+       "280.0"
+      ],
+      [
+       "have",
+       "11"
+      ],
+      [
+       "year",
+       "1"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "data"
+  },
+  {
+   "line": 11,
+   "phase": "Python",
+   "note": "<code>needed()<\/code> is called: a new frame is pushed with <code>data_tb<\/code> = 280.0.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "needed",
+       "function needed()"
+      ],
+      [
+       "data",
+       "280.0"
+      ],
+      [
+       "have",
+       "11"
+      ],
+      [
+       "year",
+       "1"
+      ]
+     ]
+    },
+    {
+     "frame": "needed()",
+     "vars": [
+      [
+       "data_tb",
+       "280.0"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "data_tb"
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "The return value is worked out and handed back to the caller.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "needed",
+       "function needed()"
+      ],
+      [
+       "data",
+       "280.0"
+      ],
+      [
+       "have",
+       "11"
+      ],
+      [
+       "year",
+       "1"
+      ]
+     ]
+    },
+    {
+     "frame": "needed()",
+     "vars": [
+      [
+       "data_tb",
+       "280.0"
+      ]
+     ]
+    }
+   ],
+   "heap": []
+  },
+  {
+   "line": 11,
+   "phase": "Return",
+   "note": "<code>needed()<\/code> returns <b>14<\/b> and its frame is popped. The caller continues on this line with that value.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "needed",
+       "function needed()"
+      ],
+      [
+       "data",
+       "280.0"
+      ],
+      [
+       "have",
+       "11"
+      ],
+      [
+       "year",
+       "1"
+      ],
+      [
+       "need",
+       "14"
+      ]
+     ]
+    }
+   ],
+   "heap": []
+  },
+  {
+   "line": 12,
+   "phase": "Python",
+   "note": "<code>buy<\/code> is created: 3.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "needed",
+       "function needed()"
+      ],
+      [
+       "data",
+       "280.0"
+      ],
+      [
+       "have",
+       "11"
+      ],
+      [
+       "year",
+       "1"
+      ],
+      [
+       "need",
+       "14"
+      ],
+      [
+       "buy",
+       "3"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "buy"
+  },
+  {
+   "line": 13,
+   "phase": "Python",
+   "note": "<code>have<\/code> changes to 14.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "needed",
+       "function needed()"
+      ],
+      [
+       "data",
+       "280.0"
+      ],
+      [
+       "have",
+       "14"
+      ],
+      [
+       "year",
+       "1"
+      ],
+      [
+       "need",
+       "14"
+      ],
+      [
+       "buy",
+       "3"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "have"
+  },
+  {
+   "line": 14,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "needed",
+       "function needed()"
+      ],
+      [
+       "data",
+       "280.0"
+      ],
+      [
+       "have",
+       "14"
+      ],
+      [
+       "year",
+       "1"
+      ],
+      [
+       "need",
+       "14"
+      ],
+      [
+       "buy",
+       "3"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "out": "Year 1: 280 TB, need 14, buy 3\n"
+  },
+  {
+   "line": 9,
+   "phase": "Python",
+   "note": "<code>year<\/code> changes to 2.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "needed",
+       "function needed()"
+      ],
+      [
+       "data",
+       "280.0"
+      ],
+      [
+       "have",
+       "14"
+      ],
+      [
+       "year",
+       "2"
+      ],
+      [
+       "need",
+       "14"
+      ],
+      [
+       "buy",
+       "3"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "year"
+  },
+  {
+   "line": 10,
+   "phase": "Python",
+   "note": "<code>data<\/code> changes to 392.0.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "needed",
+       "function needed()"
+      ],
+      [
+       "data",
+       "392.0"
+      ],
+      [
+       "have",
+       "14"
+      ],
+      [
+       "year",
+       "2"
+      ],
+      [
+       "need",
+       "14"
+      ],
+      [
+       "buy",
+       "3"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "data"
+  },
+  {
+   "line": 11,
+   "phase": "Python",
+   "note": "<code>needed()<\/code> is called: a new frame is pushed with <code>data_tb<\/code> = 392.0.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "needed",
+       "function needed()"
+      ],
+      [
+       "data",
+       "392.0"
+      ],
+      [
+       "have",
+       "14"
+      ],
+      [
+       "year",
+       "2"
+      ],
+      [
+       "need",
+       "14"
+      ],
+      [
+       "buy",
+       "3"
+      ]
+     ]
+    },
+    {
+     "frame": "needed()",
+     "vars": [
+      [
+       "data_tb",
+       "392.0"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "data_tb"
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "The return value is worked out and handed back to the caller.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "needed",
+       "function needed()"
+      ],
+      [
+       "data",
+       "392.0"
+      ],
+      [
+       "have",
+       "14"
+      ],
+      [
+       "year",
+       "2"
+      ],
+      [
+       "need",
+       "14"
+      ],
+      [
+       "buy",
+       "3"
+      ]
+     ]
+    },
+    {
+     "frame": "needed()",
+     "vars": [
+      [
+       "data_tb",
+       "392.0"
+      ]
+     ]
+    }
+   ],
+   "heap": []
+  },
+  {
+   "line": 11,
+   "phase": "Return",
+   "note": "<code>needed()<\/code> returns <b>19<\/b> and its frame is popped. The caller continues on this line with that value.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "needed",
+       "function needed()"
+      ],
+      [
+       "data",
+       "392.0"
+      ],
+      [
+       "have",
+       "14"
+      ],
+      [
+       "year",
+       "2"
+      ],
+      [
+       "need",
+       "19"
+      ],
+      [
+       "buy",
+       "3"
+      ]
+     ]
+    }
+   ],
+   "heap": []
+  },
+  {
+   "line": 12,
+   "phase": "Python",
+   "note": "<code>buy<\/code> changes to 5.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "needed",
+       "function needed()"
+      ],
+      [
+       "data",
+       "392.0"
+      ],
+      [
+       "have",
+       "14"
+      ],
+      [
+       "year",
+       "2"
+      ],
+      [
+       "need",
+       "19"
+      ],
+      [
+       "buy",
+       "5"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "buy"
+  },
+  {
+   "line": 13,
+   "phase": "Python",
+   "note": "<code>have<\/code> changes to 19.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "needed",
+       "function needed()"
+      ],
+      [
+       "data",
+       "392.0"
+      ],
+      [
+       "have",
+       "19"
+      ],
+      [
+       "year",
+       "2"
+      ],
+      [
+       "need",
+       "19"
+      ],
+      [
+       "buy",
+       "5"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "have"
+  },
+  {
+   "line": 14,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "needed",
+       "function needed()"
+      ],
+      [
+       "data",
+       "392.0"
+      ],
+      [
+       "have",
+       "19"
+      ],
+      [
+       "year",
+       "2"
+      ],
+      [
+       "need",
+       "19"
+      ],
+      [
+       "buy",
+       "5"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "out": "Year 2: 392 TB, need 19, buy 5\n"
+  },
+  {
+   "line": 9,
+   "phase": "Python",
+   "note": "<code>year<\/code> changes to 3.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "needed",
+       "function needed()"
+      ],
+      [
+       "data",
+       "392.0"
+      ],
+      [
+       "have",
+       "19"
+      ],
+      [
+       "year",
+       "3"
+      ],
+      [
+       "need",
+       "19"
+      ],
+      [
+       "buy",
+       "5"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "year"
+  },
+  {
+   "line": 10,
+   "phase": "Python",
+   "note": "<code>data<\/code> changes to 548.8.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "needed",
+       "function needed()"
+      ],
+      [
+       "data",
+       "548.8"
+      ],
+      [
+       "have",
+       "19"
+      ],
+      [
+       "year",
+       "3"
+      ],
+      [
+       "need",
+       "19"
+      ],
+      [
+       "buy",
+       "5"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "data"
+  },
+  {
+   "line": 11,
+   "phase": "Python",
+   "note": "<code>needed()<\/code> is called: a new frame is pushed with <code>data_tb<\/code> = 548.8.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "needed",
+       "function needed()"
+      ],
+      [
+       "data",
+       "548.8"
+      ],
+      [
+       "have",
+       "19"
+      ],
+      [
+       "year",
+       "3"
+      ],
+      [
+       "need",
+       "19"
+      ],
+      [
+       "buy",
+       "5"
+      ]
+     ]
+    },
+    {
+     "frame": "needed()",
+     "vars": [
+      [
+       "data_tb",
+       "548.8"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "data_tb"
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "The return value is worked out and handed back to the caller.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "needed",
+       "function needed()"
+      ],
+      [
+       "data",
+       "548.8"
+      ],
+      [
+       "have",
+       "19"
+      ],
+      [
+       "year",
+       "3"
+      ],
+      [
+       "need",
+       "19"
+      ],
+      [
+       "buy",
+       "5"
+      ]
+     ]
+    },
+    {
+     "frame": "needed()",
+     "vars": [
+      [
+       "data_tb",
+       "548.8"
+      ]
+     ]
+    }
+   ],
+   "heap": []
+  },
+  {
+   "line": 11,
+   "phase": "Return",
+   "note": "<code>needed()<\/code> returns <b>25<\/b> and its frame is popped. The caller continues on this line with that value.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "needed",
+       "function needed()"
+      ],
+      [
+       "data",
+       "548.8"
+      ],
+      [
+       "have",
+       "19"
+      ],
+      [
+       "year",
+       "3"
+      ],
+      [
+       "need",
+       "25"
+      ],
+      [
+       "buy",
+       "5"
+      ]
+     ]
+    }
+   ],
+   "heap": []
+  },
+  {
+   "line": 12,
+   "phase": "Python",
+   "note": "<code>buy<\/code> changes to 6.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "needed",
+       "function needed()"
+      ],
+      [
+       "data",
+       "548.8"
+      ],
+      [
+       "have",
+       "19"
+      ],
+      [
+       "year",
+       "3"
+      ],
+      [
+       "need",
+       "25"
+      ],
+      [
+       "buy",
+       "6"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "buy"
+  },
+  {
+   "line": 13,
+   "phase": "Python",
+   "note": "<code>have<\/code> changes to 25.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "needed",
+       "function needed()"
+      ],
+      [
+       "data",
+       "548.8"
+      ],
+      [
+       "have",
+       "25"
+      ],
+      [
+       "year",
+       "3"
+      ],
+      [
+       "need",
+       "25"
+      ],
+      [
+       "buy",
+       "6"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "have"
+  },
+  {
+   "line": 14,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "needed",
+       "function needed()"
+      ],
+      [
+       "data",
+       "548.8"
+      ],
+      [
+       "have",
+       "25"
+      ],
+      [
+       "year",
+       "3"
+      ],
+      [
+       "need",
+       "25"
+      ],
+      [
+       "buy",
+       "6"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "out": "Year 3: 549 TB, need 25, buy 6\n"
+  },
+  {
+   "line": 9,
+   "phase": "Python",
+   "note": "Nothing is left to loop over, so the loop ends and Python moves on.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "needed",
+       "function needed()"
+      ],
+      [
+       "data",
+       "548.8"
+      ],
+      [
+       "have",
+       "25"
+      ],
+      [
+       "year",
+       "3"
+      ],
+      [
+       "need",
+       "25"
+      ],
+      [
+       "buy",
+       "6"
+      ]
+     ]
+    }
+   ],
+   "heap": []
+  }
+ ]
+}</script>
+    </div>
+  </article>
+</section>
+
+<section class="part" id="quiz">
+  <span class="part-label"><b>9</b> Quiz and revision</span>
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <script type="application/json">[
+ {
+  "q": "You must store 100 TB in HDFS with replication 3. Ignoring temp space and headroom, how much raw disk is needed?",
+  "options": [
+   "100 TB",
+   "133 TB",
+   "300 TB",
+   "600 TB"
+  ],
+  "answer": 2,
+  "why": "Every block is stored 3 times: 100 × 3 = <b>300 TB<\/b>."
+ },
+ {
+  "q": "With replication 3, 25% temp space and 25% headroom, raw disk needed is about:",
+  "options": [
+   "data × 3",
+   "data × 6",
+   "data × 4",
+   "data × 9"
+  ],
+  "answer": 1,
+  "why": "data × 3 ÷ (1 − 0.25 − 0.25) = data × 3 ÷ 0.5 = <b>data × 6<\/b>."
+ },
+ {
+  "q": "Storage sizing says 13 nodes; compute sizing says 5 nodes. How many do you plan for (before spares)?",
+  "options": [
+   "13",
+   "5",
+   "9",
+   "18"
+  ],
+  "answer": 0,
+  "why": "The cluster must meet both requirements, so you take the <b>larger<\/b>: 13."
+ },
+ {
+  "q": "Data of 100 TB grows 50% every year. After 2 years it is:",
+  "options": [
+   "150 TB",
+   "200 TB",
+   "250 TB",
+   "225 TB"
+  ],
+  "answer": 3,
+  "why": "Growth compounds: 100 × 1.5 × 1.5 = <b>225 TB<\/b>."
+ },
+ {
+  "q": "After adding 4 empty DataNodes, why might old jobs not get faster immediately?",
+  "options": [
+   "New nodes need a week to warm up",
+   "HDFS ignores new nodes for 24 hours",
+   "Existing blocks stay on the old nodes until the balancer moves some to the new ones",
+   "Jobs only run on master nodes"
+  ],
+  "answer": 2,
+  "why": "Old data is still only on the old nodes. Run the <b>HDFS balancer<\/b> to spread blocks to the new nodes."
+ },
+ {
+  "q": "Why can many smaller nodes be better than a few very large nodes of the same total size?",
+  "options": [
+   "They use less power",
+   "A failure loses a smaller share, re-replication is faster, and work spreads over more disks and NICs",
+   "They need no network",
+   "HDFS supports only small nodes"
+  ],
+  "answer": 1,
+  "why": "Smaller failure “blast radius”, faster recovery and more parallelism. The cost is more machines to manage and more rack space."
+ },
+ {
+  "q": "Doubling the nodes of a cluster usually makes a job:",
+  "options": [
+   "Faster, but often less than twice as fast",
+   "Exactly twice as fast",
+   "Slower",
+   "No different"
+  ],
+  "answer": 0,
+  "why": "Parts of a job do not split: start-up, coordination, the reduce phase, the slowest task. Speed-up is real but not perfect (Amdahl's law)."
+ },
+ {
+  "q": "In the cloud, with data kept in object storage (like S3), a Hadoop/Spark cluster is mostly sized for:",
+  "options": [
+   "Storage only",
+   "Nothing: the cloud sizes itself",
+   "Exactly the same as on-premises",
+   "Compute for the jobs, often created and deleted per job"
+  ],
+  "answer": 3,
+  "why": "Separating storage from compute means clusters are sized for the work, and can be scaled or shut down without moving data."
+ }
+]</script>
+  </div>
+
+  <h3>Quick revision</h3>
+  <div class="revision">
+    <h3>Lesson 1.3 in one screen</h3>
+    <ul><li><b>Scale out</b> = add nodes. <b>Sizing</b> = decide how many, before buying.</li><li>Storage: raw = data × replication ÷ (1 − temp − headroom). Defaults (3, 25%, 25%) give <b>× 6</b>.</li><li>Compute: nodes = task-minutes ÷ (window × slots per node).</li><li>Final size = <b>max</b>(storage, compute) + spares. Round <b>up</b>.</li><li>Growth compounds: data × (1 + rate)<sup>years</sup>. Measure compression on real samples.</li><li>Use at least 2 racks so replicas span failure domains.</li><li>New nodes start empty: run <code>hdfs balancer -threshold 10</code>.</li><li>Many small nodes: smaller blast radius, faster re-replication. Few big nodes: less space and power.</li><li>More nodes ≠ proportionally faster: fixed parts of a job remain (Amdahl).</li><li>Cloud: storage in object stores, clusters sized for compute and often temporary.</li></ul>
+  </div>
+
+  <h3>Interview and viva questions</h3>
+  <div class="faq">
+    <details><summary>How do you size a Hadoop cluster?</summary><p>Start from requirements: current data, growth rate, retention period and compression. Multiply by the replication factor, add temporary space for intermediate data (about 25% of raw is a common rule of thumb) and headroom (20–30%). Divide by usable disk per node to get storage nodes. Separately estimate compute nodes from the workload and time windows. Take the larger number, add spares for failures, and spread nodes over at least two racks. State your assumptions.</p></details>
+    <details><summary>Why do we keep free headroom in HDFS?</summary><p>A nearly full HDFS causes failed writes, uneven nodes and slow jobs. Free space absorbs growth spikes, job temp files and re-replication after a node dies (the surviving nodes must hold the lost replicas).</p></details>
+    <details><summary>What does the HDFS balancer do?</summary><p>It moves blocks from over-utilised DataNodes to under-utilised ones until every node's usage is within a threshold (for example 10%) of the cluster average. It runs in the background with limited bandwidth so normal work continues. It is typically used after adding nodes.</p></details>
+    <details><summary>Is it better to have more small nodes or fewer large nodes?</summary><p>It depends. More small nodes give more parallel disks and network ports, a smaller share lost per failure and faster re-replication. Fewer large nodes save rack space, power and management effort, and suit cold archive data. Very dense nodes make failures expensive to recover from.</p></details>
+    <details><summary>Why doesn't doubling the nodes always halve the job time?</summary><p>Some parts of a job are serial or fixed: start-up, planning, the reduce or final step, waiting for the slowest task, and coordination overhead. Amdahl's law says the serial part limits the maximum speed-up. Moving more data over the network can also add cost.</p></details>
+    
+  </div>
+
+  <h3 id="practice">Practice problems</h3>
+  <p class="prob-intro">Sizing questions of the kind asked in data engineering interviews and in real capacity reviews. Work them out on paper first, then run the code.</p>
+  <div class="probs">
+    <article class="prob"><div class="prob__head"><span class="prob__num">P1</span><span class="prob__tag prob__tag--easy">Easy</span><h4>Raw disk for 50 TB</h4></div>
+      <p>How much raw disk is needed for 50 TB of data with replication 3, 25% temp and 25% headroom?</p>
+      <div class="prob__io"><div><small>Input</small><pre>50 TB · 3 · 0.25 · 0.25</pre></div><div><small>Expected output</small><pre>300.0 TB</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>print(50 * 3 / (1 - 0.25 - 0.25), &quot;TB&quot;)</code></pre><div class="output">300.0 TB</div></div>
+        <p><b>How it works:</b> 50 × 3 ÷ 0.5 = 300 TB: six times the data.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P2</span><span class="prob__tag prob__tag--easy">Easy</span><h4>Nodes from raw disk</h4></div>
+      <p>The cluster needs 1,000 TB raw. Each node has 12 disks of 16 TB. How many nodes?</p>
+      <div class="prob__io"><div><small>Input</small><pre>1000 TB raw · 12 × 16 TB</pre></div><div><small>Expected output</small><pre>6 nodes</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>import math
+print(math.ceil(1000 / (12 * 16)), &quot;nodes&quot;)</code></pre><div class="output">6 nodes</div></div>
+        <p><b>How it works:</b> Each node has 192 TB, so 1000 ÷ 192 = 5.2 → 6 nodes.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P3</span><span class="prob__tag prob__tag--easy">Easy</span><h4>Waves of tasks</h4></div>
+      <p>A job has 500 tasks. The cluster has 25 nodes with 8 slots each. How many waves?</p>
+      <div class="prob__io"><div><small>Input</small><pre>500 tasks · 25 × 8 slots</pre></div><div><small>Expected output</small><pre>3 waves</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>import math
+print(math.ceil(500 / (25 * 8)), &quot;waves&quot;)</code></pre><div class="output">3 waves</div></div>
+        <p><b>How it works:</b> 200 tasks run at once, so 500 tasks need 3 waves.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P4</span><span class="prob__tag prob__tag--medium">Medium</span><h4>Compression saves nodes</h4></div>
+      <p>300 TB of logs compress 4× as Parquet. Using the ×6 rule and 144 TB nodes, how many nodes without and with compression?</p>
+      <div class="prob__io"><div><small>Input</small><pre>300 TB · 4× · ×6 · 144 TB</pre></div><div><small>Expected output</small><pre>raw logs -&gt; 13 nodes
+Parquet -&gt; 4 nodes</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>import math
+for label, tb in [(&quot;raw logs&quot;, 300), (&quot;Parquet&quot;, 300 / 4)]:
+    print(label, &quot;-&gt;&quot;, math.ceil(tb * 6 / 144), &quot;nodes&quot;)</code></pre><div class="output">raw logs -&gt; 13 nodes
+Parquet -&gt; 4 nodes</div></div>
+        <p><b>How it works:</b> 13 vs 4 nodes. Good file formats are one of the biggest cost levers in big data (Module 10).</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P5</span><span class="prob__tag prob__tag--medium">Medium</span><h4>When does the cluster get full?</h4></div>
+      <p>A cluster can hold 400 TB of business data. Data is 150 TB and grows 35% a year. In which year does it pass 400 TB?</p>
+      <div class="prob__io"><div><small>Input</small><pre>capacity 400 · 150 TB · +35%/year</pre></div><div><small>Expected output</small><pre>Year 4 -&gt; 498 TB</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>data, year = 150, 0
+while data &lt;= 400:
+    data *= 1.35
+    year += 1
+print(&quot;Year&quot;, year, &quot;-&gt;&quot;, round(data), &quot;TB&quot;)</code></pre><div class="output">Year 4 -&gt; 498 TB</div></div>
+        <p><b>How it works:</b> 150 → 203 → 273 → 369 → 498. It passes in year 4, so new nodes must be ordered in year 3, allowing for delivery time.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P6</span><span class="prob__tag prob__tag--medium">Medium</span><h4>Re-replication time after a failure</h4></div>
+      <p>A node with 200 TB of replicas dies. The other 39 nodes each copy at 100 MB/s for re-replication, in parallel. Roughly how many hours until all copies are restored?</p>
+      <div class="prob__io"><div><small>Input</small><pre>200 TB · 39 nodes × 100 MB/s</pre></div><div><small>Expected output</small><pre>14.9 hours</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>mb = 200 * 1024 * 1024
+rate = 39 * 100            # MB per second, all nodes together
+print(round(mb / rate / 3600, 1), &quot;hours&quot;)</code></pre><div class="output">14.9 hours</div></div>
+        <p><b>How it works:</b> About 15 hours with these numbers. Denser nodes take longer, which raises the risk that a second failure hits a block before it is fully copied again.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P7</span><span class="prob__tag prob__tag--business">Business problem</span><h4>Cloud cluster per night vs always on</h4></div>
+      <p>A nightly job needs 40 nodes for 2 hours. A cloud node costs Rs 35 per hour. Compare a cluster kept on all day (24 h) with one created only for the job, for 30 days.</p>
+      <div class="prob__io"><div><small>Input</small><pre>40 nodes · Rs 35/h · 2 h vs 24 h · 30 days</pre></div><div><small>Expected output</small><pre>Always on : Rs 10.08 lakh
+Per job   : Rs 0.84 lakh
+Saved     : Rs 9.24 lakh</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>rate, nodes, days = 35, 40, 30
+always = nodes * 24 * rate * days
+per_job = nodes * 2 * rate * days
+print(f&quot;Always on : Rs {always / 1e5:.2f} lakh&quot;)
+print(f&quot;Per job   : Rs {per_job / 1e5:.2f} lakh&quot;)
+print(f&quot;Saved     : Rs {(always - per_job) / 1e5:.2f} lakh&quot;)</code></pre><div class="output">Always on : Rs 10.08 lakh
+Per job   : Rs 0.84 lakh
+Saved     : Rs 9.24 lakh</div></div>
+        <p><b>How it works:</b> Rs 10.08 lakh vs Rs 0.84 lakh a month (illustrative prices). With data in object storage, creating clusters per job saves most of the compute bill.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P8</span><span class="prob__tag prob__tag--business">Business problem</span><h4>Full sizing note for a manager</h4></div>
+      <p>Write a small program that prints a sizing note: data 120 TB, growth 30% for 2 years, replication 3, 25% temp, 25% headroom, 144 TB nodes, 2 spares, 12 nodes per rack.</p>
+      <div class="prob__io"><div><small>Input</small><pre>120 TB · 30% × 2 years · 3 · 0.25 · 0.25 · 144 TB · +2 · 12/rack</pre></div><div><small>Expected output</small><pre>Data in 2 years : 203 TB
+Raw disk needed : 1217 TB
+Nodes (+2 spare): 11
+Racks           : 2</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>import math
+data = 120 * 1.3 ** 2
+raw = data * 3 / (1 - 0.25 - 0.25)
+nodes = math.ceil(raw / 144) + 2
+racks = max(2, math.ceil(nodes / 12))
+print(f&quot;Data in 2 years : {data:.0f} TB&quot;)
+print(f&quot;Raw disk needed : {raw:.0f} TB&quot;)
+print(f&quot;Nodes (+2 spare): {nodes}&quot;)
+print(f&quot;Racks           : {racks}&quot;)</code></pre><div class="output">Data in 2 years : 203 TB
+Raw disk needed : 1217 TB
+Nodes (+2 spare): 11
+Racks           : 2</div></div>
+        <p><b>How it works:</b> Always present the result with its assumptions. If the manager changes growth or replication, the note can be re-run in seconds.</p>
+      </details>
+    </article>
+  </div>
+
+  <h3 id="scenarios">Real-world scenario questions (asked in company interviews)</h3>
+  <p class="scn-intro">Sizing and scaling situations that come up in data engineering interviews. Decide your answer first, then compare.</p>
+  <div class="scenarios">
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Data platform · capacity</span><span class="scn__tag scn__tag--level">Fresher</span></div>
+      <h4>“We have 100 TB. How many 100 TB nodes do we need?”</h4>
+      <p class="scn__situation">The interviewer gives you exactly this question and waits. There is no more information.</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> do you know that HDFS needs far more raw disk than the data size, and do you ask about assumptions?</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <p>Not one. First, questions: replication factor? growth rate and retention? compression? workload? Then a default calculation:</p>
+        <ul>
+          <li>100 TB × 3 copies = 300 TB, ÷ 0.5 for temp space and headroom = <b>600 TB raw</b>, so <b>6 nodes</b>, plus 1–2 spares.</li>
+          <li>With 40% growth for 2 years: 196 TB of data, about 12 nodes, plus spares.</li>
+          <li>Check compute too, and spread over at least two racks.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid saying:</b> “One node, because 100 TB fits.”</p>
+      </div></details>
+    </article>
+
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Retail · operations</span><span class="scn__tag scn__tag--level">1–3 years</span></div>
+      <h4>We added 10 nodes and nothing got faster</h4>
+      <p class="scn__situation">A 30-node cluster was 85% full and jobs were slow. The team added 10 new nodes yesterday. Today jobs are just as slow, and the new nodes show almost no disk usage.</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> do you know how HDFS treats new nodes and how to fix the imbalance safely?</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ol>
+          <li>New DataNodes start empty. Existing blocks stay on the old nodes, so tasks reading old data still run (data-local) mostly on the old 30 nodes.</li>
+          <li>Run the <b>balancer</b>: <code>hdfs balancer -threshold 10</code>, with a bandwidth limit so production jobs are not hurt, preferably at night.</li>
+          <li>Check that the new nodes are in the topology script (correct racks) and that their NodeManagers are registered, so YARN can use their CPU.</li>
+          <li>Also check that the slowness was really storage-related; if jobs were CPU- or network-bound, more disks alone wouldn't help.</li>
+        </ol>
+        <p class="scn__avoid"><b>Avoid:</b> “Wait a few days, it will balance itself.” Only new writes go to new nodes.</p>
+      </div></details>
+    </article>
+
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Infrastructure · hardware choice</span><span class="scn__tag scn__tag--level">3+ years</span></div>
+      <h4>24 × 22 TB disks per node: good idea?</h4>
+      <p class="scn__situation">To save rack space, a vendor proposes very dense nodes: 24 disks of 22 TB each (528 TB per node). The cluster would have only 8 nodes instead of 30 smaller ones.</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> can you reason about failure blast radius, recovery time and parallelism?</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li><b>Failure impact:</b> one node is 12.5% of the cluster. Its loss forces re-copying up to ~528 TB, which can take a day or more and loads the network.</li>
+          <li><b>Rack awareness:</b> with 8 nodes, spreading replicas over racks evenly is harder.</li>
+          <li><b>Compute:</b> fewer nodes means fewer cores and NICs for parallel tasks, unless the CPU is scaled up too.</li>
+          <li><b>When it's fine:</b> mostly cold, archival data with light processing, possibly with erasure coding.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> judging only by cost per TB.</p>
+      </div></details>
+    </article>
+
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Startup · cloud cost</span><span class="scn__tag scn__tag--level">1–3 years</span></div>
+      <h4>The cloud bill doubled, but data only grew 10%</h4>
+      <p class="scn__situation">A startup runs a 50-node cloud Hadoop cluster 24 hours a day. Jobs run only from midnight to 4 am. The bill has doubled since last year.</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> do you know how cloud clusters are sized differently from on-premises ones?</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>Keep data in object storage (S3, GCS, ADLS) instead of HDFS on the cluster's disks, so the cluster holds no data of its own.</li>
+          <li>Create the cluster for the nightly jobs and delete it after, or autoscale it down to a few nodes during the day: about 4 hours a day instead of 24 can cut the compute bill roughly in proportion.</li>
+          <li>Use cheaper spot/preemptible nodes for task-only nodes that can be lost safely.</li>
+          <li>Check which jobs grew; maybe one job is rescanning all history every night.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> treating a cloud cluster like on-prem hardware that must run all the time.</p>
+      </div></details>
+    </article>
+  </div>
+</section>
+
+<nav class="lesson-nav" id="lesson-nav" aria-label="Lesson navigation"></nav>
+<div class="ad-slot" data-slot="bottom"></div>
+</article>
+
+<aside class="lesson-side">
+  <nav class="toc" aria-label="In this lesson">
+    <h4>In this lesson</h4>
+    <ol>
+      <li><a href="#story">The story</a></li>
+      <li><a href="#definition">Definition</a></li><li><a href="#levels">Beginner → Advanced</a></li>
+      <li><a href="#types">Types and ways to use it</a></li>
+      <li><a href="#steps">Step by step</a></li>
+      <li><a href="#animation">See it happen</a></li>
+      <li><a href="#real-world">Real-world use</a></li>
+      <li><a href="#run">Run the code</a></li>
+      <li><a href="#tracer">Line by line</a></li>
+      <li><a href="#worked">Worked examples</a></li>
+      <li><a href="#quiz">Quiz and revision</a></li>
+      <li><a href="#practice">Practice problems</a></li>
+      <li><a href="#scenarios">Industry scenarios</a></li>
+    </ol>
+  </nav>
+  <div class="ad-slot" data-slot="side"></div>
+  <div class="outline" id="outline"></div>
+</aside>
+</div>
+</main>
+
+<footer class="site-footer">
+  <div class="wrap">
+    <div><h4>MyPhatshala</h4><p>Free programming and IT lessons that show what happens behind the screen.</p></div>
+    <div><h4>Learn</h4><a href="../../../../#tracks">All courses</a><a href="../../">Apache Hadoop syllabus</a></div>
+    <div><h4>Site</h4><a href="../../../../about.html">About</a><a href="../../../../contact.html">Contact</a><a href="../../../../privacy.html">Privacy policy</a><a href="../../../../disclaimer.html">Disclaimer</a></div>
+    <div class="copyright">© MyPhatshala. All lesson content, diagrams and animations are original. Please do not copy without permission.</div>
+  </div>
+</footer>
+
+<script src="../../../../data/courses/hadoop.js"></script>
+<script src="../../../../assets/js/lesson.js"></script>
+<script src="../../../../assets/js/cluster-sim.js"></script>
+<script src="../../../../assets/js/ads.js"></script>
+<script src="../../../../assets/js/site.js"></script>
+</body>
+</html>

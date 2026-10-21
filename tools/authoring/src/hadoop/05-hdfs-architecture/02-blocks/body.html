@@ -1,0 +1,282 @@
+<!-- ======================= PART 1: THE STORY ======================= -->
+<section class="part" id="story">
+  <span class="part-label"><b>1</b> The story</span>
+  <h2>A cut through the middle of an order</h2>
+  <div class="story">
+    <p class="narration">Kabir stored the canteen file with 1 MB blocks and opened the end of the first block on a DataNode. The last line reads <code>71484,poha,2</code>. The first line of the next block is just <code>5</code>. Order 71484 cost 25 rupees, and HDFS has sliced it in half. “Our MapReduce job will read a poha for 2 rupees!” he says. But the job's answer was correct. Why?</p>
+
+    <div class="scene">
+      <svg viewBox="0 0 640 180" role="img" aria-label="A file is cut into blocks at exact byte positions, even in the middle of a line. Input splits follow the blocks, but the reader of each split finishes the last line from the next block.">
+        <g font-size="10">
+          <text x="20" y="28" font-weight="700" class="s-ink">Blocks: cut by bytes</text>
+          <rect x="20" y="38" width="290" height="36" rx="6" class="s-soft-blue" style="stroke:var(--blue)"/><text x="165" y="60" text-anchor="middle" class="mono s-blue" font-size="9">block 0 … 71483,dosa,45⏎71484,poha,2</text>
+          <rect x="314" y="38" width="290" height="36" rx="6" class="s-soft-blue" style="stroke:var(--blue)"/><text x="459" y="60" text-anchor="middle" class="mono s-blue" font-size="9">5⏎71485,idli,30⏎71486,idli,30 … block 1</text>
+          <path d="M312 30v52" style="stroke:var(--red);stroke-width:2;stroke-dasharray:4 3"/><text x="312" y="96" text-anchor="middle" font-size="8.6" class="s-red">byte 1,048,576</text>
+          <text x="20" y="124" font-weight="700" class="s-ink">Splits: whole records</text>
+          <rect x="20" y="134" width="304" height="30" rx="6" class="s-soft-acc" style="stroke:var(--track)"/><text x="172" y="153" text-anchor="middle" class="mono s-acc" font-size="9">map 0 reads … 71484,poha,25 ✓</text>
+          <rect x="330" y="134" width="274" height="30" rx="6" class="s-soft-acc" style="stroke:var(--track)"/><text x="467" y="153" text-anchor="middle" class="mono s-acc" font-size="9">map 1 skips “5”, starts at 71485</text>
+        </g>
+        <text x="632" y="176" text-anchor="end" class="s-wm">myphatshala.in</text>
+      </svg>
+    </div>
+
+A> Two different ideas are hiding in your question. A <b>block</b> is how HDFS <i>stores</i> a file: fixed-size pieces of bytes, cut wherever the byte count says, even in the middle of a word. HDFS doesn't know or care what a “line” is.
+R> And the job?
+A> The job works with <b>input splits</b>: one split per map task, usually one per block. But a split is <i>logical</i>. Its reader finishes the last record even if that means reading a few bytes from the next block, and the next reader skips the broken first line. Every order is read exactly once, whole.
+K> So the 2-rupee poha never exists.
+A> Never. Today we'll prove it on the real cluster: count the records each map task read, and check that they add up to the whole file.
+  </div>
+</section>
+
+<!-- ======================= PART 2: DEFINITION ======================= -->
+<section class="part" id="definition">
+  <span class="part-label"><b>2</b> Definition</span>
+  <h2>HDFS blocks (and input splits)</h2>
+  <div class="def">
+    <div class="def__formal"><small>Formal definition (write this in exams)</small>
+      <p>An <b>HDFS block</b> is the unit in which a file is stored and replicated: a file is divided into blocks of a fixed size (<code>dfs.blocksize</code>, default <b>128 MB</b> in Hadoop 2 and 3), chosen per file by the writing client; every block except the last is full, and the last block occupies only as much space as its data. Each block is replicated independently and placed on DataNodes by the NameNode. An <b>input split</b> is a <b>logical</b> division of the input for MapReduce: one split is processed by one map task. <code>FileInputFormat</code> creates splits that by default match block boundaries, and the <b>RecordReader</b> (e.g. <code>LineRecordReader</code>) ensures records crossing a boundary are read whole by exactly one split.</p></div>
+    <div class="def__simple"><small>In simple words</small>
+      <p>Blocks are how HDFS chops a file for storage: by size, not by meaning. Splits are how a job divides the work: about one per block, but always in whole records.</p></div>
+  </div>
+
+  <h3>Words you'll meet in this lesson</h3>
+  <div class="terms">
+    <div class="term"><b>dfs.blocksize</b><span>Block size for new files, set by the writer. Default 134,217,728 bytes (128 MB).</span></div>
+    <div class="term"><b>Last block</b><span>Usually smaller; uses only the disk space of its data (no padding).</span></div>
+    <div class="term"><b>Input split</b><span>The piece of input one map task processes: path, start offset, length, preferred hosts.</span></div>
+    <div class="term"><b>RecordReader</b><span>Turns a split's bytes into records; finishes boundary records, skips partial first lines.</span></div>
+    <div class="term"><b>Block ID</b><span>Unique number, e.g. <code>blk_1073741826</code>, plus a generation stamp <code>_1002</code>.</span></div>
+    <div class="term"><b>Seek vs transfer</b><span>Large blocks keep disk seek time small compared with reading time.</span></div>
+  </div>
+
+  <h3>Block facts (Hadoop 3.5.0 defaults)</h3>
+  <table class="facts" style="table-layout:fixed;overflow-wrap:anywhere">
+    <tr><th>Default block size</th><td>134,217,728 bytes = 128 MB (<code>dfs.blocksize</code>; Hadoop 1 used 64 MB)</td></tr>
+    <tr><th>Minimum block size</th><td>1,048,576 bytes = 1 MB (<code>dfs.namenode.fs-limits.min-block-size</code>)</td></tr>
+    <tr><th>Who chooses</th><td>The client writing the file; can differ per file (<code>-D dfs.blocksize=…</code>)</td></tr>
+    <tr><th>Last block</th><td>Stores only real data: our 4,692,009-byte file uses one 4,692,009-byte block file, not 128 MB</td></tr>
+    <tr><th>Splits by default</th><td>One per block (<code>mapreduce.input.fileinputformat.split.minsize</code>/<code>maxsize</code> can change this)</td></tr>
+  </table>
+
+LEVELS> Blocks and splits at three levels
+L1> A long train and its coaches
+      <ul>
+        <li>A file is a long train. HDFS cuts it into coaches of equal length (blocks), even if a passenger's seat gets split by the cut.</li>
+        <li>Each coach is parked in three different stations (replicas).</li>
+        <li>Ticket checkers (map tasks) each take a coach. A checker who finds a passenger half in the next coach walks over and checks the whole passenger; the next checker ignores that half.</li>
+      </ul>
+L2> Why big blocks?
+      <ul>
+        <li>A disk spends a few milliseconds seeking before it can read. With large blocks, reading takes much longer than seeking, so disks work at full speed.</li>
+        <li>Fewer blocks mean less NameNode memory and fewer map tasks to schedule.</li>
+        <li>Too big and you get too few map tasks (little parallelism) for medium files.</li>
+        <li>So 128 MB is a balance; 256 MB is common for very large tables, smaller sizes are rarely useful.</li>
+      </ul>
+L3> Splits in detail
+      <ul>
+        <li>Split size = max(minSize, min(maxSize, blockSize)); with defaults it equals the block size.</li>
+        <li>A small last piece (up to 10% larger than a split) is merged into the previous split (<code>SPLIT_SLOP</code> = 1.1).</li>
+        <li>Non-splittable inputs (e.g. a gzip file) become one split however many blocks they have (Lesson 10.3).</li>
+        <li>Each split carries the hosts of its block, so YARN can run the map task where the data is (locality).</li>
+        <li>Reading the end of a boundary record can be a small remote read from another DataNode.</li>
+      </ul>
+/LEVELS
+EXAM> “Differentiate HDFS block and input split”: block = <b>physical</b> division for storage, fixed size (128 MB), may cut a record, replicated; split = <b>logical</b> division for processing, one per map task, respects record boundaries, usually equals one block. Draw a record crossing a block boundary and show which split reads it.
+</section>
+
+<!-- ======================= PART 3: TYPES AND WAYS TO USE IT ======================= -->
+<section class="part" id="types">
+  <span class="part-label"><b>3</b> Types and ways to use it</span>
+  <h2>Block vs split, and choosing a block size</h2>
+  <div class="table-wrap">
+  <table class="compare" style="min-width:600px">
+    <thead><tr><th></th><th>Block</th><th>Input split</th></tr></thead>
+    <tbody>
+      <tr><td><b>Kind</b></td><td>Physical: bytes on disks</td><td>Logical: a range of the input</td></tr>
+      <tr><td><b>Belongs to</b></td><td>HDFS</td><td>MapReduce / Spark / Hive input formats</td></tr>
+      <tr><td><b>Size set by</b></td><td><code>dfs.blocksize</code> when writing</td><td>Block size and split min/max settings when reading</td></tr>
+      <tr><td><b>Respects records?</b></td><td>No, cuts at a byte count</td><td>Yes, via the RecordReader</td></tr>
+      <tr><td><b>Count for our file</b></td><td>5 blocks (1 MB) or 1 block (128 MB)</td><td>5 splits or 1 split (real job output)</td></tr>
+      <tr><td><b>Replicated?</b></td><td>Yes, 3 copies</td><td>No; it just points to data</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <h3>Common block sizes</h3>
+  <div class="cards">
+    <div class="card"><h4>64 MB</h4><p>Hadoop 1 default. Still seen on old clusters; more blocks, more NameNode memory.</p><span class="tag">Legacy</span></div>
+    <div class="card"><h4>128 MB</h4><p>Hadoop 2/3 default. Good for most data.</p><span class="tag">Default</span></div>
+    <div class="card"><h4>256 MB</h4><p>Very large tables scanned in full; fewer, longer map tasks.</p><span class="tag">Big tables</span></div>
+    <div class="card"><h4>1 MB</h4><p>The minimum allowed. Only for demos like this lesson: terrible for real data.</p><span class="tag">Demo only</span></div>
+  </div>
+TIP> Block size is per file and set when the file is written. To change it for existing data, rewrite the data (for example with <code>distcp</code> or by re-running the job that produced it with a different <code>dfs.blocksize</code>).
+</section>
+
+<!-- ======================= PART 4: STEP BY STEP ======================= -->
+<section class="part" id="steps">
+  <span class="part-label"><b>4</b> Step by step</span>
+  <h2>See blocks and splits on the real cluster</h2>
+  <p>Uses the Module 5 lab cluster and the two copies of <code>canteen_orders.csv</code> from Lesson 5.1.</p>
+  <ol class="stepper">
+    <li><h4>Compare block sizes of the two copies</h4>
+      <div class="code" data-lang="bash" data-file="Terminal"><pre><code>docker compose exec namenode hdfs dfs -stat "%o %b %n" data/canteen_orders.csv data/canteen_1mb.csv
+docker compose exec namenode hdfs fsck /user/hadoop/data/canteen_1mb.csv -files -blocks | grep blk_</code></pre><div class="output">134217728 4692009 canteen_orders.csv
+1048576 4692009 canteen_1mb.csv
+0. BP-1507681208-…:blk_1073741826_1002 len=1048576 Live_repl=3
+1. BP-1507681208-…:blk_1073741827_1003 len=1048576 Live_repl=3
+2. BP-1507681208-…:blk_1073741828_1004 len=1048576 Live_repl=3
+3. BP-1507681208-…:blk_1073741829_1005 len=1048576 Live_repl=3
+4. BP-1507681208-…:blk_1073741830_1006 len=497705 Live_repl=3</div></div>
+      <span class="behind">4 full blocks of 1,048,576 bytes and a last block of 497,705 bytes: 4 × 1,048,576 + 497,705 = 4,692,009. The 128 MB copy has a single block.</span></li>
+    <li><h4>Check the real files on a DataNode</h4>
+      <div class="code" data-lang="bash" data-file="Terminal (on datanode-1)"><pre><code>find /tmp/hadoop-hadoop/dfs/data -name "blk_*" | grep -v meta | sort | xargs ls -l</code></pre><div class="output">-rw-r--r-- 1 hadoop users 4692009 … blk_1073741825
+-rw-r--r-- 1 hadoop users 1048576 … blk_1073741826
+-rw-r--r-- 1 hadoop users 1048576 … blk_1073741827
+-rw-r--r-- 1 hadoop users 1048576 … blk_1073741828
+-rw-r--r-- 1 hadoop users 1048576 … blk_1073741829
+-rw-r--r-- 1 hadoop users  497705 … blk_1073741830</div></div>
+      <span class="behind"><code>blk_1073741825</code> belongs to a file with 128 MB blocks, yet the file on disk is 4,692,009 bytes. A block is a maximum size, not a reservation.</span></li>
+    <li><h4>Find the record cut by the boundary</h4>
+      <div class="code" data-lang="bash" data-file="Terminal (on datanode-1, in the block folder)"><pre><code>tail -c 60 blk_1073741826
+head -c 60 blk_1073741827</code></pre><div class="output">ha,25
+71481,poha,25
+71482,poha,25
+71483,dosa,45
+71484,poha,2
+5
+71485,idli,30
+71486,idli,30
+71487,dosa,45
+71488,vada pav,2</div></div>
+      <span class="behind">The 1,048,576th byte falls between the “2” and the “5” of order 71484. HDFS stores bytes; it has no idea this is a CSV.</span></li>
+    <li><h4>Run a job and count splits</h4>
+      <div class="code" data-lang="bash" data-file="Terminal"><pre><code>docker compose exec namenode hadoop jar \
+  /opt/hadoop/share/hadoop/mapreduce/hadoop-mapreduce-examples-3.5.0.jar wordcount \
+  -D mapreduce.framework.name=local data/canteen_1mb.csv out/wc1</code></pre><div class="output">INFO  FileInputFormat:303 - Total input files to process : 1
+INFO  JobSubmitter:203 - number of splits:5
+		Map input records=70485
+		Map input records=67321
+		Map input records=65498
+		Map input records=65574
+		Map input records=31123
+INFO  Job:1765 - Job job_local479046282_0001 completed successfully
+		Map input records=300001</div></div>
+      <span class="behind">5 blocks → 5 splits → 5 map tasks (run locally inside the client here, reading from HDFS). Their records add up to 300,001: the header plus 3 lakh orders, each read exactly once.</span></li>
+    <li><h4>Same job on the 128 MB copy</h4>
+      <div class="code" data-lang="bash" data-file="Terminal"><pre><code>docker compose exec namenode hadoop jar \
+  /opt/hadoop/share/hadoop/mapreduce/hadoop-mapreduce-examples-3.5.0.jar wordcount \
+  -D mapreduce.framework.name=local data/canteen_orders.csv out/wc128</code></pre><div class="output">INFO  JobSubmitter:203 - number of splits:1
+		Map input records=300001</div></div>
+      <span class="behind">One block, one split, one map task reading all 300,001 lines. Same data, different parallelism, decided by how the file was written.</span></li>
+  </ol>
+WARN> Don't shrink the block size to “get more map tasks” for big data. Smaller blocks multiply NameNode objects and task overhead. Tune the split size of the job instead, or use a format and engine that parallelise well.
+</section>
+
+<!-- ======================= PART 5: SEE IT HAPPEN ======================= -->
+<section class="part" id="animation">
+  <span class="part-label"><b>5</b> See it happen</span>
+  <h2>How map 0 and map 1 share order 71484</h2>
+  <p>The real bytes around the first block boundary of <code>canteen_1mb.csv</code>, and what each map task's RecordReader does with them.</p>
+  <div class="anim" data-frames="6">
+    <div class="anim__title">Blocks cut bytes, splits keep records <span>6 steps</span></div>
+    <div class="anim__views">
+      <div class="view view--see">
+        <span class="view__tag">What you see</span>
+        <svg viewBox="0 0 360 250" role="img" aria-label="Bytes around the block boundary">
+          <rect x="14" y="14" width="332" height="206" rx="8" class="s-board"/>
+          <text x="26" y="32" font-size="9" class="mono" style="fill:#7F8C86">bytes near offset 1,048,576</text>
+          <g font-size="9" class="mono"><text x="26" y="58" style="fill:#9FD3B8">71482,poha,25⏎</text><text x="26" y="74" style="fill:#9FD3B8">71483,dosa,45⏎</text><text x="26" y="90" style="fill:#F5C77E">71484,poha,2</text><text x="26" y="118" style="fill:#F5C77E">5⏎</text><text x="26" y="134" style="fill:#9FD3B8">71485,idli,30⏎</text><text x="26" y="150" style="fill:#9FD3B8">71486,idli,30⏎</text></g>
+          <path d="M20 103h320" style="stroke:#FF8A80;stroke-width:1.6;stroke-dasharray:5 4"/><text x="336" y="99" text-anchor="end" font-size="8" class="mono" style="fill:#FF8A80">block 0 | block 1</text>
+          <g data-on="1"><text x="180" y="196" text-anchor="middle" font-size="10" class="s-chalk">HDFS cut at exactly 1 MB.</text></g>
+          <g data-on="2"><rect x="22" y="46" width="150" height="50" rx="4" style="fill:none;stroke:#9FD3B8;stroke-width:1.6"/><text x="180" y="196" text-anchor="middle" font-size="10" class="s-chalk">map 0 reads its block line by line…</text></g>
+          <g data-on="3"><rect x="22" y="80" width="150" height="44" rx="4" style="fill:none;stroke:#F5C77E;stroke-width:2"/><text x="180" y="196" text-anchor="middle" font-size="10" class="s-chalk">…and finishes 71484 from block 1.</text></g>
+          <g data-on="4"><path d="M20 118h60" style="stroke:#FF8A80;stroke-width:2"/><text x="180" y="196" text-anchor="middle" font-size="10" class="s-chalk">map 1 skips the partial “5⏎”.</text></g>
+          <g data-on="5"><rect x="22" y="124" width="150" height="32" rx="4" style="fill:none;stroke:#9FD3B8;stroke-width:1.6"/><text x="180" y="196" text-anchor="middle" font-size="10" class="s-chalk">map 1 starts at 71485.</text></g>
+          <g data-on="6"><text x="180" y="180" text-anchor="middle" font-size="9" class="mono" style="fill:#9FD3B8">70485+67321+65498+65574+31123</text><text x="180" y="198" text-anchor="middle" font-size="9" class="mono" style="fill:#9FD3B8">= 300001 records ✓</text></g>
+          <text x="352" y="244" text-anchor="end" class="s-wm">myphatshala.in</text>
+        </svg>
+        <ol class="caps" hidden>
+          <li>The real bytes: the block boundary falls inside order 71484, between “2” and “5”.</li>
+          <li>Map task 0 reads its split, record by record, from the start of the file.</li>
+          <li>At the end of its split it is in the middle of a record, so it keeps reading into block 1 until the line ends: it gets the whole “71484,poha,25”.</li>
+          <li>Map task 1 starts at byte 1,048,576. Because it is not the first split, it throws away everything up to the first newline.</li>
+          <li>Its first record is the complete order 71485.</li>
+          <li>The real job counters add up to every line of the file: no record lost, none read twice.</li>
+        </ol>
+      </div>
+
+      <div class="view view--behind">
+        <span class="view__tag">Behind the screen</span>
+        <svg viewBox="0 0 360 250" role="img" aria-label="Blocks on DataNodes and splits to map tasks">
+          <g font-size="8.6">
+            <rect x="16" y="20" width="60" height="30" rx="4" class="s-soft-blue" style="stroke:var(--blue)"/><text x="46" y="39" text-anchor="middle" class="s-blue">blk 0</text>
+            <rect x="82" y="20" width="60" height="30" rx="4" class="s-soft-blue" style="stroke:var(--blue)"/><text x="112" y="39" text-anchor="middle" class="s-blue">blk 1</text>
+            <rect x="148" y="20" width="60" height="30" rx="4" class="s-soft-blue" style="stroke:var(--blue)"/><text x="178" y="39" text-anchor="middle" class="s-blue">blk 2</text>
+            <rect x="214" y="20" width="60" height="30" rx="4" class="s-soft-blue" style="stroke:var(--blue)"/><text x="244" y="39" text-anchor="middle" class="s-blue">blk 3</text>
+            <rect x="280" y="20" width="30" height="30" rx="4" class="s-soft-blue" style="stroke:var(--blue)"/><text x="295" y="39" text-anchor="middle" class="s-blue">4</text>
+          </g>
+          <text x="180" y="230" text-anchor="middle" font-size="8.6" class="s-ink2">blocks: 4 × 1,048,576 + 497,705 bytes, on DataNodes</text>
+          <g data-on="2-">
+            <rect x="16" y="90" width="60" height="30" rx="4" class="s-soft-acc" style="stroke:var(--track)"/><text x="46" y="109" text-anchor="middle" font-size="8.6" class="s-acc">map 0</text>
+            <path d="M46 50v40" class="s-line"/>
+          </g>
+          <g data-on="3-"><path d="M76 105c10 0 14-40 16-55" style="fill:none;stroke:var(--track);stroke-width:2"/><text x="112" y="86" font-size="7.6" class="s-acc">reads a few bytes</text><text x="112" y="96" font-size="7.6" class="s-acc">of blk 1 (maybe remote)</text></g>
+          <g data-on="4-"><rect x="82" y="130" width="60" height="30" rx="4" class="s-soft-acc" style="stroke:var(--track)"/><text x="112" y="149" text-anchor="middle" font-size="8.6" class="s-acc">map 1</text><path d="M112 50v80" class="s-line"/></g>
+          <g data-on="6"><rect x="148" y="90" width="60" height="30" rx="4" class="s-soft-acc" style="stroke:var(--track)"/><text x="178" y="109" text-anchor="middle" font-size="8.6" class="s-acc">map 2</text><rect x="214" y="130" width="60" height="30" rx="4" class="s-soft-acc" style="stroke:var(--track)"/><text x="244" y="149" text-anchor="middle" font-size="8.6" class="s-acc">map 3</text><rect x="280" y="90" width="60" height="30" rx="4" class="s-soft-acc" style="stroke:var(--track)"/><text x="310" y="109" text-anchor="middle" font-size="8.6" class="s-acc">map 4</text></g>
+          <g data-on="1"><text x="180" y="190" text-anchor="middle" font-size="9" class="s-ink2">blocks: fixed size, any byte can be a boundary</text></g>
+          <g data-on="2-3"><text x="180" y="190" text-anchor="middle" font-size="9" class="s-ink2">one split per block, one map task per split</text></g>
+          <g data-on="4-5"><text x="180" y="190" text-anchor="middle" font-size="9" class="s-ink2">every split except the first skips a partial first line</text></g>
+          <g data-on="6"><text x="180" y="190" text-anchor="middle" font-size="9" font-weight="700" class="s-green">5 blocks → 5 splits → 5 map tasks</text><text x="180" y="206" text-anchor="middle" font-size="8.6" class="s-ink2">(a 128 MB block size gave 1 of each)</text></g>
+          <text x="352" y="246" text-anchor="end" class="s-wm">myphatshala.in</text>
+        </svg>
+        <ol class="caps" hidden>
+          <li>The file sits in HDFS as five blocks; each is replicated on three DataNodes.</li>
+          <li><code>FileInputFormat</code> creates one split per block, and YARN runs one map task per split.</li>
+          <li>Map 0 reads past its split's end into block 1 to finish the last record. Sometimes that block is on another machine: a small remote read.</li>
+          <li>Map 1 starts at its block, skipping the first partial line that map 0 already handled.</li>
+          <li>The rule is the same at every boundary.</li>
+          <li>Result: five map tasks for five blocks. The file written with 128 MB blocks gave one split and one map task.</li>
+        </ol>
+      </div>
+    </div>
+  </div>
+
+  <h3 id="playground">Try it yourself: block size in the playground</h3>
+  <p>Change <b>Block</b> before each upload and compare how many blocks the same file becomes.</p>
+  {{PLAYGROUND}}
+</section>
+
+<!-- ======================= PART 6: REAL-WORLD USE ======================= -->
+<section class="part" id="real-world">
+  <span class="part-label"><b>6</b> Real-world use</span>
+  <h2>Blocks and splits at work</h2>
+
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="20" y="20" width="80" height="50" rx="6" class="s-soft-blue" style="stroke:var(--blue)"/><text x="60" y="42" text-anchor="middle" font-size="8.6" font-weight="700" class="s-blue">256 MB</text><text x="60" y="58" text-anchor="middle" font-size="8.6" class="s-ink">big fact tables</text></svg></div>
+    <div><h4>1. Bigger blocks for huge tables</h4>
+      <p>Teams writing multi-terabyte fact tables often use 256 MB blocks (and matching Parquet row groups), halving block counts and NameNode load while keeping enough parallelism.</p>
+      <div class="uc-flow"><span>Huge table</span><i>→</i><span class="java">256 MB blocks</span><i>→</i><span>Fewer objects</span></div></div>
+  </div>
+
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="20" y="20" width="80" height="50" rx="6" class="s-soft-acc" style="stroke:var(--track)"/><text x="60" y="42" text-anchor="middle" font-size="8.6" font-weight="700" class="s-acc">split.maxsize</text><text x="60" y="58" text-anchor="middle" font-size="8.6" class="s-ink">more mappers</text></svg></div>
+    <div><h4>2. Tuning splits, not blocks</h4>
+      <p>When a CPU-heavy job needs more parallel tasks, engineers lower the job's maximum split size instead of rewriting data with smaller blocks.</p>
+      <div class="uc-flow"><span>Slow job</span><i>→</i><span class="java">Smaller splits</span><i>→</i><span>More map tasks</span></div></div>
+  </div>
+
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="20" y="20" width="80" height="50" rx="6" class="s-card2"/><text x="60" y="42" text-anchor="middle" font-size="8.6" font-weight="700" class="s-ink">.gz = 1 split</text><text x="60" y="58" text-anchor="middle" font-size="8.6" class="s-ink2">bottleneck</text></svg></div>
+    <div><h4>3. Unsplittable files</h4>
+      <p>A 10 GB gzip log is 80 blocks but one split, so one map task reads it all. Ingestion teams store logs in splittable formats (bzip2, or Parquet/ORC with Snappy) to avoid this.</p>
+      <div class="uc-flow"><span>One .gz</span><i>→</i><span class="java">One mapper</span><i>→</i><span>Use splittable formats</span></div></div>
+  </div>
+
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="20" y="20" width="80" height="50" rx="6" class="s-soft-green" style="stroke:var(--green)"/><text x="60" y="42" text-anchor="middle" font-size="8.6" font-weight="700" class="s-green">Spark</text><text x="60" y="58" text-anchor="middle" font-size="8.6" class="s-ink">partitions ≈ splits</text></svg></div>
+    <div><h4>4. Same idea in Spark</h4>
+      <p>When Spark reads files from HDFS, its initial partitions come from the same Hadoop input splits, so block size also affects how many tasks a Spark stage starts with.</p>
+      <div class="uc-flow"><span>HDFS blocks</span><i>→</i><span class="java">Splits</span><i>→</i><span>Spark partitions</span></div></div>
+  </div>
+  <p class="muted">Simplified; organisations differ in tools and policies.</p>
+</section>

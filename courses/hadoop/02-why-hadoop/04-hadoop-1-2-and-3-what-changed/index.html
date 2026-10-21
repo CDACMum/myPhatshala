@@ -1,0 +1,3284 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hadoop 1, 2 and 3: what changed | MyPhatshala</title>
+<meta name="description" content="Hadoop 1 vs 2 vs 3: JobTracker and TaskTracker slots vs YARN ResourceManager, NodeManagers, ApplicationMasters and containers; NameNode HA and federation in Hadoop 2; erasure coding, multiple standby NameNodes, new ports (9870), Java 8+ and GPUs in Hadoop 3; releases up to 3.5.0. With animations, a playground, Python calculators, quiz and interview scenarios.">
+<meta name="mp:minutes" content="25">
+<link rel="canonical" href="https://myphatshala.in/courses/hadoop/02-why-hadoop/04-hadoop-1-2-and-3-what-changed/">
+<meta property="og:title" content="Hadoop 1, 2 and 3: what changed · MyPhatshala">
+<meta property="og:description" content="JobTracker to YARN, one NameNode to many, 3× replication to erasure coding: what each Hadoop generation fixed.">
+<link rel="icon" href="../../../../assets/img/logo.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Fraunces:ital,opsz,wght@0,9..144,600;0,9..144,700;1,9..144,600&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../../../../assets/css/style.css">
+<link rel="stylesheet" href="../../../../assets/css/lesson.css">
+<link rel="stylesheet" href="../../../../assets/css/cluster-sim.css">
+<script src="../../../../assets/js/config.js"></script>
+<script>try { const t = localStorage.getItem("mp-theme"); if (t) document.documentElement.dataset.theme = t; } catch (e) {}</script>
+<script type="application/ld+json">{"@context": "https://schema.org", "@type": "LearningResource", "name": "Hadoop 1, 2 and 3: what changed", "learningResourceType": "Lesson", "educationalLevel": "Beginner → Advanced", "isAccessibleForFree": true, "inLanguage": "en", "isPartOf": {"@type": "Course", "name": "Apache Hadoop", "provider": {"@type": "Organization", "name": "MyPhatshala"}}}</script>
+</head>
+<body style="--track:#B45309" data-lesson="02-why-hadoop/04-hadoop-1-2-and-3-what-changed" data-course-root="../../">
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="site-header">
+  <div class="wrap">
+    <a class="brand" href="../../../../" aria-label="MyPhatshala home"><img src="../../../../assets/img/logo.svg" width="34" height="34" alt=""><span>My<b>Phatshala</b></span></a>
+    <nav class="nav" aria-label="Main">
+      <a href="../../../../#tracks">All courses</a>
+      <a href="../../">Apache Hadoop syllabus</a>
+      <button class="theme-btn" id="theme-btn" aria-label="Toggle dark mode"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg></button>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+<section class="lesson-hero">
+  <div class="wrap">
+    <nav class="crumbs" aria-label="Breadcrumb"><a href="../../../../">Home</a><span>›</span><a href="../../../../#track-big-data">Big Data Engineering</a><span>›</span><a href="../../">Apache Hadoop</a><span>›</span><b>Lesson 2.4</b></nav>
+    <h1>Hadoop 1, 2 and 3: what changed</h1>
+    <p class="lead">Hadoop kept its core ideas but changed its architecture twice. Hadoop 1 had one JobTracker doing everything and fixed slots that wasted resources. Hadoop 2 introduced YARN and a standby NameNode, so many engines could share a bigger, safer cluster. Hadoop 3 added erasure coding, extra standbys, GPU scheduling and newer Java. This lesson explains each change, why it was needed, and the details (like ports) that trip people up in real work.</p>
+    <div class="lesson-meta"><span>Module 2 · Why Hadoop was born</span><span>⏱ 25 min</span><span>Beginner → Advanced</span><span>1 vs 2 vs 3 table</span><span>Cluster Playground (HA)</span><span>Runs in your browser (Python)</span><span>8 practice problems</span></div>
+  </div>
+</section>
+
+<div class="wrap lesson-layout">
+<article class="lesson-main">
+<!-- ======================= PART 1: THE STORY ======================= -->
+<section class="part" id="story">
+  <span class="part-label"><b>1</b> The story</span>
+  <h2>Three generations in one office</h2>
+  <div class="story">
+    <p class="narration">At Kabir's internship, three engineers sit at the same table. Mr Iyer has run Hadoop since 2010 and still says “check the JobTracker”. Ms Fernandes moved the company to Hadoop 2 in 2014 and talks about “YARN queues”. The new hire, Ananya, set up Hadoop 3 last year and keeps mentioning “erasure coding”. Kabir wonders whether they are even using the same software.</p>
+
+    <div class="scene">
+      <svg viewBox="0 0 640 186" role="img" aria-label="Three columns: Hadoop 1 with a single JobTracker doing everything, Hadoop 2 with YARN and a standby NameNode, Hadoop 3 with erasure coding and several standby NameNodes.">
+        <g font-size="10">
+          <rect x="10" y="12" width="196" height="148" rx="10" class="s-card2"/><text x="108" y="32" text-anchor="middle" font-weight="700" class="s-ink">Hadoop 1 (2011)</text>
+          <rect x="36" y="44" width="144" height="26" rx="5" class="s-red"/><text x="108" y="61" text-anchor="middle" font-size="9" font-weight="700" style="fill:#fff">JobTracker: does everything</text>
+          <text x="108" y="90" text-anchor="middle" font-size="8.6" class="s-ink">fixed map + reduce slots</text>
+          <text x="108" y="106" text-anchor="middle" font-size="8.6" class="s-ink">only MapReduce</text>
+          <text x="108" y="122" text-anchor="middle" font-size="8.6" class="s-ink">one NameNode (SPOF)</text>
+          <text x="108" y="146" text-anchor="middle" font-size="8.6" font-weight="700" class="s-red">~4,000 nodes max</text>
+          <rect x="222" y="12" width="196" height="148" rx="10" class="s-soft-acc" style="stroke:var(--track)"/><text x="320" y="32" text-anchor="middle" font-weight="700" class="s-acc">Hadoop 2 (2013)</text>
+          <rect x="248" y="44" width="144" height="26" rx="5" style="fill:var(--track)"/><text x="320" y="61" text-anchor="middle" font-size="9" font-weight="700" style="fill:#fff">YARN: RM + AM per job</text>
+          <text x="320" y="90" text-anchor="middle" font-size="8.6" class="s-ink">flexible containers</text>
+          <text x="320" y="106" text-anchor="middle" font-size="8.6" class="s-ink">Spark, Tez, MapReduce…</text>
+          <text x="320" y="122" text-anchor="middle" font-size="8.6" class="s-ink">active + standby NameNode</text>
+          <text x="320" y="146" text-anchor="middle" font-size="8.6" font-weight="700" class="s-acc">federation, 128 MB blocks</text>
+          <rect x="434" y="12" width="196" height="148" rx="10" class="s-soft-green" style="stroke:var(--green)"/><text x="532" y="32" text-anchor="middle" font-weight="700" class="s-green">Hadoop 3 (2017 →)</text>
+          <rect x="460" y="44" width="144" height="26" rx="5" class="s-green"/><text x="532" y="61" text-anchor="middle" font-size="9" font-weight="700" style="fill:#fff">erasure coding: ~1.5×</text>
+          <text x="532" y="90" text-anchor="middle" font-size="8.6" class="s-ink">2+ standby NameNodes</text>
+          <text x="532" y="106" text-anchor="middle" font-size="8.6" class="s-ink">GPUs, Docker on YARN</text>
+          <text x="532" y="122" text-anchor="middle" font-size="8.6" class="s-ink">new ports (UI on 9870)</text>
+          <text x="532" y="146" text-anchor="middle" font-size="8.6" font-weight="700" class="s-green">3.5.0 in April 2026</text>
+        </g>
+        <text x="320" y="180" text-anchor="middle" font-size="10" class="s-ink2">Same idea, three architectures. Each version fixed the biggest pain of the one before.</text>
+        <text x="632" y="180" text-anchor="end" class="s-wm">myphatshala.in</text>
+      </svg>
+    </div>
+
+    <div class="panel"><div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#E1E9F7"/><path d="M12 64c2-12 10-18 20-18s18 6 20 18z" fill="#B45309"/><circle cx="32" cy="29" r="12" fill="#A9714A"/><path d="M19 27c0-9 6-14 13-14s13 5 13 14c-2-4-5-6-8-6-3 3-9 4-13 3-2 1-4 2-5 3z" fill="#1E1A17"/><circle cx="27.5" cy="30" r="1.5" fill="#1E1A17"/><circle cx="36.5" cy="30" r="1.5" fill="#1E1A17"/><path d="M27 35.5q5 3.5 10 0" stroke="#1E1A17" stroke-width="1.6" fill="none" stroke-linecap="round"/><rect x="41" y="40" width="10" height="7" rx="1.5" fill="#2E5AAC"/></svg></div><div class="bubble"><b class="who">Kabir</b><p>Sir, are they all talking about the same Hadoop?</p></div></div>
+    <div class="panel panel--right"><div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#DDEFE6"/><path d="M12 64c2-12 10-18 20-18s18 6 20 18z" fill="#F4F1EA"/><path d="M28 46l4 8 4-8" fill="#2F7D5B"/><circle cx="32" cy="28" r="12" fill="#B57A50"/><path d="M20 26c0-8 5-13 12-13s12 5 12 13c-2-3-6-5-12-5s-10 2-12 5z" fill="#5A5A5A"/><path d="M22 32c1 8 5 11 10 11s9-3 10-11c-2 3-6 4-10 4s-8-1-10-4z" fill="#5A5A5A"/><circle cx="27" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><circle cx="37" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><path d="M30.4 29h3.2" stroke="#1B2433" stroke-width="1.4"/><circle cx="27" cy="29" r="1.1" fill="#1B2433"/><circle cx="37" cy="29" r="1.1" fill="#1B2433"/></svg></div><div class="bubble"><b class="who">Arjun Sir</b><p>The same project, three generations. HDFS and the idea of MapReduce stayed. What changed is <b>how the cluster is managed</b>. In Hadoop 1, one process, the JobTracker, managed every job and every machine. It became the bottleneck.</p></div></div>
+    <div class="panel"><div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#FCE6D6"/><path d="M14 64c2-12 9-18 18-18s16 6 18 18z" fill="#2E5AAC"/><circle cx="32" cy="29" r="12" fill="#C68B5E"/><path d="M19 29c0-10 6-15 13-15s13 5 13 15c-3-5-7-8-13-8s-10 3-13 8z" fill="#2A1B14"/><path d="M43 27c3 6 3 14 0 20" stroke="#2A1B14" stroke-width="4" fill="none" stroke-linecap="round"/><circle cx="27.5" cy="30" r="1.5" fill="#2A1B14"/><circle cx="36.5" cy="30" r="1.5" fill="#2A1B14"/><path d="M28 35q4 3 8 0" stroke="#2A1B14" stroke-width="1.6" fill="none" stroke-linecap="round"/><circle cx="32" cy="24" r="1.2" fill="#D64545"/></svg></div><div class="bubble"><b class="who">Riya</b><p>So Hadoop 2 split that job into pieces?</p></div></div>
+    <div class="panel panel--right"><div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#DDEFE6"/><path d="M12 64c2-12 10-18 20-18s18 6 20 18z" fill="#F4F1EA"/><path d="M28 46l4 8 4-8" fill="#2F7D5B"/><circle cx="32" cy="28" r="12" fill="#B57A50"/><path d="M20 26c0-8 5-13 12-13s12 5 12 13c-2-3-6-5-12-5s-10 2-12 5z" fill="#5A5A5A"/><path d="M22 32c1 8 5 11 10 11s9-3 10-11c-2 3-6 4-10 4s-8-1-10-4z" fill="#5A5A5A"/><circle cx="27" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><circle cx="37" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><path d="M30.4 29h3.2" stroke="#1B2433" stroke-width="1.4"/><circle cx="27" cy="29" r="1.1" fill="#1B2433"/><circle cx="37" cy="29" r="1.1" fill="#1B2433"/></svg></div><div class="bubble"><b class="who">Arjun Sir</b><p>Yes: <b>YARN</b>. A ResourceManager only hands out resources; each job gets its own ApplicationMaster. Suddenly the cluster could run Spark and other engines too, and grow much bigger. Hadoop 2 also fixed the NameNode being a single point of failure.</p></div></div>
+    <div class="panel"><div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#E1E9F7"/><path d="M12 64c2-12 10-18 20-18s18 6 20 18z" fill="#B45309"/><circle cx="32" cy="29" r="12" fill="#A9714A"/><path d="M19 27c0-9 6-14 13-14s13 5 13 14c-2-4-5-6-8-6-3 3-9 4-13 3-2 1-4 2-5 3z" fill="#1E1A17"/><circle cx="27.5" cy="30" r="1.5" fill="#1E1A17"/><circle cx="36.5" cy="30" r="1.5" fill="#1E1A17"/><path d="M27 35.5q5 3.5 10 0" stroke="#1E1A17" stroke-width="1.6" fill="none" stroke-linecap="round"/><rect x="41" y="40" width="10" height="7" rx="1.5" fill="#2E5AAC"/></svg></div><div class="bubble"><b class="who">Kabir</b><p>And Hadoop 3?</p></div></div>
+    <div class="panel panel--right"><div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#DDEFE6"/><path d="M12 64c2-12 10-18 20-18s18 6 20 18z" fill="#F4F1EA"/><path d="M28 46l4 8 4-8" fill="#2F7D5B"/><circle cx="32" cy="28" r="12" fill="#B57A50"/><path d="M20 26c0-8 5-13 12-13s12 5 12 13c-2-3-6-5-12-5s-10 2-12 5z" fill="#5A5A5A"/><path d="M22 32c1 8 5 11 10 11s9-3 10-11c-2 3-6 4-10 4s-8-1-10-4z" fill="#5A5A5A"/><circle cx="27" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><circle cx="37" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><path d="M30.4 29h3.2" stroke="#1B2433" stroke-width="1.4"/><circle cx="27" cy="29" r="1.1" fill="#1B2433"/><circle cx="37" cy="29" r="1.1" fill="#1B2433"/></svg></div><div class="bubble"><b class="who">Arjun Sir</b><p>It's about efficiency and modern hardware: erasure coding to cut storage, more than one standby NameNode, GPU scheduling, newer Java. Interviewers love the question “what is the difference between Hadoop 1, 2 and 3?” By the end of today you'll answer it better than most working engineers.</p></div></div>
+  </div>
+</section>
+
+<!-- ======================= PART 2: DEFINITION ======================= -->
+<section class="part" id="definition">
+  <span class="part-label"><b>2</b> Definition</span>
+  <h2>Hadoop 1, 2 and 3</h2>
+  <div class="def">
+    <div class="def__formal"><small>Formal definition (write this in exams)</small>
+      <p><b>Hadoop 1</b> (1.x, first stable release December 2011) consists of HDFS with a single NameNode and <b>MapReduce v1</b>, in which one <b>JobTracker</b> performs both cluster resource management and job scheduling/monitoring, and <b>TaskTrackers</b> run tasks in fixed map and reduce <b>slots</b>. <b>Hadoop 2</b> (2.x, GA October 2013) introduces <b>YARN</b>, separating resource management (<b>ResourceManager</b>, <b>NodeManagers</b>) from per-application logic (<b>ApplicationMaster</b>), so MapReduce becomes one of many YARN applications; it also adds <b>HDFS High Availability</b> and <b>Federation</b>. <b>Hadoop 3</b> (3.x, GA December 2017) requires Java 8 or later and adds <b>HDFS erasure coding</b>, <b>more than two NameNodes</b> for HA, new default ports outside the Linux ephemeral range, YARN Timeline Service v2, opportunistic containers and support for resource types such as GPUs.</p></div>
+    <div class="def__simple"><small>In simple words</small>
+      <p>Hadoop 1: one boss (JobTracker) ran every job and every machine, and only MapReduce could run. Hadoop 2: YARN split the boss into a resource manager plus a small manager for each job, so any engine can share the cluster, and the NameNode got a backup. Hadoop 3: saves storage with erasure coding, allows more backups, uses modern hardware like GPUs, and needs a newer Java.</p></div>
+  </div>
+
+  <h3>Words you'll meet in this lesson</h3>
+  <div class="terms">
+    <div class="term"><b>JobTracker</b><span>Hadoop 1 master that scheduled every task of every job and tracked all TaskTrackers.</span></div>
+    <div class="term"><b>TaskTracker</b><span>Hadoop 1 worker daemon that ran tasks in its slots.</span></div>
+    <div class="term"><b>Slot</b><span>Hadoop 1's fixed place for one task: either a map slot or a reduce slot, never both.</span></div>
+    <div class="term"><b>MRv1 / MRv2</b><span>MapReduce on the JobTracker (Hadoop 1) / MapReduce as a YARN application (Hadoop 2+).</span></div>
+    <div class="term"><b>Container</b><span>YARN's flexible unit: an amount of memory and CPU on one node, usable by any kind of task.</span></div>
+    <div class="term"><b>HDFS Federation</b><span>Several independent NameNodes, each owning part of the namespace, sharing the same DataNodes.</span></div>
+    <div class="term"><b>JournalNodes (QJM)</b><span>A small group of nodes that store the NameNode edit log so the standby stays up to date.</span></div>
+    <div class="term"><b>Erasure coding</b><span>Storing data plus parity pieces (for example 6 + 3) instead of full copies: survives failures with about 1.5× storage.</span></div>
+  </div>
+
+  <h3>Release facts</h3>
+  <table class="facts">
+    <tr><th>Hadoop 1.0.0</th><td>27 December 2011</td></tr>
+    <tr><th>Hadoop 2.2.0 (first GA of 2.x)</th><td>15 October 2013: YARN, HDFS HA, Federation</td></tr>
+    <tr><th>Hadoop 3.0.0 GA</th><td>December 2017: erasure coding, Java 8 minimum, new ports, multiple standby NameNodes</td></tr>
+    <tr><th>Hadoop 3.1 and 3.2</th><td>2018–2019: GPU/FPGA scheduling on YARN and other improvements</td></tr>
+    <tr><th>Hadoop 3.3</th><td>2020: Java 11 runtime support, ARM support, many cloud-connector improvements</td></tr>
+    <tr><th>Hadoop 3.4.0 / 3.4.3</th><td>March 2024 / February 2026</td></tr>
+    <tr><th>Hadoop 3.5.0</th><td>2 April 2026: first stable release of the 3.5 line; server side requires JDK 17 (clients 17 or 21)</td></tr>
+  </table>
+  <p class="muted">Dates from the Apache Hadoop release pages. Check each release's notes for its supported Java versions before installing.</p>
+
+  <h3 id="levels">The versions at three levels</h3>
+  <div class="modlab levels"><div class="modlab__bar"><b>Pick your level. New to this? Start at Beginner and climb.</b><button type="button" data-mod="b">Beginner</button><button type="button" data-mod="i">Intermediate</button><button type="button" data-mod="a">Advanced</button></div>
+    <div class="modlab__panel" data-mod="b"><h4><span class="lvl lvl--b">Beginner</span> One principal, or a principal and many class teachers</h4>
+      <ul>
+        <li><b>Hadoop 1:</b> one principal personally plans every class, every period and every exam for the whole school. Fine for a small school; impossible for a huge one.</li>
+        <li><b>Hadoop 2:</b> the principal only assigns classrooms and time (resources). Each class has its own class teacher (ApplicationMaster) who plans that class. Any subject can be taught, not just one.</li>
+        <li><b>Hadoop 3:</b> the same school, run more efficiently: smaller storerooms (erasure coding), more vice-principals ready to take over (standby NameNodes), science labs with special equipment (GPUs).</li>
+      </ul>
+
+    </div>
+    <div class="modlab__panel" data-mod="i"><h4><span class="lvl lvl--i">Intermediate</span> What exactly changed between 1 and 2</h4>
+      <ul>
+        <li><b>JobTracker split in two:</b> the ResourceManager (cluster-wide resources) and one ApplicationMaster per job (task scheduling, retries, progress).</li>
+        <li><b>Slots → containers:</b> Hadoop 1 nodes had, say, 8 map and 4 reduce slots. If only map tasks were waiting, the reduce slots sat empty. YARN containers can run either kind of task.</li>
+        <li><b>Beyond MapReduce:</b> any framework that writes an ApplicationMaster can run: Spark, Tez (used by Hive), Flink, and others.</li>
+        <li><b>HDFS HA:</b> an active and a standby NameNode share the edit log through JournalNodes; ZooKeeper-based failover controllers switch automatically.</li>
+        <li><b>Federation:</b> several NameNodes can split the namespace (for example <code>/user</code> and <code>/data</code>) so metadata scales beyond one machine's RAM.</li>
+        <li>Default block size 128 MB.</li>
+      </ul>
+
+    </div>
+    <div class="modlab__panel" data-mod="a"><h4><span class="lvl lvl--a">Advanced</span> What Hadoop 3 added, and why it matters</h4>
+      <ul>
+        <li><b>Erasure coding:</b> with the RS-6-3 policy, 6 data cells get 3 parity cells: 1.5× storage and tolerance of 3 lost cells, versus 3× for replication. Costs CPU and network to rebuild, so it suits cold data.</li>
+        <li><b>More than two NameNodes:</b> with three NameNodes and five JournalNodes the cluster survives two NameNode failures.</li>
+        <li><b>Ports:</b> defaults moved out of the Linux ephemeral range (32768–61000) to avoid clashes; for example the NameNode web UI moved from 50070 to <b>9870</b>.</li>
+        <li><b>YARN:</b> Timeline Service v2, opportunistic containers, resource types (GPUs, FPGAs), Docker containers, and Router-based Federation for very large clusters.</li>
+        <li><b>Cloud storage:</b> much better S3A, Azure and other connectors, so Hadoop tools can read and write object storage directly.</li>
+        <li><b>Intra-DataNode disk balancer</b> (<code>hdfs diskbalancer</code>) evens out data across the disks inside one node.</li>
+      </ul>
+
+    </div>
+  </div>
+  <div class="callout callout--exam"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19V5a2 2 0 0 1 2-2h12v18H6a2 2 0 0 1-2-2zm0 0a2 2 0 0 1 2-2h12"/></svg><p><b>Exam tip:</b> The classic question “Differentiate Hadoop 1 and Hadoop 2” expects a table: <b>JobTracker + TaskTracker vs ResourceManager + NodeManager + ApplicationMaster</b>, <b>slots vs containers</b>, <b>MapReduce only vs many engines</b>, <b>NameNode SPOF vs HA</b>, <b>single namespace vs federation</b>, <b>~4,000 nodes vs much larger</b>, <b>64 vs 128 MB</b> default block. Add 2–3 Hadoop 3 lines (erasure coding, multiple standbys, Java 8+, port changes) to stand out.</p></div>
+</section>
+
+<!-- ======================= PART 3: TYPES AND WAYS TO USE IT ======================= -->
+<section class="part" id="types">
+  <span class="part-label"><b>3</b> Types and ways to use it</span>
+  <h2>Hadoop 1 vs 2 vs 3 at a glance</h2>
+  <div class="table-wrap">
+  <table class="compare" style="min-width:680px">
+    <thead><tr><th></th><th>Hadoop 1</th><th>Hadoop 2</th><th>Hadoop 3</th></tr></thead>
+    <tbody>
+      <tr><td><b>Resource management</b></td><td>JobTracker (also schedules tasks)</td><td>YARN: ResourceManager + NodeManagers</td><td>YARN, plus opportunistic containers, resource types, Docker</td></tr>
+      <tr><td><b>Per-job management</b></td><td>JobTracker</td><td>ApplicationMaster per job</td><td>ApplicationMaster per job</td></tr>
+      <tr><td><b>Unit of resources</b></td><td>Fixed map / reduce slots</td><td>Containers (memory + vcores)</td><td>Containers, also GPUs/FPGAs</td></tr>
+      <tr><td><b>Engines</b></td><td>MapReduce only</td><td>MapReduce, Spark, Tez, …</td><td>Same, better isolation</td></tr>
+      <tr><td><b>NameNode availability</b></td><td>Single NameNode (Secondary does checkpoints only)</td><td>Active + 1 standby (HA)</td><td>Active + 2 or more standbys</td></tr>
+      <tr><td><b>Namespace scale</b></td><td>One NameNode</td><td>Federation</td><td>Federation + Router-based Federation</td></tr>
+      <tr><td><b>Fault tolerance of data</b></td><td>Replication (3×)</td><td>Replication (3×)</td><td>Replication or erasure coding (~1.5×)</td></tr>
+      <tr><td><b>Default block size</b></td><td>64 MB</td><td>128 MB</td><td>128 MB</td></tr>
+      <tr><td><b>Typical scale limit</b></td><td>~4,000 nodes per cluster</td><td>Around 10,000 nodes per cluster</td><td>Tens of thousands with federation</td></tr>
+      <tr><td><b>Java</b></td><td>Java 6</td><td>Java 7 (later 2.x: 8)</td><td>Java 8 (3.3/3.4: also Java 11 runtime; 3.5: servers require JDK 17)</td></tr>
+      <tr><td><b>NameNode web UI port</b></td><td>50070</td><td>50070</td><td><b>9870</b></td></tr>
+    </tbody>
+  </table>
+  </div>
+  <p class="muted">Scale limits are the commonly quoted design figures; real clusters vary with hardware and workload.</p>
+
+  <h3>Port numbers that changed in Hadoop 3</h3>
+  <div class="table-wrap">
+  <table class="compare" style="min-width:480px">
+    <thead><tr><th>Service</th><th>Hadoop 2</th><th>Hadoop 3</th></tr></thead>
+    <tbody>
+      <tr><td>NameNode web UI (HTTP)</td><td>50070</td><td><b>9870</b></td></tr>
+      <tr><td>NameNode web UI (HTTPS)</td><td>50470</td><td><b>9871</b></td></tr>
+      <tr><td>Secondary NameNode web UI</td><td>50090</td><td><b>9868</b></td></tr>
+      <tr><td>DataNode data transfer</td><td>50010</td><td><b>9866</b></td></tr>
+      <tr><td>DataNode IPC</td><td>50020</td><td><b>9867</b></td></tr>
+      <tr><td>DataNode web UI</td><td>50075</td><td><b>9864</b></td></tr>
+      <tr><td>ResourceManager web UI</td><td>8088</td><td>8088 (unchanged)</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <div class="callout callout--tip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18h6M10 22h4M12 2a7 7 0 0 0-4 12.7V17h8v-2.3A7 7 0 0 0 12 2z"/></svg><p>Many old tutorials still say “open <code>http://localhost:50070</code>”. On Hadoop 3 that page doesn't exist: use <b>9870</b>. If a guide uses 50070, it is written for Hadoop 2, and other details may be outdated too.</p></div>
+</section>
+
+<!-- ======================= PART 4: STEP BY STEP ======================= -->
+<section class="part" id="steps">
+  <span class="part-label"><b>4</b> Step by step</span>
+  <h2>Why Hadoop 1's JobTracker hit a wall</h2>
+  <ol class="stepper">
+    <li><h4>One process, every decision</h4>
+      <p>In Hadoop 1, every TaskTracker heartbeats to the JobTracker, and the JobTracker decides every task placement for every running job.</p>
+      <span class="behind">It also keeps the progress, counters and history of all jobs in its own memory. The more nodes and jobs, the more work for this single process.</span></li>
+    <li><h4>Count the load</h4>
+      <div class="code" data-lang="python" data-file="jt_load.py"><pre><code>nodes, hb_interval_s = 4000, 3
+tasks_running = 40000
+print(nodes // hb_interval_s, "heartbeats per second, tracking", tasks_running, "tasks")</code></pre><div class="output">1333 heartbeats per second, tracking 40000 tasks</div></div>
+      <span class="behind">Around 4,000 nodes and 40,000 concurrent tasks is where Hadoop 1 clusters typically topped out. Beyond that the JobTracker became slow or unstable.</span></li>
+    <li><h4>Slots waste resources</h4>
+      <p>Each node had fixed map slots and reduce slots. During a map-heavy phase, reduce slots sat idle even though maps were waiting.</p>
+      <span class="behind">Utilisation suffered, and an admin had to guess the right map/reduce split for every node.</span></li>
+    <li><h4>Hadoop 2 splits the JobTracker</h4>
+      <p>The <b>ResourceManager</b> only tracks free resources and hands out containers. Each job's <b>ApplicationMaster</b> (running in an ordinary container on a worker) handles its own tasks.</p>
+      <span class="behind">The heavy, per-job work is now spread across the cluster. The ResourceManager stays small and fast, so clusters can grow much larger.</span></li>
+    <li><h4>Any engine can join</h4>
+      <p>Spark, Tez and others ship their own ApplicationMaster. YARN doesn't care what runs inside a container.</p>
+      <span class="behind">This is why “Spark on YARN” is so common: one cluster, one storage layer, many engines, shared fairly through queues.</span></li>
+  </ol>
+</section>
+
+<!-- ======================= PART 5: SEE IT HAPPEN ======================= -->
+<section class="part" id="animation">
+  <span class="part-label"><b>5</b> See it happen</span>
+  <h2>The same two jobs on Hadoop 1 and on Hadoop 2</h2>
+  <p>A map-heavy job and a Spark job arrive at a 3-node cluster. Left: Hadoop 1 with a JobTracker and slots. Right: Hadoop 2 with YARN and containers.</p>
+  <div class="anim" data-frames="6">
+    <div class="anim__title">JobTracker and slots vs YARN and containers <span>6 steps</span></div>
+    <div class="anim__views">
+      <div class="view view--see">
+        <span class="view__tag">Hadoop 1</span>
+        <svg viewBox="0 0 360 250" role="img" aria-label="Hadoop 1 cluster with a JobTracker and map and reduce slots">
+          <rect x="110" y="12" width="140" height="36" rx="6" class="s-board"/><text x="180" y="35" text-anchor="middle" font-size="10" font-weight="700" class="s-chalk">JobTracker</text>
+          <path d="M180 48v14M60 62h240M60 62v12M180 62v12M300 62v12" class="s-wire"/>
+          <g><rect x="16" y="74" width="88" height="110" rx="6" class="s-card2"/><rect x="136" y="74" width="88" height="110" rx="6" class="s-card2"/><rect x="256" y="74" width="88" height="110" rx="6" class="s-card2"/>
+            <text x="60" y="90" text-anchor="middle" font-size="8.6" font-weight="700" class="s-ink">TaskTracker 1</text><text x="180" y="90" text-anchor="middle" font-size="8.6" font-weight="700" class="s-ink">TaskTracker 2</text><text x="300" y="90" text-anchor="middle" font-size="8.6" font-weight="700" class="s-ink">TaskTracker 3</text>
+            <text x="24" y="106" font-size="7.6" class="s-ink2">map slots</text><text x="144" y="106" font-size="7.6" class="s-ink2">map slots</text><text x="264" y="106" font-size="7.6" class="s-ink2">map slots</text>
+            <rect x="24" y="110" width="34" height="16" rx="3" class="s-card"/><rect x="62" y="110" width="34" height="16" rx="3" class="s-card"/><rect x="144" y="110" width="34" height="16" rx="3" class="s-card"/><rect x="182" y="110" width="34" height="16" rx="3" class="s-card"/><rect x="264" y="110" width="34" height="16" rx="3" class="s-card"/><rect x="302" y="110" width="34" height="16" rx="3" class="s-card"/>
+            <text x="24" y="142" font-size="7.6" class="s-ink2">reduce slots</text><text x="144" y="142" font-size="7.6" class="s-ink2">reduce slots</text><text x="264" y="142" font-size="7.6" class="s-ink2">reduce slots</text>
+            <rect x="24" y="146" width="34" height="16" rx="3" class="s-card"/><rect x="62" y="146" width="34" height="16" rx="3" class="s-card"/><rect x="144" y="146" width="34" height="16" rx="3" class="s-card"/><rect x="182" y="146" width="34" height="16" rx="3" class="s-card"/><rect x="264" y="146" width="34" height="16" rx="3" class="s-card"/><rect x="302" y="146" width="34" height="16" rx="3" class="s-card"/></g>
+          <g data-on="2-"><rect x="24" y="110" width="34" height="16" rx="3" class="s-green"/><rect x="62" y="110" width="34" height="16" rx="3" class="s-green"/><rect x="144" y="110" width="34" height="16" rx="3" class="s-green"/><rect x="182" y="110" width="34" height="16" rx="3" class="s-green"/><rect x="264" y="110" width="34" height="16" rx="3" class="s-green"/><rect x="302" y="110" width="34" height="16" rx="3" class="s-green"/></g>
+          <g data-on="3"><text x="180" y="208" text-anchor="middle" font-size="9" font-weight="700" class="s-red">6 maps waiting · 6 reduce slots idle</text></g>
+          <g data-on="4"><text x="180" y="208" text-anchor="middle" font-size="9" font-weight="700" class="s-red">Spark job: “I can't run here.”</text></g>
+          <g data-on="5"><rect x="110" y="12" width="140" height="36" rx="6" style="fill:none;stroke:var(--red);stroke-width:3"/><text x="180" y="208" text-anchor="middle" font-size="9" font-weight="700" class="s-red">JobTracker overloaded at scale</text></g>
+          <g data-on="6"><text x="180" y="208" text-anchor="middle" font-size="9" font-weight="700" class="s-red">50% of slots used, MapReduce only</text></g>
+          <g data-on="1"><text x="180" y="208" text-anchor="middle" font-size="9" class="s-ink2">each node: 2 map slots + 2 reduce slots</text></g>
+          <g data-on="2"><text x="180" y="208" text-anchor="middle" font-size="9" class="s-ink2">12 map tasks arrive; 6 start</text></g>
+          <text x="352" y="244" text-anchor="end" class="s-wm">myphatshala.in</text>
+        </svg>
+        <ol class="caps" hidden>
+          <li>Hadoop 1: a single <b>JobTracker</b> and three TaskTrackers. Each node has 2 map slots and 2 reduce slots, fixed by configuration.</li>
+          <li>A job with 12 map tasks arrives. Only the 6 <b>map</b> slots can take them.</li>
+          <li>Six maps wait in the queue while six <b>reduce</b> slots sit empty: they may only run reduce tasks.</li>
+          <li>A Spark job arrives. Hadoop 1 runs only MapReduce, so it needs a separate cluster.</li>
+          <li>On a big cluster, the JobTracker tracks every task of every job and becomes the bottleneck and a single point of failure.</li>
+          <li>Result: half the slots used, one engine, one overloaded master.</li>
+        </ol>
+      </div>
+
+      <div class="view view--behind">
+        <span class="view__tag">Hadoop 2 (YARN)</span>
+        <svg viewBox="0 0 360 250" role="img" aria-label="Hadoop 2 cluster with ResourceManager and containers">
+          <rect x="110" y="12" width="140" height="36" rx="6" class="s-board"/><text x="180" y="35" text-anchor="middle" font-size="10" font-weight="700" class="s-chalk">ResourceManager</text>
+          <path d="M180 48v14M60 62h240M60 62v12M180 62v12M300 62v12" class="s-wire"/>
+          <g><rect x="16" y="74" width="88" height="110" rx="6" class="s-card2"/><rect x="136" y="74" width="88" height="110" rx="6" class="s-card2"/><rect x="256" y="74" width="88" height="110" rx="6" class="s-card2"/>
+            <text x="60" y="90" text-anchor="middle" font-size="8.6" font-weight="700" class="s-ink">NodeManager 1</text><text x="180" y="90" text-anchor="middle" font-size="8.6" font-weight="700" class="s-ink">NodeManager 2</text><text x="300" y="90" text-anchor="middle" font-size="8.6" font-weight="700" class="s-ink">NodeManager 3</text>
+            <text x="24" y="106" font-size="7.6" class="s-ink2">4 containers</text><text x="144" y="106" font-size="7.6" class="s-ink2">4 containers</text><text x="264" y="106" font-size="7.6" class="s-ink2">4 containers</text>
+            <rect x="24" y="110" width="34" height="16" rx="3" class="s-card"/><rect x="62" y="110" width="34" height="16" rx="3" class="s-card"/><rect x="144" y="110" width="34" height="16" rx="3" class="s-card"/><rect x="182" y="110" width="34" height="16" rx="3" class="s-card"/><rect x="264" y="110" width="34" height="16" rx="3" class="s-card"/><rect x="302" y="110" width="34" height="16" rx="3" class="s-card"/>
+            <rect x="24" y="146" width="34" height="16" rx="3" class="s-card"/><rect x="62" y="146" width="34" height="16" rx="3" class="s-card"/><rect x="144" y="146" width="34" height="16" rx="3" class="s-card"/><rect x="182" y="146" width="34" height="16" rx="3" class="s-card"/><rect x="264" y="146" width="34" height="16" rx="3" class="s-card"/><rect x="302" y="146" width="34" height="16" rx="3" class="s-card"/></g>
+          <g data-on="2-"><rect x="24" y="110" width="34" height="16" rx="3" style="fill:#8B5CF6"/><text x="41" y="122" text-anchor="middle" font-size="7.6" font-weight="700" style="fill:#fff">AM</text>
+            <rect x="62" y="110" width="34" height="16" rx="3" class="s-green"/><rect x="144" y="110" width="34" height="16" rx="3" class="s-green"/><rect x="182" y="110" width="34" height="16" rx="3" class="s-green"/><rect x="264" y="110" width="34" height="16" rx="3" class="s-green"/><rect x="302" y="110" width="34" height="16" rx="3" class="s-green"/></g>
+          <g data-on="3-"><rect x="24" y="146" width="34" height="16" rx="3" class="s-green"/><rect x="62" y="146" width="34" height="16" rx="3" class="s-green"/><rect x="144" y="146" width="34" height="16" rx="3" class="s-green"/><rect x="182" y="146" width="34" height="16" rx="3" class="s-green"/></g>
+          <g data-on="4-"><rect x="264" y="146" width="34" height="16" rx="3" style="fill:#E8772E"/><text x="281" y="158" text-anchor="middle" font-size="7.6" font-weight="700" style="fill:#fff">AM</text><rect x="302" y="146" width="34" height="16" rx="3" style="fill:#E8772E"/></g>
+          <g data-on="1"><text x="180" y="208" text-anchor="middle" font-size="9" class="s-ink2">each node: 4 general containers</text></g>
+          <g data-on="2"><text x="180" y="208" text-anchor="middle" font-size="9" class="s-ink2">MapReduce gets an ApplicationMaster (AM) + maps</text></g>
+          <g data-on="3"><text x="180" y="208" text-anchor="middle" font-size="9" font-weight="700" class="s-green">more maps start: no idle “reduce slots”</text></g>
+          <g data-on="4"><text x="180" y="208" text-anchor="middle" font-size="9" font-weight="700" class="s-acc">Spark job runs too (orange), with its own AM</text></g>
+          <g data-on="5"><text x="180" y="208" text-anchor="middle" font-size="9" font-weight="700" class="s-green">RM only hands out containers: stays light</text></g>
+          <g data-on="6"><text x="180" y="208" text-anchor="middle" font-size="9" font-weight="700" class="s-green">100% used, two engines, one cluster</text></g>
+          <text x="352" y="244" text-anchor="end" class="s-wm">myphatshala.in</text>
+        </svg>
+        <ol class="caps" hidden>
+          <li>Hadoop 2: a <b>ResourceManager</b> and three NodeManagers. Each node offers containers that can run any kind of task.</li>
+          <li>The MapReduce job gets an <b>ApplicationMaster</b> (violet), which asks for containers for its map tasks.</li>
+          <li>Four more maps start in containers that Hadoop 1 would have kept empty for reducers. Nothing is reserved for a task type that isn't running.</li>
+          <li>The Spark job gets its own ApplicationMaster and executors (orange) on the same cluster.</li>
+          <li>Per-job decisions are made by each ApplicationMaster, so the ResourceManager stays light and the cluster can grow.</li>
+          <li>Every container is in use, by two different engines, on one shared cluster.</li>
+        </ol>
+      </div>
+    </div>
+  </div>
+
+  <h3 id="playground">Try it yourself: Hadoop 2's two big fixes</h3>
+  <p>This cluster runs Hadoop 2+ features: jobs run through the ResourceManager, and the NameNode has a standby. Try the failure that would have stopped a Hadoop 1 cluster.</p>
+  <div class="csim"><script type="application/json">{"title": "The failures Hadoop 1 could not survive", "intro": "<p>This cluster has two NameNodes (Hadoop 2 HA) and runs jobs through the ResourceManager. In Hadoop 1, losing the only NameNode stopped the whole file system.<\/p>", "racks": 2, "nodes": 3, "features": ["job", "ha", "fail", "fsck"], "preload": [{"name": "sales_2026_q1.csv", "sizeMB": 1024}], "try": [{"text": "Run the job. The ResourceManager hands out containers for the 8 map tasks.", "on": "job-done"}, {"text": "Press <b>Stop active NameNode<\/b>. ZooKeeper notices and the standby becomes active.", "on": "nn-failover"}, {"text": "Run <b>hdfs fsck /<\/b> and the job again: the file system is still there.", "on": "fsck"}, {"text": "Now stop the new active NameNode too. With no standby left, HDFS is unavailable: why Hadoop 3 allows more than one standby.", "on": "nn-stop"}]}</script></div>
+</section>
+
+<!-- ======================= PART 6: REAL-WORLD USE ======================= -->
+<section class="part" id="real-world">
+  <span class="part-label"><b>6</b> Real-world use</span>
+  <h2>Version changes in real projects</h2>
+
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="16" y="26" width="36" height="40" rx="5" class="s-card2"/><path d="M56 46h10" class="s-line"/><path d="M62 42l6 4-6 4" class="s-line"/><rect x="70" y="26" width="36" height="40" rx="5" class="s-soft-green" style="stroke:var(--green)"/><text x="34" y="50" text-anchor="middle" font-size="9" font-weight="700" class="s-ink">2.x</text><text x="88" y="50" text-anchor="middle" font-size="9" font-weight="700" class="s-green">3.x</text></svg></div>
+    <div><h4>1. Upgrading from Hadoop 2 to 3</h4>
+      <p>Upgrade projects check Java versions, rewrite scripts for the new shell, update firewall rules and monitoring for the new ports, test jobs on staging, and use HDFS rolling upgrades so the cluster stays available.</p>
+      <div class="uc-flow"><span>Hadoop 2.x</span><i>→</i><span class="java">Test + rolling upgrade</span><i>→</i><span>Hadoop 3.x</span></div></div>
+  </div>
+
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="18" y="20" width="84" height="50" rx="6" class="s-soft-blue" style="stroke:var(--blue)"/><text x="60" y="42" text-anchor="middle" font-size="9" font-weight="700" class="s-blue">6 + 3</text><text x="60" y="58" text-anchor="middle" font-size="8.6" class="s-ink">EC policy</text></svg></div>
+    <div><h4>2. Cutting storage cost with erasure coding</h4>
+      <p>Companies with years of rarely read data apply an erasure-coding policy to archive directories, roughly halving the raw disk needed for them while keeping hot data replicated.</p>
+      <div class="uc-flow"><span>Cold directories</span><i>→</i><span class="java">hdfs ec -setPolicy</span><i>→</i><span>~1.5× instead of 3×</span></div></div>
+  </div>
+
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="14" y="26" width="28" height="38" rx="4" class="s-board"/><rect x="46" y="26" width="28" height="38" rx="4" class="s-board" style="opacity:.6"/><rect x="78" y="26" width="28" height="38" rx="4" class="s-board" style="opacity:.6"/></svg></div>
+    <div><h4>3. Three NameNodes for critical clusters</h4>
+      <p>Platforms that must keep HDFS available through maintenance and failures run one active and two standby NameNodes (Hadoop 3), so one can be patched while another still protects the cluster.</p>
+      <div class="uc-flow"><span>Active NN</span><i>→</i><span class="java">2 standbys + 5 JournalNodes</span><i>→</i><span>Survives 2 failures</span></div></div>
+  </div>
+
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="22" y="22" width="76" height="46" rx="6" class="s-card2"/><rect x="32" y="32" width="24" height="26" rx="3" style="fill:#8B5CF6"/><rect x="64" y="32" width="24" height="26" rx="3" class="s-green"/><text x="44" y="49" text-anchor="middle" font-size="8" font-weight="700" style="fill:#fff">GPU</text></svg></div>
+    <div><h4>4. GPUs on YARN for machine learning</h4>
+      <p>Hadoop 3.1 added GPU scheduling to YARN, so ML teams can train models on the same cluster that stores their data, requesting GPUs like memory and CPU.</p>
+      <div class="uc-flow"><span>Training job</span><i>→</i><span class="java">YARN container with GPU</span><i>→</i><span>Model</span></div></div>
+  </div>
+
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="18" y="20" width="84" height="50" rx="6" class="s-board"/><text x="60" y="42" text-anchor="middle" font-size="9" class="mono" style="fill:#FF8A80">:50070 ✕</text><text x="60" y="58" text-anchor="middle" font-size="9" class="mono" style="fill:#9FD3B8">:9870 ✓</text></svg></div>
+    <div><h4>5. Reading old tutorials safely</h4>
+      <p>Much online material was written for Hadoop 1 or 2. Knowing the version differences lets you spot outdated advice: JobTracker commands, port 50070, 64 MB blocks, or Java 7 instructions.</p>
+      <div class="uc-flow"><span>Old guide</span><i>→</i><span class="java">Check version clues</span><i>→</i><span>Adapt for 3.x</span></div></div>
+  </div>
+  <p class="muted">Examples are simplified descriptions of common practice.</p>
+</section>
+
+
+<div class="ad-slot" data-slot="mid"></div>
+
+<section class="part" id="run">
+  <span class="part-label"><b>7</b> Run the code</span>
+  <h2>Slots vs containers: measure the waste</h2>
+  <p>In Hadoop 1, each node has fixed map slots and reduce slots. This program fills them with a map-heavy workload and measures how much of the cluster is idle, then does the same with YARN-style containers that can run either kind of task.</p>
+  <div class="code" data-lang="python" data-file="main.py"><pre><code>nodes = 10
+map_slots, reduce_slots = 8, 4          # Hadoop 1: fixed per node
+containers = map_slots + reduce_slots    # Hadoop 2: same capacity, any task type
+
+maps_waiting, reduces_waiting = 200, 10
+
+h1_used = min(maps_waiting, nodes * map_slots) + min(reduces_waiting, nodes * reduce_slots)
+h2_used = min(maps_waiting + reduces_waiting, nodes * containers)
+
+total = nodes * containers
+print(f&quot;Hadoop 1: {h1_used} of {total} busy ({h1_used / total:.0%})&quot;)
+print(f&quot;Hadoop 2: {h2_used} of {total} busy ({h2_used / total:.0%})&quot;)</code></pre><div class="output">Hadoop 1: 90 of 120 busy (75%)
+Hadoop 2: 120 of 120 busy (100%)</div></div>
+  <ul class="anno"><li><code>map_slots, reduce_slots = 8, 4</code><span>In Hadoop 1, an admin fixed these numbers per node. A reduce slot could never run a map task.</span></li><li><code>h1_used = min(...) + min(...)</code><span>Map tasks can only use map slots and reduce tasks only reduce slots, so each is capped separately.</span></li><li><code>h2_used = min(maps_waiting + reduces_waiting, nodes * containers)</code><span>With containers, any waiting task can use any free capacity.</span></li></ul>
+  <div class="runner">
+    <script type="application/json">{
+ "lang": "python",
+ "file": "main.py",
+ "tasks": [
+  {
+   "label": "1 · Slot waste",
+   "hint": "Press <b>Run<\/b>. Then try a reduce-heavy moment: <code>maps_waiting, reduces_waiting = 5, 120<\/code>.",
+   "code": "nodes = 10\nmap_slots, reduce_slots = 8, 4          # Hadoop 1: fixed per node\ncontainers = map_slots + reduce_slots    # Hadoop 2: same capacity, any task type\n\nmaps_waiting, reduces_waiting = 200, 10\n\nh1_used = min(maps_waiting, nodes * map_slots) + min(reduces_waiting, nodes * reduce_slots)\nh2_used = min(maps_waiting + reduces_waiting, nodes * containers)\n\ntotal = nodes * containers\nprint(f\"Hadoop 1: {h1_used} of {total} busy ({h1_used / total:.0%})\")\nprint(f\"Hadoop 2: {h2_used} of {total} busy ({h2_used / total:.0%})\")\n"
+  },
+  {
+   "label": "2 · JobTracker load",
+   "hint": "<b>Predict first:<\/b> how many heartbeats per second does one JobTracker handle at 4,000 nodes? Then imagine 10,000 nodes.",
+   "code": "hb_interval_s = 3\nfor nodes in [500, 4000, 10000]:\n    print(f\"{nodes:>6} nodes -> {nodes / hb_interval_s:,.0f} heartbeats/s to ONE JobTracker\")\n"
+  },
+  {
+   "label": "3 · Replication vs erasure coding",
+   "hint": "Compare raw storage and how many lost pieces each scheme survives for 600 TB of data.",
+   "code": "data_tb = 600\nschemes = {\"replication x3\": (3.0, 2), \"EC RS-6-3\": (9 / 6, 3), \"EC RS-10-4\": (14 / 10, 4)}\nfor name, (overhead, survives) in schemes.items():\n    print(f\"{name:15}: {data_tb * overhead:6.0f} TB raw, survives {survives} lost pieces\")\n"
+  },
+  {
+   "label": "4 · Old port, new port",
+   "hint": "A Hadoop 2 guide says to open these ports. Translate them for Hadoop 3. Add 50475 → 9865 (DataNode HTTPS).",
+   "code": "h2_to_h3 = {50070: 9870, 50470: 9871, 50090: 9868, 50010: 9866, 50020: 9867, 50075: 9864}\nold_guide = [50070, 50075, 8088]\nfor p in old_guide:\n    print(p, \"->\", h2_to_h3.get(p, p), \"\" if p in h2_to_h3 else \"(unchanged)\")\n"
+  },
+  {
+   "label": "5 · Which version?",
+   "hint": "Classify features by the Hadoop generation that introduced them. Then add \"Docker containers on YARN\": 3.",
+   "code": "introduced = {\"JobTracker\": 1, \"YARN\": 2, \"NameNode HA\": 2, \"Federation\": 2,\n              \"Erasure coding\": 3, \"Multiple standby NameNodes\": 3, \"GPU scheduling\": 3}\nby_version = {}\nfor feature, v in introduced.items():\n    by_version.setdefault(v, []).append(feature)\nfor v in sorted(by_version):\n    print(f\"Hadoop {v}:\", \", \".join(by_version[v]))\n"
+  }
+ ]
+}</script>
+  </div>
+</section>
+
+<section class="part" id="tracer">
+  <span class="part-label"><b>8</b> Line by line</span>
+  <h2>Placing tasks in slots vs containers, one line at a time</h2>
+  <p>Watch the same five tasks being placed on one node, first with Hadoop 1 slots (2 map + 2 reduce) and then with 4 YARN containers. Notice which tasks are left waiting.</p>
+  <div class="tracer">
+    <script type="application/json">{
+ "lang": "python",
+ "code": [
+  "tasks = [\"map\", \"map\", \"map\", \"map\", \"reduce\"]",
+  "",
+  "slots = {\"map\": 2, \"reduce\": 2}",
+  "waiting_h1 = []",
+  "for t in tasks:",
+  "    if slots[t] > 0:",
+  "        slots[t] -= 1",
+  "    else:",
+  "        waiting_h1.append(t)",
+  "",
+  "free_containers = 4",
+  "waiting_h2 = tasks[free_containers:]",
+  "print(\"Hadoop 1 waiting:\", waiting_h1, \"| Hadoop 2 waiting:\", waiting_h2)"
+ ],
+ "steps": [
+  {
+   "line": 1,
+   "phase": "Python",
+   "note": "<code>tasks<\/code> is created: → list #1.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "tasks",
+       "→ list #1"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (5)<\/b> [&#x27;map&#x27;, &#x27;map&#x27;, &#x27;map&#x27;, &#x27;map&#x27;, &#x27;reduce&#x27;]"
+   ],
+   "newVar": "tasks"
+  },
+  {
+   "line": 3,
+   "phase": "Hadoop 1",
+   "note": "Fixed slots per task type. <code>slots<\/code> is created: → dict #2. A new dict object (#2) is created: {&#x27;map&#x27;: 2, &#x27;reduce&#x27;: 2}",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "tasks",
+       "→ list #1"
+      ],
+      [
+       "slots",
+       "→ dict #2"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (5)<\/b> [&#x27;map&#x27;, &#x27;map&#x27;, &#x27;map&#x27;, &#x27;map&#x27;, &#x27;reduce&#x27;]",
+    "<b>#2 dict (2)<\/b> {&#x27;map&#x27;: 2, &#x27;reduce&#x27;: 2}"
+   ],
+   "newVar": "slots"
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "<code>waiting_h1<\/code> is created: → list #3. A new list object (#3) is created: []",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "tasks",
+       "→ list #1"
+      ],
+      [
+       "slots",
+       "→ dict #2"
+      ],
+      [
+       "waiting_h1",
+       "→ list #3"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (5)<\/b> [&#x27;map&#x27;, &#x27;map&#x27;, &#x27;map&#x27;, &#x27;map&#x27;, &#x27;reduce&#x27;]",
+    "<b>#2 dict (2)<\/b> {&#x27;map&#x27;: 2, &#x27;reduce&#x27;: 2}",
+    "<b>#3 list (0)<\/b> []"
+   ],
+   "newVar": "waiting_h1"
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "<code>t<\/code> is created: &#x27;map&#x27;.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "tasks",
+       "→ list #1"
+      ],
+      [
+       "slots",
+       "→ dict #2"
+      ],
+      [
+       "waiting_h1",
+       "→ list #3"
+      ],
+      [
+       "t",
+       "'map'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (5)<\/b> [&#x27;map&#x27;, &#x27;map&#x27;, &#x27;map&#x27;, &#x27;map&#x27;, &#x27;reduce&#x27;]",
+    "<b>#2 dict (2)<\/b> {&#x27;map&#x27;: 2, &#x27;reduce&#x27;: 2}",
+    "<b>#3 list (0)<\/b> []"
+   ],
+   "newVar": "t"
+  },
+  {
+   "line": 6,
+   "phase": "Python",
+   "note": "The condition is <b>True<\/b>, so the indented block runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "tasks",
+       "→ list #1"
+      ],
+      [
+       "slots",
+       "→ dict #2"
+      ],
+      [
+       "waiting_h1",
+       "→ list #3"
+      ],
+      [
+       "t",
+       "'map'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (5)<\/b> [&#x27;map&#x27;, &#x27;map&#x27;, &#x27;map&#x27;, &#x27;map&#x27;, &#x27;reduce&#x27;]",
+    "<b>#2 dict (2)<\/b> {&#x27;map&#x27;: 2, &#x27;reduce&#x27;: 2}",
+    "<b>#3 list (0)<\/b> []"
+   ]
+  },
+  {
+   "line": 7,
+   "phase": "Python",
+   "note": "Object #2 dict now holds {&#x27;map&#x27;: 1, &#x27;reduce&#x27;: 2}",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "tasks",
+       "→ list #1"
+      ],
+      [
+       "slots",
+       "→ dict #2"
+      ],
+      [
+       "waiting_h1",
+       "→ list #3"
+      ],
+      [
+       "t",
+       "'map'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (5)<\/b> [&#x27;map&#x27;, &#x27;map&#x27;, &#x27;map&#x27;, &#x27;map&#x27;, &#x27;reduce&#x27;]",
+    "<b>#2 dict (2)<\/b> {&#x27;map&#x27;: 1, &#x27;reduce&#x27;: 2}",
+    "<b>#3 list (0)<\/b> []"
+   ]
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "The loop takes the next item (it has the same value as the previous one).",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "tasks",
+       "→ list #1"
+      ],
+      [
+       "slots",
+       "→ dict #2"
+      ],
+      [
+       "waiting_h1",
+       "→ list #3"
+      ],
+      [
+       "t",
+       "'map'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (5)<\/b> [&#x27;map&#x27;, &#x27;map&#x27;, &#x27;map&#x27;, &#x27;map&#x27;, &#x27;reduce&#x27;]",
+    "<b>#2 dict (2)<\/b> {&#x27;map&#x27;: 1, &#x27;reduce&#x27;: 2}",
+    "<b>#3 list (0)<\/b> []"
+   ]
+  },
+  {
+   "line": 6,
+   "phase": "Python",
+   "note": "The condition is <b>True<\/b>, so the indented block runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "tasks",
+       "→ list #1"
+      ],
+      [
+       "slots",
+       "→ dict #2"
+      ],
+      [
+       "waiting_h1",
+       "→ list #3"
+      ],
+      [
+       "t",
+       "'map'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (5)<\/b> [&#x27;map&#x27;, &#x27;map&#x27;, &#x27;map&#x27;, &#x27;map&#x27;, &#x27;reduce&#x27;]",
+    "<b>#2 dict (2)<\/b> {&#x27;map&#x27;: 1, &#x27;reduce&#x27;: 2}",
+    "<b>#3 list (0)<\/b> []"
+   ]
+  },
+  {
+   "line": 7,
+   "phase": "Python",
+   "note": "Object #2 dict now holds {&#x27;map&#x27;: 0, &#x27;reduce&#x27;: 2}",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "tasks",
+       "→ list #1"
+      ],
+      [
+       "slots",
+       "→ dict #2"
+      ],
+      [
+       "waiting_h1",
+       "→ list #3"
+      ],
+      [
+       "t",
+       "'map'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (5)<\/b> [&#x27;map&#x27;, &#x27;map&#x27;, &#x27;map&#x27;, &#x27;map&#x27;, &#x27;reduce&#x27;]",
+    "<b>#2 dict (2)<\/b> {&#x27;map&#x27;: 0, &#x27;reduce&#x27;: 2}",
+    "<b>#3 list (0)<\/b> []"
+   ]
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "The loop takes the next item (it has the same value as the previous one).",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "tasks",
+       "→ list #1"
+      ],
+      [
+       "slots",
+       "→ dict #2"
+      ],
+      [
+       "waiting_h1",
+       "→ list #3"
+      ],
+      [
+       "t",
+       "'map'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (5)<\/b> [&#x27;map&#x27;, &#x27;map&#x27;, &#x27;map&#x27;, &#x27;map&#x27;, &#x27;reduce&#x27;]",
+    "<b>#2 dict (2)<\/b> {&#x27;map&#x27;: 0, &#x27;reduce&#x27;: 2}",
+    "<b>#3 list (0)<\/b> []"
+   ]
+  },
+  {
+   "line": 6,
+   "phase": "Python",
+   "note": "The condition is <b>False<\/b>, so the indented block is skipped.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "tasks",
+       "→ list #1"
+      ],
+      [
+       "slots",
+       "→ dict #2"
+      ],
+      [
+       "waiting_h1",
+       "→ list #3"
+      ],
+      [
+       "t",
+       "'map'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (5)<\/b> [&#x27;map&#x27;, &#x27;map&#x27;, &#x27;map&#x27;, &#x27;map&#x27;, &#x27;reduce&#x27;]",
+    "<b>#2 dict (2)<\/b> {&#x27;map&#x27;: 0, &#x27;reduce&#x27;: 2}",
+    "<b>#3 list (0)<\/b> []"
+   ]
+  },
+  {
+   "line": 9,
+   "phase": "Python",
+   "note": "Object #3 list now holds [&#x27;map&#x27;]",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "tasks",
+       "→ list #1"
+      ],
+      [
+       "slots",
+       "→ dict #2"
+      ],
+      [
+       "waiting_h1",
+       "→ list #3"
+      ],
+      [
+       "t",
+       "'map'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (5)<\/b> [&#x27;map&#x27;, &#x27;map&#x27;, &#x27;map&#x27;, &#x27;map&#x27;, &#x27;reduce&#x27;]",
+    "<b>#2 dict (2)<\/b> {&#x27;map&#x27;: 0, &#x27;reduce&#x27;: 2}",
+    "<b>#3 list (1)<\/b> [&#x27;map&#x27;]"
+   ]
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "The loop takes the next item (it has the same value as the previous one).",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "tasks",
+       "→ list #1"
+      ],
+      [
+       "slots",
+       "→ dict #2"
+      ],
+      [
+       "waiting_h1",
+       "→ list #3"
+      ],
+      [
+       "t",
+       "'map'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (5)<\/b> [&#x27;map&#x27;, &#x27;map&#x27;, &#x27;map&#x27;, &#x27;map&#x27;, &#x27;reduce&#x27;]",
+    "<b>#2 dict (2)<\/b> {&#x27;map&#x27;: 0, &#x27;reduce&#x27;: 2}",
+    "<b>#3 list (1)<\/b> [&#x27;map&#x27;]"
+   ]
+  },
+  {
+   "line": 6,
+   "phase": "Python",
+   "note": "The condition is <b>False<\/b>, so the indented block is skipped.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "tasks",
+       "→ list #1"
+      ],
+      [
+       "slots",
+       "→ dict #2"
+      ],
+      [
+       "waiting_h1",
+       "→ list #3"
+      ],
+      [
+       "t",
+       "'map'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (5)<\/b> [&#x27;map&#x27;, &#x27;map&#x27;, &#x27;map&#x27;, &#x27;map&#x27;, &#x27;reduce&#x27;]",
+    "<b>#2 dict (2)<\/b> {&#x27;map&#x27;: 0, &#x27;reduce&#x27;: 2}",
+    "<b>#3 list (1)<\/b> [&#x27;map&#x27;]"
+   ]
+  },
+  {
+   "line": 9,
+   "phase": "Python",
+   "note": "Object #3 list now holds [&#x27;map&#x27;, &#x27;map&#x27;]",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "tasks",
+       "→ list #1"
+      ],
+      [
+       "slots",
+       "→ dict #2"
+      ],
+      [
+       "waiting_h1",
+       "→ list #3"
+      ],
+      [
+       "t",
+       "'map'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (5)<\/b> [&#x27;map&#x27;, &#x27;map&#x27;, &#x27;map&#x27;, &#x27;map&#x27;, &#x27;reduce&#x27;]",
+    "<b>#2 dict (2)<\/b> {&#x27;map&#x27;: 0, &#x27;reduce&#x27;: 2}",
+    "<b>#3 list (2)<\/b> [&#x27;map&#x27;, &#x27;map&#x27;]"
+   ]
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "<code>t<\/code> changes to &#x27;reduce&#x27;.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "tasks",
+       "→ list #1"
+      ],
+      [
+       "slots",
+       "→ dict #2"
+      ],
+      [
+       "waiting_h1",
+       "→ list #3"
+      ],
+      [
+       "t",
+       "'reduce'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (5)<\/b> [&#x27;map&#x27;, &#x27;map&#x27;, &#x27;map&#x27;, &#x27;map&#x27;, &#x27;reduce&#x27;]",
+    "<b>#2 dict (2)<\/b> {&#x27;map&#x27;: 0, &#x27;reduce&#x27;: 2}",
+    "<b>#3 list (2)<\/b> [&#x27;map&#x27;, &#x27;map&#x27;]"
+   ],
+   "newVar": "t"
+  },
+  {
+   "line": 6,
+   "phase": "Python",
+   "note": "The condition is <b>True<\/b>, so the indented block runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "tasks",
+       "→ list #1"
+      ],
+      [
+       "slots",
+       "→ dict #2"
+      ],
+      [
+       "waiting_h1",
+       "→ list #3"
+      ],
+      [
+       "t",
+       "'reduce'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (5)<\/b> [&#x27;map&#x27;, &#x27;map&#x27;, &#x27;map&#x27;, &#x27;map&#x27;, &#x27;reduce&#x27;]",
+    "<b>#2 dict (2)<\/b> {&#x27;map&#x27;: 0, &#x27;reduce&#x27;: 2}",
+    "<b>#3 list (2)<\/b> [&#x27;map&#x27;, &#x27;map&#x27;]"
+   ]
+  },
+  {
+   "line": 7,
+   "phase": "Python",
+   "note": "Object #2 dict now holds {&#x27;map&#x27;: 0, &#x27;reduce&#x27;: 1}",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "tasks",
+       "→ list #1"
+      ],
+      [
+       "slots",
+       "→ dict #2"
+      ],
+      [
+       "waiting_h1",
+       "→ list #3"
+      ],
+      [
+       "t",
+       "'reduce'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (5)<\/b> [&#x27;map&#x27;, &#x27;map&#x27;, &#x27;map&#x27;, &#x27;map&#x27;, &#x27;reduce&#x27;]",
+    "<b>#2 dict (2)<\/b> {&#x27;map&#x27;: 0, &#x27;reduce&#x27;: 1}",
+    "<b>#3 list (2)<\/b> [&#x27;map&#x27;, &#x27;map&#x27;]"
+   ]
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "Nothing is left to loop over, so the loop ends and Python moves on.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "tasks",
+       "→ list #1"
+      ],
+      [
+       "slots",
+       "→ dict #2"
+      ],
+      [
+       "waiting_h1",
+       "→ list #3"
+      ],
+      [
+       "t",
+       "'reduce'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (5)<\/b> [&#x27;map&#x27;, &#x27;map&#x27;, &#x27;map&#x27;, &#x27;map&#x27;, &#x27;reduce&#x27;]",
+    "<b>#2 dict (2)<\/b> {&#x27;map&#x27;: 0, &#x27;reduce&#x27;: 1}",
+    "<b>#3 list (2)<\/b> [&#x27;map&#x27;, &#x27;map&#x27;]"
+   ]
+  },
+  {
+   "line": 11,
+   "phase": "Hadoop 2",
+   "note": "Any task can use any container. <code>free_containers<\/code> is created: 4.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "tasks",
+       "→ list #1"
+      ],
+      [
+       "slots",
+       "→ dict #2"
+      ],
+      [
+       "waiting_h1",
+       "→ list #3"
+      ],
+      [
+       "t",
+       "'reduce'"
+      ],
+      [
+       "free_containers",
+       "4"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (5)<\/b> [&#x27;map&#x27;, &#x27;map&#x27;, &#x27;map&#x27;, &#x27;map&#x27;, &#x27;reduce&#x27;]",
+    "<b>#2 dict (2)<\/b> {&#x27;map&#x27;: 0, &#x27;reduce&#x27;: 1}",
+    "<b>#3 list (2)<\/b> [&#x27;map&#x27;, &#x27;map&#x27;]"
+   ],
+   "newVar": "free_containers"
+  },
+  {
+   "line": 12,
+   "phase": "Python",
+   "note": "<code>waiting_h2<\/code> is created: → list #4. A new list object (#4) is created: [&#x27;reduce&#x27;]",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "tasks",
+       "→ list #1"
+      ],
+      [
+       "slots",
+       "→ dict #2"
+      ],
+      [
+       "waiting_h1",
+       "→ list #3"
+      ],
+      [
+       "t",
+       "'reduce'"
+      ],
+      [
+       "free_containers",
+       "4"
+      ],
+      [
+       "waiting_h2",
+       "→ list #4"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (5)<\/b> [&#x27;map&#x27;, &#x27;map&#x27;, &#x27;map&#x27;, &#x27;map&#x27;, &#x27;reduce&#x27;]",
+    "<b>#2 dict (2)<\/b> {&#x27;map&#x27;: 0, &#x27;reduce&#x27;: 1}",
+    "<b>#3 list (2)<\/b> [&#x27;map&#x27;, &#x27;map&#x27;]",
+    "<b>#4 list (1)<\/b> [&#x27;reduce&#x27;]"
+   ],
+   "newVar": "waiting_h2"
+  },
+  {
+   "line": 13,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "tasks",
+       "→ list #1"
+      ],
+      [
+       "slots",
+       "→ dict #2"
+      ],
+      [
+       "waiting_h1",
+       "→ list #3"
+      ],
+      [
+       "t",
+       "'reduce'"
+      ],
+      [
+       "free_containers",
+       "4"
+      ],
+      [
+       "waiting_h2",
+       "→ list #4"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (5)<\/b> [&#x27;map&#x27;, &#x27;map&#x27;, &#x27;map&#x27;, &#x27;map&#x27;, &#x27;reduce&#x27;]",
+    "<b>#2 dict (2)<\/b> {&#x27;map&#x27;: 0, &#x27;reduce&#x27;: 1}",
+    "<b>#3 list (2)<\/b> [&#x27;map&#x27;, &#x27;map&#x27;]",
+    "<b>#4 list (1)<\/b> [&#x27;reduce&#x27;]"
+   ],
+   "out": "Hadoop 1 waiting: ['map', 'map'] | Hadoop 2 waiting: ['reduce']\n"
+  }
+ ]
+}</script>
+  </div>
+
+<h3 id="worked">Worked examples: real problems, solved and traced in memory</h3>
+  <p class="wx-intro">Three problems from real version decisions: an upgrade checklist, the storage savings of Hadoop 3, and how many NameNodes a cluster needs. Each runs live and is traced in memory.</p>
+  <article class="wx">
+    <div class="wx__head"><span class="wx__num">Example 1</span><span class="lvl lvl--b">Beginner</span><span class="wx__tag">Upgrade · planning</span></div>
+    <h4>What must change when moving a cluster from Hadoop 2 to 3?</h4>
+    <div class="wx__problem"><p class="wx__label">Problem statement</p><p>A team lists its current setup. Print an upgrade checklist: flag Java older than 8, any monitoring that uses old Hadoop 2 ports, and any job still using the Hadoop 1 JobTracker API.</p></div>
+    <div class="prob__io"><div><small>Input</small><pre>java 7 · monitored ports [50070, 8088, 50075] · jobs [(&quot;daily_sales&quot;, &quot;mapred&quot;), (&quot;fraud&quot;, &quot;mapreduce&quot;)]</pre></div><div><small>Expected output</small><pre>Upgrade Java: Hadoop 3 needs Java 8 or later
+Monitoring: change port 50070 to 9870
+Monitoring: change port 50075 to 9864
+Review job &#x27;daily_sales&#x27;: uses the old mapred API</pre></div></div>
+    <div class="wx__approach"><p class="wx__label">Approach</p><ol><li>Check the Java version number.</li><li>Look up each monitored port in the old → new port map.</li><li>Old-API jobs (package <code>org.apache.hadoop.mapred</code>) still run, but should be reviewed.</li></ol></div>
+    <p class="wx__label">Solution: run it live</p>
+    <div class="runner">
+    <script type="application/json">{
+ "lang": "python",
+ "file": "main.py",
+ "tasks": [
+  {
+   "label": "Solution",
+   "hint": "Add port 50010 to the monitored list and Java 11. Which lines disappear?",
+   "code": "java = 7\nports = [50070, 8088, 50075]\njobs = [(\"daily_sales\", \"mapred\"), (\"fraud\", \"mapreduce\")]\nnew_port = {50070: 9870, 50075: 9864, 50010: 9866, 50090: 9868}\n\nif java < 8:\n    print(\"Upgrade Java: Hadoop 3 needs Java 8 or later\")\nfor p in ports:\n    if p in new_port:\n        print(f\"Monitoring: change port {p} to {new_port[p]}\")\nfor name, api in jobs:\n    if api == \"mapred\":\n        print(f\"Review job '{name}': uses the old mapred API\")\n"
+  }
+ ]
+}</script>
+    </div>
+    <p class="wx__label">What happens in memory, step by step</p>
+    <p class="wx__how">Recorded from a real Python run: press <b>Next</b> to execute one line at a time. Watch variables change in each frame, and lists and dictionaries (numbered #1, #2 …) fill up as objects.</p>
+    <div class="tracer">
+    <script type="application/json">{
+ "lang": "python",
+ "code": [
+  "java = 7",
+  "ports = [50070, 8088, 50075]",
+  "jobs = [(\"daily_sales\", \"mapred\"), (\"fraud\", \"mapreduce\")]",
+  "new_port = {50070: 9870, 50075: 9864, 50010: 9866, 50090: 9868}",
+  "",
+  "if java < 8:",
+  "    print(\"Upgrade Java: Hadoop 3 needs Java 8 or later\")",
+  "for p in ports:",
+  "    if p in new_port:",
+  "        print(f\"Monitoring: change port {p} to {new_port[p]}\")",
+  "for name, api in jobs:",
+  "    if api == \"mapred\":",
+  "        print(f\"Review job '{name}': uses the old mapred API\")"
+ ],
+ "steps": [
+  {
+   "line": 1,
+   "phase": "Python",
+   "note": "<code>java<\/code> is created: 7.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "java",
+       "7"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "java"
+  },
+  {
+   "line": 2,
+   "phase": "Python",
+   "note": "<code>ports<\/code> is created: → list #1. A new list object (#1) is created: [50070, 8088, 50075]",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "java",
+       "7"
+      ],
+      [
+       "ports",
+       "→ list #1"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (3)<\/b> [50070, 8088, 50075]"
+   ],
+   "newVar": "ports"
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "<code>jobs<\/code> is created: → list #2. A new list object (#2) is created: [→ tuple #3, → tuple #4] A new tuple object (#3) is created: (&#x27;daily_sales&#x27;, &#x27;mapred&#x27;) A new tuple object (#4) is created: (&#x27;fraud&#x27;, &#x27;mapreduce&#x27;)",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "java",
+       "7"
+      ],
+      [
+       "ports",
+       "→ list #1"
+      ],
+      [
+       "jobs",
+       "→ list #2"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (3)<\/b> [50070, 8088, 50075]",
+    "<b>#2 list (2)<\/b> [→ tuple #3, → tuple #4]",
+    "<b>#3 tuple (2)<\/b> (&#x27;daily_sales&#x27;, &#x27;mapred&#x27;)",
+    "<b>#4 tuple (2)<\/b> (&#x27;fraud&#x27;, &#x27;mapreduce&#x27;)"
+   ],
+   "newVar": "jobs"
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "<code>new_port<\/code> is created: → dict #5. A new dict object (#5) is created: {50070: 9870, 50075: 9864, 50010: 9866, 50090: 9868}",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "java",
+       "7"
+      ],
+      [
+       "ports",
+       "→ list #1"
+      ],
+      [
+       "jobs",
+       "→ list #2"
+      ],
+      [
+       "new_port",
+       "→ dict #5"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (3)<\/b> [50070, 8088, 50075]",
+    "<b>#2 list (2)<\/b> [→ tuple #3, → tuple #4]",
+    "<b>#3 tuple (2)<\/b> (&#x27;daily_sales&#x27;, &#x27;mapred&#x27;)",
+    "<b>#4 tuple (2)<\/b> (&#x27;fraud&#x27;, &#x27;mapreduce&#x27;)",
+    "<b>#5 dict (4)<\/b> {50070: 9870, 50075: 9864, 50010: 9866, 50090: 9868}"
+   ],
+   "newVar": "new_port"
+  },
+  {
+   "line": 6,
+   "phase": "Python",
+   "note": "The condition is <b>True<\/b>, so the indented block runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "java",
+       "7"
+      ],
+      [
+       "ports",
+       "→ list #1"
+      ],
+      [
+       "jobs",
+       "→ list #2"
+      ],
+      [
+       "new_port",
+       "→ dict #5"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (3)<\/b> [50070, 8088, 50075]",
+    "<b>#2 list (2)<\/b> [→ tuple #3, → tuple #4]",
+    "<b>#3 tuple (2)<\/b> (&#x27;daily_sales&#x27;, &#x27;mapred&#x27;)",
+    "<b>#4 tuple (2)<\/b> (&#x27;fraud&#x27;, &#x27;mapreduce&#x27;)",
+    "<b>#5 dict (4)<\/b> {50070: 9870, 50075: 9864, 50010: 9866, 50090: 9868}"
+   ]
+  },
+  {
+   "line": 7,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "java",
+       "7"
+      ],
+      [
+       "ports",
+       "→ list #1"
+      ],
+      [
+       "jobs",
+       "→ list #2"
+      ],
+      [
+       "new_port",
+       "→ dict #5"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (3)<\/b> [50070, 8088, 50075]",
+    "<b>#2 list (2)<\/b> [→ tuple #3, → tuple #4]",
+    "<b>#3 tuple (2)<\/b> (&#x27;daily_sales&#x27;, &#x27;mapred&#x27;)",
+    "<b>#4 tuple (2)<\/b> (&#x27;fraud&#x27;, &#x27;mapreduce&#x27;)",
+    "<b>#5 dict (4)<\/b> {50070: 9870, 50075: 9864, 50010: 9866, 50090: 9868}"
+   ],
+   "out": "Upgrade Java: Hadoop 3 needs Java 8 or later\n"
+  },
+  {
+   "line": 8,
+   "phase": "Python",
+   "note": "<code>p<\/code> is created: 50070.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "java",
+       "7"
+      ],
+      [
+       "ports",
+       "→ list #1"
+      ],
+      [
+       "jobs",
+       "→ list #2"
+      ],
+      [
+       "new_port",
+       "→ dict #5"
+      ],
+      [
+       "p",
+       "50070"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (3)<\/b> [50070, 8088, 50075]",
+    "<b>#2 list (2)<\/b> [→ tuple #3, → tuple #4]",
+    "<b>#3 tuple (2)<\/b> (&#x27;daily_sales&#x27;, &#x27;mapred&#x27;)",
+    "<b>#4 tuple (2)<\/b> (&#x27;fraud&#x27;, &#x27;mapreduce&#x27;)",
+    "<b>#5 dict (4)<\/b> {50070: 9870, 50075: 9864, 50010: 9866, 50090: 9868}"
+   ],
+   "newVar": "p"
+  },
+  {
+   "line": 9,
+   "phase": "Python",
+   "note": "The condition is <b>True<\/b>, so the indented block runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "java",
+       "7"
+      ],
+      [
+       "ports",
+       "→ list #1"
+      ],
+      [
+       "jobs",
+       "→ list #2"
+      ],
+      [
+       "new_port",
+       "→ dict #5"
+      ],
+      [
+       "p",
+       "50070"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (3)<\/b> [50070, 8088, 50075]",
+    "<b>#2 list (2)<\/b> [→ tuple #3, → tuple #4]",
+    "<b>#3 tuple (2)<\/b> (&#x27;daily_sales&#x27;, &#x27;mapred&#x27;)",
+    "<b>#4 tuple (2)<\/b> (&#x27;fraud&#x27;, &#x27;mapreduce&#x27;)",
+    "<b>#5 dict (4)<\/b> {50070: 9870, 50075: 9864, 50010: 9866, 50090: 9868}"
+   ]
+  },
+  {
+   "line": 10,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "java",
+       "7"
+      ],
+      [
+       "ports",
+       "→ list #1"
+      ],
+      [
+       "jobs",
+       "→ list #2"
+      ],
+      [
+       "new_port",
+       "→ dict #5"
+      ],
+      [
+       "p",
+       "50070"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (3)<\/b> [50070, 8088, 50075]",
+    "<b>#2 list (2)<\/b> [→ tuple #3, → tuple #4]",
+    "<b>#3 tuple (2)<\/b> (&#x27;daily_sales&#x27;, &#x27;mapred&#x27;)",
+    "<b>#4 tuple (2)<\/b> (&#x27;fraud&#x27;, &#x27;mapreduce&#x27;)",
+    "<b>#5 dict (4)<\/b> {50070: 9870, 50075: 9864, 50010: 9866, 50090: 9868}"
+   ],
+   "out": "Monitoring: change port 50070 to 9870\n"
+  },
+  {
+   "line": 8,
+   "phase": "Python",
+   "note": "<code>p<\/code> changes to 8088.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "java",
+       "7"
+      ],
+      [
+       "ports",
+       "→ list #1"
+      ],
+      [
+       "jobs",
+       "→ list #2"
+      ],
+      [
+       "new_port",
+       "→ dict #5"
+      ],
+      [
+       "p",
+       "8088"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (3)<\/b> [50070, 8088, 50075]",
+    "<b>#2 list (2)<\/b> [→ tuple #3, → tuple #4]",
+    "<b>#3 tuple (2)<\/b> (&#x27;daily_sales&#x27;, &#x27;mapred&#x27;)",
+    "<b>#4 tuple (2)<\/b> (&#x27;fraud&#x27;, &#x27;mapreduce&#x27;)",
+    "<b>#5 dict (4)<\/b> {50070: 9870, 50075: 9864, 50010: 9866, 50090: 9868}"
+   ],
+   "newVar": "p"
+  },
+  {
+   "line": 9,
+   "phase": "Python",
+   "note": "The condition is <b>False<\/b>, so the indented block is skipped.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "java",
+       "7"
+      ],
+      [
+       "ports",
+       "→ list #1"
+      ],
+      [
+       "jobs",
+       "→ list #2"
+      ],
+      [
+       "new_port",
+       "→ dict #5"
+      ],
+      [
+       "p",
+       "8088"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (3)<\/b> [50070, 8088, 50075]",
+    "<b>#2 list (2)<\/b> [→ tuple #3, → tuple #4]",
+    "<b>#3 tuple (2)<\/b> (&#x27;daily_sales&#x27;, &#x27;mapred&#x27;)",
+    "<b>#4 tuple (2)<\/b> (&#x27;fraud&#x27;, &#x27;mapreduce&#x27;)",
+    "<b>#5 dict (4)<\/b> {50070: 9870, 50075: 9864, 50010: 9866, 50090: 9868}"
+   ]
+  },
+  {
+   "line": 8,
+   "phase": "Python",
+   "note": "<code>p<\/code> changes to 50075.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "java",
+       "7"
+      ],
+      [
+       "ports",
+       "→ list #1"
+      ],
+      [
+       "jobs",
+       "→ list #2"
+      ],
+      [
+       "new_port",
+       "→ dict #5"
+      ],
+      [
+       "p",
+       "50075"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (3)<\/b> [50070, 8088, 50075]",
+    "<b>#2 list (2)<\/b> [→ tuple #3, → tuple #4]",
+    "<b>#3 tuple (2)<\/b> (&#x27;daily_sales&#x27;, &#x27;mapred&#x27;)",
+    "<b>#4 tuple (2)<\/b> (&#x27;fraud&#x27;, &#x27;mapreduce&#x27;)",
+    "<b>#5 dict (4)<\/b> {50070: 9870, 50075: 9864, 50010: 9866, 50090: 9868}"
+   ],
+   "newVar": "p"
+  },
+  {
+   "line": 9,
+   "phase": "Python",
+   "note": "The condition is <b>True<\/b>, so the indented block runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "java",
+       "7"
+      ],
+      [
+       "ports",
+       "→ list #1"
+      ],
+      [
+       "jobs",
+       "→ list #2"
+      ],
+      [
+       "new_port",
+       "→ dict #5"
+      ],
+      [
+       "p",
+       "50075"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (3)<\/b> [50070, 8088, 50075]",
+    "<b>#2 list (2)<\/b> [→ tuple #3, → tuple #4]",
+    "<b>#3 tuple (2)<\/b> (&#x27;daily_sales&#x27;, &#x27;mapred&#x27;)",
+    "<b>#4 tuple (2)<\/b> (&#x27;fraud&#x27;, &#x27;mapreduce&#x27;)",
+    "<b>#5 dict (4)<\/b> {50070: 9870, 50075: 9864, 50010: 9866, 50090: 9868}"
+   ]
+  },
+  {
+   "line": 10,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "java",
+       "7"
+      ],
+      [
+       "ports",
+       "→ list #1"
+      ],
+      [
+       "jobs",
+       "→ list #2"
+      ],
+      [
+       "new_port",
+       "→ dict #5"
+      ],
+      [
+       "p",
+       "50075"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (3)<\/b> [50070, 8088, 50075]",
+    "<b>#2 list (2)<\/b> [→ tuple #3, → tuple #4]",
+    "<b>#3 tuple (2)<\/b> (&#x27;daily_sales&#x27;, &#x27;mapred&#x27;)",
+    "<b>#4 tuple (2)<\/b> (&#x27;fraud&#x27;, &#x27;mapreduce&#x27;)",
+    "<b>#5 dict (4)<\/b> {50070: 9870, 50075: 9864, 50010: 9866, 50090: 9868}"
+   ],
+   "out": "Monitoring: change port 50075 to 9864\n"
+  },
+  {
+   "line": 8,
+   "phase": "Python",
+   "note": "Nothing is left to loop over, so the loop ends and Python moves on.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "java",
+       "7"
+      ],
+      [
+       "ports",
+       "→ list #1"
+      ],
+      [
+       "jobs",
+       "→ list #2"
+      ],
+      [
+       "new_port",
+       "→ dict #5"
+      ],
+      [
+       "p",
+       "50075"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (3)<\/b> [50070, 8088, 50075]",
+    "<b>#2 list (2)<\/b> [→ tuple #3, → tuple #4]",
+    "<b>#3 tuple (2)<\/b> (&#x27;daily_sales&#x27;, &#x27;mapred&#x27;)",
+    "<b>#4 tuple (2)<\/b> (&#x27;fraud&#x27;, &#x27;mapreduce&#x27;)",
+    "<b>#5 dict (4)<\/b> {50070: 9870, 50075: 9864, 50010: 9866, 50090: 9868}"
+   ]
+  },
+  {
+   "line": 11,
+   "phase": "Python",
+   "note": "<code>name<\/code> is created: &#x27;daily_sales&#x27;. <code>api<\/code> is created: &#x27;mapred&#x27;.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "java",
+       "7"
+      ],
+      [
+       "ports",
+       "→ list #1"
+      ],
+      [
+       "jobs",
+       "→ list #2"
+      ],
+      [
+       "new_port",
+       "→ dict #5"
+      ],
+      [
+       "p",
+       "50075"
+      ],
+      [
+       "name",
+       "'daily_sales'"
+      ],
+      [
+       "api",
+       "'mapred'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (3)<\/b> [50070, 8088, 50075]",
+    "<b>#2 list (2)<\/b> [→ tuple #3, → tuple #4]",
+    "<b>#3 tuple (2)<\/b> (&#x27;daily_sales&#x27;, &#x27;mapred&#x27;)",
+    "<b>#4 tuple (2)<\/b> (&#x27;fraud&#x27;, &#x27;mapreduce&#x27;)",
+    "<b>#5 dict (4)<\/b> {50070: 9870, 50075: 9864, 50010: 9866, 50090: 9868}"
+   ],
+   "newVar": "api"
+  },
+  {
+   "line": 12,
+   "phase": "Python",
+   "note": "The condition is <b>True<\/b>, so the indented block runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "java",
+       "7"
+      ],
+      [
+       "ports",
+       "→ list #1"
+      ],
+      [
+       "jobs",
+       "→ list #2"
+      ],
+      [
+       "new_port",
+       "→ dict #5"
+      ],
+      [
+       "p",
+       "50075"
+      ],
+      [
+       "name",
+       "'daily_sales'"
+      ],
+      [
+       "api",
+       "'mapred'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (3)<\/b> [50070, 8088, 50075]",
+    "<b>#2 list (2)<\/b> [→ tuple #3, → tuple #4]",
+    "<b>#3 tuple (2)<\/b> (&#x27;daily_sales&#x27;, &#x27;mapred&#x27;)",
+    "<b>#4 tuple (2)<\/b> (&#x27;fraud&#x27;, &#x27;mapreduce&#x27;)",
+    "<b>#5 dict (4)<\/b> {50070: 9870, 50075: 9864, 50010: 9866, 50090: 9868}"
+   ]
+  },
+  {
+   "line": 13,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "java",
+       "7"
+      ],
+      [
+       "ports",
+       "→ list #1"
+      ],
+      [
+       "jobs",
+       "→ list #2"
+      ],
+      [
+       "new_port",
+       "→ dict #5"
+      ],
+      [
+       "p",
+       "50075"
+      ],
+      [
+       "name",
+       "'daily_sales'"
+      ],
+      [
+       "api",
+       "'mapred'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (3)<\/b> [50070, 8088, 50075]",
+    "<b>#2 list (2)<\/b> [→ tuple #3, → tuple #4]",
+    "<b>#3 tuple (2)<\/b> (&#x27;daily_sales&#x27;, &#x27;mapred&#x27;)",
+    "<b>#4 tuple (2)<\/b> (&#x27;fraud&#x27;, &#x27;mapreduce&#x27;)",
+    "<b>#5 dict (4)<\/b> {50070: 9870, 50075: 9864, 50010: 9866, 50090: 9868}"
+   ],
+   "out": "Review job 'daily_sales': uses the old mapred API\n"
+  },
+  {
+   "line": 11,
+   "phase": "Python",
+   "note": "<code>name<\/code> changes to &#x27;fraud&#x27;. <code>api<\/code> changes to &#x27;mapreduce&#x27;.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "java",
+       "7"
+      ],
+      [
+       "ports",
+       "→ list #1"
+      ],
+      [
+       "jobs",
+       "→ list #2"
+      ],
+      [
+       "new_port",
+       "→ dict #5"
+      ],
+      [
+       "p",
+       "50075"
+      ],
+      [
+       "name",
+       "'fraud'"
+      ],
+      [
+       "api",
+       "'mapreduce'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (3)<\/b> [50070, 8088, 50075]",
+    "<b>#2 list (2)<\/b> [→ tuple #3, → tuple #4]",
+    "<b>#3 tuple (2)<\/b> (&#x27;daily_sales&#x27;, &#x27;mapred&#x27;)",
+    "<b>#4 tuple (2)<\/b> (&#x27;fraud&#x27;, &#x27;mapreduce&#x27;)",
+    "<b>#5 dict (4)<\/b> {50070: 9870, 50075: 9864, 50010: 9866, 50090: 9868}"
+   ],
+   "newVar": "api"
+  },
+  {
+   "line": 12,
+   "phase": "Python",
+   "note": "The condition is <b>False<\/b>, so the indented block is skipped.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "java",
+       "7"
+      ],
+      [
+       "ports",
+       "→ list #1"
+      ],
+      [
+       "jobs",
+       "→ list #2"
+      ],
+      [
+       "new_port",
+       "→ dict #5"
+      ],
+      [
+       "p",
+       "50075"
+      ],
+      [
+       "name",
+       "'fraud'"
+      ],
+      [
+       "api",
+       "'mapreduce'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (3)<\/b> [50070, 8088, 50075]",
+    "<b>#2 list (2)<\/b> [→ tuple #3, → tuple #4]",
+    "<b>#3 tuple (2)<\/b> (&#x27;daily_sales&#x27;, &#x27;mapred&#x27;)",
+    "<b>#4 tuple (2)<\/b> (&#x27;fraud&#x27;, &#x27;mapreduce&#x27;)",
+    "<b>#5 dict (4)<\/b> {50070: 9870, 50075: 9864, 50010: 9866, 50090: 9868}"
+   ]
+  },
+  {
+   "line": 11,
+   "phase": "Python",
+   "note": "Nothing is left to loop over, so the loop ends and Python moves on.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "java",
+       "7"
+      ],
+      [
+       "ports",
+       "→ list #1"
+      ],
+      [
+       "jobs",
+       "→ list #2"
+      ],
+      [
+       "new_port",
+       "→ dict #5"
+      ],
+      [
+       "p",
+       "50075"
+      ],
+      [
+       "name",
+       "'fraud'"
+      ],
+      [
+       "api",
+       "'mapreduce'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (3)<\/b> [50070, 8088, 50075]",
+    "<b>#2 list (2)<\/b> [→ tuple #3, → tuple #4]",
+    "<b>#3 tuple (2)<\/b> (&#x27;daily_sales&#x27;, &#x27;mapred&#x27;)",
+    "<b>#4 tuple (2)<\/b> (&#x27;fraud&#x27;, &#x27;mapreduce&#x27;)",
+    "<b>#5 dict (4)<\/b> {50070: 9870, 50075: 9864, 50010: 9866, 50090: 9868}"
+   ]
+  }
+ ]
+}</script>
+    </div>
+  </article>
+  <article class="wx">
+    <div class="wx__head"><span class="wx__num">Example 2</span><span class="lvl lvl--i">Intermediate</span><span class="wx__tag">Storage · Hadoop 3</span></div>
+    <h4>How much disk does erasure coding free up?</h4>
+    <div class="wx__problem"><p class="wx__label">Problem statement</p><p>A cluster stores <b>1.2 PB</b> of business data, all with 3× replication. The team moves the <b>70%</b> that is older than a year to the RS-6-3 erasure-coding policy. How much raw storage is freed, and how many 144 TB nodes is that?</p></div>
+    <div class="prob__io"><div><small>Input</small><pre>1.2 PB · 70% cold · 3× → 1.5× · 144 TB per node</pre></div><div><small>Expected output</small><pre>Before: 3600 TB raw, after: 2340 TB raw
+Freed: 1260 TB = about 8 nodes</pre></div></div>
+    <div class="wx__approach"><p class="wx__label">Approach</p><ol><li>Before: 1,200 TB × 3.</li><li>After: hot 30% × 3 + cold 70% × 1.5.</li><li>Freed raw TB ÷ 144 = nodes no longer needed.</li></ol></div>
+    <p class="wx__label">Solution: run it live</p>
+    <div class="runner">
+    <script type="application/json">{
+ "lang": "python",
+ "file": "main.py",
+ "tasks": [
+  {
+   "label": "Solution",
+   "hint": "Erasure-coded files are slower to read when a node is down (data must be rebuilt). What share would you keep replicated for a reporting cluster?",
+   "code": "import math\ndata_tb = 1200\ncold = 0.70\nbefore = data_tb * 3\nafter = data_tb * (1 - cold) * 3 + data_tb * cold * 1.5\nfreed = before - after\nprint(f\"Before: {before:.0f} TB raw, after: {after:.0f} TB raw\")\nprint(f\"Freed: {freed:.0f} TB = about {math.floor(freed / 144)} nodes\")\n"
+  }
+ ]
+}</script>
+    </div>
+    <p class="wx__label">What happens in memory, step by step</p>
+    <p class="wx__how">Recorded from a real Python run: press <b>Next</b> to execute one line at a time. Watch variables change in each frame, and lists and dictionaries (numbered #1, #2 …) fill up as objects.</p>
+    <div class="tracer">
+    <script type="application/json">{
+ "lang": "python",
+ "code": [
+  "import math",
+  "data_tb = 1200",
+  "cold = 0.70",
+  "before = data_tb * 3",
+  "after = data_tb * (1 - cold) * 3 + data_tb * cold * 1.5",
+  "freed = before - after",
+  "print(f\"Before: {before:.0f} TB raw, after: {after:.0f} TB raw\")",
+  "print(f\"Freed: {freed:.0f} TB = about {math.floor(freed / 144)} nodes\")"
+ ],
+ "steps": [
+  {
+   "line": 1,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": []
+    }
+   ],
+   "heap": []
+  },
+  {
+   "line": 2,
+   "phase": "Python",
+   "note": "<code>data_tb<\/code> is created: 1200.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "data_tb",
+       "1200"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "data_tb"
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "<code>cold<\/code> is created: 0.7.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "data_tb",
+       "1200"
+      ],
+      [
+       "cold",
+       "0.7"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "cold"
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "<code>before<\/code> is created: 3600.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "data_tb",
+       "1200"
+      ],
+      [
+       "cold",
+       "0.7"
+      ],
+      [
+       "before",
+       "3600"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "before"
+  },
+  {
+   "line": 5,
+   "phase": "Mix",
+   "note": "Hot data stays replicated; cold data uses 6 data + 3 parity cells. <code>after<\/code> is created: 2340.0.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "data_tb",
+       "1200"
+      ],
+      [
+       "cold",
+       "0.7"
+      ],
+      [
+       "before",
+       "3600"
+      ],
+      [
+       "after",
+       "2340.0"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "after"
+  },
+  {
+   "line": 6,
+   "phase": "Python",
+   "note": "<code>freed<\/code> is created: 1260.0.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "data_tb",
+       "1200"
+      ],
+      [
+       "cold",
+       "0.7"
+      ],
+      [
+       "before",
+       "3600"
+      ],
+      [
+       "after",
+       "2340.0"
+      ],
+      [
+       "freed",
+       "1260.0"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "freed"
+  },
+  {
+   "line": 7,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "data_tb",
+       "1200"
+      ],
+      [
+       "cold",
+       "0.7"
+      ],
+      [
+       "before",
+       "3600"
+      ],
+      [
+       "after",
+       "2340.0"
+      ],
+      [
+       "freed",
+       "1260.0"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "out": "Before: 3600 TB raw, after: 2340 TB raw\n"
+  },
+  {
+   "line": 8,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "data_tb",
+       "1200"
+      ],
+      [
+       "cold",
+       "0.7"
+      ],
+      [
+       "before",
+       "3600"
+      ],
+      [
+       "after",
+       "2340.0"
+      ],
+      [
+       "freed",
+       "1260.0"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "out": "Freed: 1260 TB = about 8 nodes\n"
+  }
+ ]
+}</script>
+    </div>
+  </article>
+  <article class="wx">
+    <div class="wx__head"><span class="wx__num">Example 3</span><span class="lvl lvl--a">Advanced</span><span class="wx__tag">High availability · design</span></div>
+    <h4>How many NameNodes and JournalNodes for a given safety level?</h4>
+    <div class="wx__problem"><p class="wx__label">Problem statement</p><p>JournalNodes work by majority: with <i>J</i> JournalNodes the cluster tolerates <i>(J − 1) ÷ 2</i> JournalNode failures. With <i>N</i> NameNodes (one active), it tolerates <i>N − 1</i> NameNode failures. For each target, print the smallest setup that survives that many failures of each kind.</p></div>
+    <div class="prob__io"><div><small>Input</small><pre>targets: survive 1 failure (Hadoop 2 style) and 2 failures (Hadoop 3 style)</pre></div><div><small>Expected output</small><pre>Survive 1: 2 NameNodes + 3 JournalNodes (Hadoop 2 or 3)
+Survive 2: 3 NameNodes + 5 JournalNodes (Hadoop 3 only)</pre></div></div>
+    <div class="wx__approach"><p class="wx__label">Approach</p><ol><li>NameNodes needed = failures + 1.</li><li>JournalNodes needed = 2 × failures + 1 (an odd number, for a majority).</li><li>Hadoop 2 allowed at most 2 NameNodes; Hadoop 3 allows more.</li></ol></div>
+    <p class="wx__label">Solution: run it live</p>
+    <div class="runner">
+    <script type="application/json">{
+ "lang": "python",
+ "file": "main.py",
+ "tasks": [
+  {
+   "label": "Solution",
+   "hint": "Why must the number of JournalNodes be odd? Try 4: how many failures can it survive? (Still 1, so the fourth adds cost but no safety.)",
+   "code": "def ha_setup(failures):\n    namenodes = failures + 1\n    journalnodes = 2 * failures + 1\n    return namenodes, journalnodes\n\nfor f in [1, 2]:\n    nn, jn = ha_setup(f)\n    ok = \"Hadoop 2 or 3\" if nn <= 2 else \"Hadoop 3 only\"\n    print(f\"Survive {f}: {nn} NameNodes + {jn} JournalNodes ({ok})\")\n"
+  }
+ ]
+}</script>
+    </div>
+    <p class="wx__label">What happens in memory, step by step</p>
+    <p class="wx__how">Recorded from a real Python run: press <b>Next</b> to execute one line at a time. Watch variables change in each frame, and lists and dictionaries (numbered #1, #2 …) fill up as objects.</p>
+    <div class="tracer">
+    <script type="application/json">{
+ "lang": "python",
+ "code": [
+  "def ha_setup(failures):",
+  "    namenodes = failures + 1",
+  "    journalnodes = 2 * failures + 1",
+  "    return namenodes, journalnodes",
+  "",
+  "for f in [1, 2]:",
+  "    nn, jn = ha_setup(f)",
+  "    ok = \"Hadoop 2 or 3\" if nn <= 2 else \"Hadoop 3 only\"",
+  "    print(f\"Survive {f}: {nn} NameNodes + {jn} JournalNodes ({ok})\")"
+ ],
+ "steps": [
+  {
+   "line": 1,
+   "phase": "Rule",
+   "note": "A majority of JournalNodes must be alive to accept edits. <code>ha_setup<\/code> is created: function ha_setup().",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "ha_setup",
+       "function ha_setup()"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "ha_setup"
+  },
+  {
+   "line": 6,
+   "phase": "Python",
+   "note": "<code>f<\/code> is created: 1.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "ha_setup",
+       "function ha_setup()"
+      ],
+      [
+       "f",
+       "1"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "f"
+  },
+  {
+   "line": 7,
+   "phase": "Python",
+   "note": "<code>ha_setup()<\/code> is called: a new frame is pushed with <code>failures<\/code> = 1.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "ha_setup",
+       "function ha_setup()"
+      ],
+      [
+       "f",
+       "1"
+      ]
+     ]
+    },
+    {
+     "frame": "ha_setup()",
+     "vars": [
+      [
+       "failures",
+       "1"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "failures"
+  },
+  {
+   "line": 2,
+   "phase": "Python",
+   "note": "<code>namenodes<\/code> is created: 2.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "ha_setup",
+       "function ha_setup()"
+      ],
+      [
+       "f",
+       "1"
+      ]
+     ]
+    },
+    {
+     "frame": "ha_setup()",
+     "vars": [
+      [
+       "failures",
+       "1"
+      ],
+      [
+       "namenodes",
+       "2"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "namenodes"
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "<code>journalnodes<\/code> is created: 3.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "ha_setup",
+       "function ha_setup()"
+      ],
+      [
+       "f",
+       "1"
+      ]
+     ]
+    },
+    {
+     "frame": "ha_setup()",
+     "vars": [
+      [
+       "failures",
+       "1"
+      ],
+      [
+       "namenodes",
+       "2"
+      ],
+      [
+       "journalnodes",
+       "3"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "journalnodes"
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "The return value is worked out and handed back to the caller.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "ha_setup",
+       "function ha_setup()"
+      ],
+      [
+       "f",
+       "1"
+      ]
+     ]
+    },
+    {
+     "frame": "ha_setup()",
+     "vars": [
+      [
+       "failures",
+       "1"
+      ],
+      [
+       "namenodes",
+       "2"
+      ],
+      [
+       "journalnodes",
+       "3"
+      ]
+     ]
+    }
+   ],
+   "heap": []
+  },
+  {
+   "line": 7,
+   "phase": "Return",
+   "note": "<code>ha_setup()<\/code> returns <b>→ tuple #1<\/b> and its frame is popped. The caller continues on this line with that value.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "ha_setup",
+       "function ha_setup()"
+      ],
+      [
+       "f",
+       "1"
+      ],
+      [
+       "nn",
+       "2"
+      ],
+      [
+       "jn",
+       "3"
+      ]
+     ]
+    }
+   ],
+   "heap": []
+  },
+  {
+   "line": 8,
+   "phase": "Python",
+   "note": "<code>ok<\/code> is created: &#x27;Hadoop 2 or 3&#x27;.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "ha_setup",
+       "function ha_setup()"
+      ],
+      [
+       "f",
+       "1"
+      ],
+      [
+       "nn",
+       "2"
+      ],
+      [
+       "jn",
+       "3"
+      ],
+      [
+       "ok",
+       "'Hadoop 2 or 3'"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "ok"
+  },
+  {
+   "line": 9,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "ha_setup",
+       "function ha_setup()"
+      ],
+      [
+       "f",
+       "1"
+      ],
+      [
+       "nn",
+       "2"
+      ],
+      [
+       "jn",
+       "3"
+      ],
+      [
+       "ok",
+       "'Hadoop 2 or 3'"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "out": "Survive 1: 2 NameNodes + 3 JournalNodes (Hadoop 2 or 3)\n"
+  },
+  {
+   "line": 6,
+   "phase": "Python",
+   "note": "<code>f<\/code> changes to 2.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "ha_setup",
+       "function ha_setup()"
+      ],
+      [
+       "f",
+       "2"
+      ],
+      [
+       "nn",
+       "2"
+      ],
+      [
+       "jn",
+       "3"
+      ],
+      [
+       "ok",
+       "'Hadoop 2 or 3'"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "f"
+  },
+  {
+   "line": 7,
+   "phase": "Python",
+   "note": "<code>ha_setup()<\/code> is called: a new frame is pushed with <code>failures<\/code> = 2.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "ha_setup",
+       "function ha_setup()"
+      ],
+      [
+       "f",
+       "2"
+      ],
+      [
+       "nn",
+       "2"
+      ],
+      [
+       "jn",
+       "3"
+      ],
+      [
+       "ok",
+       "'Hadoop 2 or 3'"
+      ]
+     ]
+    },
+    {
+     "frame": "ha_setup()",
+     "vars": [
+      [
+       "failures",
+       "2"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "failures"
+  },
+  {
+   "line": 2,
+   "phase": "Python",
+   "note": "<code>namenodes<\/code> is created: 3.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "ha_setup",
+       "function ha_setup()"
+      ],
+      [
+       "f",
+       "2"
+      ],
+      [
+       "nn",
+       "2"
+      ],
+      [
+       "jn",
+       "3"
+      ],
+      [
+       "ok",
+       "'Hadoop 2 or 3'"
+      ]
+     ]
+    },
+    {
+     "frame": "ha_setup()",
+     "vars": [
+      [
+       "failures",
+       "2"
+      ],
+      [
+       "namenodes",
+       "3"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "namenodes"
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "<code>journalnodes<\/code> is created: 5.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "ha_setup",
+       "function ha_setup()"
+      ],
+      [
+       "f",
+       "2"
+      ],
+      [
+       "nn",
+       "2"
+      ],
+      [
+       "jn",
+       "3"
+      ],
+      [
+       "ok",
+       "'Hadoop 2 or 3'"
+      ]
+     ]
+    },
+    {
+     "frame": "ha_setup()",
+     "vars": [
+      [
+       "failures",
+       "2"
+      ],
+      [
+       "namenodes",
+       "3"
+      ],
+      [
+       "journalnodes",
+       "5"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "journalnodes"
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "The return value is worked out and handed back to the caller.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "ha_setup",
+       "function ha_setup()"
+      ],
+      [
+       "f",
+       "2"
+      ],
+      [
+       "nn",
+       "2"
+      ],
+      [
+       "jn",
+       "3"
+      ],
+      [
+       "ok",
+       "'Hadoop 2 or 3'"
+      ]
+     ]
+    },
+    {
+     "frame": "ha_setup()",
+     "vars": [
+      [
+       "failures",
+       "2"
+      ],
+      [
+       "namenodes",
+       "3"
+      ],
+      [
+       "journalnodes",
+       "5"
+      ]
+     ]
+    }
+   ],
+   "heap": []
+  },
+  {
+   "line": 7,
+   "phase": "Return",
+   "note": "<code>ha_setup()<\/code> returns <b>→ tuple #2<\/b> and its frame is popped. The caller continues on this line with that value.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "ha_setup",
+       "function ha_setup()"
+      ],
+      [
+       "f",
+       "2"
+      ],
+      [
+       "nn",
+       "3"
+      ],
+      [
+       "jn",
+       "5"
+      ],
+      [
+       "ok",
+       "'Hadoop 2 or 3'"
+      ]
+     ]
+    }
+   ],
+   "heap": []
+  },
+  {
+   "line": 8,
+   "phase": "Python",
+   "note": "<code>ok<\/code> changes to &#x27;Hadoop 3 only&#x27;.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "ha_setup",
+       "function ha_setup()"
+      ],
+      [
+       "f",
+       "2"
+      ],
+      [
+       "nn",
+       "3"
+      ],
+      [
+       "jn",
+       "5"
+      ],
+      [
+       "ok",
+       "'Hadoop 3 only'"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "ok"
+  },
+  {
+   "line": 9,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "ha_setup",
+       "function ha_setup()"
+      ],
+      [
+       "f",
+       "2"
+      ],
+      [
+       "nn",
+       "3"
+      ],
+      [
+       "jn",
+       "5"
+      ],
+      [
+       "ok",
+       "'Hadoop 3 only'"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "out": "Survive 2: 3 NameNodes + 5 JournalNodes (Hadoop 3 only)\n"
+  },
+  {
+   "line": 6,
+   "phase": "Python",
+   "note": "Nothing is left to loop over, so the loop ends and Python moves on.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "ha_setup",
+       "function ha_setup()"
+      ],
+      [
+       "f",
+       "2"
+      ],
+      [
+       "nn",
+       "3"
+      ],
+      [
+       "jn",
+       "5"
+      ],
+      [
+       "ok",
+       "'Hadoop 3 only'"
+      ]
+     ]
+    }
+   ],
+   "heap": []
+  }
+ ]
+}</script>
+    </div>
+  </article>
+</section>
+
+<section class="part" id="quiz">
+  <span class="part-label"><b>9</b> Quiz and revision</span>
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <script type="application/json">[
+ {
+  "q": "In Hadoop 1, which daemon handled both resource management and job scheduling?",
+  "options": [
+   "ResourceManager",
+   "ApplicationMaster",
+   "JobTracker",
+   "NodeManager"
+  ],
+  "answer": 2,
+  "why": "The <b>JobTracker<\/b> did both, which made it a bottleneck and a single point of failure."
+ },
+ {
+  "q": "What replaced fixed map and reduce slots in Hadoop 2?",
+  "options": [
+   "Threads",
+   "YARN containers that any task type can use",
+   "Bigger blocks",
+   "More JobTrackers"
+  ],
+  "answer": 1,
+  "why": "Containers are flexible amounts of memory and CPU, so no capacity is reserved for a task type that isn't running."
+ },
+ {
+  "q": "In YARN, which component manages the tasks of one particular job?",
+  "options": [
+   "ApplicationMaster",
+   "ResourceManager",
+   "NodeManager",
+   "NameNode"
+  ],
+  "answer": 0,
+  "why": "Each application has its own <b>ApplicationMaster<\/b>; the ResourceManager only allocates resources."
+ },
+ {
+  "q": "Which Hadoop 2 feature removed the NameNode as a single point of failure?",
+  "options": [
+   "Federation",
+   "Erasure coding",
+   "Secondary NameNode",
+   "High Availability with an active and a standby NameNode"
+  ],
+  "answer": 3,
+  "why": "<b>HDFS HA<\/b> keeps a standby NameNode in sync via JournalNodes and fails over automatically. The Secondary NameNode only checkpoints."
+ },
+ {
+  "q": "Which feature is new in Hadoop 3?",
+  "options": [
+   "YARN",
+   "MapReduce",
+   "HDFS erasure coding",
+   "HDFS replication"
+  ],
+  "answer": 2,
+  "why": "Erasure coding arrived in Hadoop 3.0, cutting storage overhead to about 1.5× for suitable data."
+ },
+ {
+  "q": "On Hadoop 3, the NameNode web UI is by default on port:",
+  "options": [
+   "50070",
+   "9870",
+   "8088",
+   "8020"
+  ],
+  "answer": 1,
+  "why": "Hadoop 3 moved it from 50070 to <b>9870<\/b>. 8088 is the ResourceManager UI; 8020 is the NameNode RPC port."
+ },
+ {
+  "q": "What is the minimum Java version for Hadoop 3?",
+  "options": [
+   "Java 8",
+   "Java 6",
+   "Java 7",
+   "Java 17"
+  ],
+  "answer": 0,
+  "why": "Hadoop 3.0 raised the minimum from Java 7 to <b>Java 8<\/b>. Later 3.x lines also support newer runtimes; check each release's notes."
+ },
+ {
+  "q": "What does HDFS Federation do?",
+  "options": [
+   "Copies data to another country",
+   "Encrypts all blocks",
+   "Merges YARN and HDFS",
+   "Lets several independent NameNodes each manage part of the namespace, sharing the DataNodes"
+  ],
+  "answer": 3,
+  "why": "Federation scales the namespace beyond one NameNode's memory, for example one NameNode for <code>/user<\/code> and another for <code>/data<\/code>."
+ }
+]</script>
+  </div>
+
+  <h3>Quick revision</h3>
+  <div class="revision">
+    <h3>Lesson 2.4 in one screen</h3>
+    <ul><li><b>Hadoop 1</b> (2011): JobTracker + TaskTrackers, fixed map/reduce <b>slots</b>, MapReduce only, single NameNode, ~4,000 nodes.</li><li><b>Hadoop 2</b> (GA Oct 2013): <b>YARN</b> = ResourceManager + NodeManagers + one ApplicationMaster per job; <b>containers</b>.</li><li>Hadoop 2 also: <b>NameNode HA</b> (active + standby, JournalNodes, ZooKeeper failover), <b>Federation</b>, 128 MB blocks.</li><li>Many engines on one cluster: MapReduce, Spark, Tez, Flink.</li><li><b>Hadoop 3</b> (GA Dec 2017): <b>erasure coding</b> (RS-6-3 ≈ 1.5×), <b>2+ standby NameNodes</b>, Java 8+, new ports.</li><li>Hadoop 3 YARN: Timeline v2, opportunistic containers, GPUs/FPGAs (3.1), Docker; Router-based Federation.</li><li>Ports: NameNode UI 50070 → <b>9870</b>; DataNode 50010 → 9866, 50075 → 9864; Secondary 50090 → 9868; RM UI 8088 unchanged.</li><li>Recent: 3.3 (2020, Java 11 runtime, ARM), 3.4.0 (2024), <b>3.5.0 (Apr 2026, servers need JDK 17)</b>.</li></ul>
+  </div>
+
+  <h3>Interview and viva questions</h3>
+  <div class="faq">
+    <details><summary>What are the differences between Hadoop 1 and Hadoop 2?</summary><p>Hadoop 1 used a single JobTracker for both resource management and job scheduling, with TaskTrackers offering fixed map and reduce slots, ran only MapReduce, had a single NameNode (a SPOF) and scaled to about 4,000 nodes. Hadoop 2 introduced YARN: a ResourceManager for cluster resources, NodeManagers on each node, and an ApplicationMaster per job, using flexible containers. It supports engines beyond MapReduce, adds NameNode High Availability and HDFS Federation, scales further and uses a 128 MB default block size.</p></details>
+    <details><summary>What new features came in Hadoop 3?</summary><p>HDFS erasure coding (about 1.5× storage overhead instead of 3× for suitable data), support for more than two NameNodes, a minimum of Java 8, default ports moved out of the ephemeral range (NameNode UI on 9870), a rewritten shell, YARN Timeline Service v2, opportunistic containers, resource types such as GPUs and FPGAs (3.1), Docker container support, Router-based Federation, an intra-DataNode disk balancer and much improved cloud storage connectors.</p></details>
+    <details><summary>Why was the JobTracker a bottleneck?</summary><p>It received heartbeats from every TaskTracker, scheduled every task of every job, tracked their progress and counters, and kept job history in memory. As clusters and job counts grew, one process could not keep up, and if it failed all running jobs were lost.</p></details>
+    <details><summary>Is the Secondary NameNode a backup NameNode?</summary><p>No. It periodically merges the NameNode's edit log into the fsimage (checkpointing) so the edit log does not grow forever and restarts are faster. It cannot take over if the NameNode fails. Automatic failover requires HA with a standby NameNode.</p></details>
+    <details><summary>What is the difference between replication and erasure coding?</summary><p>Replication stores full copies of each block (3× storage) and reads are simple and fast. Erasure coding splits data into data cells and computes parity cells (for example 6 + 3); any 6 of the 9 cells can rebuild the data. It needs about 1.5× storage but costs CPU and network to encode and rebuild, so it is best for cold, large files.</p></details>
+    
+  </div>
+
+  <h3 id="practice">Practice problems</h3>
+  <p class="prob-intro">Questions that test version knowledge with small programs: slots, ports, storage schemes and HA sizing.</p>
+  <div class="probs">
+    <article class="prob"><div class="prob__head"><span class="prob__num">P1</span><span class="prob__tag prob__tag--easy">Easy</span><h4>Total slots in Hadoop 1</h4></div>
+      <p>A Hadoop 1 cluster has 50 nodes with 6 map and 3 reduce slots each. How many map and reduce slots in total?</p>
+      <div class="prob__io"><div><small>Input</small><pre>50 nodes · 6 map + 3 reduce</pre></div><div><small>Expected output</small><pre>map: 300 | reduce: 150</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>print(&quot;map:&quot;, 50 * 6, &quot;| reduce:&quot;, 50 * 3)</code></pre><div class="output">map: 300 | reduce: 150</div></div>
+        <p><b>How it works:</b> 300 map and 150 reduce slots. If no reduce tasks are running, those 150 slots do nothing.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P2</span><span class="prob__tag prob__tag--easy">Easy</span><h4>Erasure coding overhead</h4></div>
+      <p>Print the storage overhead of RS-6-3 and RS-3-2 erasure coding.</p>
+      <div class="prob__io"><div><small>Input</small><pre>RS-6-3 · RS-3-2</pre></div><div><small>Expected output</small><pre>RS-6-3: 1.50x
+RS-3-2: 1.67x</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>for d, p in [(6, 3), (3, 2)]:
+    print(f&quot;RS-{d}-{p}: {(d + p) / d:.2f}x&quot;)</code></pre><div class="output">RS-6-3: 1.50x
+RS-3-2: 1.67x</div></div>
+        <p><b>How it works:</b> 1.50× and 1.67×. Both are well below the 3× of replication; RS-6-3 is the default policy.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P3</span><span class="prob__tag prob__tag--easy">Easy</span><h4>Port lookup</h4></div>
+      <p>Write code that prints the Hadoop 3 port for the NameNode web UI, given a dictionary of services.</p>
+      <div class="prob__io"><div><small>Input</small><pre>{&quot;namenode-ui&quot;: 9870, &quot;rm-ui&quot;: 8088, &quot;datanode-ui&quot;: 9864}</pre></div><div><small>Expected output</small><pre>Open http://localhost:9870</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>ports = {&quot;namenode-ui&quot;: 9870, &quot;rm-ui&quot;: 8088, &quot;datanode-ui&quot;: 9864}
+print(&quot;Open http://localhost:&quot; + str(ports[&quot;namenode-ui&quot;]))</code></pre><div class="output">Open http://localhost:9870</div></div>
+        <p><b>How it works:</b> On a fresh Hadoop 3 install, the NameNode UI is at http://localhost:9870 and YARN at http://localhost:8088.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P4</span><span class="prob__tag prob__tag--medium">Medium</span><h4>Idle slots during a map phase</h4></div>
+      <p>A Hadoop 1 cluster has 400 map slots and 200 reduce slots. 1,000 maps are waiting and no reduces. What percentage of all slots is idle? What would it be with 600 general containers?</p>
+      <div class="prob__io"><div><small>Input</small><pre>400 map + 200 reduce slots · 1000 maps waiting</pre></div><div><small>Expected output</small><pre>Hadoop 1 idle: 33%
+Hadoop 2 idle: 0%</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>total = 400 + 200
+used_h1 = min(1000, 400)
+used_h2 = min(1000, total)
+print(f&quot;Hadoop 1 idle: {(total - used_h1) / total:.0%}&quot;)
+print(f&quot;Hadoop 2 idle: {(total - used_h2) / total:.0%}&quot;)</code></pre><div class="output">Hadoop 1 idle: 33%
+Hadoop 2 idle: 0%</div></div>
+        <p><b>How it works:</b> A third of the cluster idles in Hadoop 1 while maps queue up; YARN uses it all.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P5</span><span class="prob__tag prob__tag--medium">Medium</span><h4>Survivable JournalNode failures</h4></div>
+      <p>For 3, 4, 5 and 7 JournalNodes, print how many failures a majority-based system survives.</p>
+      <div class="prob__io"><div><small>Input</small><pre>[3, 4, 5, 7]</pre></div><div><small>Expected output</small><pre>3 JournalNodes survive 1 failure(s)
+4 JournalNodes survive 1 failure(s)
+5 JournalNodes survive 2 failure(s)
+7 JournalNodes survive 3 failure(s)</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>for j in [3, 4, 5, 7]:
+    print(j, &quot;JournalNodes survive&quot;, (j - 1) // 2, &quot;failure(s)&quot;)</code></pre><div class="output">3 JournalNodes survive 1 failure(s)
+4 JournalNodes survive 1 failure(s)
+5 JournalNodes survive 2 failure(s)
+7 JournalNodes survive 3 failure(s)</div></div>
+        <p><b>How it works:</b> 3 → 1, 4 → 1, 5 → 2, 7 → 3. Even numbers add cost but no extra safety, which is why JournalNodes come in odd numbers.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P6</span><span class="prob__tag prob__tag--medium">Medium</span><h4>Map features to versions</h4></div>
+      <p>Given a list of features, print the ones that would NOT exist on a Hadoop 2 cluster.</p>
+      <div class="prob__io"><div><small>Input</small><pre>[&quot;YARN&quot;, &quot;erasure coding&quot;, &quot;NameNode HA&quot;, &quot;GPU scheduling&quot;, &quot;Federation&quot;]</pre></div><div><small>Expected output</small><pre>[&#x27;erasure coding&#x27;, &#x27;GPU scheduling&#x27;]</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>hadoop3_only = {&quot;erasure coding&quot;, &quot;GPU scheduling&quot;, &quot;multiple standby NameNodes&quot;}
+features = [&quot;YARN&quot;, &quot;erasure coding&quot;, &quot;NameNode HA&quot;, &quot;GPU scheduling&quot;, &quot;Federation&quot;]
+print([f for f in features if f in hadoop3_only])</code></pre><div class="output">[&#x27;erasure coding&#x27;, &#x27;GPU scheduling&#x27;]</div></div>
+        <p><b>How it works:</b> Erasure coding and GPU scheduling need Hadoop 3. YARN, HA and Federation arrived in Hadoop 2.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P7</span><span class="prob__tag prob__tag--business">Business problem</span><h4>Should we upgrade to Hadoop 3 for storage savings?</h4></div>
+      <p>A 2 PB cluster (raw) is full. 60% of the stored data is cold. Switching cold data from 3× replication to 1.5× erasure coding frees raw disk. The alternative is buying new nodes of 144 TB at Rs 18 lakh each. How much hardware spending does the upgrade avoid?</p>
+      <div class="prob__io"><div><small>Input</small><pre>2,048 TB raw · 60% cold · node 144 TB = Rs 18 lakh</pre></div><div><small>Expected output</small><pre>Freed 614 TB raw = 4 nodes = Rs 72 lakh avoided</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>import math
+raw = 2048
+data = raw / 3
+cold = data * 0.60
+freed = cold * 3 - cold * 1.5
+nodes = math.floor(freed / 144)
+print(f&quot;Freed {freed:.0f} TB raw = {nodes} nodes = Rs {nodes * 18} lakh avoided&quot;)</code></pre><div class="output">Freed 614 TB raw = 4 nodes = Rs 72 lakh avoided</div></div>
+        <p><b>How it works:</b> About 614 TB freed, 4 nodes (Rs 72 lakh) not bought, using illustrative prices. Weigh it against upgrade effort and the CPU cost of erasure coding.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P8</span><span class="prob__tag prob__tag--business">Business problem</span><h4>Consolidate separate MapReduce and Spark clusters</h4></div>
+      <p>A company runs a 40-node Hadoop 1 cluster for MapReduce and a separate 30-node cluster for Spark. Peak usage is 30 nodes and 20 nodes, at different times of day. With one YARN cluster, the worst-case need is the larger peak plus a quiet share of 6 nodes from the other, plus 20% spare. How many nodes are needed?</p>
+      <div class="prob__io"><div><small>Input</small><pre>peaks 30 and 20 at different times · quiet share 6 · +20%</pre></div><div><small>Expected output</small><pre>Nodes needed: 44 instead of 70</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>import math
+need = max(30, 20) + 6
+print(&quot;Nodes needed:&quot;, math.ceil(need * 1.2), &quot;instead of&quot;, 40 + 30)</code></pre><div class="output">Nodes needed: 44 instead of 70</div></div>
+        <p><b>How it works:</b> 44 instead of 70 nodes. Sharing one cluster across engines was a major business reason for YARN.</p>
+      </details>
+    </article>
+  </div>
+
+  <h3 id="scenarios">Real-world scenario questions (asked in company interviews)</h3>
+  <p class="scn-intro">Version questions show up in almost every Hadoop interview. These scenarios turn the comparison table into practical answers.</p>
+  <div class="scenarios">
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Any company · concepts</span><span class="scn__tag scn__tag--level">Fresher</span></div>
+      <h4>“Explain the difference between Hadoop 1 and 2 in two minutes.”</h4>
+      <p class="scn__situation">The classic question. The interviewer wants the main differences and the reason behind them.</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> do you know <i>why</i> YARN exists, not just its name?</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li><b>Problem:</b> in Hadoop 1, one JobTracker did resource management <i>and</i> scheduled every task of every job. It limited clusters to about 4,000 nodes, was a single point of failure, used fixed map/reduce slots (wasting capacity) and could only run MapReduce.</li>
+          <li><b>Fix (Hadoop 2):</b> YARN split it: the ResourceManager manages resources; each job has its own ApplicationMaster; NodeManagers run flexible containers. Result: bigger clusters, better utilisation, and Spark, Tez and others on the same cluster.</li>
+          <li><b>Also in Hadoop 2:</b> NameNode HA (active + standby) and Federation.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> saying “Hadoop 2 removed MapReduce”. MapReduce still exists; it runs as a YARN application.</p>
+      </div></details>
+    </article>
+
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Operations · troubleshooting</span><span class="scn__tag scn__tag--level">Fresher</span></div>
+      <h4>“The NameNode web page won't open”</h4>
+      <p class="scn__situation">A colleague installed Hadoop 3.4 from a tutorial and says HDFS is running, but <code>http://localhost:50070</code> shows “connection refused”.</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> do you know the practical version differences?</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>Hadoop 3 moved the NameNode UI to <b>9870</b>. Try <code>http://localhost:9870</code>.</li>
+          <li>Confirm with <code>jps</code> that the NameNode process is running, and check <code>dfs.namenode.http-address</code> in <code>hdfs-site.xml</code>.</li>
+          <li>The tutorial was probably written for Hadoop 2: double-check its other settings too (Java version, script names, ports for DataNodes).</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> reinstalling Hadoop before checking the port.</p>
+      </div></details>
+    </article>
+
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Platform team · upgrade</span><span class="scn__tag scn__tag--level">1–3 years</span></div>
+      <h4>Plan an upgrade from Hadoop 2.10 to 3.x</h4>
+      <p class="scn__situation">Your company runs a 60-node Hadoop 2.10 cluster with Hive and Spark jobs. Management wants it on a current 3.x release with minimal downtime.</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> can you think through compatibility and risk, not just “install the new version”?</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ol>
+          <li><b>Inventory:</b> Java version, every job and its libraries (Hive, Spark, custom jars), scripts using old shell behaviour, monitoring and firewalls using old ports.</li>
+          <li><b>Compatibility:</b> pick a 3.x release supported by your Hive and Spark versions; upgrade Java first.</li>
+          <li><b>Staging:</b> build a staging cluster on the target version and run real jobs on copies of data.</li>
+          <li><b>Upgrade:</b> back up NameNode metadata, use an HA rolling upgrade for HDFS where supported, then YARN, keeping a rollback path until finalised.</li>
+          <li><b>After:</b> update ports in monitoring, then consider Hadoop 3 features like erasure coding for cold data.</li>
+        </ol>
+        <p class="scn__avoid"><b>Avoid:</b> upgrading production directly, or enabling erasure coding everywhere on day one.</p>
+      </div></details>
+    </article>
+
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Banking · availability</span><span class="scn__tag scn__tag--level">3+ years</span></div>
+      <h4>Two NameNodes or three?</h4>
+      <p class="scn__situation">A bank's HDFS cluster uses HA with two NameNodes. Last month, while the standby was down for patching, the active NameNode's server failed, and HDFS was unavailable for an hour.</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> do you know what Hadoop 3 added for availability and how quorums work?</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>With two NameNodes, maintenance on one leaves no protection. Hadoop 3 supports <b>more than two NameNodes</b>: with one active and two standbys, one can be patched while another still protects the cluster.</li>
+          <li>Pair it with <b>five JournalNodes</b> (a majority of 3 must be alive) to tolerate two JournalNode failures as well.</li>
+          <li>Run the NameNodes on different racks and power feeds, and schedule maintenance one node at a time.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> “Use the Secondary NameNode as a third backup.” It cannot take over.</p>
+      </div></details>
+    </article>
+  </div>
+</section>
+
+<nav class="lesson-nav" id="lesson-nav" aria-label="Lesson navigation"></nav>
+<div class="ad-slot" data-slot="bottom"></div>
+</article>
+
+<aside class="lesson-side">
+  <nav class="toc" aria-label="In this lesson">
+    <h4>In this lesson</h4>
+    <ol>
+      <li><a href="#story">The story</a></li>
+      <li><a href="#definition">Definition</a></li><li><a href="#levels">Beginner → Advanced</a></li>
+      <li><a href="#types">Types and ways to use it</a></li>
+      <li><a href="#steps">Step by step</a></li>
+      <li><a href="#animation">See it happen</a></li>
+      <li><a href="#real-world">Real-world use</a></li>
+      <li><a href="#run">Run the code</a></li>
+      <li><a href="#tracer">Line by line</a></li>
+      <li><a href="#worked">Worked examples</a></li>
+      <li><a href="#quiz">Quiz and revision</a></li>
+      <li><a href="#practice">Practice problems</a></li>
+      <li><a href="#scenarios">Industry scenarios</a></li>
+    </ol>
+  </nav>
+  <div class="ad-slot" data-slot="side"></div>
+  <div class="outline" id="outline"></div>
+</aside>
+</div>
+</main>
+
+<footer class="site-footer">
+  <div class="wrap">
+    <div><h4>MyPhatshala</h4><p>Free programming and IT lessons that show what happens behind the screen.</p></div>
+    <div><h4>Learn</h4><a href="../../../../#tracks">All courses</a><a href="../../">Apache Hadoop syllabus</a></div>
+    <div><h4>Site</h4><a href="../../../../about.html">About</a><a href="../../../../contact.html">Contact</a><a href="../../../../privacy.html">Privacy policy</a><a href="../../../../disclaimer.html">Disclaimer</a></div>
+    <div class="copyright">© MyPhatshala. All lesson content, diagrams and animations are original. Please do not copy without permission.</div>
+  </div>
+</footer>
+
+<script src="../../../../data/courses/hadoop.js"></script>
+<script src="../../../../assets/js/lesson.js"></script>
+<script src="../../../../assets/js/cluster-sim.js"></script>
+<script src="../../../../assets/js/ads.js"></script>
+<script src="../../../../assets/js/site.js"></script>
+</body>
+</html>

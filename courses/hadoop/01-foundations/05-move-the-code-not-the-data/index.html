@@ -1,0 +1,5049 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Move the code, not the data | MyPhatshala</title>
+<meta name="description" content="Data locality in Hadoop: why sending a small program to the data beats moving terabytes over the network, node-local, rack-local and off-rack tasks, delay scheduling, short-circuit reads, locality counters, and when locality is given up in the cloud. With animations, a locality on/off playground, Python you can run, quiz and interview scenarios.">
+<meta name="mp:minutes" content="24">
+<link rel="canonical" href="https://myphatshala.in/courses/hadoop/01-foundations/05-move-the-code-not-the-data/">
+<meta property="og:title" content="Move the code, not the data · MyPhatshala">
+<meta property="og:description" content="Programs are kilobytes, data is terabytes. See how Hadoop ships the small thing, and prove it with job counters.">
+<link rel="icon" href="../../../../assets/img/logo.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Fraunces:ital,opsz,wght@0,9..144,600;0,9..144,700;1,9..144,600&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../../../../assets/css/style.css">
+<link rel="stylesheet" href="../../../../assets/css/lesson.css">
+<link rel="stylesheet" href="../../../../assets/css/cluster-sim.css">
+<script src="../../../../assets/js/config.js"></script>
+<script>try { const t = localStorage.getItem("mp-theme"); if (t) document.documentElement.dataset.theme = t; } catch (e) {}</script>
+<script type="application/ld+json">{"@context": "https://schema.org", "@type": "LearningResource", "name": "Move the code, not the data", "learningResourceType": "Lesson", "educationalLevel": "Beginner → Advanced", "isAccessibleForFree": true, "inLanguage": "en", "isPartOf": {"@type": "Course", "name": "Apache Hadoop", "provider": {"@type": "Organization", "name": "MyPhatshala"}}}</script>
+</head>
+<body style="--track:#B45309" data-lesson="01-foundations/05-move-the-code-not-the-data" data-course-root="../../">
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="site-header">
+  <div class="wrap">
+    <a class="brand" href="../../../../" aria-label="MyPhatshala home"><img src="../../../../assets/img/logo.svg" width="34" height="34" alt=""><span>My<b>Phatshala</b></span></a>
+    <nav class="nav" aria-label="Main">
+      <a href="../../../../#tracks">All courses</a>
+      <a href="../../">Apache Hadoop syllabus</a>
+      <button class="theme-btn" id="theme-btn" aria-label="Toggle dark mode"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg></button>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+<section class="lesson-hero">
+  <div class="wrap">
+    <nav class="crumbs" aria-label="Breadcrumb"><a href="../../../../">Home</a><span>›</span><a href="../../../../#track-big-data">Big Data Engineering</a><span>›</span><a href="../../">Apache Hadoop</a><span>›</span><b>Lesson 1.5</b></nav>
+    <h1>Move the code, not the data</h1>
+    <p class="lead">The single most important idea behind Hadoop fits in five words: move the code, not the data. This lesson shows why with real numbers (a day of copying versus minutes of processing), how Hadoop uses block locations to send each task to a node that already holds its data, what node-local, rack-local and off-rack mean, and how to check locality in a real job. Then switch locality off in the playground and watch the network fill up.</p>
+    <div class="lesson-meta"><span>Module 1 · Foundations: before Hadoop</span><span>⏱ 24 min</span><span>Beginner → Advanced</span><span>Cluster Playground</span><span>Runs in your browser (Python)</span><span>Locality counters</span><span>8 practice problems</span></div>
+  </div>
+</section>
+
+<div class="wrap lesson-layout">
+<article class="lesson-main">
+<!-- ======================= PART 1: THE STORY ======================= -->
+<section class="part" id="story">
+  <span class="part-label"><b>1</b> The story</span>
+  <h2>The weekly report that took 22 hours</h2>
+  <div class="story">
+    <p class="narration">Every Monday, TiffinGo's analytics team copies the whole week of app logs, about <b>10 TB</b> spread over 40 servers, to one big reporting server. Then a script counts orders per city. The copying alone takes most of the day. Kabir proudly tells Arjun Sir he has found the problem: “We need a faster reporting server!”</p>
+
+    <div class="scene">
+      <svg viewBox="0 0 640 186" role="img" aria-label="Left: 10 TB of data is pulled from 40 servers over the network into one big server; the network is jammed. Right: a tiny program is sent to each of the 40 servers, each processes its own data, and only small results come back.">
+        <g font-size="10">
+          <rect x="10" y="12" width="300" height="146" rx="10" class="s-soft-acc" style="stroke:#D64545;stroke-width:1.5"/>
+          <text x="160" y="32" text-anchor="middle" font-weight="700" class="s-red">Move the data to the code</text>
+          <g><rect x="24" y="46" width="34" height="22" rx="3" class="s-card2"/><rect x="24" y="74" width="34" height="22" rx="3" class="s-card2"/><rect x="24" y="102" width="34" height="22" rx="3" class="s-card2"/>
+            <rect x="66" y="46" width="34" height="22" rx="3" class="s-card2"/><rect x="66" y="74" width="34" height="22" rx="3" class="s-card2"/><rect x="66" y="102" width="34" height="22" rx="3" class="s-card2"/></g>
+          <path d="M104 57h80M104 85h80M104 113h80" style="stroke:#D64545;stroke-width:6;opacity:.7"/>
+          <rect x="190" y="52" width="104" height="66" rx="6" class="s-board"/>
+          <text x="242" y="76" text-anchor="middle" font-size="9" font-weight="700" class="s-chalk">1 big server</text>
+          <text x="242" y="94" text-anchor="middle" font-size="9" class="mono" style="fill:#FF8A80">10 TB arriving…</text>
+          <text x="160" y="146" text-anchor="middle" font-size="9" font-weight="700" class="s-red">10 TB over the network: ~22 hours</text>
+          <rect x="330" y="12" width="300" height="146" rx="10" class="s-soft-green" style="stroke:var(--green);stroke-width:1.5"/>
+          <text x="480" y="32" text-anchor="middle" font-weight="700" class="s-green">Move the code to the data</text>
+          <rect x="452" y="42" width="56" height="20" rx="4" class="s-board"/><text x="480" y="56" text-anchor="middle" font-size="8.6" font-weight="700" class="s-chalk">50 KB jar</text>
+          <path d="M480 62v12M372 74h216M372 74v8M444 74v8M516 74v8M588 74v8" class="s-line"/>
+          <g><rect x="350" y="84" width="44" height="30" rx="4" class="s-card2"/><rect x="422" y="84" width="44" height="30" rx="4" class="s-card2"/><rect x="494" y="84" width="44" height="30" rx="4" class="s-card2"/><rect x="566" y="84" width="44" height="30" rx="4" class="s-card2"/>
+            <text x="372" y="103" text-anchor="middle" font-size="8.6" class="s-green" font-weight="700">count</text><text x="444" y="103" text-anchor="middle" font-size="8.6" class="s-green" font-weight="700">count</text><text x="516" y="103" text-anchor="middle" font-size="8.6" class="s-green" font-weight="700">count</text><text x="588" y="103" text-anchor="middle" font-size="8.6" class="s-green" font-weight="700">count</text></g>
+          <text x="480" y="130" text-anchor="middle" font-size="8.6" class="s-ink2">each server reads only its own disks</text>
+          <text x="480" y="146" text-anchor="middle" font-size="9" font-weight="700" class="s-green">only tiny results travel: minutes</text>
+        </g>
+        <text x="320" y="178" text-anchor="middle" font-size="10" class="s-ink2">Programs are kilobytes. Data is terabytes. <tspan font-weight="700" class="s-acc">Ship the small thing.</tspan></text>
+        <text x="632" y="178" text-anchor="end" class="s-wm">myphatshala.in</text>
+      </svg>
+    </div>
+
+    <div class="panel"><div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#E1E9F7"/><path d="M12 64c2-12 10-18 20-18s18 6 20 18z" fill="#B45309"/><circle cx="32" cy="29" r="12" fill="#A9714A"/><path d="M19 27c0-9 6-14 13-14s13 5 13 14c-2-4-5-6-8-6-3 3-9 4-13 3-2 1-4 2-5 3z" fill="#1E1A17"/><circle cx="27.5" cy="30" r="1.5" fill="#1E1A17"/><circle cx="36.5" cy="30" r="1.5" fill="#1E1A17"/><path d="M27 35.5q5 3.5 10 0" stroke="#1E1A17" stroke-width="1.6" fill="none" stroke-linecap="round"/><rect x="41" y="40" width="10" height="7" rx="1.5" fill="#2E5AAC"/></svg></div><div class="bubble"><b class="who">Kabir</b><p>Sir, the reporting server is old. A new one with 64 cores would finish the counting much faster.</p></div></div>
+    <div class="panel panel--right"><div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#DDEFE6"/><path d="M12 64c2-12 10-18 20-18s18 6 20 18z" fill="#F4F1EA"/><path d="M28 46l4 8 4-8" fill="#2F7D5B"/><circle cx="32" cy="28" r="12" fill="#B57A50"/><path d="M20 26c0-8 5-13 12-13s12 5 12 13c-2-3-6-5-12-5s-10 2-12 5z" fill="#5A5A5A"/><path d="M22 32c1 8 5 11 10 11s9-3 10-11c-2 3-6 4-10 4s-8-1-10-4z" fill="#5A5A5A"/><circle cx="27" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><circle cx="37" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><path d="M30.4 29h3.2" stroke="#1B2433" stroke-width="1.4"/><circle cx="27" cy="29" r="1.1" fill="#1B2433"/><circle cx="37" cy="29" r="1.1" fill="#1B2433"/></svg></div><div class="bubble"><b class="who">Arjun Sir</b><p>How long does the counting take now, Kabir?</p></div></div>
+    <div class="panel"><div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#E1E9F7"/><path d="M12 64c2-12 10-18 20-18s18 6 20 18z" fill="#B45309"/><circle cx="32" cy="29" r="12" fill="#A9714A"/><path d="M19 27c0-9 6-14 13-14s13 5 13 14c-2-4-5-6-8-6-3 3-9 4-13 3-2 1-4 2-5 3z" fill="#1E1A17"/><circle cx="27.5" cy="30" r="1.5" fill="#1E1A17"/><circle cx="36.5" cy="30" r="1.5" fill="#1E1A17"/><path d="M27 35.5q5 3.5 10 0" stroke="#1E1A17" stroke-width="1.6" fill="none" stroke-linecap="round"/><rect x="41" y="40" width="10" height="7" rx="1.5" fill="#2E5AAC"/></svg></div><div class="bubble"><b class="who">Kabir</b><p>About an hour. The copying takes… twenty-one hours.</p></div></div>
+    <div class="panel panel--right"><div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#DDEFE6"/><path d="M12 64c2-12 10-18 20-18s18 6 20 18z" fill="#F4F1EA"/><path d="M28 46l4 8 4-8" fill="#2F7D5B"/><circle cx="32" cy="28" r="12" fill="#B57A50"/><path d="M20 26c0-8 5-13 12-13s12 5 12 13c-2-3-6-5-12-5s-10 2-12 5z" fill="#5A5A5A"/><path d="M22 32c1 8 5 11 10 11s9-3 10-11c-2 3-6 4-10 4s-8-1-10-4z" fill="#5A5A5A"/><circle cx="27" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><circle cx="37" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><path d="M30.4 29h3.2" stroke="#1B2433" stroke-width="1.4"/><circle cx="27" cy="29" r="1.1" fill="#1B2433"/><circle cx="37" cy="29" r="1.1" fill="#1B2433"/></svg></div><div class="bubble"><b class="who">Arjun Sir</b><p>So a faster CPU saves you part of one hour, and the twenty-one hours stay. What is actually slow?</p></div></div>
+    <div class="panel"><div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#FCE6D6"/><path d="M14 64c2-12 9-18 18-18s16 6 18 18z" fill="#2E5AAC"/><circle cx="32" cy="29" r="12" fill="#C68B5E"/><path d="M19 29c0-10 6-15 13-15s13 5 13 15c-3-5-7-8-13-8s-10 3-13 8z" fill="#2A1B14"/><path d="M43 27c3 6 3 14 0 20" stroke="#2A1B14" stroke-width="4" fill="none" stroke-linecap="round"/><circle cx="27.5" cy="30" r="1.5" fill="#2A1B14"/><circle cx="36.5" cy="30" r="1.5" fill="#2A1B14"/><path d="M28 35q4 3 8 0" stroke="#2A1B14" stroke-width="1.6" fill="none" stroke-linecap="round"/><circle cx="32" cy="24" r="1.2" fill="#D64545"/></svg></div><div class="bubble"><b class="who">Riya</b><p>Moving 10 TB over the network!</p></div></div>
+    <div class="panel panel--right"><div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#DDEFE6"/><path d="M12 64c2-12 10-18 20-18s18 6 20 18z" fill="#F4F1EA"/><path d="M28 46l4 8 4-8" fill="#2F7D5B"/><circle cx="32" cy="28" r="12" fill="#B57A50"/><path d="M20 26c0-8 5-13 12-13s12 5 12 13c-2-3-6-5-12-5s-10 2-12 5z" fill="#5A5A5A"/><path d="M22 32c1 8 5 11 10 11s9-3 10-11c-2 3-6 4-10 4s-8-1-10-4z" fill="#5A5A5A"/><circle cx="27" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><circle cx="37" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><path d="M30.4 29h3.2" stroke="#1B2433" stroke-width="1.4"/><circle cx="27" cy="29" r="1.1" fill="#1B2433"/><circle cx="37" cy="29" r="1.1" fill="#1B2433"/></svg></div><div class="bubble"><b class="who">Arjun Sir</b><p>Right. Now think. The data is already on 40 servers, and each of those servers has a CPU sitting idle. Your counting program is maybe 50 kilobytes. What if you sent the program to the data, and each server counted its own part?</p></div></div>
+    <div class="panel"><div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#E1E9F7"/><path d="M12 64c2-12 10-18 20-18s18 6 20 18z" fill="#B45309"/><circle cx="32" cy="29" r="12" fill="#A9714A"/><path d="M19 27c0-9 6-14 13-14s13 5 13 14c-2-4-5-6-8-6-3 3-9 4-13 3-2 1-4 2-5 3z" fill="#1E1A17"/><circle cx="27.5" cy="30" r="1.5" fill="#1E1A17"/><circle cx="36.5" cy="30" r="1.5" fill="#1E1A17"/><path d="M27 35.5q5 3.5 10 0" stroke="#1E1A17" stroke-width="1.6" fill="none" stroke-linecap="round"/><rect x="41" y="40" width="10" height="7" rx="1.5" fill="#2E5AAC"/></svg></div><div class="bubble"><b class="who">Kabir</b><p>Then only the counts come back, a few kilobytes each. That's… the whole idea of Hadoop, isn't it?</p></div></div>
+    <div class="panel panel--right"><div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#DDEFE6"/><path d="M12 64c2-12 10-18 20-18s18 6 20 18z" fill="#F4F1EA"/><path d="M28 46l4 8 4-8" fill="#2F7D5B"/><circle cx="32" cy="28" r="12" fill="#B57A50"/><path d="M20 26c0-8 5-13 12-13s12 5 12 13c-2-3-6-5-12-5s-10 2-12 5z" fill="#5A5A5A"/><path d="M22 32c1 8 5 11 10 11s9-3 10-11c-2 3-6 4-10 4s-8-1-10-4z" fill="#5A5A5A"/><circle cx="27" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><circle cx="37" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><path d="M30.4 29h3.2" stroke="#1B2433" stroke-width="1.4"/><circle cx="27" cy="29" r="1.1" fill="#1B2433"/><circle cx="37" cy="29" r="1.1" fill="#1B2433"/></svg></div><div class="bubble"><b class="who">Arjun Sir</b><p>It's the most important idea in this whole module: <b>move the code, not the data</b>. Hadoop calls it <b>data locality</b>.</p></div></div>
+  </div>
+</section>
+
+<!-- ======================= PART 2: DEFINITION ======================= -->
+<section class="part" id="definition">
+  <span class="part-label"><b>2</b> Definition</span>
+  <h2>Data locality: move the code, not the data</h2>
+  <div class="def">
+    <div class="def__formal"><small>Formal definition (write this in exams)</small>
+      <p><b>Data locality</b> is the principle of running a computation on, or as close as possible to, the node where its input data is stored, instead of transferring the data across the network to the computation. In Hadoop, the scheduler uses the block locations reported by HDFS to place each task on a node that holds a replica of its input block (<b>node-local</b> or <b>data-local</b>); if none is free, on another node in the same rack (<b>rack-local</b>); and only as a last resort elsewhere (<b>off-rack</b>). This minimises network traffic, which is usually the scarcest resource in a cluster.</p></div>
+    <div class="def__simple"><small>In simple words</small>
+      <p>Data is huge and the network is slow, but programs are tiny. So Hadoop sends the program to the machines that already have the data, and each machine works on what is on its own disks. Only small results travel over the network.</p></div>
+  </div>
+  <div class="callout callout--tip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18h6M10 22h4M12 2a7 7 0 0 0-4 12.7V17h8v-2.3A7 7 0 0 0 12 2z"/></svg><p><b>Coming from Big Data Fundamentals?</b> Its lesson <a href="../../../big-data-fundamentals/01-introduction/03-distributed-computing-basics/">Distributed computing basics</a> introduced “move the program, not the data” as a general idea. Here you will see exactly how Hadoop does it: block locations, node-local and rack-local tasks, and the counters that prove it.</p></div>
+
+  <h3>Words you'll meet in this lesson</h3>
+  <div class="terms">
+    <div class="term"><b>Data locality</b><span>Running a task where its data already is.</span></div>
+    <div class="term"><b>Node-local (data-local)</b><span>The task runs on a node that holds a replica of its block. No network needed for input.</span></div>
+    <div class="term"><b>Rack-local</b><span>The task runs on another node in the same rack. Data crosses only the rack switch.</span></div>
+    <div class="term"><b>Off-rack</b><span>The task runs in a different rack. Data crosses the shared core network.</span></div>
+    <div class="term"><b>Input split</b><span>The piece of input one map task processes; usually one HDFS block.</span></div>
+    <div class="term"><b>Delay scheduling</b><span>Waiting a short time for a slot on a node with the data, rather than starting the task somewhere else at once.</span></div>
+    <div class="term"><b>Network distance</b><span>Hadoop's measure of “how far”: 0 same node, 2 same rack, 4 other rack.</span></div>
+    <div class="term"><b>Short-circuit read</b><span>When the task is on the same node as the block, it can read the file directly from local disk, skipping the DataNode network path.</span></div>
+  </div>
+
+  <h3>Why it matters: the numbers</h3>
+  <table class="facts">
+    <tr><th>A typical MapReduce job jar</th><td>tens of KB to a few MB</td></tr>
+    <tr><th>Input of a typical job</th><td>GB to TB</td></tr>
+    <tr><th>Moving 10 TB over 1 Gbps</th><td>about 23 hours (10 × 1,024 × 8 ÷ 1 Gbps ≈ 81,920 s)</td></tr>
+    <tr><th>Moving 10 TB over 10 Gbps</th><td>about 2.3 hours, if nothing else uses the link</td></tr>
+    <tr><th>40 nodes each reading 256 GB locally at 1 GB/s (many disks)</th><td>about 4–5 minutes, all in parallel</td></tr>
+    <tr><th>Job counters that show locality</th><td><code>Data-local map tasks</code>, <code>Rack-local map tasks</code> (and other local tasks)</td></tr>
+  </table>
+  <p class="muted">Times are back-of-the-envelope estimates. Real networks are shared, and disks and protocols add overhead.</p>
+
+  <h3 id="levels">Locality at three levels</h3>
+  <div class="modlab levels"><div class="modlab__bar"><b>Pick your level. New to this? Start at Beginner and climb.</b><button type="button" data-mod="b">Beginner</button><button type="button" data-mod="i">Intermediate</button><button type="button" data-mod="a">Advanced</button></div>
+    <div class="modlab__panel" data-mod="b"><h4><span class="lvl lvl--b">Beginner</span> The census enumerator</h4>
+      <ul>
+        <li>India's census does not bring every family to one office to be counted.</li>
+        <li>It sends enumerators (the “program”) to every area. Each one counts the families there (the “data”).</li>
+        <li>Only the totals travel back to the district office, then the state, then Delhi.</li>
+        <li>Moving people would take forever; moving a few counters and some forms is easy. Hadoop works the same way.</li>
+      </ul>
+
+    </div>
+    <div class="modlab__panel" data-mod="i"><h4><span class="lvl lvl--i">Intermediate</span> How Hadoop places tasks near the data</h4>
+      <ul>
+        <li>When a job starts, it asks the NameNode for the <b>locations of every input block</b> (each block has 3 replicas, so 3 candidate nodes).</li>
+        <li>The ApplicationMaster asks YARN for containers <b>on those nodes</b>. If one of them has a free slot, the map task runs there: <b>node-local</b>.</li>
+        <li>If all three are busy, YARN may wait briefly (delay scheduling), then try a node in the <b>same rack</b>, then anywhere.</li>
+        <li>After the job, the counters show how well it went, for example <code>Data-local map tasks=118</code> and <code>Rack-local map tasks=10</code>.</li>
+        <li>Three replicas help locality too: three places a task could run locally instead of one.</li>
+      </ul>
+
+    </div>
+    <div class="modlab__panel" data-mod="a"><h4><span class="lvl lvl--a">Advanced</span> Where locality breaks down, and the modern view</h4>
+      <ul>
+        <li><b>Shuffle can't be local:</b> map outputs must travel to the reducers. Locality saves the input read, not the shuffle. Combiners (Module 9) shrink what is shuffled.</li>
+        <li><b>Small files:</b> thousands of tiny blocks mean thousands of tiny tasks; scheduling overhead dominates (Module 7).</li>
+        <li><b>Hot spots:</b> if everyone reads the same popular file, its 3 holders are overloaded. Raise replication for such files.</li>
+        <li><b>Cloud object storage:</b> with data in S3/GCS/ADLS and compute on separate VMs, there is no node-local option. It works because cloud data-centre networks are very fast and storage is built for parallel reads. Many teams now accept this trade: cheaper, elastic compute in exchange for less locality.</li>
+        <li><b>Spark</b> uses the same idea through “preferred locations” for each partition, and also caches data in memory on the executors.</li>
+      </ul>
+
+    </div>
+  </div>
+  <div class="callout callout--exam"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19V5a2 2 0 0 1 2-2h12v18H6a2 2 0 0 1-2-2zm0 0a2 2 0 0 1 2-2h12"/></svg><p><b>Exam tip:</b> “Explain data locality in Hadoop” is a favourite question. Give the definition, the three levels (<b>node-local → rack-local → off-rack</b>), why it matters (network is the bottleneck; code is small, data is big), and how HDFS block locations and replication make it possible.</p></div>
+</section>
+
+<!-- ======================= PART 3: TYPES AND WAYS TO USE IT ======================= -->
+<section class="part" id="types">
+  <span class="part-label"><b>3</b> Types and ways to use it</span>
+  <h2>Three levels of locality</h2>
+  <div class="table-wrap">
+  <table class="compare" style="min-width:600px">
+    <thead><tr><th>Level</th><th>Where the task runs</th><th>Path of the input data</th><th>Network distance</th><th>Cost</th></tr></thead>
+    <tbody>
+      <tr><td><b>Node-local</b></td><td>On a node holding a replica</td><td>Local disk → task</td><td>0</td><td>Cheapest</td></tr>
+      <tr><td><b>Rack-local</b></td><td>Another node, same rack</td><td>Disk → ToR switch → task</td><td>2</td><td>Low</td></tr>
+      <tr><td><b>Off-rack</b></td><td>A node in another rack</td><td>Disk → ToR → core → ToR → task</td><td>4</td><td>Highest: uses the shared uplinks</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <h3>Ways systems put compute near data</h3>
+  <div class="cards">
+    <div class="card"><h4>Co-located storage and compute</h4><p>Every worker runs both a DataNode and a NodeManager, so the CPU sits next to the disks. Classic on-premises Hadoop.</p><span class="tag">Hadoop default</span></div>
+    <div class="card"><h4>Locality-aware scheduling</h4><p>The scheduler is told where each block is and prefers those nodes, with delay scheduling to wait for a local slot.</p><span class="tag">YARN, Spark</span></div>
+    <div class="card"><h4>Push filters down</h4><p>Ask the storage to drop rows and columns early (for example Parquet column pruning), so less data is read and moved at all.</p><span class="tag">Read less</span></div>
+    <div class="card"><h4>Combine before sending</h4><p>Sum or count locally first, then send only the partial results. The MapReduce combiner does this.</p><span class="tag">Send less</span></div>
+    <div class="card"><h4>Disaggregated (cloud)</h4><p>Storage and compute are separate services. Locality is traded for elasticity, helped by very fast networks.</p><span class="tag">Modern cloud</span></div>
+  </div>
+  <div class="callout callout--tip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18h6M10 22h4M12 2a7 7 0 0 0-4 12.7V17h8v-2.3A7 7 0 0 0 12 2z"/></svg><p>You can check locality for any finished MapReduce job: open it in the JobHistory web UI or run <code>mapred job -status &lt;job-id&gt;</code> and look at the job counters. If most map tasks are not data-local, look for busy nodes, a misconfigured rack script, or too few replicas.</p></div>
+</section>
+
+<!-- ======================= PART 4: STEP BY STEP ======================= -->
+<section class="part" id="steps">
+  <span class="part-label"><b>4</b> Step by step</span>
+  <h2>How Hadoop sends one map task to its data</h2>
+  <ol class="stepper">
+    <li><h4>The job asks: where is the input?</h4>
+      <div class="code" data-lang="python" data-file="locations.py"><pre><code>block_locations = {               # what the NameNode answers
+    "blk_1": ["dn1", "dn4", "dn5"],
+    "blk_2": ["dn2", "dn4", "dn6"],
+}
+print(block_locations["blk_1"])</code></pre><div class="output">['dn1', 'dn4', 'dn5']</div></div>
+      <span class="behind">The client computes the input splits (normally one per block) and records the nodes that hold each one. This list travels with the job.</span></li>
+    <li><h4>The ApplicationMaster asks for containers on those nodes</h4>
+      <p>For the task of <code>blk_1</code>, it asks YARN: “a container on dn1, dn4 or dn5, or failing that, on /rack1 or /rack2.”</p>
+      <span class="behind">YARN resource requests can name specific hosts and racks. The scheduler tries to satisfy the most local one first.</span></li>
+    <li><h4>Only the program travels</h4>
+      <p>The job jar (say 50 KB) and the configuration are copied to the chosen node, and the task JVM starts there.</p>
+      <span class="behind">Hadoop puts job files in HDFS and each NodeManager downloads them once per job, shared by all tasks on that node. Even with 1,000 tasks, this is tiny compared with the input data.</span></li>
+    <li><h4>The task reads its block from local disk</h4>
+      <p>The map task opens <code>blk_1</code>. Because dn1 itself holds a replica, the HDFS client reads it from dn1's disk.</p>
+      <span class="behind">With <b>short-circuit local reads</b> enabled, the task reads the block file straight from disk without going through the DataNode's network socket, which is faster still.</span></li>
+    <li><h4>Only small results leave the node</h4>
+      <p>The map task writes its output (for example counts per city) to dn1's local disk. Reducers fetch only these small outputs.</p>
+      <span class="behind">128 MB of logs might become a few KB of counts. That is the shuffle: the only big network step of a MapReduce job, and much smaller than moving the input.</span></li>
+  </ol>
+</section>
+
+<!-- ======================= PART 5: SEE IT HAPPEN ======================= -->
+<section class="part" id="animation">
+  <span class="part-label"><b>5</b> See it happen</span>
+  <h2>Same report, two ways: what Kabir sees, and what crosses the network</h2>
+  <p>First the old way (copy all data to one server), then the Hadoop way (send the program to the data). Left: Kabir's terminal. Right: what moves across the cluster.</p>
+  <div class="anim" data-frames="6">
+    <div class="anim__title">Move the data vs move the code <span>6 steps</span></div>
+    <div class="anim__views">
+      <div class="view view--see">
+        <span class="view__tag">What you see</span>
+        <svg viewBox="0 0 360 250" role="img" aria-label="Kabir's terminal for both approaches">
+          <rect x="14" y="14" width="332" height="206" rx="8" class="s-board"/>
+          <text x="26" y="32" font-size="9" class="mono" style="fill:#7F8C86">kabir@edge-01 : ~</text>
+          <g data-on="1">
+            <text x="26" y="56" font-size="9" class="mono" style="fill:#7F8C86">$ ./copy_week_logs.sh  (40 servers)</text>
+            <text x="26" y="74" font-size="9" class="mono" style="fill:#9FD3B8">copied 0.4 TB of 10 TB …</text>
+            <rect x="26" y="88" width="300" height="12" rx="3" style="fill:#33413B"/><rect x="26" y="88" width="12" height="12" rx="3" style="fill:#F5C77E"/>
+            <text x="26" y="118" font-size="9" class="mono" style="fill:#F5C77E">time left: 21 h 10 min</text>
+          </g>
+          <g data-on="2">
+            <text x="26" y="56" font-size="9" class="mono" style="fill:#7F8C86">(next morning)</text>
+            <text x="26" y="74" font-size="9" class="mono" style="fill:#9FD3B8">copy done. python count_cities.py</text>
+            <text x="26" y="92" font-size="9" class="mono" style="fill:#9FD3B8">done in 58 min</text>
+            <text x="26" y="116" font-size="9" class="mono" style="fill:#FF8A80">total: about 22 hours</text>
+          </g>
+          <g data-on="3">
+            <text x="26" y="56" font-size="9" class="mono" style="fill:#7F8C86">$ hadoop jar city-count.jar CityCount \</text>
+            <text x="26" y="72" font-size="9" class="mono" style="fill:#7F8C86">    /logs/week42 /out/week42</text>
+            <text x="26" y="92" font-size="9" class="mono" style="fill:#9FD3B8">number of splits: 81920</text>
+          </g>
+          <g data-on="4">
+            <text x="26" y="56" font-size="9" class="mono" style="fill:#9FD3B8"> map 35% reduce 0%</text>
+            <text x="26" y="72" font-size="9" class="mono" style="fill:#9FD3B8"> map 78% reduce 0%</text>
+            <text x="26" y="88" font-size="9" class="mono" style="fill:#9FD3B8"> map 100% reduce 61%</text>
+          </g>
+          <g data-on="5">
+            <text x="26" y="56" font-size="9" class="mono" style="fill:#9FD3B8">Job completed successfully</text>
+            <text x="26" y="72" font-size="9" class="mono" style="fill:#7F8C86">Job Counters</text>
+            <text x="26" y="88" font-size="9" class="mono" style="fill:#9FD3B8">  Data-local map tasks=79462</text>
+            <text x="26" y="104" font-size="9" class="mono" style="fill:#F5C77E">  Rack-local map tasks=2458</text>
+            <text x="26" y="128" font-size="9" class="mono" style="fill:#9FD3B8">elapsed: 41 min</text>
+          </g>
+          <g data-on="6">
+            <text x="26" y="56" font-size="9" class="mono" style="fill:#7F8C86">Old way : ~22 hours</text>
+            <text x="26" y="74" font-size="9" class="mono" style="fill:#9FD3B8">Hadoop  :  41 minutes</text>
+            <text x="180" y="190" text-anchor="middle" font-size="10" class="s-chalk">Same data, same servers. Only the direction changed.</text>
+          </g>
+          <text x="352" y="244" text-anchor="end" class="s-wm">myphatshala.in</text>
+        </svg>
+        <ol class="caps" hidden>
+          <li><b>Old way:</b> Kabir's script copies the week's 10 TB of logs from 40 servers to one reporting server. The estimate says over 21 hours.</li>
+          <li>Next morning the copy finishes and counting takes under an hour. About 22 hours in total, almost all of it moving data.</li>
+          <li><b>Hadoop way:</b> the logs already sit in HDFS on the 40 nodes. Kabir submits a small job jar. 10 TB in 128 MB blocks gives 81,920 input splits.</li>
+          <li>Thousands of map tasks run at the same time across the cluster, each on its own block.</li>
+          <li>The counters show that about 97% of map tasks were <b>data-local</b> and the rest rack-local. The job takes 41 minutes.</li>
+          <li>Same data, same servers. Moving the code instead of the data turned a day into minutes. (Times are illustrative.)</li>
+        </ol>
+      </div>
+
+      <div class="view view--behind">
+        <span class="view__tag">Behind the screen</span>
+        <svg viewBox="0 0 360 250" role="img" aria-label="Data flowing to one server versus a jar flowing to many nodes">
+          <rect x="130" y="12" width="100" height="22" rx="5" class="s-board"/><text x="180" y="27" text-anchor="middle" font-size="9" font-weight="700" class="s-chalk">core switch</text>
+          <rect x="10" y="60" width="160" height="126" rx="8" class="s-card2"/><text x="90" y="76" text-anchor="middle" font-size="9" font-weight="700" class="s-ink">rack 1</text>
+          <rect x="190" y="60" width="160" height="126" rx="8" class="s-card2"/><text x="270" y="76" text-anchor="middle" font-size="9" font-weight="700" class="s-ink">rack 2</text>
+          <g>
+            <rect x="20" y="86" width="66" height="40" rx="5" class="s-card"/><rect x="94" y="86" width="66" height="40" rx="5" class="s-card"/><rect x="20" y="134" width="66" height="40" rx="5" class="s-card"/><rect x="94" y="134" width="66" height="40" rx="5" class="s-card"/>
+            <rect x="200" y="86" width="66" height="40" rx="5" class="s-card"/><rect x="274" y="86" width="66" height="40" rx="5" class="s-card"/><rect x="200" y="134" width="66" height="40" rx="5" class="s-card"/><rect x="274" y="134" width="66" height="40" rx="5" class="s-card"/>
+            <text x="53" y="101" text-anchor="middle" font-size="8" class="s-ink2">250 GB</text><text x="127" y="101" text-anchor="middle" font-size="8" class="s-ink2">250 GB</text><text x="53" y="149" text-anchor="middle" font-size="8" class="s-ink2">250 GB</text><text x="127" y="149" text-anchor="middle" font-size="8" class="s-ink2">250 GB</text>
+            <text x="233" y="101" text-anchor="middle" font-size="8" class="s-ink2">250 GB</text><text x="307" y="101" text-anchor="middle" font-size="8" class="s-ink2">250 GB</text><text x="233" y="149" text-anchor="middle" font-size="8" class="s-ink2">250 GB</text><text x="307" y="149" text-anchor="middle" font-size="8" class="s-ink2">250 GB</text>
+          </g>
+          <path d="M90 60V46h60V34M270 60V46h-60V34" class="s-wire"/>
+          <g data-on="1-2">
+            <rect x="120" y="200" width="120" height="30" rx="6" class="s-board"/><text x="180" y="219" text-anchor="middle" font-size="9" font-weight="700" class="s-chalk">report server</text>
+            <path d="M90 186v6h52v8M270 186v6h-52v8" style="fill:none;stroke:#D64545;stroke-width:5"/>
+            <path d="M150 34v-4M210 34v-4" style="stroke:#D64545;stroke-width:5"/>
+          </g>
+          <g data-on="1"><text x="180" y="54" text-anchor="middle" font-size="9" font-weight="700" class="s-red">10 TB flowing in</text></g>
+          <g data-on="2"><text x="180" y="54" text-anchor="middle" font-size="9" font-weight="700" class="s-red">links jammed for hours</text></g>
+          <g data-on="3">
+            <rect x="150" y="196" width="60" height="22" rx="4" class="s-soft-acc" style="stroke:var(--track)"/><text x="180" y="211" text-anchor="middle" font-size="8.6" font-weight="700" class="s-acc">jar 50 KB</text>
+            <path d="M180 196v-6M180 190H53v-4M180 190h127v-4" class="s-line" style="fill:none"/>
+            <text x="180" y="54" text-anchor="middle" font-size="9" font-weight="700" class="s-acc">only the program travels</text>
+          </g>
+          <g data-on="4">
+            <rect x="24" y="110" width="58" height="10" rx="2" class="s-green"/><rect x="98" y="110" width="58" height="10" rx="2" class="s-green"/><rect x="24" y="158" width="58" height="10" rx="2" class="s-green"/><rect x="98" y="158" width="58" height="10" rx="2" class="s-green"/>
+            <rect x="204" y="110" width="58" height="10" rx="2" class="s-green"/><rect x="278" y="110" width="58" height="10" rx="2" class="s-green"/><rect x="204" y="158" width="58" height="10" rx="2" class="s-green"/><rect x="278" y="158" width="58" height="10" rx="2" class="s-green"/>
+            <text x="180" y="54" text-anchor="middle" font-size="9" font-weight="700" class="s-green">every node reads its own disks</text>
+          </g>
+          <g data-on="5">
+            <rect x="24" y="110" width="58" height="10" rx="2" class="s-green"/><rect x="98" y="110" width="58" height="10" rx="2" class="s-green"/><rect x="24" y="158" width="58" height="10" rx="2" class="s-green"/><rect x="98" y="158" width="58" height="10" rx="2" class="s-green"/>
+            <rect x="204" y="110" width="58" height="10" rx="2" class="s-green"/><rect x="278" y="110" width="58" height="10" rx="2" style="fill:#E0A100"/><rect x="204" y="158" width="58" height="10" rx="2" class="s-green"/><rect x="278" y="158" width="58" height="10" rx="2" class="s-green"/>
+            <path d="M266 106h8" style="stroke:#E0A100;stroke-width:3"/>
+            <text x="180" y="54" text-anchor="middle" font-size="9" font-weight="700" class="s-acc">a few tasks read from a neighbour</text>
+          </g>
+          <g data-on="6">
+            <path d="M53 126v4h254v-4" style="fill:none;stroke:var(--violet,#8B5CF6);stroke-width:2;stroke-dasharray:4 3"/>
+            <text x="180" y="54" text-anchor="middle" font-size="9" font-weight="700" class="s-ink">only small counts are shuffled</text>
+          </g>
+          <text x="352" y="246" text-anchor="end" class="s-wm">myphatshala.in</text>
+        </svg>
+        <ol class="caps" hidden>
+          <li>The old way pulls every node's data through the rack switches and the core switch into one server. All links fill up.</li>
+          <li>For hours the network is the bottleneck. The report server's CPU mostly waits, and other jobs suffer too.</li>
+          <li>The Hadoop way: the job jar (tens of KB) is sent to the nodes that hold the blocks. That is all that crosses the network at the start.</li>
+          <li>Each node's map tasks read the blocks <b>on its own disks</b>, all nodes at once. No input data crosses the core switch.</li>
+          <li>When a node's slots are busy, a task may run on a neighbour in the <b>same rack</b> (rack-local). Data crosses only the rack switch.</li>
+          <li>The only big network step is the shuffle of map outputs, which are tiny here (counts per city).</li>
+        </ol>
+      </div>
+    </div>
+  </div>
+
+  <h3 id="playground">Try it yourself: locality on, locality off</h3>
+  <p>Run the same job twice: once with Hadoop's normal locality-aware scheduling, and once with locality switched off, so tasks go to any free node and must pull their block over the network (red packets).</p>
+  <div class="csim"><script type="application/json">{"title": "Locality on, locality off", "intro": "<p>A 2 GB file (16 blocks) is stored on 6 nodes. Green task bars are <b>node-local<\/b>, amber are <b>rack-local<\/b>, red are <b>off-rack<\/b>. Red packets are input blocks being pulled over the network.<\/p>", "racks": 2, "nodes": 3, "features": ["job", "locality"], "speed": 2, "preload": [{"name": "tiffingo_logs_week42.log", "sizeMB": 2048}], "try": [{"text": "Keep <b>Move code to data<\/b> ticked and run the job. Almost every bar is green.", "on": "job-done"}, {"text": "Untick it and run again. Tasks land anywhere and pull their blocks over the network.", "on": "job-done-nolocal"}, {"text": "Open <b>Job runs<\/b> and compare the network used and the time. Which resource did locality save?"}]}</script></div>
+</section>
+
+<!-- ======================= PART 6: REAL-WORLD USE ======================= -->
+<section class="part" id="real-world">
+  <span class="part-label"><b>6</b> Real-world use</span>
+  <h2>Where moving the code wins</h2>
+
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="16" y="22" width="88" height="46" rx="6" class="s-card2"/><text x="60" y="42" text-anchor="middle" font-size="9" font-weight="700" class="s-ink mono">GET /order</text><text x="60" y="58" text-anchor="middle" font-size="8.6" class="s-ink2">billions of log lines</text></svg></div>
+    <div><h4>1. Log analysis</h4>
+      <p>Web and app servers write billions of log lines a day into HDFS. Counting errors, sessions or orders per city runs where the logs are stored; only the totals move.</p>
+      <div class="uc-flow"><span>Logs in HDFS</span><i>→</i><span class="java">Map tasks on each node</span><i>→</i><span>Small totals</span></div></div>
+  </div>
+
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="18" y="18" width="84" height="54" rx="6" class="s-soft-blue" style="stroke:var(--blue)"/><text x="60" y="40" text-anchor="middle" font-size="9" font-weight="700" class="s-blue">₹ txn</text><text x="60" y="58" text-anchor="middle" font-size="8.6" class="s-ink">filter → flag</text></svg></div>
+    <div><h4>2. Scanning transactions for fraud rules</h4>
+      <p>A bank re-checks months of card and UPI transactions against new fraud rules. Each node filters its own blocks and sends back only the suspicious rows, a tiny fraction of the data.</p>
+      <div class="uc-flow"><span>All transactions</span><i>→</i><span class="java">Filter where stored</span><i>→</i><span>Few suspicious rows</span></div></div>
+  </div>
+
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="16" y="20" width="26" height="50" rx="3" class="s-card2"/><rect x="47" y="20" width="26" height="50" rx="3" style="fill:var(--track)"/><rect x="78" y="20" width="26" height="50" rx="3" class="s-card2"/><text x="60" y="84" text-anchor="middle" font-size="8.6" class="s-ink">read 1 column of 50</text></svg></div>
+    <div><h4>3. Columnar formats: move less from disk too</h4>
+      <p>Hive and Spark queries on Parquet or ORC files read only the columns a query needs and skip blocks whose min/max values can't match. Locality cuts network; columnar formats cut disk reads (Module 10).</p>
+      <div class="uc-flow"><span>Query</span><i>→</i><span class="java">Read needed columns</span><i>→</i><span>Less I/O</span></div></div>
+  </div>
+
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><path d="M30 60a18 18 0 0 1 4-35 24 24 0 0 1 46 6 15 15 0 0 1 10 29z" class="s-soft-blue" style="stroke:var(--blue);stroke-width:2"/><text x="60" y="52" text-anchor="middle" font-size="8.6" font-weight="700" class="s-blue">object store</text></svg></div>
+    <div><h4>4. Cloud: when locality is given up on purpose</h4>
+      <p>Many companies keep data in cloud object storage and spin up compute clusters per job. There is no node-local read, but the cloud network is fast and the cluster can be deleted afterwards. Knowing locality helps you understand that trade-off.</p>
+      <div class="uc-flow"><span>Object storage</span><i>→</i><span class="java">Fast network reads</span><i>→</i><span>Elastic compute</span></div></div>
+  </div>
+
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="20" y="16" width="80" height="58" rx="6" class="s-board"/><text x="60" y="38" text-anchor="middle" font-size="8.6" class="mono" style="fill:#9FD3B8">Data-local 97%</text><text x="60" y="56" text-anchor="middle" font-size="8.6" class="mono" style="fill:#F5C77E">Rack-local  3%</text></svg></div>
+    <div><h4>5. Tuning a slow job</h4>
+      <p>When a job is slow, one of the first things an engineer checks is the locality counters. A sudden drop in data-local tasks often points to a full cluster, a broken rack script, or data written with replication 1.</p>
+      <div class="uc-flow"><span>Slow job</span><i>→</i><span class="java">Check counters</span><i>→</i><span>Fix placement</span></div></div>
+  </div>
+  <p class="muted">Examples are simplified; figures are illustrative.</p>
+</section>
+
+
+<div class="ad-slot" data-slot="mid"></div>
+
+<section class="part" id="run">
+  <span class="part-label"><b>7</b> Run the code</span>
+  <h2>Move the data or move the code? Do the maths</h2>
+  <p>Compare the time to bring all the data to one machine with the time to send a small program to every node and let each read its own share in parallel. Then try the challenges, including a tiny locality-aware scheduler.</p>
+  <div class="code" data-lang="python" data-file="main.py"><pre><code>data_tb = 10
+nodes = 40
+network_gbps = 10          # link into the single reporting server
+local_read_gb_s = 1.0      # each node, many disks in parallel
+jar_kb = 50
+
+move_data_h = data_tb * 1024 * 8 / network_gbps / 3600
+move_code_s = jar_kb * 8 / 1024 / 1024 / network_gbps
+local_min = data_tb * 1024 / nodes / local_read_gb_s / 60
+
+print(f&quot;Move the data : {move_data_h:.1f} hours of transfer&quot;)
+print(f&quot;Move the code : {move_code_s:.5f} s to send the jar&quot;)
+print(f&quot;Then each node reads its share in {local_min:.1f} minutes&quot;)</code></pre><div class="output">Move the data : 2.3 hours of transfer
+Move the code : 0.00004 s to send the jar
+Then each node reads its share in 4.3 minutes</div></div>
+  <ul class="anno"><li><code>move_data_h = data_tb * 1024 * 8 / network_gbps / 3600</code><span>TB → GB (× 1024), bytes → bits (× 8), ÷ link speed in Gbit/s = seconds, ÷ 3600 = hours.</span></li><li><code>move_code_s = jar_kb * 8 / 1024 / 1024 / network_gbps</code><span>The same formula for a 50 KB jar: KB → Gbit is ÷ 1024 ÷ 1024 after × 8.</span></li><li><code>local_min = data_tb * 1024 / nodes / local_read_gb_s / 60</code><span>Each node reads only its own 1/40th of the data, and all nodes read at the same time.</span></li></ul>
+  <div class="runner">
+    <script type="application/json">{
+ "lang": "python",
+ "file": "main.py",
+ "tasks": [
+  {
+   "label": "1 · Data vs code",
+   "hint": "Press <b>Run<\/b>. Then make the network 100 Gbps. Moving data is still far slower than reading locally in parallel. Try 400 nodes.",
+   "code": "data_tb = 10\nnodes = 40\nnetwork_gbps = 10          # link into the single reporting server\nlocal_read_gb_s = 1.0      # each node, many disks in parallel\njar_kb = 50\n\nmove_data_h = data_tb * 1024 * 8 / network_gbps / 3600\nmove_code_s = jar_kb * 8 / 1024 / 1024 / network_gbps\nlocal_min = data_tb * 1024 / nodes / local_read_gb_s / 60\n\nprint(f\"Move the data : {move_data_h:.1f} hours of transfer\")\nprint(f\"Move the code : {move_code_s:.5f} s to send the jar\")\nprint(f\"Then each node reads its share in {local_min:.1f} minutes\")\n"
+  },
+  {
+   "label": "2 · Pick a local node",
+   "hint": "<b>Predict first:<\/b> which node does each task get? A task goes to the first free node holding its block, otherwise to any free node.",
+   "code": "blocks = {\"T1\": [\"dn1\", \"dn4\"], \"T2\": [\"dn1\", \"dn2\"], \"T3\": [\"dn1\", \"dn5\"]}\nfree = [\"dn1\", \"dn2\", \"dn3\"]\n\nfor task, holders in blocks.items():\n    local = [n for n in holders if n in free]\n    node = local[0] if local else free[0]\n    free.remove(node)\n    print(task, \"->\", node, \"(local)\" if local else \"(remote)\")\n"
+  },
+  {
+   "label": "3 · Network distance",
+   "hint": "Hadoop measures distance as 0 (same node), 2 (same rack), 4 (other rack). Find the closest replica for a task on dn3.",
+   "code": "rack = {\"dn1\": \"r1\", \"dn2\": \"r1\", \"dn3\": \"r1\", \"dn4\": \"r2\", \"dn5\": \"r2\"}\n\ndef distance(a, b):\n    if a == b:\n        return 0\n    return 2 if rack[a] == rack[b] else 4\n\nreplicas = [\"dn5\", \"dn2\", \"dn4\"]\nbest = min(replicas, key=lambda r: distance(\"dn3\", r))\nprint({r: distance(\"dn3\", r) for r in replicas}, \"-> read from\", best)\n"
+  },
+  {
+   "label": "4 · Locality report",
+   "hint": "Turn a list of task placements into the counters Hadoop prints. What percentage were data-local?",
+   "code": "placements = [\"node\", \"node\", \"rack\", \"node\", \"off\", \"node\", \"node\", \"rack\"]\ncounters = {}\nfor p in placements:\n    counters[p] = counters.get(p, 0) + 1\nprint(counters)\nprint(f\"Data-local: {counters['node'] / len(placements):.0%}\")\n"
+  },
+  {
+   "label": "5 · How much is shuffled?",
+   "hint": "Map tasks turn 128 MB of logs into a small count per city. Compare input size with what crosses the network in the shuffle.",
+   "code": "splits = 80000\ninput_mb = splits * 128\ncities = 500\nbytes_per_count = 20\nshuffle_mb = splits * cities * bytes_per_count / 1024 / 1024\n\nprint(f\"Input read locally : {input_mb / 1024 / 1024:.1f} TB\")\nprint(f\"Shuffled over net  : {shuffle_mb / 1024:.2f} GB\")\n"
+  }
+ ]
+}</script>
+  </div>
+</section>
+
+<section class="part" id="tracer">
+  <span class="part-label"><b>8</b> Line by line</span>
+  <h2>A locality-aware scheduler, one line at a time</h2>
+  <p>Watch the scheduler give each task to a free node that holds its block, and fall back to any free node when none does. The <code>free</code> list shrinks as slots are used.</p>
+  <div class="tracer">
+    <script type="application/json">{
+ "lang": "python",
+ "code": [
+  "def schedule(tasks, free):",
+  "    plan = {}",
+  "    for task, holders in tasks.items():",
+  "        local = [n for n in holders if n in free]",
+  "        node = local[0] if local else free[0]",
+  "        free.remove(node)",
+  "        plan[task] = node",
+  "    return plan",
+  "",
+  "tasks = {\"M1\": [\"dn2\", \"dn5\"], \"M2\": [\"dn2\", \"dn3\"], \"M3\": [\"dn2\"]}",
+  "print(schedule(tasks, [\"dn2\", \"dn3\", \"dn4\"]))"
+ ],
+ "steps": [
+  {
+   "line": 1,
+   "phase": "Python",
+   "note": "<code>schedule<\/code> is created: function schedule().",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "schedule",
+       "function schedule()"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "schedule"
+  },
+  {
+   "line": 10,
+   "phase": "Input",
+   "note": "Each map task with the nodes that hold its block. <code>tasks<\/code> is created: → dict #1. A new dict object (#1) is created: {&#x27;M1&#x27;: → list #2, &#x27;M2&#x27;: → list #3, &#x27;M3&#x27;: → list #4} A new list object (#2) is created: [&#x27;dn2&#x27;, &#x27;dn5&#x27;] A new list object (#3) is created: [&#x27;dn2&#x27;, &#x27;dn3&#x27;] A new list object (#4) is created: [&#x27;dn2&#x27;]",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "schedule",
+       "function schedule()"
+      ],
+      [
+       "tasks",
+       "→ dict #1"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;M1&#x27;: → list #2, &#x27;M2&#x27;: → list #3, &#x27;M3&#x27;: → list #4}",
+    "<b>#2 list (2)<\/b> [&#x27;dn2&#x27;, &#x27;dn5&#x27;]",
+    "<b>#3 list (2)<\/b> [&#x27;dn2&#x27;, &#x27;dn3&#x27;]",
+    "<b>#4 list (1)<\/b> [&#x27;dn2&#x27;]"
+   ],
+   "newVar": "tasks"
+  },
+  {
+   "line": 11,
+   "phase": "Python",
+   "note": "<code>schedule()<\/code> is called: a new frame is pushed with <code>tasks<\/code> = → dict #1, <code>free<\/code> = → list #5.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "schedule",
+       "function schedule()"
+      ],
+      [
+       "tasks",
+       "→ dict #1"
+      ]
+     ]
+    },
+    {
+     "frame": "schedule()",
+     "vars": [
+      [
+       "tasks",
+       "→ dict #1"
+      ],
+      [
+       "free",
+       "→ list #5"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;M1&#x27;: → list #2, &#x27;M2&#x27;: → list #3, &#x27;M3&#x27;: → list #4}",
+    "<b>#2 list (2)<\/b> [&#x27;dn2&#x27;, &#x27;dn5&#x27;]",
+    "<b>#3 list (2)<\/b> [&#x27;dn2&#x27;, &#x27;dn3&#x27;]",
+    "<b>#4 list (1)<\/b> [&#x27;dn2&#x27;]",
+    "<b>#5 list (3)<\/b> [&#x27;dn2&#x27;, &#x27;dn3&#x27;, &#x27;dn4&#x27;]"
+   ],
+   "newVar": "free"
+  },
+  {
+   "line": 2,
+   "phase": "Python",
+   "note": "<code>plan<\/code> is created: → dict #6. A new dict object (#6) is created: {}",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "schedule",
+       "function schedule()"
+      ],
+      [
+       "tasks",
+       "→ dict #1"
+      ]
+     ]
+    },
+    {
+     "frame": "schedule()",
+     "vars": [
+      [
+       "tasks",
+       "→ dict #1"
+      ],
+      [
+       "free",
+       "→ list #5"
+      ],
+      [
+       "plan",
+       "→ dict #6"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;M1&#x27;: → list #2, &#x27;M2&#x27;: → list #3, &#x27;M3&#x27;: → list #4}",
+    "<b>#2 list (2)<\/b> [&#x27;dn2&#x27;, &#x27;dn5&#x27;]",
+    "<b>#3 list (2)<\/b> [&#x27;dn2&#x27;, &#x27;dn3&#x27;]",
+    "<b>#4 list (1)<\/b> [&#x27;dn2&#x27;]",
+    "<b>#5 list (3)<\/b> [&#x27;dn2&#x27;, &#x27;dn3&#x27;, &#x27;dn4&#x27;]",
+    "<b>#6 dict (0)<\/b> {}"
+   ],
+   "newVar": "plan"
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "<code>task<\/code> is created: &#x27;M1&#x27;. <code>holders<\/code> is created: → list #2.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "schedule",
+       "function schedule()"
+      ],
+      [
+       "tasks",
+       "→ dict #1"
+      ]
+     ]
+    },
+    {
+     "frame": "schedule()",
+     "vars": [
+      [
+       "tasks",
+       "→ dict #1"
+      ],
+      [
+       "free",
+       "→ list #5"
+      ],
+      [
+       "plan",
+       "→ dict #6"
+      ],
+      [
+       "task",
+       "'M1'"
+      ],
+      [
+       "holders",
+       "→ list #2"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;M1&#x27;: → list #2, &#x27;M2&#x27;: → list #3, &#x27;M3&#x27;: → list #4}",
+    "<b>#2 list (2)<\/b> [&#x27;dn2&#x27;, &#x27;dn5&#x27;]",
+    "<b>#3 list (2)<\/b> [&#x27;dn2&#x27;, &#x27;dn3&#x27;]",
+    "<b>#4 list (1)<\/b> [&#x27;dn2&#x27;]",
+    "<b>#5 list (3)<\/b> [&#x27;dn2&#x27;, &#x27;dn3&#x27;, &#x27;dn4&#x27;]",
+    "<b>#6 dict (0)<\/b> {}"
+   ],
+   "newVar": "holders"
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "<code>n<\/code> is created: &#x27;dn2&#x27;.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "schedule",
+       "function schedule()"
+      ],
+      [
+       "tasks",
+       "→ dict #1"
+      ]
+     ]
+    },
+    {
+     "frame": "schedule()",
+     "vars": [
+      [
+       "tasks",
+       "→ dict #1"
+      ],
+      [
+       "free",
+       "→ list #5"
+      ],
+      [
+       "plan",
+       "→ dict #6"
+      ],
+      [
+       "task",
+       "'M1'"
+      ],
+      [
+       "holders",
+       "→ list #2"
+      ],
+      [
+       "n",
+       "'dn2'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;M1&#x27;: → list #2, &#x27;M2&#x27;: → list #3, &#x27;M3&#x27;: → list #4}",
+    "<b>#2 list (2)<\/b> [&#x27;dn2&#x27;, &#x27;dn5&#x27;]",
+    "<b>#3 list (2)<\/b> [&#x27;dn2&#x27;, &#x27;dn3&#x27;]",
+    "<b>#4 list (1)<\/b> [&#x27;dn2&#x27;]",
+    "<b>#5 list (3)<\/b> [&#x27;dn2&#x27;, &#x27;dn3&#x27;, &#x27;dn4&#x27;]",
+    "<b>#6 dict (0)<\/b> {}"
+   ],
+   "newVar": "n"
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "<code>n<\/code> changes to &#x27;dn5&#x27;.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "schedule",
+       "function schedule()"
+      ],
+      [
+       "tasks",
+       "→ dict #1"
+      ]
+     ]
+    },
+    {
+     "frame": "schedule()",
+     "vars": [
+      [
+       "tasks",
+       "→ dict #1"
+      ],
+      [
+       "free",
+       "→ list #5"
+      ],
+      [
+       "plan",
+       "→ dict #6"
+      ],
+      [
+       "task",
+       "'M1'"
+      ],
+      [
+       "holders",
+       "→ list #2"
+      ],
+      [
+       "n",
+       "'dn5'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;M1&#x27;: → list #2, &#x27;M2&#x27;: → list #3, &#x27;M3&#x27;: → list #4}",
+    "<b>#2 list (2)<\/b> [&#x27;dn2&#x27;, &#x27;dn5&#x27;]",
+    "<b>#3 list (2)<\/b> [&#x27;dn2&#x27;, &#x27;dn3&#x27;]",
+    "<b>#4 list (1)<\/b> [&#x27;dn2&#x27;]",
+    "<b>#5 list (3)<\/b> [&#x27;dn2&#x27;, &#x27;dn3&#x27;, &#x27;dn4&#x27;]",
+    "<b>#6 dict (0)<\/b> {}"
+   ],
+   "newVar": "n"
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "<code>local<\/code> is created: → list #7. A new list object (#7) is created: [&#x27;dn2&#x27;]",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "schedule",
+       "function schedule()"
+      ],
+      [
+       "tasks",
+       "→ dict #1"
+      ]
+     ]
+    },
+    {
+     "frame": "schedule()",
+     "vars": [
+      [
+       "tasks",
+       "→ dict #1"
+      ],
+      [
+       "free",
+       "→ list #5"
+      ],
+      [
+       "plan",
+       "→ dict #6"
+      ],
+      [
+       "task",
+       "'M1'"
+      ],
+      [
+       "holders",
+       "→ list #2"
+      ],
+      [
+       "local",
+       "→ list #7"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;M1&#x27;: → list #2, &#x27;M2&#x27;: → list #3, &#x27;M3&#x27;: → list #4}",
+    "<b>#2 list (2)<\/b> [&#x27;dn2&#x27;, &#x27;dn5&#x27;]",
+    "<b>#3 list (2)<\/b> [&#x27;dn2&#x27;, &#x27;dn3&#x27;]",
+    "<b>#4 list (1)<\/b> [&#x27;dn2&#x27;]",
+    "<b>#5 list (3)<\/b> [&#x27;dn2&#x27;, &#x27;dn3&#x27;, &#x27;dn4&#x27;]",
+    "<b>#6 dict (0)<\/b> {}",
+    "<b>#7 list (1)<\/b> [&#x27;dn2&#x27;]"
+   ],
+   "newVar": "local"
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "<code>node<\/code> is created: &#x27;dn2&#x27;.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "schedule",
+       "function schedule()"
+      ],
+      [
+       "tasks",
+       "→ dict #1"
+      ]
+     ]
+    },
+    {
+     "frame": "schedule()",
+     "vars": [
+      [
+       "tasks",
+       "→ dict #1"
+      ],
+      [
+       "free",
+       "→ list #5"
+      ],
+      [
+       "plan",
+       "→ dict #6"
+      ],
+      [
+       "task",
+       "'M1'"
+      ],
+      [
+       "holders",
+       "→ list #2"
+      ],
+      [
+       "local",
+       "→ list #7"
+      ],
+      [
+       "node",
+       "'dn2'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;M1&#x27;: → list #2, &#x27;M2&#x27;: → list #3, &#x27;M3&#x27;: → list #4}",
+    "<b>#2 list (2)<\/b> [&#x27;dn2&#x27;, &#x27;dn5&#x27;]",
+    "<b>#3 list (2)<\/b> [&#x27;dn2&#x27;, &#x27;dn3&#x27;]",
+    "<b>#4 list (1)<\/b> [&#x27;dn2&#x27;]",
+    "<b>#5 list (3)<\/b> [&#x27;dn2&#x27;, &#x27;dn3&#x27;, &#x27;dn4&#x27;]",
+    "<b>#6 dict (0)<\/b> {}",
+    "<b>#7 list (1)<\/b> [&#x27;dn2&#x27;]"
+   ],
+   "newVar": "node"
+  },
+  {
+   "line": 6,
+   "phase": "Python",
+   "note": "Object #5 list now holds [&#x27;dn3&#x27;, &#x27;dn4&#x27;]",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "schedule",
+       "function schedule()"
+      ],
+      [
+       "tasks",
+       "→ dict #1"
+      ]
+     ]
+    },
+    {
+     "frame": "schedule()",
+     "vars": [
+      [
+       "tasks",
+       "→ dict #1"
+      ],
+      [
+       "free",
+       "→ list #5"
+      ],
+      [
+       "plan",
+       "→ dict #6"
+      ],
+      [
+       "task",
+       "'M1'"
+      ],
+      [
+       "holders",
+       "→ list #2"
+      ],
+      [
+       "local",
+       "→ list #7"
+      ],
+      [
+       "node",
+       "'dn2'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;M1&#x27;: → list #2, &#x27;M2&#x27;: → list #3, &#x27;M3&#x27;: → list #4}",
+    "<b>#2 list (2)<\/b> [&#x27;dn2&#x27;, &#x27;dn5&#x27;]",
+    "<b>#3 list (2)<\/b> [&#x27;dn2&#x27;, &#x27;dn3&#x27;]",
+    "<b>#4 list (1)<\/b> [&#x27;dn2&#x27;]",
+    "<b>#5 list (2)<\/b> [&#x27;dn3&#x27;, &#x27;dn4&#x27;]",
+    "<b>#6 dict (0)<\/b> {}",
+    "<b>#7 list (1)<\/b> [&#x27;dn2&#x27;]"
+   ]
+  },
+  {
+   "line": 7,
+   "phase": "Python",
+   "note": "Object #6 dict now holds {&#x27;M1&#x27;: &#x27;dn2&#x27;}",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "schedule",
+       "function schedule()"
+      ],
+      [
+       "tasks",
+       "→ dict #1"
+      ]
+     ]
+    },
+    {
+     "frame": "schedule()",
+     "vars": [
+      [
+       "tasks",
+       "→ dict #1"
+      ],
+      [
+       "free",
+       "→ list #5"
+      ],
+      [
+       "plan",
+       "→ dict #6"
+      ],
+      [
+       "task",
+       "'M1'"
+      ],
+      [
+       "holders",
+       "→ list #2"
+      ],
+      [
+       "local",
+       "→ list #7"
+      ],
+      [
+       "node",
+       "'dn2'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;M1&#x27;: → list #2, &#x27;M2&#x27;: → list #3, &#x27;M3&#x27;: → list #4}",
+    "<b>#2 list (2)<\/b> [&#x27;dn2&#x27;, &#x27;dn5&#x27;]",
+    "<b>#3 list (2)<\/b> [&#x27;dn2&#x27;, &#x27;dn3&#x27;]",
+    "<b>#4 list (1)<\/b> [&#x27;dn2&#x27;]",
+    "<b>#5 list (2)<\/b> [&#x27;dn3&#x27;, &#x27;dn4&#x27;]",
+    "<b>#6 dict (1)<\/b> {&#x27;M1&#x27;: &#x27;dn2&#x27;}",
+    "<b>#7 list (1)<\/b> [&#x27;dn2&#x27;]"
+   ]
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "<code>task<\/code> changes to &#x27;M2&#x27;. <code>holders<\/code> changes to → list #3.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "schedule",
+       "function schedule()"
+      ],
+      [
+       "tasks",
+       "→ dict #1"
+      ]
+     ]
+    },
+    {
+     "frame": "schedule()",
+     "vars": [
+      [
+       "tasks",
+       "→ dict #1"
+      ],
+      [
+       "free",
+       "→ list #5"
+      ],
+      [
+       "plan",
+       "→ dict #6"
+      ],
+      [
+       "task",
+       "'M2'"
+      ],
+      [
+       "holders",
+       "→ list #3"
+      ],
+      [
+       "local",
+       "→ list #7"
+      ],
+      [
+       "node",
+       "'dn2'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;M1&#x27;: → list #2, &#x27;M2&#x27;: → list #3, &#x27;M3&#x27;: → list #4}",
+    "<b>#2 list (2)<\/b> [&#x27;dn2&#x27;, &#x27;dn5&#x27;]",
+    "<b>#3 list (2)<\/b> [&#x27;dn2&#x27;, &#x27;dn3&#x27;]",
+    "<b>#4 list (1)<\/b> [&#x27;dn2&#x27;]",
+    "<b>#5 list (2)<\/b> [&#x27;dn3&#x27;, &#x27;dn4&#x27;]",
+    "<b>#6 dict (1)<\/b> {&#x27;M1&#x27;: &#x27;dn2&#x27;}",
+    "<b>#7 list (1)<\/b> [&#x27;dn2&#x27;]"
+   ],
+   "newVar": "holders"
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "<code>n<\/code> is created: &#x27;dn2&#x27;.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "schedule",
+       "function schedule()"
+      ],
+      [
+       "tasks",
+       "→ dict #1"
+      ]
+     ]
+    },
+    {
+     "frame": "schedule()",
+     "vars": [
+      [
+       "tasks",
+       "→ dict #1"
+      ],
+      [
+       "free",
+       "→ list #5"
+      ],
+      [
+       "plan",
+       "→ dict #6"
+      ],
+      [
+       "task",
+       "'M2'"
+      ],
+      [
+       "holders",
+       "→ list #3"
+      ],
+      [
+       "n",
+       "'dn2'"
+      ],
+      [
+       "local",
+       "→ list #7"
+      ],
+      [
+       "node",
+       "'dn2'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;M1&#x27;: → list #2, &#x27;M2&#x27;: → list #3, &#x27;M3&#x27;: → list #4}",
+    "<b>#2 list (2)<\/b> [&#x27;dn2&#x27;, &#x27;dn5&#x27;]",
+    "<b>#3 list (2)<\/b> [&#x27;dn2&#x27;, &#x27;dn3&#x27;]",
+    "<b>#4 list (1)<\/b> [&#x27;dn2&#x27;]",
+    "<b>#5 list (2)<\/b> [&#x27;dn3&#x27;, &#x27;dn4&#x27;]",
+    "<b>#6 dict (1)<\/b> {&#x27;M1&#x27;: &#x27;dn2&#x27;}",
+    "<b>#7 list (1)<\/b> [&#x27;dn2&#x27;]"
+   ],
+   "newVar": "n"
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "<code>n<\/code> changes to &#x27;dn3&#x27;.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "schedule",
+       "function schedule()"
+      ],
+      [
+       "tasks",
+       "→ dict #1"
+      ]
+     ]
+    },
+    {
+     "frame": "schedule()",
+     "vars": [
+      [
+       "tasks",
+       "→ dict #1"
+      ],
+      [
+       "free",
+       "→ list #5"
+      ],
+      [
+       "plan",
+       "→ dict #6"
+      ],
+      [
+       "task",
+       "'M2'"
+      ],
+      [
+       "holders",
+       "→ list #3"
+      ],
+      [
+       "n",
+       "'dn3'"
+      ],
+      [
+       "local",
+       "→ list #7"
+      ],
+      [
+       "node",
+       "'dn2'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;M1&#x27;: → list #2, &#x27;M2&#x27;: → list #3, &#x27;M3&#x27;: → list #4}",
+    "<b>#2 list (2)<\/b> [&#x27;dn2&#x27;, &#x27;dn5&#x27;]",
+    "<b>#3 list (2)<\/b> [&#x27;dn2&#x27;, &#x27;dn3&#x27;]",
+    "<b>#4 list (1)<\/b> [&#x27;dn2&#x27;]",
+    "<b>#5 list (2)<\/b> [&#x27;dn3&#x27;, &#x27;dn4&#x27;]",
+    "<b>#6 dict (1)<\/b> {&#x27;M1&#x27;: &#x27;dn2&#x27;}",
+    "<b>#7 list (1)<\/b> [&#x27;dn2&#x27;]"
+   ],
+   "newVar": "n"
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "<code>local<\/code> changes to → list #8. A new list object (#8) is created: [&#x27;dn3&#x27;]",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "schedule",
+       "function schedule()"
+      ],
+      [
+       "tasks",
+       "→ dict #1"
+      ]
+     ]
+    },
+    {
+     "frame": "schedule()",
+     "vars": [
+      [
+       "tasks",
+       "→ dict #1"
+      ],
+      [
+       "free",
+       "→ list #5"
+      ],
+      [
+       "plan",
+       "→ dict #6"
+      ],
+      [
+       "task",
+       "'M2'"
+      ],
+      [
+       "holders",
+       "→ list #3"
+      ],
+      [
+       "local",
+       "→ list #8"
+      ],
+      [
+       "node",
+       "'dn2'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;M1&#x27;: → list #2, &#x27;M2&#x27;: → list #3, &#x27;M3&#x27;: → list #4}",
+    "<b>#2 list (2)<\/b> [&#x27;dn2&#x27;, &#x27;dn5&#x27;]",
+    "<b>#3 list (2)<\/b> [&#x27;dn2&#x27;, &#x27;dn3&#x27;]",
+    "<b>#4 list (1)<\/b> [&#x27;dn2&#x27;]",
+    "<b>#5 list (2)<\/b> [&#x27;dn3&#x27;, &#x27;dn4&#x27;]",
+    "<b>#6 dict (1)<\/b> {&#x27;M1&#x27;: &#x27;dn2&#x27;}",
+    "<b>#8 list (1)<\/b> [&#x27;dn3&#x27;]"
+   ],
+   "newVar": "local"
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "<code>node<\/code> changes to &#x27;dn3&#x27;.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "schedule",
+       "function schedule()"
+      ],
+      [
+       "tasks",
+       "→ dict #1"
+      ]
+     ]
+    },
+    {
+     "frame": "schedule()",
+     "vars": [
+      [
+       "tasks",
+       "→ dict #1"
+      ],
+      [
+       "free",
+       "→ list #5"
+      ],
+      [
+       "plan",
+       "→ dict #6"
+      ],
+      [
+       "task",
+       "'M2'"
+      ],
+      [
+       "holders",
+       "→ list #3"
+      ],
+      [
+       "local",
+       "→ list #8"
+      ],
+      [
+       "node",
+       "'dn3'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;M1&#x27;: → list #2, &#x27;M2&#x27;: → list #3, &#x27;M3&#x27;: → list #4}",
+    "<b>#2 list (2)<\/b> [&#x27;dn2&#x27;, &#x27;dn5&#x27;]",
+    "<b>#3 list (2)<\/b> [&#x27;dn2&#x27;, &#x27;dn3&#x27;]",
+    "<b>#4 list (1)<\/b> [&#x27;dn2&#x27;]",
+    "<b>#5 list (2)<\/b> [&#x27;dn3&#x27;, &#x27;dn4&#x27;]",
+    "<b>#6 dict (1)<\/b> {&#x27;M1&#x27;: &#x27;dn2&#x27;}",
+    "<b>#8 list (1)<\/b> [&#x27;dn3&#x27;]"
+   ],
+   "newVar": "node"
+  },
+  {
+   "line": 6,
+   "phase": "Python",
+   "note": "Object #5 list now holds [&#x27;dn4&#x27;]",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "schedule",
+       "function schedule()"
+      ],
+      [
+       "tasks",
+       "→ dict #1"
+      ]
+     ]
+    },
+    {
+     "frame": "schedule()",
+     "vars": [
+      [
+       "tasks",
+       "→ dict #1"
+      ],
+      [
+       "free",
+       "→ list #5"
+      ],
+      [
+       "plan",
+       "→ dict #6"
+      ],
+      [
+       "task",
+       "'M2'"
+      ],
+      [
+       "holders",
+       "→ list #3"
+      ],
+      [
+       "local",
+       "→ list #8"
+      ],
+      [
+       "node",
+       "'dn3'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;M1&#x27;: → list #2, &#x27;M2&#x27;: → list #3, &#x27;M3&#x27;: → list #4}",
+    "<b>#2 list (2)<\/b> [&#x27;dn2&#x27;, &#x27;dn5&#x27;]",
+    "<b>#3 list (2)<\/b> [&#x27;dn2&#x27;, &#x27;dn3&#x27;]",
+    "<b>#4 list (1)<\/b> [&#x27;dn2&#x27;]",
+    "<b>#5 list (1)<\/b> [&#x27;dn4&#x27;]",
+    "<b>#6 dict (1)<\/b> {&#x27;M1&#x27;: &#x27;dn2&#x27;}",
+    "<b>#8 list (1)<\/b> [&#x27;dn3&#x27;]"
+   ]
+  },
+  {
+   "line": 7,
+   "phase": "Python",
+   "note": "Object #6 dict now holds {&#x27;M1&#x27;: &#x27;dn2&#x27;, &#x27;M2&#x27;: &#x27;dn3&#x27;}",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "schedule",
+       "function schedule()"
+      ],
+      [
+       "tasks",
+       "→ dict #1"
+      ]
+     ]
+    },
+    {
+     "frame": "schedule()",
+     "vars": [
+      [
+       "tasks",
+       "→ dict #1"
+      ],
+      [
+       "free",
+       "→ list #5"
+      ],
+      [
+       "plan",
+       "→ dict #6"
+      ],
+      [
+       "task",
+       "'M2'"
+      ],
+      [
+       "holders",
+       "→ list #3"
+      ],
+      [
+       "local",
+       "→ list #8"
+      ],
+      [
+       "node",
+       "'dn3'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;M1&#x27;: → list #2, &#x27;M2&#x27;: → list #3, &#x27;M3&#x27;: → list #4}",
+    "<b>#2 list (2)<\/b> [&#x27;dn2&#x27;, &#x27;dn5&#x27;]",
+    "<b>#3 list (2)<\/b> [&#x27;dn2&#x27;, &#x27;dn3&#x27;]",
+    "<b>#4 list (1)<\/b> [&#x27;dn2&#x27;]",
+    "<b>#5 list (1)<\/b> [&#x27;dn4&#x27;]",
+    "<b>#6 dict (2)<\/b> {&#x27;M1&#x27;: &#x27;dn2&#x27;, &#x27;M2&#x27;: &#x27;dn3&#x27;}",
+    "<b>#8 list (1)<\/b> [&#x27;dn3&#x27;]"
+   ]
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "<code>task<\/code> changes to &#x27;M3&#x27;. <code>holders<\/code> changes to → list #4.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "schedule",
+       "function schedule()"
+      ],
+      [
+       "tasks",
+       "→ dict #1"
+      ]
+     ]
+    },
+    {
+     "frame": "schedule()",
+     "vars": [
+      [
+       "tasks",
+       "→ dict #1"
+      ],
+      [
+       "free",
+       "→ list #5"
+      ],
+      [
+       "plan",
+       "→ dict #6"
+      ],
+      [
+       "task",
+       "'M3'"
+      ],
+      [
+       "holders",
+       "→ list #4"
+      ],
+      [
+       "local",
+       "→ list #8"
+      ],
+      [
+       "node",
+       "'dn3'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;M1&#x27;: → list #2, &#x27;M2&#x27;: → list #3, &#x27;M3&#x27;: → list #4}",
+    "<b>#2 list (2)<\/b> [&#x27;dn2&#x27;, &#x27;dn5&#x27;]",
+    "<b>#3 list (2)<\/b> [&#x27;dn2&#x27;, &#x27;dn3&#x27;]",
+    "<b>#4 list (1)<\/b> [&#x27;dn2&#x27;]",
+    "<b>#5 list (1)<\/b> [&#x27;dn4&#x27;]",
+    "<b>#6 dict (2)<\/b> {&#x27;M1&#x27;: &#x27;dn2&#x27;, &#x27;M2&#x27;: &#x27;dn3&#x27;}",
+    "<b>#8 list (1)<\/b> [&#x27;dn3&#x27;]"
+   ],
+   "newVar": "holders"
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "<code>n<\/code> is created: &#x27;dn2&#x27;.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "schedule",
+       "function schedule()"
+      ],
+      [
+       "tasks",
+       "→ dict #1"
+      ]
+     ]
+    },
+    {
+     "frame": "schedule()",
+     "vars": [
+      [
+       "tasks",
+       "→ dict #1"
+      ],
+      [
+       "free",
+       "→ list #5"
+      ],
+      [
+       "plan",
+       "→ dict #6"
+      ],
+      [
+       "task",
+       "'M3'"
+      ],
+      [
+       "holders",
+       "→ list #4"
+      ],
+      [
+       "n",
+       "'dn2'"
+      ],
+      [
+       "local",
+       "→ list #8"
+      ],
+      [
+       "node",
+       "'dn3'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;M1&#x27;: → list #2, &#x27;M2&#x27;: → list #3, &#x27;M3&#x27;: → list #4}",
+    "<b>#2 list (2)<\/b> [&#x27;dn2&#x27;, &#x27;dn5&#x27;]",
+    "<b>#3 list (2)<\/b> [&#x27;dn2&#x27;, &#x27;dn3&#x27;]",
+    "<b>#4 list (1)<\/b> [&#x27;dn2&#x27;]",
+    "<b>#5 list (1)<\/b> [&#x27;dn4&#x27;]",
+    "<b>#6 dict (2)<\/b> {&#x27;M1&#x27;: &#x27;dn2&#x27;, &#x27;M2&#x27;: &#x27;dn3&#x27;}",
+    "<b>#8 list (1)<\/b> [&#x27;dn3&#x27;]"
+   ],
+   "newVar": "n"
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "<code>local<\/code> changes to → list #9. A new list object (#9) is created: []",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "schedule",
+       "function schedule()"
+      ],
+      [
+       "tasks",
+       "→ dict #1"
+      ]
+     ]
+    },
+    {
+     "frame": "schedule()",
+     "vars": [
+      [
+       "tasks",
+       "→ dict #1"
+      ],
+      [
+       "free",
+       "→ list #5"
+      ],
+      [
+       "plan",
+       "→ dict #6"
+      ],
+      [
+       "task",
+       "'M3'"
+      ],
+      [
+       "holders",
+       "→ list #4"
+      ],
+      [
+       "local",
+       "→ list #9"
+      ],
+      [
+       "node",
+       "'dn3'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;M1&#x27;: → list #2, &#x27;M2&#x27;: → list #3, &#x27;M3&#x27;: → list #4}",
+    "<b>#2 list (2)<\/b> [&#x27;dn2&#x27;, &#x27;dn5&#x27;]",
+    "<b>#3 list (2)<\/b> [&#x27;dn2&#x27;, &#x27;dn3&#x27;]",
+    "<b>#4 list (1)<\/b> [&#x27;dn2&#x27;]",
+    "<b>#5 list (1)<\/b> [&#x27;dn4&#x27;]",
+    "<b>#6 dict (2)<\/b> {&#x27;M1&#x27;: &#x27;dn2&#x27;, &#x27;M2&#x27;: &#x27;dn3&#x27;}",
+    "<b>#9 list (0)<\/b> []"
+   ],
+   "newVar": "local"
+  },
+  {
+   "line": 5,
+   "phase": "M3",
+   "note": "Its only holder, dn2, is already busy, so it gets a remote node. <code>node<\/code> changes to &#x27;dn4&#x27;.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "schedule",
+       "function schedule()"
+      ],
+      [
+       "tasks",
+       "→ dict #1"
+      ]
+     ]
+    },
+    {
+     "frame": "schedule()",
+     "vars": [
+      [
+       "tasks",
+       "→ dict #1"
+      ],
+      [
+       "free",
+       "→ list #5"
+      ],
+      [
+       "plan",
+       "→ dict #6"
+      ],
+      [
+       "task",
+       "'M3'"
+      ],
+      [
+       "holders",
+       "→ list #4"
+      ],
+      [
+       "local",
+       "→ list #9"
+      ],
+      [
+       "node",
+       "'dn4'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;M1&#x27;: → list #2, &#x27;M2&#x27;: → list #3, &#x27;M3&#x27;: → list #4}",
+    "<b>#2 list (2)<\/b> [&#x27;dn2&#x27;, &#x27;dn5&#x27;]",
+    "<b>#3 list (2)<\/b> [&#x27;dn2&#x27;, &#x27;dn3&#x27;]",
+    "<b>#4 list (1)<\/b> [&#x27;dn2&#x27;]",
+    "<b>#5 list (1)<\/b> [&#x27;dn4&#x27;]",
+    "<b>#6 dict (2)<\/b> {&#x27;M1&#x27;: &#x27;dn2&#x27;, &#x27;M2&#x27;: &#x27;dn3&#x27;}",
+    "<b>#9 list (0)<\/b> []"
+   ],
+   "newVar": "node"
+  },
+  {
+   "line": 6,
+   "phase": "Python",
+   "note": "Object #5 list now holds []",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "schedule",
+       "function schedule()"
+      ],
+      [
+       "tasks",
+       "→ dict #1"
+      ]
+     ]
+    },
+    {
+     "frame": "schedule()",
+     "vars": [
+      [
+       "tasks",
+       "→ dict #1"
+      ],
+      [
+       "free",
+       "→ list #5"
+      ],
+      [
+       "plan",
+       "→ dict #6"
+      ],
+      [
+       "task",
+       "'M3'"
+      ],
+      [
+       "holders",
+       "→ list #4"
+      ],
+      [
+       "local",
+       "→ list #9"
+      ],
+      [
+       "node",
+       "'dn4'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;M1&#x27;: → list #2, &#x27;M2&#x27;: → list #3, &#x27;M3&#x27;: → list #4}",
+    "<b>#2 list (2)<\/b> [&#x27;dn2&#x27;, &#x27;dn5&#x27;]",
+    "<b>#3 list (2)<\/b> [&#x27;dn2&#x27;, &#x27;dn3&#x27;]",
+    "<b>#4 list (1)<\/b> [&#x27;dn2&#x27;]",
+    "<b>#5 list (0)<\/b> []",
+    "<b>#6 dict (2)<\/b> {&#x27;M1&#x27;: &#x27;dn2&#x27;, &#x27;M2&#x27;: &#x27;dn3&#x27;}",
+    "<b>#9 list (0)<\/b> []"
+   ]
+  },
+  {
+   "line": 7,
+   "phase": "Python",
+   "note": "Object #6 dict now holds {&#x27;M1&#x27;: &#x27;dn2&#x27;, &#x27;M2&#x27;: &#x27;dn3&#x27;, &#x27;M3&#x27;: &#x27;dn4&#x27;}",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "schedule",
+       "function schedule()"
+      ],
+      [
+       "tasks",
+       "→ dict #1"
+      ]
+     ]
+    },
+    {
+     "frame": "schedule()",
+     "vars": [
+      [
+       "tasks",
+       "→ dict #1"
+      ],
+      [
+       "free",
+       "→ list #5"
+      ],
+      [
+       "plan",
+       "→ dict #6"
+      ],
+      [
+       "task",
+       "'M3'"
+      ],
+      [
+       "holders",
+       "→ list #4"
+      ],
+      [
+       "local",
+       "→ list #9"
+      ],
+      [
+       "node",
+       "'dn4'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;M1&#x27;: → list #2, &#x27;M2&#x27;: → list #3, &#x27;M3&#x27;: → list #4}",
+    "<b>#2 list (2)<\/b> [&#x27;dn2&#x27;, &#x27;dn5&#x27;]",
+    "<b>#3 list (2)<\/b> [&#x27;dn2&#x27;, &#x27;dn3&#x27;]",
+    "<b>#4 list (1)<\/b> [&#x27;dn2&#x27;]",
+    "<b>#5 list (0)<\/b> []",
+    "<b>#6 dict (3)<\/b> {&#x27;M1&#x27;: &#x27;dn2&#x27;, &#x27;M2&#x27;: &#x27;dn3&#x27;, &#x27;M3&#x27;: &#x27;dn4&#x27;}",
+    "<b>#9 list (0)<\/b> []"
+   ]
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "Nothing is left to loop over, so the loop ends and Python moves on.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "schedule",
+       "function schedule()"
+      ],
+      [
+       "tasks",
+       "→ dict #1"
+      ]
+     ]
+    },
+    {
+     "frame": "schedule()",
+     "vars": [
+      [
+       "tasks",
+       "→ dict #1"
+      ],
+      [
+       "free",
+       "→ list #5"
+      ],
+      [
+       "plan",
+       "→ dict #6"
+      ],
+      [
+       "task",
+       "'M3'"
+      ],
+      [
+       "holders",
+       "→ list #4"
+      ],
+      [
+       "local",
+       "→ list #9"
+      ],
+      [
+       "node",
+       "'dn4'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;M1&#x27;: → list #2, &#x27;M2&#x27;: → list #3, &#x27;M3&#x27;: → list #4}",
+    "<b>#2 list (2)<\/b> [&#x27;dn2&#x27;, &#x27;dn5&#x27;]",
+    "<b>#3 list (2)<\/b> [&#x27;dn2&#x27;, &#x27;dn3&#x27;]",
+    "<b>#4 list (1)<\/b> [&#x27;dn2&#x27;]",
+    "<b>#5 list (0)<\/b> []",
+    "<b>#6 dict (3)<\/b> {&#x27;M1&#x27;: &#x27;dn2&#x27;, &#x27;M2&#x27;: &#x27;dn3&#x27;, &#x27;M3&#x27;: &#x27;dn4&#x27;}",
+    "<b>#9 list (0)<\/b> []"
+   ]
+  },
+  {
+   "line": 8,
+   "phase": "Python",
+   "note": "The return value is worked out and handed back to the caller.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "schedule",
+       "function schedule()"
+      ],
+      [
+       "tasks",
+       "→ dict #1"
+      ]
+     ]
+    },
+    {
+     "frame": "schedule()",
+     "vars": [
+      [
+       "tasks",
+       "→ dict #1"
+      ],
+      [
+       "free",
+       "→ list #5"
+      ],
+      [
+       "plan",
+       "→ dict #6"
+      ],
+      [
+       "task",
+       "'M3'"
+      ],
+      [
+       "holders",
+       "→ list #4"
+      ],
+      [
+       "local",
+       "→ list #9"
+      ],
+      [
+       "node",
+       "'dn4'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;M1&#x27;: → list #2, &#x27;M2&#x27;: → list #3, &#x27;M3&#x27;: → list #4}",
+    "<b>#2 list (2)<\/b> [&#x27;dn2&#x27;, &#x27;dn5&#x27;]",
+    "<b>#3 list (2)<\/b> [&#x27;dn2&#x27;, &#x27;dn3&#x27;]",
+    "<b>#4 list (1)<\/b> [&#x27;dn2&#x27;]",
+    "<b>#5 list (0)<\/b> []",
+    "<b>#6 dict (3)<\/b> {&#x27;M1&#x27;: &#x27;dn2&#x27;, &#x27;M2&#x27;: &#x27;dn3&#x27;, &#x27;M3&#x27;: &#x27;dn4&#x27;}",
+    "<b>#9 list (0)<\/b> []"
+   ]
+  },
+  {
+   "line": 11,
+   "phase": "Return",
+   "note": "<code>schedule()<\/code> returns <b>→ dict #6<\/b> and its frame is popped. The caller continues on this line with that value.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "schedule",
+       "function schedule()"
+      ],
+      [
+       "tasks",
+       "→ dict #1"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;M1&#x27;: → list #2, &#x27;M2&#x27;: → list #3, &#x27;M3&#x27;: → list #4}",
+    "<b>#2 list (2)<\/b> [&#x27;dn2&#x27;, &#x27;dn5&#x27;]",
+    "<b>#3 list (2)<\/b> [&#x27;dn2&#x27;, &#x27;dn3&#x27;]",
+    "<b>#4 list (1)<\/b> [&#x27;dn2&#x27;]"
+   ],
+   "out": "{'M1': 'dn2', 'M2': 'dn3', 'M3': 'dn4'}\n"
+  }
+ ]
+}</script>
+  </div>
+
+<h3 id="worked">Worked examples: real problems, solved and traced in memory</h3>
+  <p class="wx-intro">Three locality problems from real cluster work: a transfer estimate, a scheduling decision, and a job report built from task placements. Each runs live and is traced in memory.</p>
+  <article class="wx">
+    <div class="wx__head"><span class="wx__num">Example 1</span><span class="lvl lvl--b">Beginner</span><span class="wx__tag">Analytics · estimate</span></div>
+    <h4>Copying 2 TB to a laptop for analysis</h4>
+    <div class="wx__problem"><p class="wx__label">Problem statement</p><p>An analyst wants to copy <b>2 TB</b> of HDFS data to her laptop over the office Wi-Fi (about <b>200 Mbps</b> in practice) to analyse it in Python. How many hours will the copy take? Compare with a 1 Gbps wired link.</p></div>
+    <div class="prob__io"><div><small>Input</small><pre>2 TB · 200 Mbps vs 1000 Mbps</pre></div><div><small>Expected output</small><pre>Wi-Fi        : 23.3 hours
+Wired 1 Gbps : 4.7 hours</pre></div></div>
+    <div class="wx__approach"><p class="wx__label">Approach</p><ol><li>Convert TB to megabits: × 1024 × 1024 × 8.</li><li>Divide by the link speed in Mbps to get seconds.</li><li>Print hours for both links.</li></ol></div>
+    <p class="wx__label">Solution: run it live</p>
+    <div class="runner">
+    <script type="application/json">{
+ "lang": "python",
+ "file": "main.py",
+ "tasks": [
+  {
+   "label": "Solution",
+   "hint": "The analysis itself is a group-by on one column. What should she do instead of copying? (Run a Hive or Spark query on the cluster and copy only the result.)",
+   "code": "data_mbit = 2 * 1024 * 1024 * 8\nfor name, mbps in [(\"Wi-Fi\", 200), (\"Wired 1 Gbps\", 1000)]:\n    hours = data_mbit / mbps / 3600\n    print(f\"{name:13}: {hours:.1f} hours\")\n"
+  }
+ ]
+}</script>
+    </div>
+    <p class="wx__label">What happens in memory, step by step</p>
+    <p class="wx__how">Recorded from a real Python run: press <b>Next</b> to execute one line at a time. Watch variables change in each frame, and lists and dictionaries (numbered #1, #2 …) fill up as objects.</p>
+    <div class="tracer">
+    <script type="application/json">{
+ "lang": "python",
+ "code": [
+  "data_mbit = 2 * 1024 * 1024 * 8",
+  "for name, mbps in [(\"Wi-Fi\", 200), (\"Wired 1 Gbps\", 1000)]:",
+  "    hours = data_mbit / mbps / 3600",
+  "    print(f\"{name:13}: {hours:.1f} hours\")"
+ ],
+ "steps": [
+  {
+   "line": 1,
+   "phase": "Units",
+   "note": "2 TB = 1,67,77,216 megabits. <code>data_mbit<\/code> is created: 16777216.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "data_mbit",
+       "16777216"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "data_mbit"
+  },
+  {
+   "line": 2,
+   "phase": "Python",
+   "note": "<code>name<\/code> is created: &#x27;Wi-Fi&#x27;. <code>mbps<\/code> is created: 200.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "data_mbit",
+       "16777216"
+      ],
+      [
+       "name",
+       "'Wi-Fi'"
+      ],
+      [
+       "mbps",
+       "200"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "mbps"
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "<code>hours<\/code> is created: 23.3017.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "data_mbit",
+       "16777216"
+      ],
+      [
+       "name",
+       "'Wi-Fi'"
+      ],
+      [
+       "mbps",
+       "200"
+      ],
+      [
+       "hours",
+       "23.3017"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "hours"
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "data_mbit",
+       "16777216"
+      ],
+      [
+       "name",
+       "'Wi-Fi'"
+      ],
+      [
+       "mbps",
+       "200"
+      ],
+      [
+       "hours",
+       "23.3017"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "out": "Wi-Fi        : 23.3 hours\n"
+  },
+  {
+   "line": 2,
+   "phase": "Python",
+   "note": "<code>name<\/code> changes to &#x27;Wired 1 Gbps&#x27;. <code>mbps<\/code> changes to 1000.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "data_mbit",
+       "16777216"
+      ],
+      [
+       "name",
+       "'Wired 1 Gbps'"
+      ],
+      [
+       "mbps",
+       "1000"
+      ],
+      [
+       "hours",
+       "23.3017"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "mbps"
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "<code>hours<\/code> changes to 4.6603.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "data_mbit",
+       "16777216"
+      ],
+      [
+       "name",
+       "'Wired 1 Gbps'"
+      ],
+      [
+       "mbps",
+       "1000"
+      ],
+      [
+       "hours",
+       "4.6603"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "hours"
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "data_mbit",
+       "16777216"
+      ],
+      [
+       "name",
+       "'Wired 1 Gbps'"
+      ],
+      [
+       "mbps",
+       "1000"
+      ],
+      [
+       "hours",
+       "4.6603"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "out": "Wired 1 Gbps : 4.7 hours\n"
+  },
+  {
+   "line": 2,
+   "phase": "Python",
+   "note": "Nothing is left to loop over, so the loop ends and Python moves on.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "data_mbit",
+       "16777216"
+      ],
+      [
+       "name",
+       "'Wired 1 Gbps'"
+      ],
+      [
+       "mbps",
+       "1000"
+      ],
+      [
+       "hours",
+       "4.6603"
+      ]
+     ]
+    }
+   ],
+   "heap": []
+  }
+ ]
+}</script>
+    </div>
+  </article>
+  <article class="wx">
+    <div class="wx__head"><span class="wx__num">Example 2</span><span class="lvl lvl--i">Intermediate</span><span class="wx__tag">YARN · scheduling</span></div>
+    <h4>Place map tasks with locality first</h4>
+    <div class="wx__problem"><p class="wx__label">Problem statement</p><p>Four map tasks are waiting. Each node has a number of free container slots. Give each task a slot on a node that holds its block if possible, otherwise any node with a free slot, and label each placement.</p></div>
+    <div class="prob__io"><div><small>Input</small><pre>M1 [dn1, dn3] · M2 [dn1, dn2] · M3 [dn1] · M4 [dn4] · free slots dn1 2, dn2 1, dn3 1</pre></div><div><small>Expected output</small><pre>M1 -&gt; dn1 node-local
+M2 -&gt; dn1 node-local
+M3 -&gt; dn2 remote
+M4 -&gt; dn3 remote</pre></div></div>
+    <div class="wx__approach"><p class="wx__label">Approach</p><ol><li>For each task, list holders that still have a free slot.</li><li>Use the first one (node-local), or any node with slots (remote).</li><li>Reduce that node's free slots by one.</li></ol></div>
+    <p class="wx__label">Solution: run it live</p>
+    <div class="runner">
+    <script type="application/json">{
+ "lang": "python",
+ "file": "main.py",
+ "tasks": [
+  {
+   "label": "Solution",
+   "hint": "Swap the order of M2 and M3. Does a different order give more local tasks? Real schedulers handle this with delay scheduling.",
+   "code": "tasks = {\"M1\": [\"dn1\", \"dn3\"], \"M2\": [\"dn1\", \"dn2\"], \"M3\": [\"dn1\"], \"M4\": [\"dn4\"]}\nslots = {\"dn1\": 2, \"dn2\": 1, \"dn3\": 1}\n\nfor task, holders in tasks.items():\n    local = [n for n in holders if slots.get(n, 0) > 0]\n    if local:\n        node, kind = local[0], \"node-local\"\n    else:\n        node, kind = max(slots, key=slots.get), \"remote\"\n    slots[node] -= 1\n    print(task, \"->\", node, kind)\n"
+  }
+ ]
+}</script>
+    </div>
+    <p class="wx__label">What happens in memory, step by step</p>
+    <p class="wx__how">Recorded from a real Python run: press <b>Next</b> to execute one line at a time. Watch variables change in each frame, and lists and dictionaries (numbered #1, #2 …) fill up as objects.</p>
+    <div class="tracer">
+    <script type="application/json">{
+ "lang": "python",
+ "code": [
+  "tasks = {\"M1\": [\"dn1\", \"dn3\"], \"M2\": [\"dn1\", \"dn2\"], \"M3\": [\"dn1\"], \"M4\": [\"dn4\"]}",
+  "slots = {\"dn1\": 2, \"dn2\": 1, \"dn3\": 1}",
+  "",
+  "for task, holders in tasks.items():",
+  "    local = [n for n in holders if slots.get(n, 0) > 0]",
+  "    if local:",
+  "        node, kind = local[0], \"node-local\"",
+  "    else:",
+  "        node, kind = max(slots, key=slots.get), \"remote\"",
+  "    slots[node] -= 1",
+  "    print(task, \"->\", node, kind)"
+ ],
+ "steps": [
+  {
+   "line": 1,
+   "phase": "Python",
+   "note": "<code>tasks<\/code> is created: → dict #1.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "tasks",
+       "→ dict #1"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (4)<\/b> {&#x27;M1&#x27;: → list #2, &#x27;M2&#x27;: → list #3, &#x27;M3&#x27;: → list #4, &#x27;M4&#x27;: → list #5}",
+    "<b>#2 list (2)<\/b> [&#x27;dn1&#x27;, &#x27;dn3&#x27;]",
+    "<b>#3 list (2)<\/b> [&#x27;dn1&#x27;, &#x27;dn2&#x27;]",
+    "<b>#4 list (1)<\/b> [&#x27;dn1&#x27;]",
+    "<b>#5 list (1)<\/b> [&#x27;dn4&#x27;]"
+   ],
+   "newVar": "tasks"
+  },
+  {
+   "line": 2,
+   "phase": "Slots",
+   "note": "dn4 holds M4's block but has no free slot (not in the dictionary). <code>slots<\/code> is created: → dict #6. A new dict object (#6) is created: {&#x27;dn1&#x27;: 2, &#x27;dn2&#x27;: 1, &#x27;dn3&#x27;: 1}",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "tasks",
+       "→ dict #1"
+      ],
+      [
+       "slots",
+       "→ dict #6"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (4)<\/b> {&#x27;M1&#x27;: → list #2, &#x27;M2&#x27;: → list #3, &#x27;M3&#x27;: → list #4, &#x27;M4&#x27;: → list #5}",
+    "<b>#2 list (2)<\/b> [&#x27;dn1&#x27;, &#x27;dn3&#x27;]",
+    "<b>#3 list (2)<\/b> [&#x27;dn1&#x27;, &#x27;dn2&#x27;]",
+    "<b>#4 list (1)<\/b> [&#x27;dn1&#x27;]",
+    "<b>#5 list (1)<\/b> [&#x27;dn4&#x27;]",
+    "<b>#6 dict (3)<\/b> {&#x27;dn1&#x27;: 2, &#x27;dn2&#x27;: 1, &#x27;dn3&#x27;: 1}"
+   ],
+   "newVar": "slots"
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "<code>task<\/code> is created: &#x27;M1&#x27;. <code>holders<\/code> is created: → list #2.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "tasks",
+       "→ dict #1"
+      ],
+      [
+       "slots",
+       "→ dict #6"
+      ],
+      [
+       "task",
+       "'M1'"
+      ],
+      [
+       "holders",
+       "→ list #2"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (4)<\/b> {&#x27;M1&#x27;: → list #2, &#x27;M2&#x27;: → list #3, &#x27;M3&#x27;: → list #4, &#x27;M4&#x27;: → list #5}",
+    "<b>#2 list (2)<\/b> [&#x27;dn1&#x27;, &#x27;dn3&#x27;]",
+    "<b>#3 list (2)<\/b> [&#x27;dn1&#x27;, &#x27;dn2&#x27;]",
+    "<b>#4 list (1)<\/b> [&#x27;dn1&#x27;]",
+    "<b>#5 list (1)<\/b> [&#x27;dn4&#x27;]",
+    "<b>#6 dict (3)<\/b> {&#x27;dn1&#x27;: 2, &#x27;dn2&#x27;: 1, &#x27;dn3&#x27;: 1}"
+   ],
+   "newVar": "holders"
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "tasks",
+       "→ dict #1"
+      ],
+      [
+       "slots",
+       "→ dict #6"
+      ],
+      [
+       "task",
+       "'M1'"
+      ],
+      [
+       "holders",
+       "→ list #2"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (4)<\/b> {&#x27;M1&#x27;: → list #2, &#x27;M2&#x27;: → list #3, &#x27;M3&#x27;: → list #4, &#x27;M4&#x27;: → list #5}",
+    "<b>#2 list (2)<\/b> [&#x27;dn1&#x27;, &#x27;dn3&#x27;]",
+    "<b>#3 list (2)<\/b> [&#x27;dn1&#x27;, &#x27;dn2&#x27;]",
+    "<b>#4 list (1)<\/b> [&#x27;dn1&#x27;]",
+    "<b>#5 list (1)<\/b> [&#x27;dn4&#x27;]",
+    "<b>#6 dict (3)<\/b> {&#x27;dn1&#x27;: 2, &#x27;dn2&#x27;: 1, &#x27;dn3&#x27;: 1}"
+   ]
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "tasks",
+       "→ dict #1"
+      ],
+      [
+       "slots",
+       "→ dict #6"
+      ],
+      [
+       "task",
+       "'M1'"
+      ],
+      [
+       "holders",
+       "→ list #2"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (4)<\/b> {&#x27;M1&#x27;: → list #2, &#x27;M2&#x27;: → list #3, &#x27;M3&#x27;: → list #4, &#x27;M4&#x27;: → list #5}",
+    "<b>#2 list (2)<\/b> [&#x27;dn1&#x27;, &#x27;dn3&#x27;]",
+    "<b>#3 list (2)<\/b> [&#x27;dn1&#x27;, &#x27;dn2&#x27;]",
+    "<b>#4 list (1)<\/b> [&#x27;dn1&#x27;]",
+    "<b>#5 list (1)<\/b> [&#x27;dn4&#x27;]",
+    "<b>#6 dict (3)<\/b> {&#x27;dn1&#x27;: 2, &#x27;dn2&#x27;: 1, &#x27;dn3&#x27;: 1}"
+   ]
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "<code>local<\/code> is created: → list #7. A new list object (#7) is created: [&#x27;dn1&#x27;, &#x27;dn3&#x27;]",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "tasks",
+       "→ dict #1"
+      ],
+      [
+       "slots",
+       "→ dict #6"
+      ],
+      [
+       "task",
+       "'M1'"
+      ],
+      [
+       "holders",
+       "→ list #2"
+      ],
+      [
+       "local",
+       "→ list #7"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (4)<\/b> {&#x27;M1&#x27;: → list #2, &#x27;M2&#x27;: → list #3, &#x27;M3&#x27;: → list #4, &#x27;M4&#x27;: → list #5}",
+    "<b>#2 list (2)<\/b> [&#x27;dn1&#x27;, &#x27;dn3&#x27;]",
+    "<b>#3 list (2)<\/b> [&#x27;dn1&#x27;, &#x27;dn2&#x27;]",
+    "<b>#4 list (1)<\/b> [&#x27;dn1&#x27;]",
+    "<b>#5 list (1)<\/b> [&#x27;dn4&#x27;]",
+    "<b>#6 dict (3)<\/b> {&#x27;dn1&#x27;: 2, &#x27;dn2&#x27;: 1, &#x27;dn3&#x27;: 1}",
+    "<b>#7 list (2)<\/b> [&#x27;dn1&#x27;, &#x27;dn3&#x27;]"
+   ],
+   "newVar": "local"
+  },
+  {
+   "line": 6,
+   "phase": "Python",
+   "note": "The condition is <b>True<\/b>, so the indented block runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "tasks",
+       "→ dict #1"
+      ],
+      [
+       "slots",
+       "→ dict #6"
+      ],
+      [
+       "task",
+       "'M1'"
+      ],
+      [
+       "holders",
+       "→ list #2"
+      ],
+      [
+       "local",
+       "→ list #7"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (4)<\/b> {&#x27;M1&#x27;: → list #2, &#x27;M2&#x27;: → list #3, &#x27;M3&#x27;: → list #4, &#x27;M4&#x27;: → list #5}",
+    "<b>#2 list (2)<\/b> [&#x27;dn1&#x27;, &#x27;dn3&#x27;]",
+    "<b>#3 list (2)<\/b> [&#x27;dn1&#x27;, &#x27;dn2&#x27;]",
+    "<b>#4 list (1)<\/b> [&#x27;dn1&#x27;]",
+    "<b>#5 list (1)<\/b> [&#x27;dn4&#x27;]",
+    "<b>#6 dict (3)<\/b> {&#x27;dn1&#x27;: 2, &#x27;dn2&#x27;: 1, &#x27;dn3&#x27;: 1}",
+    "<b>#7 list (2)<\/b> [&#x27;dn1&#x27;, &#x27;dn3&#x27;]"
+   ]
+  },
+  {
+   "line": 7,
+   "phase": "Python",
+   "note": "<code>node<\/code> is created: &#x27;dn1&#x27;. <code>kind<\/code> is created: &#x27;node-local&#x27;.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "tasks",
+       "→ dict #1"
+      ],
+      [
+       "slots",
+       "→ dict #6"
+      ],
+      [
+       "task",
+       "'M1'"
+      ],
+      [
+       "holders",
+       "→ list #2"
+      ],
+      [
+       "local",
+       "→ list #7"
+      ],
+      [
+       "node",
+       "'dn1'"
+      ],
+      [
+       "kind",
+       "'node-local'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (4)<\/b> {&#x27;M1&#x27;: → list #2, &#x27;M2&#x27;: → list #3, &#x27;M3&#x27;: → list #4, &#x27;M4&#x27;: → list #5}",
+    "<b>#2 list (2)<\/b> [&#x27;dn1&#x27;, &#x27;dn3&#x27;]",
+    "<b>#3 list (2)<\/b> [&#x27;dn1&#x27;, &#x27;dn2&#x27;]",
+    "<b>#4 list (1)<\/b> [&#x27;dn1&#x27;]",
+    "<b>#5 list (1)<\/b> [&#x27;dn4&#x27;]",
+    "<b>#6 dict (3)<\/b> {&#x27;dn1&#x27;: 2, &#x27;dn2&#x27;: 1, &#x27;dn3&#x27;: 1}",
+    "<b>#7 list (2)<\/b> [&#x27;dn1&#x27;, &#x27;dn3&#x27;]"
+   ],
+   "newVar": "kind"
+  },
+  {
+   "line": 10,
+   "phase": "Python",
+   "note": "Object #6 dict now holds {&#x27;dn1&#x27;: 1, &#x27;dn2&#x27;: 1, &#x27;dn3&#x27;: 1}",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "tasks",
+       "→ dict #1"
+      ],
+      [
+       "slots",
+       "→ dict #6"
+      ],
+      [
+       "task",
+       "'M1'"
+      ],
+      [
+       "holders",
+       "→ list #2"
+      ],
+      [
+       "local",
+       "→ list #7"
+      ],
+      [
+       "node",
+       "'dn1'"
+      ],
+      [
+       "kind",
+       "'node-local'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (4)<\/b> {&#x27;M1&#x27;: → list #2, &#x27;M2&#x27;: → list #3, &#x27;M3&#x27;: → list #4, &#x27;M4&#x27;: → list #5}",
+    "<b>#2 list (2)<\/b> [&#x27;dn1&#x27;, &#x27;dn3&#x27;]",
+    "<b>#3 list (2)<\/b> [&#x27;dn1&#x27;, &#x27;dn2&#x27;]",
+    "<b>#4 list (1)<\/b> [&#x27;dn1&#x27;]",
+    "<b>#5 list (1)<\/b> [&#x27;dn4&#x27;]",
+    "<b>#6 dict (3)<\/b> {&#x27;dn1&#x27;: 1, &#x27;dn2&#x27;: 1, &#x27;dn3&#x27;: 1}",
+    "<b>#7 list (2)<\/b> [&#x27;dn1&#x27;, &#x27;dn3&#x27;]"
+   ]
+  },
+  {
+   "line": 11,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "tasks",
+       "→ dict #1"
+      ],
+      [
+       "slots",
+       "→ dict #6"
+      ],
+      [
+       "task",
+       "'M1'"
+      ],
+      [
+       "holders",
+       "→ list #2"
+      ],
+      [
+       "local",
+       "→ list #7"
+      ],
+      [
+       "node",
+       "'dn1'"
+      ],
+      [
+       "kind",
+       "'node-local'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (4)<\/b> {&#x27;M1&#x27;: → list #2, &#x27;M2&#x27;: → list #3, &#x27;M3&#x27;: → list #4, &#x27;M4&#x27;: → list #5}",
+    "<b>#2 list (2)<\/b> [&#x27;dn1&#x27;, &#x27;dn3&#x27;]",
+    "<b>#3 list (2)<\/b> [&#x27;dn1&#x27;, &#x27;dn2&#x27;]",
+    "<b>#4 list (1)<\/b> [&#x27;dn1&#x27;]",
+    "<b>#5 list (1)<\/b> [&#x27;dn4&#x27;]",
+    "<b>#6 dict (3)<\/b> {&#x27;dn1&#x27;: 1, &#x27;dn2&#x27;: 1, &#x27;dn3&#x27;: 1}",
+    "<b>#7 list (2)<\/b> [&#x27;dn1&#x27;, &#x27;dn3&#x27;]"
+   ],
+   "out": "M1 -> dn1 node-local\n"
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "<code>task<\/code> changes to &#x27;M2&#x27;. <code>holders<\/code> changes to → list #3.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "tasks",
+       "→ dict #1"
+      ],
+      [
+       "slots",
+       "→ dict #6"
+      ],
+      [
+       "task",
+       "'M2'"
+      ],
+      [
+       "holders",
+       "→ list #3"
+      ],
+      [
+       "local",
+       "→ list #7"
+      ],
+      [
+       "node",
+       "'dn1'"
+      ],
+      [
+       "kind",
+       "'node-local'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (4)<\/b> {&#x27;M1&#x27;: → list #2, &#x27;M2&#x27;: → list #3, &#x27;M3&#x27;: → list #4, &#x27;M4&#x27;: → list #5}",
+    "<b>#2 list (2)<\/b> [&#x27;dn1&#x27;, &#x27;dn3&#x27;]",
+    "<b>#3 list (2)<\/b> [&#x27;dn1&#x27;, &#x27;dn2&#x27;]",
+    "<b>#4 list (1)<\/b> [&#x27;dn1&#x27;]",
+    "<b>#5 list (1)<\/b> [&#x27;dn4&#x27;]",
+    "<b>#6 dict (3)<\/b> {&#x27;dn1&#x27;: 1, &#x27;dn2&#x27;: 1, &#x27;dn3&#x27;: 1}",
+    "<b>#7 list (2)<\/b> [&#x27;dn1&#x27;, &#x27;dn3&#x27;]"
+   ],
+   "newVar": "holders"
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "tasks",
+       "→ dict #1"
+      ],
+      [
+       "slots",
+       "→ dict #6"
+      ],
+      [
+       "task",
+       "'M2'"
+      ],
+      [
+       "holders",
+       "→ list #3"
+      ],
+      [
+       "local",
+       "→ list #7"
+      ],
+      [
+       "node",
+       "'dn1'"
+      ],
+      [
+       "kind",
+       "'node-local'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (4)<\/b> {&#x27;M1&#x27;: → list #2, &#x27;M2&#x27;: → list #3, &#x27;M3&#x27;: → list #4, &#x27;M4&#x27;: → list #5}",
+    "<b>#2 list (2)<\/b> [&#x27;dn1&#x27;, &#x27;dn3&#x27;]",
+    "<b>#3 list (2)<\/b> [&#x27;dn1&#x27;, &#x27;dn2&#x27;]",
+    "<b>#4 list (1)<\/b> [&#x27;dn1&#x27;]",
+    "<b>#5 list (1)<\/b> [&#x27;dn4&#x27;]",
+    "<b>#6 dict (3)<\/b> {&#x27;dn1&#x27;: 1, &#x27;dn2&#x27;: 1, &#x27;dn3&#x27;: 1}",
+    "<b>#7 list (2)<\/b> [&#x27;dn1&#x27;, &#x27;dn3&#x27;]"
+   ]
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "tasks",
+       "→ dict #1"
+      ],
+      [
+       "slots",
+       "→ dict #6"
+      ],
+      [
+       "task",
+       "'M2'"
+      ],
+      [
+       "holders",
+       "→ list #3"
+      ],
+      [
+       "local",
+       "→ list #7"
+      ],
+      [
+       "node",
+       "'dn1'"
+      ],
+      [
+       "kind",
+       "'node-local'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (4)<\/b> {&#x27;M1&#x27;: → list #2, &#x27;M2&#x27;: → list #3, &#x27;M3&#x27;: → list #4, &#x27;M4&#x27;: → list #5}",
+    "<b>#2 list (2)<\/b> [&#x27;dn1&#x27;, &#x27;dn3&#x27;]",
+    "<b>#3 list (2)<\/b> [&#x27;dn1&#x27;, &#x27;dn2&#x27;]",
+    "<b>#4 list (1)<\/b> [&#x27;dn1&#x27;]",
+    "<b>#5 list (1)<\/b> [&#x27;dn4&#x27;]",
+    "<b>#6 dict (3)<\/b> {&#x27;dn1&#x27;: 1, &#x27;dn2&#x27;: 1, &#x27;dn3&#x27;: 1}",
+    "<b>#7 list (2)<\/b> [&#x27;dn1&#x27;, &#x27;dn3&#x27;]"
+   ]
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "<code>local<\/code> changes to → list #8. A new list object (#8) is created: [&#x27;dn1&#x27;, &#x27;dn2&#x27;]",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "tasks",
+       "→ dict #1"
+      ],
+      [
+       "slots",
+       "→ dict #6"
+      ],
+      [
+       "task",
+       "'M2'"
+      ],
+      [
+       "holders",
+       "→ list #3"
+      ],
+      [
+       "local",
+       "→ list #8"
+      ],
+      [
+       "node",
+       "'dn1'"
+      ],
+      [
+       "kind",
+       "'node-local'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (4)<\/b> {&#x27;M1&#x27;: → list #2, &#x27;M2&#x27;: → list #3, &#x27;M3&#x27;: → list #4, &#x27;M4&#x27;: → list #5}",
+    "<b>#2 list (2)<\/b> [&#x27;dn1&#x27;, &#x27;dn3&#x27;]",
+    "<b>#3 list (2)<\/b> [&#x27;dn1&#x27;, &#x27;dn2&#x27;]",
+    "<b>#4 list (1)<\/b> [&#x27;dn1&#x27;]",
+    "<b>#5 list (1)<\/b> [&#x27;dn4&#x27;]",
+    "<b>#6 dict (3)<\/b> {&#x27;dn1&#x27;: 1, &#x27;dn2&#x27;: 1, &#x27;dn3&#x27;: 1}",
+    "<b>#8 list (2)<\/b> [&#x27;dn1&#x27;, &#x27;dn2&#x27;]"
+   ],
+   "newVar": "local"
+  },
+  {
+   "line": 6,
+   "phase": "Python",
+   "note": "The condition is <b>True<\/b>, so the indented block runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "tasks",
+       "→ dict #1"
+      ],
+      [
+       "slots",
+       "→ dict #6"
+      ],
+      [
+       "task",
+       "'M2'"
+      ],
+      [
+       "holders",
+       "→ list #3"
+      ],
+      [
+       "local",
+       "→ list #8"
+      ],
+      [
+       "node",
+       "'dn1'"
+      ],
+      [
+       "kind",
+       "'node-local'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (4)<\/b> {&#x27;M1&#x27;: → list #2, &#x27;M2&#x27;: → list #3, &#x27;M3&#x27;: → list #4, &#x27;M4&#x27;: → list #5}",
+    "<b>#2 list (2)<\/b> [&#x27;dn1&#x27;, &#x27;dn3&#x27;]",
+    "<b>#3 list (2)<\/b> [&#x27;dn1&#x27;, &#x27;dn2&#x27;]",
+    "<b>#4 list (1)<\/b> [&#x27;dn1&#x27;]",
+    "<b>#5 list (1)<\/b> [&#x27;dn4&#x27;]",
+    "<b>#6 dict (3)<\/b> {&#x27;dn1&#x27;: 1, &#x27;dn2&#x27;: 1, &#x27;dn3&#x27;: 1}",
+    "<b>#8 list (2)<\/b> [&#x27;dn1&#x27;, &#x27;dn2&#x27;]"
+   ]
+  },
+  {
+   "line": 7,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "tasks",
+       "→ dict #1"
+      ],
+      [
+       "slots",
+       "→ dict #6"
+      ],
+      [
+       "task",
+       "'M2'"
+      ],
+      [
+       "holders",
+       "→ list #3"
+      ],
+      [
+       "local",
+       "→ list #8"
+      ],
+      [
+       "node",
+       "'dn1'"
+      ],
+      [
+       "kind",
+       "'node-local'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (4)<\/b> {&#x27;M1&#x27;: → list #2, &#x27;M2&#x27;: → list #3, &#x27;M3&#x27;: → list #4, &#x27;M4&#x27;: → list #5}",
+    "<b>#2 list (2)<\/b> [&#x27;dn1&#x27;, &#x27;dn3&#x27;]",
+    "<b>#3 list (2)<\/b> [&#x27;dn1&#x27;, &#x27;dn2&#x27;]",
+    "<b>#4 list (1)<\/b> [&#x27;dn1&#x27;]",
+    "<b>#5 list (1)<\/b> [&#x27;dn4&#x27;]",
+    "<b>#6 dict (3)<\/b> {&#x27;dn1&#x27;: 1, &#x27;dn2&#x27;: 1, &#x27;dn3&#x27;: 1}",
+    "<b>#8 list (2)<\/b> [&#x27;dn1&#x27;, &#x27;dn2&#x27;]"
+   ]
+  },
+  {
+   "line": 10,
+   "phase": "Python",
+   "note": "Object #6 dict now holds {&#x27;dn1&#x27;: 0, &#x27;dn2&#x27;: 1, &#x27;dn3&#x27;: 1}",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "tasks",
+       "→ dict #1"
+      ],
+      [
+       "slots",
+       "→ dict #6"
+      ],
+      [
+       "task",
+       "'M2'"
+      ],
+      [
+       "holders",
+       "→ list #3"
+      ],
+      [
+       "local",
+       "→ list #8"
+      ],
+      [
+       "node",
+       "'dn1'"
+      ],
+      [
+       "kind",
+       "'node-local'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (4)<\/b> {&#x27;M1&#x27;: → list #2, &#x27;M2&#x27;: → list #3, &#x27;M3&#x27;: → list #4, &#x27;M4&#x27;: → list #5}",
+    "<b>#2 list (2)<\/b> [&#x27;dn1&#x27;, &#x27;dn3&#x27;]",
+    "<b>#3 list (2)<\/b> [&#x27;dn1&#x27;, &#x27;dn2&#x27;]",
+    "<b>#4 list (1)<\/b> [&#x27;dn1&#x27;]",
+    "<b>#5 list (1)<\/b> [&#x27;dn4&#x27;]",
+    "<b>#6 dict (3)<\/b> {&#x27;dn1&#x27;: 0, &#x27;dn2&#x27;: 1, &#x27;dn3&#x27;: 1}",
+    "<b>#8 list (2)<\/b> [&#x27;dn1&#x27;, &#x27;dn2&#x27;]"
+   ]
+  },
+  {
+   "line": 11,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "tasks",
+       "→ dict #1"
+      ],
+      [
+       "slots",
+       "→ dict #6"
+      ],
+      [
+       "task",
+       "'M2'"
+      ],
+      [
+       "holders",
+       "→ list #3"
+      ],
+      [
+       "local",
+       "→ list #8"
+      ],
+      [
+       "node",
+       "'dn1'"
+      ],
+      [
+       "kind",
+       "'node-local'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (4)<\/b> {&#x27;M1&#x27;: → list #2, &#x27;M2&#x27;: → list #3, &#x27;M3&#x27;: → list #4, &#x27;M4&#x27;: → list #5}",
+    "<b>#2 list (2)<\/b> [&#x27;dn1&#x27;, &#x27;dn3&#x27;]",
+    "<b>#3 list (2)<\/b> [&#x27;dn1&#x27;, &#x27;dn2&#x27;]",
+    "<b>#4 list (1)<\/b> [&#x27;dn1&#x27;]",
+    "<b>#5 list (1)<\/b> [&#x27;dn4&#x27;]",
+    "<b>#6 dict (3)<\/b> {&#x27;dn1&#x27;: 0, &#x27;dn2&#x27;: 1, &#x27;dn3&#x27;: 1}",
+    "<b>#8 list (2)<\/b> [&#x27;dn1&#x27;, &#x27;dn2&#x27;]"
+   ],
+   "out": "M2 -> dn1 node-local\n"
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "<code>task<\/code> changes to &#x27;M3&#x27;. <code>holders<\/code> changes to → list #4.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "tasks",
+       "→ dict #1"
+      ],
+      [
+       "slots",
+       "→ dict #6"
+      ],
+      [
+       "task",
+       "'M3'"
+      ],
+      [
+       "holders",
+       "→ list #4"
+      ],
+      [
+       "local",
+       "→ list #8"
+      ],
+      [
+       "node",
+       "'dn1'"
+      ],
+      [
+       "kind",
+       "'node-local'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (4)<\/b> {&#x27;M1&#x27;: → list #2, &#x27;M2&#x27;: → list #3, &#x27;M3&#x27;: → list #4, &#x27;M4&#x27;: → list #5}",
+    "<b>#2 list (2)<\/b> [&#x27;dn1&#x27;, &#x27;dn3&#x27;]",
+    "<b>#3 list (2)<\/b> [&#x27;dn1&#x27;, &#x27;dn2&#x27;]",
+    "<b>#4 list (1)<\/b> [&#x27;dn1&#x27;]",
+    "<b>#5 list (1)<\/b> [&#x27;dn4&#x27;]",
+    "<b>#6 dict (3)<\/b> {&#x27;dn1&#x27;: 0, &#x27;dn2&#x27;: 1, &#x27;dn3&#x27;: 1}",
+    "<b>#8 list (2)<\/b> [&#x27;dn1&#x27;, &#x27;dn2&#x27;]"
+   ],
+   "newVar": "holders"
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "tasks",
+       "→ dict #1"
+      ],
+      [
+       "slots",
+       "→ dict #6"
+      ],
+      [
+       "task",
+       "'M3'"
+      ],
+      [
+       "holders",
+       "→ list #4"
+      ],
+      [
+       "local",
+       "→ list #8"
+      ],
+      [
+       "node",
+       "'dn1'"
+      ],
+      [
+       "kind",
+       "'node-local'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (4)<\/b> {&#x27;M1&#x27;: → list #2, &#x27;M2&#x27;: → list #3, &#x27;M3&#x27;: → list #4, &#x27;M4&#x27;: → list #5}",
+    "<b>#2 list (2)<\/b> [&#x27;dn1&#x27;, &#x27;dn3&#x27;]",
+    "<b>#3 list (2)<\/b> [&#x27;dn1&#x27;, &#x27;dn2&#x27;]",
+    "<b>#4 list (1)<\/b> [&#x27;dn1&#x27;]",
+    "<b>#5 list (1)<\/b> [&#x27;dn4&#x27;]",
+    "<b>#6 dict (3)<\/b> {&#x27;dn1&#x27;: 0, &#x27;dn2&#x27;: 1, &#x27;dn3&#x27;: 1}",
+    "<b>#8 list (2)<\/b> [&#x27;dn1&#x27;, &#x27;dn2&#x27;]"
+   ]
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "<code>local<\/code> changes to → list #9. A new list object (#9) is created: []",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "tasks",
+       "→ dict #1"
+      ],
+      [
+       "slots",
+       "→ dict #6"
+      ],
+      [
+       "task",
+       "'M3'"
+      ],
+      [
+       "holders",
+       "→ list #4"
+      ],
+      [
+       "local",
+       "→ list #9"
+      ],
+      [
+       "node",
+       "'dn1'"
+      ],
+      [
+       "kind",
+       "'node-local'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (4)<\/b> {&#x27;M1&#x27;: → list #2, &#x27;M2&#x27;: → list #3, &#x27;M3&#x27;: → list #4, &#x27;M4&#x27;: → list #5}",
+    "<b>#2 list (2)<\/b> [&#x27;dn1&#x27;, &#x27;dn3&#x27;]",
+    "<b>#3 list (2)<\/b> [&#x27;dn1&#x27;, &#x27;dn2&#x27;]",
+    "<b>#4 list (1)<\/b> [&#x27;dn1&#x27;]",
+    "<b>#5 list (1)<\/b> [&#x27;dn4&#x27;]",
+    "<b>#6 dict (3)<\/b> {&#x27;dn1&#x27;: 0, &#x27;dn2&#x27;: 1, &#x27;dn3&#x27;: 1}",
+    "<b>#9 list (0)<\/b> []"
+   ],
+   "newVar": "local"
+  },
+  {
+   "line": 6,
+   "phase": "Python",
+   "note": "The condition is <b>False<\/b>, so the indented block is skipped.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "tasks",
+       "→ dict #1"
+      ],
+      [
+       "slots",
+       "→ dict #6"
+      ],
+      [
+       "task",
+       "'M3'"
+      ],
+      [
+       "holders",
+       "→ list #4"
+      ],
+      [
+       "local",
+       "→ list #9"
+      ],
+      [
+       "node",
+       "'dn1'"
+      ],
+      [
+       "kind",
+       "'node-local'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (4)<\/b> {&#x27;M1&#x27;: → list #2, &#x27;M2&#x27;: → list #3, &#x27;M3&#x27;: → list #4, &#x27;M4&#x27;: → list #5}",
+    "<b>#2 list (2)<\/b> [&#x27;dn1&#x27;, &#x27;dn3&#x27;]",
+    "<b>#3 list (2)<\/b> [&#x27;dn1&#x27;, &#x27;dn2&#x27;]",
+    "<b>#4 list (1)<\/b> [&#x27;dn1&#x27;]",
+    "<b>#5 list (1)<\/b> [&#x27;dn4&#x27;]",
+    "<b>#6 dict (3)<\/b> {&#x27;dn1&#x27;: 0, &#x27;dn2&#x27;: 1, &#x27;dn3&#x27;: 1}",
+    "<b>#9 list (0)<\/b> []"
+   ]
+  },
+  {
+   "line": 9,
+   "phase": "Python",
+   "note": "<code>node<\/code> changes to &#x27;dn2&#x27;. <code>kind<\/code> changes to &#x27;remote&#x27;.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "tasks",
+       "→ dict #1"
+      ],
+      [
+       "slots",
+       "→ dict #6"
+      ],
+      [
+       "task",
+       "'M3'"
+      ],
+      [
+       "holders",
+       "→ list #4"
+      ],
+      [
+       "local",
+       "→ list #9"
+      ],
+      [
+       "node",
+       "'dn2'"
+      ],
+      [
+       "kind",
+       "'remote'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (4)<\/b> {&#x27;M1&#x27;: → list #2, &#x27;M2&#x27;: → list #3, &#x27;M3&#x27;: → list #4, &#x27;M4&#x27;: → list #5}",
+    "<b>#2 list (2)<\/b> [&#x27;dn1&#x27;, &#x27;dn3&#x27;]",
+    "<b>#3 list (2)<\/b> [&#x27;dn1&#x27;, &#x27;dn2&#x27;]",
+    "<b>#4 list (1)<\/b> [&#x27;dn1&#x27;]",
+    "<b>#5 list (1)<\/b> [&#x27;dn4&#x27;]",
+    "<b>#6 dict (3)<\/b> {&#x27;dn1&#x27;: 0, &#x27;dn2&#x27;: 1, &#x27;dn3&#x27;: 1}",
+    "<b>#9 list (0)<\/b> []"
+   ],
+   "newVar": "kind"
+  },
+  {
+   "line": 10,
+   "phase": "Python",
+   "note": "Object #6 dict now holds {&#x27;dn1&#x27;: 0, &#x27;dn2&#x27;: 0, &#x27;dn3&#x27;: 1}",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "tasks",
+       "→ dict #1"
+      ],
+      [
+       "slots",
+       "→ dict #6"
+      ],
+      [
+       "task",
+       "'M3'"
+      ],
+      [
+       "holders",
+       "→ list #4"
+      ],
+      [
+       "local",
+       "→ list #9"
+      ],
+      [
+       "node",
+       "'dn2'"
+      ],
+      [
+       "kind",
+       "'remote'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (4)<\/b> {&#x27;M1&#x27;: → list #2, &#x27;M2&#x27;: → list #3, &#x27;M3&#x27;: → list #4, &#x27;M4&#x27;: → list #5}",
+    "<b>#2 list (2)<\/b> [&#x27;dn1&#x27;, &#x27;dn3&#x27;]",
+    "<b>#3 list (2)<\/b> [&#x27;dn1&#x27;, &#x27;dn2&#x27;]",
+    "<b>#4 list (1)<\/b> [&#x27;dn1&#x27;]",
+    "<b>#5 list (1)<\/b> [&#x27;dn4&#x27;]",
+    "<b>#6 dict (3)<\/b> {&#x27;dn1&#x27;: 0, &#x27;dn2&#x27;: 0, &#x27;dn3&#x27;: 1}",
+    "<b>#9 list (0)<\/b> []"
+   ]
+  },
+  {
+   "line": 11,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "tasks",
+       "→ dict #1"
+      ],
+      [
+       "slots",
+       "→ dict #6"
+      ],
+      [
+       "task",
+       "'M3'"
+      ],
+      [
+       "holders",
+       "→ list #4"
+      ],
+      [
+       "local",
+       "→ list #9"
+      ],
+      [
+       "node",
+       "'dn2'"
+      ],
+      [
+       "kind",
+       "'remote'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (4)<\/b> {&#x27;M1&#x27;: → list #2, &#x27;M2&#x27;: → list #3, &#x27;M3&#x27;: → list #4, &#x27;M4&#x27;: → list #5}",
+    "<b>#2 list (2)<\/b> [&#x27;dn1&#x27;, &#x27;dn3&#x27;]",
+    "<b>#3 list (2)<\/b> [&#x27;dn1&#x27;, &#x27;dn2&#x27;]",
+    "<b>#4 list (1)<\/b> [&#x27;dn1&#x27;]",
+    "<b>#5 list (1)<\/b> [&#x27;dn4&#x27;]",
+    "<b>#6 dict (3)<\/b> {&#x27;dn1&#x27;: 0, &#x27;dn2&#x27;: 0, &#x27;dn3&#x27;: 1}",
+    "<b>#9 list (0)<\/b> []"
+   ],
+   "out": "M3 -> dn2 remote\n"
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "<code>task<\/code> changes to &#x27;M4&#x27;. <code>holders<\/code> changes to → list #5.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "tasks",
+       "→ dict #1"
+      ],
+      [
+       "slots",
+       "→ dict #6"
+      ],
+      [
+       "task",
+       "'M4'"
+      ],
+      [
+       "holders",
+       "→ list #5"
+      ],
+      [
+       "local",
+       "→ list #9"
+      ],
+      [
+       "node",
+       "'dn2'"
+      ],
+      [
+       "kind",
+       "'remote'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (4)<\/b> {&#x27;M1&#x27;: → list #2, &#x27;M2&#x27;: → list #3, &#x27;M3&#x27;: → list #4, &#x27;M4&#x27;: → list #5}",
+    "<b>#2 list (2)<\/b> [&#x27;dn1&#x27;, &#x27;dn3&#x27;]",
+    "<b>#3 list (2)<\/b> [&#x27;dn1&#x27;, &#x27;dn2&#x27;]",
+    "<b>#4 list (1)<\/b> [&#x27;dn1&#x27;]",
+    "<b>#5 list (1)<\/b> [&#x27;dn4&#x27;]",
+    "<b>#6 dict (3)<\/b> {&#x27;dn1&#x27;: 0, &#x27;dn2&#x27;: 0, &#x27;dn3&#x27;: 1}",
+    "<b>#9 list (0)<\/b> []"
+   ],
+   "newVar": "holders"
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "tasks",
+       "→ dict #1"
+      ],
+      [
+       "slots",
+       "→ dict #6"
+      ],
+      [
+       "task",
+       "'M4'"
+      ],
+      [
+       "holders",
+       "→ list #5"
+      ],
+      [
+       "local",
+       "→ list #9"
+      ],
+      [
+       "node",
+       "'dn2'"
+      ],
+      [
+       "kind",
+       "'remote'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (4)<\/b> {&#x27;M1&#x27;: → list #2, &#x27;M2&#x27;: → list #3, &#x27;M3&#x27;: → list #4, &#x27;M4&#x27;: → list #5}",
+    "<b>#2 list (2)<\/b> [&#x27;dn1&#x27;, &#x27;dn3&#x27;]",
+    "<b>#3 list (2)<\/b> [&#x27;dn1&#x27;, &#x27;dn2&#x27;]",
+    "<b>#4 list (1)<\/b> [&#x27;dn1&#x27;]",
+    "<b>#5 list (1)<\/b> [&#x27;dn4&#x27;]",
+    "<b>#6 dict (3)<\/b> {&#x27;dn1&#x27;: 0, &#x27;dn2&#x27;: 0, &#x27;dn3&#x27;: 1}",
+    "<b>#9 list (0)<\/b> []"
+   ]
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "<code>local<\/code> changes to → list #10. A new list object (#10) is created: []",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "tasks",
+       "→ dict #1"
+      ],
+      [
+       "slots",
+       "→ dict #6"
+      ],
+      [
+       "task",
+       "'M4'"
+      ],
+      [
+       "holders",
+       "→ list #5"
+      ],
+      [
+       "local",
+       "→ list #10"
+      ],
+      [
+       "node",
+       "'dn2'"
+      ],
+      [
+       "kind",
+       "'remote'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (4)<\/b> {&#x27;M1&#x27;: → list #2, &#x27;M2&#x27;: → list #3, &#x27;M3&#x27;: → list #4, &#x27;M4&#x27;: → list #5}",
+    "<b>#2 list (2)<\/b> [&#x27;dn1&#x27;, &#x27;dn3&#x27;]",
+    "<b>#3 list (2)<\/b> [&#x27;dn1&#x27;, &#x27;dn2&#x27;]",
+    "<b>#4 list (1)<\/b> [&#x27;dn1&#x27;]",
+    "<b>#5 list (1)<\/b> [&#x27;dn4&#x27;]",
+    "<b>#6 dict (3)<\/b> {&#x27;dn1&#x27;: 0, &#x27;dn2&#x27;: 0, &#x27;dn3&#x27;: 1}",
+    "<b>#10 list (0)<\/b> []"
+   ],
+   "newVar": "local"
+  },
+  {
+   "line": 6,
+   "phase": "Python",
+   "note": "The condition is <b>False<\/b>, so the indented block is skipped.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "tasks",
+       "→ dict #1"
+      ],
+      [
+       "slots",
+       "→ dict #6"
+      ],
+      [
+       "task",
+       "'M4'"
+      ],
+      [
+       "holders",
+       "→ list #5"
+      ],
+      [
+       "local",
+       "→ list #10"
+      ],
+      [
+       "node",
+       "'dn2'"
+      ],
+      [
+       "kind",
+       "'remote'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (4)<\/b> {&#x27;M1&#x27;: → list #2, &#x27;M2&#x27;: → list #3, &#x27;M3&#x27;: → list #4, &#x27;M4&#x27;: → list #5}",
+    "<b>#2 list (2)<\/b> [&#x27;dn1&#x27;, &#x27;dn3&#x27;]",
+    "<b>#3 list (2)<\/b> [&#x27;dn1&#x27;, &#x27;dn2&#x27;]",
+    "<b>#4 list (1)<\/b> [&#x27;dn1&#x27;]",
+    "<b>#5 list (1)<\/b> [&#x27;dn4&#x27;]",
+    "<b>#6 dict (3)<\/b> {&#x27;dn1&#x27;: 0, &#x27;dn2&#x27;: 0, &#x27;dn3&#x27;: 1}",
+    "<b>#10 list (0)<\/b> []"
+   ]
+  },
+  {
+   "line": 9,
+   "phase": "Python",
+   "note": "<code>node<\/code> changes to &#x27;dn3&#x27;.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "tasks",
+       "→ dict #1"
+      ],
+      [
+       "slots",
+       "→ dict #6"
+      ],
+      [
+       "task",
+       "'M4'"
+      ],
+      [
+       "holders",
+       "→ list #5"
+      ],
+      [
+       "local",
+       "→ list #10"
+      ],
+      [
+       "node",
+       "'dn3'"
+      ],
+      [
+       "kind",
+       "'remote'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (4)<\/b> {&#x27;M1&#x27;: → list #2, &#x27;M2&#x27;: → list #3, &#x27;M3&#x27;: → list #4, &#x27;M4&#x27;: → list #5}",
+    "<b>#2 list (2)<\/b> [&#x27;dn1&#x27;, &#x27;dn3&#x27;]",
+    "<b>#3 list (2)<\/b> [&#x27;dn1&#x27;, &#x27;dn2&#x27;]",
+    "<b>#4 list (1)<\/b> [&#x27;dn1&#x27;]",
+    "<b>#5 list (1)<\/b> [&#x27;dn4&#x27;]",
+    "<b>#6 dict (3)<\/b> {&#x27;dn1&#x27;: 0, &#x27;dn2&#x27;: 0, &#x27;dn3&#x27;: 1}",
+    "<b>#10 list (0)<\/b> []"
+   ],
+   "newVar": "node"
+  },
+  {
+   "line": 10,
+   "phase": "Python",
+   "note": "Object #6 dict now holds {&#x27;dn1&#x27;: 0, &#x27;dn2&#x27;: 0, &#x27;dn3&#x27;: 0}",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "tasks",
+       "→ dict #1"
+      ],
+      [
+       "slots",
+       "→ dict #6"
+      ],
+      [
+       "task",
+       "'M4'"
+      ],
+      [
+       "holders",
+       "→ list #5"
+      ],
+      [
+       "local",
+       "→ list #10"
+      ],
+      [
+       "node",
+       "'dn3'"
+      ],
+      [
+       "kind",
+       "'remote'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (4)<\/b> {&#x27;M1&#x27;: → list #2, &#x27;M2&#x27;: → list #3, &#x27;M3&#x27;: → list #4, &#x27;M4&#x27;: → list #5}",
+    "<b>#2 list (2)<\/b> [&#x27;dn1&#x27;, &#x27;dn3&#x27;]",
+    "<b>#3 list (2)<\/b> [&#x27;dn1&#x27;, &#x27;dn2&#x27;]",
+    "<b>#4 list (1)<\/b> [&#x27;dn1&#x27;]",
+    "<b>#5 list (1)<\/b> [&#x27;dn4&#x27;]",
+    "<b>#6 dict (3)<\/b> {&#x27;dn1&#x27;: 0, &#x27;dn2&#x27;: 0, &#x27;dn3&#x27;: 0}",
+    "<b>#10 list (0)<\/b> []"
+   ]
+  },
+  {
+   "line": 11,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "tasks",
+       "→ dict #1"
+      ],
+      [
+       "slots",
+       "→ dict #6"
+      ],
+      [
+       "task",
+       "'M4'"
+      ],
+      [
+       "holders",
+       "→ list #5"
+      ],
+      [
+       "local",
+       "→ list #10"
+      ],
+      [
+       "node",
+       "'dn3'"
+      ],
+      [
+       "kind",
+       "'remote'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (4)<\/b> {&#x27;M1&#x27;: → list #2, &#x27;M2&#x27;: → list #3, &#x27;M3&#x27;: → list #4, &#x27;M4&#x27;: → list #5}",
+    "<b>#2 list (2)<\/b> [&#x27;dn1&#x27;, &#x27;dn3&#x27;]",
+    "<b>#3 list (2)<\/b> [&#x27;dn1&#x27;, &#x27;dn2&#x27;]",
+    "<b>#4 list (1)<\/b> [&#x27;dn1&#x27;]",
+    "<b>#5 list (1)<\/b> [&#x27;dn4&#x27;]",
+    "<b>#6 dict (3)<\/b> {&#x27;dn1&#x27;: 0, &#x27;dn2&#x27;: 0, &#x27;dn3&#x27;: 0}",
+    "<b>#10 list (0)<\/b> []"
+   ],
+   "out": "M4 -> dn3 remote\n"
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "Nothing is left to loop over, so the loop ends and Python moves on.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "tasks",
+       "→ dict #1"
+      ],
+      [
+       "slots",
+       "→ dict #6"
+      ],
+      [
+       "task",
+       "'M4'"
+      ],
+      [
+       "holders",
+       "→ list #5"
+      ],
+      [
+       "local",
+       "→ list #10"
+      ],
+      [
+       "node",
+       "'dn3'"
+      ],
+      [
+       "kind",
+       "'remote'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (4)<\/b> {&#x27;M1&#x27;: → list #2, &#x27;M2&#x27;: → list #3, &#x27;M3&#x27;: → list #4, &#x27;M4&#x27;: → list #5}",
+    "<b>#2 list (2)<\/b> [&#x27;dn1&#x27;, &#x27;dn3&#x27;]",
+    "<b>#3 list (2)<\/b> [&#x27;dn1&#x27;, &#x27;dn2&#x27;]",
+    "<b>#4 list (1)<\/b> [&#x27;dn1&#x27;]",
+    "<b>#5 list (1)<\/b> [&#x27;dn4&#x27;]",
+    "<b>#6 dict (3)<\/b> {&#x27;dn1&#x27;: 0, &#x27;dn2&#x27;: 0, &#x27;dn3&#x27;: 0}",
+    "<b>#10 list (0)<\/b> []"
+   ]
+  }
+ ]
+}</script>
+    </div>
+  </article>
+  <article class="wx">
+    <div class="wx__head"><span class="wx__num">Example 3</span><span class="lvl lvl--a">Advanced</span><span class="wx__tag">Performance · job report</span></div>
+    <h4>Turn task placements into locality counters and network cost</h4>
+    <div class="wx__problem"><p class="wx__label">Problem statement</p><p>After a job, each map task's placement is known (node, rack or off) and every input block is 128 MB. Produce the job counters, the share of data-local tasks, and how many GB of input crossed the network (rack-local and off-rack only).</p></div>
+    <div class="prob__io"><div><small>Input</small><pre>[node, node, rack, node, off, node, rack, node, node, off] · 128 MB per block</pre></div><div><small>Expected output</small><pre>Data-local map tasks = 6
+Rack-local map tasks = 2
+Off-rack map tasks   = 2
+Data-local share: 60%, input over network: 0.5 GB</pre></div></div>
+    <div class="wx__approach"><p class="wx__label">Approach</p><ol><li>Count each kind with a dictionary.</li><li>Data-local share = node ÷ total.</li><li>Network GB = (rack + off) × 128 ÷ 1024.</li></ol></div>
+    <p class="wx__label">Solution: run it live</p>
+    <div class="runner">
+    <script type="application/json">{
+ "lang": "python",
+ "file": "main.py",
+ "tasks": [
+  {
+   "label": "Solution",
+   "hint": "A healthy cluster shows well over 90% data-local. What could cause 60%? (Cluster full, too few replicas, wrong rack script.)",
+   "code": "placements = [\"node\", \"node\", \"rack\", \"node\", \"off\",\n              \"node\", \"rack\", \"node\", \"node\", \"off\"]\ncount = {\"node\": 0, \"rack\": 0, \"off\": 0}\nfor p in placements:\n    count[p] += 1\nlocal_share = count[\"node\"] / len(placements)\nnet_gb = (count[\"rack\"] + count[\"off\"]) * 128 / 1024\nprint(\"Data-local map tasks =\", count[\"node\"])\nprint(\"Rack-local map tasks =\", count[\"rack\"])\nprint(\"Off-rack map tasks   =\", count[\"off\"])\nprint(f\"Data-local share: {local_share:.0%}, input over network: {net_gb} GB\")\n"
+  }
+ ]
+}</script>
+    </div>
+    <p class="wx__label">What happens in memory, step by step</p>
+    <p class="wx__how">Recorded from a real Python run: press <b>Next</b> to execute one line at a time. Watch variables change in each frame, and lists and dictionaries (numbered #1, #2 …) fill up as objects.</p>
+    <div class="tracer">
+    <script type="application/json">{
+ "lang": "python",
+ "code": [
+  "placements = [\"node\", \"node\", \"rack\", \"node\", \"off\",",
+  "              \"node\", \"rack\", \"node\", \"node\", \"off\"]",
+  "count = {\"node\": 0, \"rack\": 0, \"off\": 0}",
+  "for p in placements:",
+  "    count[p] += 1",
+  "local_share = count[\"node\"] / len(placements)",
+  "net_gb = (count[\"rack\"] + count[\"off\"]) * 128 / 1024",
+  "print(\"Data-local map tasks =\", count[\"node\"])",
+  "print(\"Rack-local map tasks =\", count[\"rack\"])",
+  "print(\"Off-rack map tasks   =\", count[\"off\"])",
+  "print(f\"Data-local share: {local_share:.0%}, input over network: {net_gb} GB\")"
+ ],
+ "steps": [
+  {
+   "line": 1,
+   "phase": "Python",
+   "note": "<code>placements<\/code> is created: → list #1.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "placements",
+       "→ list #1"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (10)<\/b> [&#x27;node&#x27;, &#x27;node&#x27;, &#x27;rack&#x27;, &#x27;node&#x27;, &#x27;off&#x27;, &#x27;node&#x27;, &#x27;rack&#x27;, &#x27;node&#x27;, &#x27;node&#x27;, &#x27;off&#x27;]"
+   ],
+   "newVar": "placements"
+  },
+  {
+   "line": 3,
+   "phase": "Counters",
+   "note": "Start every counter at zero. <code>count<\/code> is created: → dict #2. A new dict object (#2) is created: {&#x27;node&#x27;: 0, &#x27;rack&#x27;: 0, &#x27;off&#x27;: 0}",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "placements",
+       "→ list #1"
+      ],
+      [
+       "count",
+       "→ dict #2"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (10)<\/b> [&#x27;node&#x27;, &#x27;node&#x27;, &#x27;rack&#x27;, &#x27;node&#x27;, &#x27;off&#x27;, &#x27;node&#x27;, &#x27;rack&#x27;, &#x27;node&#x27;, &#x27;node&#x27;, &#x27;off&#x27;]",
+    "<b>#2 dict (3)<\/b> {&#x27;node&#x27;: 0, &#x27;rack&#x27;: 0, &#x27;off&#x27;: 0}"
+   ],
+   "newVar": "count"
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "<code>p<\/code> is created: &#x27;node&#x27;.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "placements",
+       "→ list #1"
+      ],
+      [
+       "count",
+       "→ dict #2"
+      ],
+      [
+       "p",
+       "'node'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (10)<\/b> [&#x27;node&#x27;, &#x27;node&#x27;, &#x27;rack&#x27;, &#x27;node&#x27;, &#x27;off&#x27;, &#x27;node&#x27;, &#x27;rack&#x27;, &#x27;node&#x27;, &#x27;node&#x27;, &#x27;off&#x27;]",
+    "<b>#2 dict (3)<\/b> {&#x27;node&#x27;: 0, &#x27;rack&#x27;: 0, &#x27;off&#x27;: 0}"
+   ],
+   "newVar": "p"
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "Object #2 dict now holds {&#x27;node&#x27;: 1, &#x27;rack&#x27;: 0, &#x27;off&#x27;: 0}",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "placements",
+       "→ list #1"
+      ],
+      [
+       "count",
+       "→ dict #2"
+      ],
+      [
+       "p",
+       "'node'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (10)<\/b> [&#x27;node&#x27;, &#x27;node&#x27;, &#x27;rack&#x27;, &#x27;node&#x27;, &#x27;off&#x27;, &#x27;node&#x27;, &#x27;rack&#x27;, &#x27;node&#x27;, &#x27;node&#x27;, &#x27;off&#x27;]",
+    "<b>#2 dict (3)<\/b> {&#x27;node&#x27;: 1, &#x27;rack&#x27;: 0, &#x27;off&#x27;: 0}"
+   ]
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "The loop takes the next item (it has the same value as the previous one).",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "placements",
+       "→ list #1"
+      ],
+      [
+       "count",
+       "→ dict #2"
+      ],
+      [
+       "p",
+       "'node'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (10)<\/b> [&#x27;node&#x27;, &#x27;node&#x27;, &#x27;rack&#x27;, &#x27;node&#x27;, &#x27;off&#x27;, &#x27;node&#x27;, &#x27;rack&#x27;, &#x27;node&#x27;, &#x27;node&#x27;, &#x27;off&#x27;]",
+    "<b>#2 dict (3)<\/b> {&#x27;node&#x27;: 1, &#x27;rack&#x27;: 0, &#x27;off&#x27;: 0}"
+   ]
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "Object #2 dict now holds {&#x27;node&#x27;: 2, &#x27;rack&#x27;: 0, &#x27;off&#x27;: 0}",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "placements",
+       "→ list #1"
+      ],
+      [
+       "count",
+       "→ dict #2"
+      ],
+      [
+       "p",
+       "'node'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (10)<\/b> [&#x27;node&#x27;, &#x27;node&#x27;, &#x27;rack&#x27;, &#x27;node&#x27;, &#x27;off&#x27;, &#x27;node&#x27;, &#x27;rack&#x27;, &#x27;node&#x27;, &#x27;node&#x27;, &#x27;off&#x27;]",
+    "<b>#2 dict (3)<\/b> {&#x27;node&#x27;: 2, &#x27;rack&#x27;: 0, &#x27;off&#x27;: 0}"
+   ]
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "<code>p<\/code> changes to &#x27;rack&#x27;.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "placements",
+       "→ list #1"
+      ],
+      [
+       "count",
+       "→ dict #2"
+      ],
+      [
+       "p",
+       "'rack'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (10)<\/b> [&#x27;node&#x27;, &#x27;node&#x27;, &#x27;rack&#x27;, &#x27;node&#x27;, &#x27;off&#x27;, &#x27;node&#x27;, &#x27;rack&#x27;, &#x27;node&#x27;, &#x27;node&#x27;, &#x27;off&#x27;]",
+    "<b>#2 dict (3)<\/b> {&#x27;node&#x27;: 2, &#x27;rack&#x27;: 0, &#x27;off&#x27;: 0}"
+   ],
+   "newVar": "p"
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "Object #2 dict now holds {&#x27;node&#x27;: 2, &#x27;rack&#x27;: 1, &#x27;off&#x27;: 0}",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "placements",
+       "→ list #1"
+      ],
+      [
+       "count",
+       "→ dict #2"
+      ],
+      [
+       "p",
+       "'rack'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (10)<\/b> [&#x27;node&#x27;, &#x27;node&#x27;, &#x27;rack&#x27;, &#x27;node&#x27;, &#x27;off&#x27;, &#x27;node&#x27;, &#x27;rack&#x27;, &#x27;node&#x27;, &#x27;node&#x27;, &#x27;off&#x27;]",
+    "<b>#2 dict (3)<\/b> {&#x27;node&#x27;: 2, &#x27;rack&#x27;: 1, &#x27;off&#x27;: 0}"
+   ]
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "<code>p<\/code> changes to &#x27;node&#x27;.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "placements",
+       "→ list #1"
+      ],
+      [
+       "count",
+       "→ dict #2"
+      ],
+      [
+       "p",
+       "'node'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (10)<\/b> [&#x27;node&#x27;, &#x27;node&#x27;, &#x27;rack&#x27;, &#x27;node&#x27;, &#x27;off&#x27;, &#x27;node&#x27;, &#x27;rack&#x27;, &#x27;node&#x27;, &#x27;node&#x27;, &#x27;off&#x27;]",
+    "<b>#2 dict (3)<\/b> {&#x27;node&#x27;: 2, &#x27;rack&#x27;: 1, &#x27;off&#x27;: 0}"
+   ],
+   "newVar": "p"
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "Object #2 dict now holds {&#x27;node&#x27;: 3, &#x27;rack&#x27;: 1, &#x27;off&#x27;: 0}",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "placements",
+       "→ list #1"
+      ],
+      [
+       "count",
+       "→ dict #2"
+      ],
+      [
+       "p",
+       "'node'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (10)<\/b> [&#x27;node&#x27;, &#x27;node&#x27;, &#x27;rack&#x27;, &#x27;node&#x27;, &#x27;off&#x27;, &#x27;node&#x27;, &#x27;rack&#x27;, &#x27;node&#x27;, &#x27;node&#x27;, &#x27;off&#x27;]",
+    "<b>#2 dict (3)<\/b> {&#x27;node&#x27;: 3, &#x27;rack&#x27;: 1, &#x27;off&#x27;: 0}"
+   ]
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "<code>p<\/code> changes to &#x27;off&#x27;.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "placements",
+       "→ list #1"
+      ],
+      [
+       "count",
+       "→ dict #2"
+      ],
+      [
+       "p",
+       "'off'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (10)<\/b> [&#x27;node&#x27;, &#x27;node&#x27;, &#x27;rack&#x27;, &#x27;node&#x27;, &#x27;off&#x27;, &#x27;node&#x27;, &#x27;rack&#x27;, &#x27;node&#x27;, &#x27;node&#x27;, &#x27;off&#x27;]",
+    "<b>#2 dict (3)<\/b> {&#x27;node&#x27;: 3, &#x27;rack&#x27;: 1, &#x27;off&#x27;: 0}"
+   ],
+   "newVar": "p"
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "Object #2 dict now holds {&#x27;node&#x27;: 3, &#x27;rack&#x27;: 1, &#x27;off&#x27;: 1}",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "placements",
+       "→ list #1"
+      ],
+      [
+       "count",
+       "→ dict #2"
+      ],
+      [
+       "p",
+       "'off'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (10)<\/b> [&#x27;node&#x27;, &#x27;node&#x27;, &#x27;rack&#x27;, &#x27;node&#x27;, &#x27;off&#x27;, &#x27;node&#x27;, &#x27;rack&#x27;, &#x27;node&#x27;, &#x27;node&#x27;, &#x27;off&#x27;]",
+    "<b>#2 dict (3)<\/b> {&#x27;node&#x27;: 3, &#x27;rack&#x27;: 1, &#x27;off&#x27;: 1}"
+   ]
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "<code>p<\/code> changes to &#x27;node&#x27;.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "placements",
+       "→ list #1"
+      ],
+      [
+       "count",
+       "→ dict #2"
+      ],
+      [
+       "p",
+       "'node'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (10)<\/b> [&#x27;node&#x27;, &#x27;node&#x27;, &#x27;rack&#x27;, &#x27;node&#x27;, &#x27;off&#x27;, &#x27;node&#x27;, &#x27;rack&#x27;, &#x27;node&#x27;, &#x27;node&#x27;, &#x27;off&#x27;]",
+    "<b>#2 dict (3)<\/b> {&#x27;node&#x27;: 3, &#x27;rack&#x27;: 1, &#x27;off&#x27;: 1}"
+   ],
+   "newVar": "p"
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "Object #2 dict now holds {&#x27;node&#x27;: 4, &#x27;rack&#x27;: 1, &#x27;off&#x27;: 1}",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "placements",
+       "→ list #1"
+      ],
+      [
+       "count",
+       "→ dict #2"
+      ],
+      [
+       "p",
+       "'node'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (10)<\/b> [&#x27;node&#x27;, &#x27;node&#x27;, &#x27;rack&#x27;, &#x27;node&#x27;, &#x27;off&#x27;, &#x27;node&#x27;, &#x27;rack&#x27;, &#x27;node&#x27;, &#x27;node&#x27;, &#x27;off&#x27;]",
+    "<b>#2 dict (3)<\/b> {&#x27;node&#x27;: 4, &#x27;rack&#x27;: 1, &#x27;off&#x27;: 1}"
+   ]
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "<code>p<\/code> changes to &#x27;rack&#x27;.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "placements",
+       "→ list #1"
+      ],
+      [
+       "count",
+       "→ dict #2"
+      ],
+      [
+       "p",
+       "'rack'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (10)<\/b> [&#x27;node&#x27;, &#x27;node&#x27;, &#x27;rack&#x27;, &#x27;node&#x27;, &#x27;off&#x27;, &#x27;node&#x27;, &#x27;rack&#x27;, &#x27;node&#x27;, &#x27;node&#x27;, &#x27;off&#x27;]",
+    "<b>#2 dict (3)<\/b> {&#x27;node&#x27;: 4, &#x27;rack&#x27;: 1, &#x27;off&#x27;: 1}"
+   ],
+   "newVar": "p"
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "Object #2 dict now holds {&#x27;node&#x27;: 4, &#x27;rack&#x27;: 2, &#x27;off&#x27;: 1}",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "placements",
+       "→ list #1"
+      ],
+      [
+       "count",
+       "→ dict #2"
+      ],
+      [
+       "p",
+       "'rack'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (10)<\/b> [&#x27;node&#x27;, &#x27;node&#x27;, &#x27;rack&#x27;, &#x27;node&#x27;, &#x27;off&#x27;, &#x27;node&#x27;, &#x27;rack&#x27;, &#x27;node&#x27;, &#x27;node&#x27;, &#x27;off&#x27;]",
+    "<b>#2 dict (3)<\/b> {&#x27;node&#x27;: 4, &#x27;rack&#x27;: 2, &#x27;off&#x27;: 1}"
+   ]
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "<code>p<\/code> changes to &#x27;node&#x27;.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "placements",
+       "→ list #1"
+      ],
+      [
+       "count",
+       "→ dict #2"
+      ],
+      [
+       "p",
+       "'node'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (10)<\/b> [&#x27;node&#x27;, &#x27;node&#x27;, &#x27;rack&#x27;, &#x27;node&#x27;, &#x27;off&#x27;, &#x27;node&#x27;, &#x27;rack&#x27;, &#x27;node&#x27;, &#x27;node&#x27;, &#x27;off&#x27;]",
+    "<b>#2 dict (3)<\/b> {&#x27;node&#x27;: 4, &#x27;rack&#x27;: 2, &#x27;off&#x27;: 1}"
+   ],
+   "newVar": "p"
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "Object #2 dict now holds {&#x27;node&#x27;: 5, &#x27;rack&#x27;: 2, &#x27;off&#x27;: 1}",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "placements",
+       "→ list #1"
+      ],
+      [
+       "count",
+       "→ dict #2"
+      ],
+      [
+       "p",
+       "'node'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (10)<\/b> [&#x27;node&#x27;, &#x27;node&#x27;, &#x27;rack&#x27;, &#x27;node&#x27;, &#x27;off&#x27;, &#x27;node&#x27;, &#x27;rack&#x27;, &#x27;node&#x27;, &#x27;node&#x27;, &#x27;off&#x27;]",
+    "<b>#2 dict (3)<\/b> {&#x27;node&#x27;: 5, &#x27;rack&#x27;: 2, &#x27;off&#x27;: 1}"
+   ]
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "The loop takes the next item (it has the same value as the previous one).",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "placements",
+       "→ list #1"
+      ],
+      [
+       "count",
+       "→ dict #2"
+      ],
+      [
+       "p",
+       "'node'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (10)<\/b> [&#x27;node&#x27;, &#x27;node&#x27;, &#x27;rack&#x27;, &#x27;node&#x27;, &#x27;off&#x27;, &#x27;node&#x27;, &#x27;rack&#x27;, &#x27;node&#x27;, &#x27;node&#x27;, &#x27;off&#x27;]",
+    "<b>#2 dict (3)<\/b> {&#x27;node&#x27;: 5, &#x27;rack&#x27;: 2, &#x27;off&#x27;: 1}"
+   ]
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "Object #2 dict now holds {&#x27;node&#x27;: 6, &#x27;rack&#x27;: 2, &#x27;off&#x27;: 1}",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "placements",
+       "→ list #1"
+      ],
+      [
+       "count",
+       "→ dict #2"
+      ],
+      [
+       "p",
+       "'node'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (10)<\/b> [&#x27;node&#x27;, &#x27;node&#x27;, &#x27;rack&#x27;, &#x27;node&#x27;, &#x27;off&#x27;, &#x27;node&#x27;, &#x27;rack&#x27;, &#x27;node&#x27;, &#x27;node&#x27;, &#x27;off&#x27;]",
+    "<b>#2 dict (3)<\/b> {&#x27;node&#x27;: 6, &#x27;rack&#x27;: 2, &#x27;off&#x27;: 1}"
+   ]
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "<code>p<\/code> changes to &#x27;off&#x27;.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "placements",
+       "→ list #1"
+      ],
+      [
+       "count",
+       "→ dict #2"
+      ],
+      [
+       "p",
+       "'off'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (10)<\/b> [&#x27;node&#x27;, &#x27;node&#x27;, &#x27;rack&#x27;, &#x27;node&#x27;, &#x27;off&#x27;, &#x27;node&#x27;, &#x27;rack&#x27;, &#x27;node&#x27;, &#x27;node&#x27;, &#x27;off&#x27;]",
+    "<b>#2 dict (3)<\/b> {&#x27;node&#x27;: 6, &#x27;rack&#x27;: 2, &#x27;off&#x27;: 1}"
+   ],
+   "newVar": "p"
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "Object #2 dict now holds {&#x27;node&#x27;: 6, &#x27;rack&#x27;: 2, &#x27;off&#x27;: 2}",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "placements",
+       "→ list #1"
+      ],
+      [
+       "count",
+       "→ dict #2"
+      ],
+      [
+       "p",
+       "'off'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (10)<\/b> [&#x27;node&#x27;, &#x27;node&#x27;, &#x27;rack&#x27;, &#x27;node&#x27;, &#x27;off&#x27;, &#x27;node&#x27;, &#x27;rack&#x27;, &#x27;node&#x27;, &#x27;node&#x27;, &#x27;off&#x27;]",
+    "<b>#2 dict (3)<\/b> {&#x27;node&#x27;: 6, &#x27;rack&#x27;: 2, &#x27;off&#x27;: 2}"
+   ]
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "Nothing is left to loop over, so the loop ends and Python moves on.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "placements",
+       "→ list #1"
+      ],
+      [
+       "count",
+       "→ dict #2"
+      ],
+      [
+       "p",
+       "'off'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (10)<\/b> [&#x27;node&#x27;, &#x27;node&#x27;, &#x27;rack&#x27;, &#x27;node&#x27;, &#x27;off&#x27;, &#x27;node&#x27;, &#x27;rack&#x27;, &#x27;node&#x27;, &#x27;node&#x27;, &#x27;off&#x27;]",
+    "<b>#2 dict (3)<\/b> {&#x27;node&#x27;: 6, &#x27;rack&#x27;: 2, &#x27;off&#x27;: 2}"
+   ]
+  },
+  {
+   "line": 6,
+   "phase": "Python",
+   "note": "<code>local_share<\/code> is created: 0.6.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "placements",
+       "→ list #1"
+      ],
+      [
+       "count",
+       "→ dict #2"
+      ],
+      [
+       "p",
+       "'off'"
+      ],
+      [
+       "local_share",
+       "0.6"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (10)<\/b> [&#x27;node&#x27;, &#x27;node&#x27;, &#x27;rack&#x27;, &#x27;node&#x27;, &#x27;off&#x27;, &#x27;node&#x27;, &#x27;rack&#x27;, &#x27;node&#x27;, &#x27;node&#x27;, &#x27;off&#x27;]",
+    "<b>#2 dict (3)<\/b> {&#x27;node&#x27;: 6, &#x27;rack&#x27;: 2, &#x27;off&#x27;: 2}"
+   ],
+   "newVar": "local_share"
+  },
+  {
+   "line": 7,
+   "phase": "Python",
+   "note": "<code>net_gb<\/code> is created: 0.5.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "placements",
+       "→ list #1"
+      ],
+      [
+       "count",
+       "→ dict #2"
+      ],
+      [
+       "p",
+       "'off'"
+      ],
+      [
+       "local_share",
+       "0.6"
+      ],
+      [
+       "net_gb",
+       "0.5"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (10)<\/b> [&#x27;node&#x27;, &#x27;node&#x27;, &#x27;rack&#x27;, &#x27;node&#x27;, &#x27;off&#x27;, &#x27;node&#x27;, &#x27;rack&#x27;, &#x27;node&#x27;, &#x27;node&#x27;, &#x27;off&#x27;]",
+    "<b>#2 dict (3)<\/b> {&#x27;node&#x27;: 6, &#x27;rack&#x27;: 2, &#x27;off&#x27;: 2}"
+   ],
+   "newVar": "net_gb"
+  },
+  {
+   "line": 8,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "placements",
+       "→ list #1"
+      ],
+      [
+       "count",
+       "→ dict #2"
+      ],
+      [
+       "p",
+       "'off'"
+      ],
+      [
+       "local_share",
+       "0.6"
+      ],
+      [
+       "net_gb",
+       "0.5"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (10)<\/b> [&#x27;node&#x27;, &#x27;node&#x27;, &#x27;rack&#x27;, &#x27;node&#x27;, &#x27;off&#x27;, &#x27;node&#x27;, &#x27;rack&#x27;, &#x27;node&#x27;, &#x27;node&#x27;, &#x27;off&#x27;]",
+    "<b>#2 dict (3)<\/b> {&#x27;node&#x27;: 6, &#x27;rack&#x27;: 2, &#x27;off&#x27;: 2}"
+   ],
+   "out": "Data-local map tasks = 6\n"
+  },
+  {
+   "line": 9,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "placements",
+       "→ list #1"
+      ],
+      [
+       "count",
+       "→ dict #2"
+      ],
+      [
+       "p",
+       "'off'"
+      ],
+      [
+       "local_share",
+       "0.6"
+      ],
+      [
+       "net_gb",
+       "0.5"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (10)<\/b> [&#x27;node&#x27;, &#x27;node&#x27;, &#x27;rack&#x27;, &#x27;node&#x27;, &#x27;off&#x27;, &#x27;node&#x27;, &#x27;rack&#x27;, &#x27;node&#x27;, &#x27;node&#x27;, &#x27;off&#x27;]",
+    "<b>#2 dict (3)<\/b> {&#x27;node&#x27;: 6, &#x27;rack&#x27;: 2, &#x27;off&#x27;: 2}"
+   ],
+   "out": "Rack-local map tasks = 2\n"
+  },
+  {
+   "line": 10,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "placements",
+       "→ list #1"
+      ],
+      [
+       "count",
+       "→ dict #2"
+      ],
+      [
+       "p",
+       "'off'"
+      ],
+      [
+       "local_share",
+       "0.6"
+      ],
+      [
+       "net_gb",
+       "0.5"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (10)<\/b> [&#x27;node&#x27;, &#x27;node&#x27;, &#x27;rack&#x27;, &#x27;node&#x27;, &#x27;off&#x27;, &#x27;node&#x27;, &#x27;rack&#x27;, &#x27;node&#x27;, &#x27;node&#x27;, &#x27;off&#x27;]",
+    "<b>#2 dict (3)<\/b> {&#x27;node&#x27;: 6, &#x27;rack&#x27;: 2, &#x27;off&#x27;: 2}"
+   ],
+   "out": "Off-rack map tasks   = 2\n"
+  },
+  {
+   "line": 11,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "placements",
+       "→ list #1"
+      ],
+      [
+       "count",
+       "→ dict #2"
+      ],
+      [
+       "p",
+       "'off'"
+      ],
+      [
+       "local_share",
+       "0.6"
+      ],
+      [
+       "net_gb",
+       "0.5"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (10)<\/b> [&#x27;node&#x27;, &#x27;node&#x27;, &#x27;rack&#x27;, &#x27;node&#x27;, &#x27;off&#x27;, &#x27;node&#x27;, &#x27;rack&#x27;, &#x27;node&#x27;, &#x27;node&#x27;, &#x27;off&#x27;]",
+    "<b>#2 dict (3)<\/b> {&#x27;node&#x27;: 6, &#x27;rack&#x27;: 2, &#x27;off&#x27;: 2}"
+   ],
+   "out": "Data-local share: 60%, input over network: 0.5 GB\n"
+  }
+ ]
+}</script>
+    </div>
+  </article>
+</section>
+
+<section class="part" id="quiz">
+  <span class="part-label"><b>9</b> Quiz and revision</span>
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <script type="application/json">[
+ {
+  "q": "What is data locality in Hadoop?",
+  "options": [
+   "Storing all data on the master",
+   "Keeping data in one city",
+   "Running tasks on (or near) the nodes that hold their input data",
+   "Compressing data before storage"
+  ],
+  "answer": 2,
+  "why": "Hadoop sends the computation to the data so that input is read from local disks instead of the network."
+ },
+ {
+  "q": "Why is moving the code cheaper than moving the data?",
+  "options": [
+   "Code runs faster than data",
+   "A job jar is KB–MB while input data is GB–TB, and the network is the scarcest resource",
+   "Data cannot be moved",
+   "Code is encrypted"
+  ],
+  "answer": 1,
+  "why": "Shipping kilobytes to many nodes is almost free; shipping terabytes to one place takes hours and jams the network."
+ },
+ {
+  "q": "A map task runs on a different node in the same rack as its block. This is:",
+  "options": [
+   "Rack-local",
+   "Node-local",
+   "Off-rack",
+   "Not allowed"
+  ],
+  "answer": 0,
+  "why": "<b>Rack-local<\/b>: the data crosses only the rack's ToR switch, not the core network."
+ },
+ {
+  "q": "Hadoop's network distance between two different nodes in the same rack is:",
+  "options": [
+   "0",
+   "1",
+   "4",
+   "2"
+  ],
+  "answer": 3,
+  "why": "0 = same node, <b>2 = same rack<\/b>, 4 = another rack in the same data centre."
+ },
+ {
+  "q": "Which job counters show how well locality worked?",
+  "options": [
+   "Map input records and Map output records",
+   "GC time elapsed",
+   "Data-local map tasks and Rack-local map tasks",
+   "Bytes written"
+  ],
+  "answer": 2,
+  "why": "The Job Counters section lists <code>Data-local map tasks<\/code> and <code>Rack-local map tasks<\/code>."
+ },
+ {
+  "q": "How does replication factor 3 help data locality?",
+  "options": [
+   "It doesn't",
+   "Each block can be processed locally on any of 3 nodes, so a free local slot is more likely",
+   "It makes the jar smaller",
+   "It disables the shuffle"
+  ],
+  "answer": 1,
+  "why": "Three replicas mean three candidate nodes for a node-local task."
+ },
+ {
+  "q": "Which part of a MapReduce job cannot be made data-local?",
+  "options": [
+   "The shuffle, where map outputs travel to reducers",
+   "Reading input splits",
+   "Starting the task JVM",
+   "Writing map output to local disk"
+  ],
+  "answer": 0,
+  "why": "Reducers need outputs from many mappers, so the <b>shuffle<\/b> always uses the network. Combiners make it smaller."
+ },
+ {
+  "q": "Why do many cloud setups accept losing data locality?",
+  "options": [
+   "Cloud disks are faster than RAM",
+   "Locality is illegal in the cloud",
+   "Cloud jobs have no input",
+   "Data in object storage plus very fast networks allows elastic compute clusters that can be deleted after the job"
+  ],
+  "answer": 3,
+  "why": "Separating storage and compute trades some locality for elasticity and cost savings, made practical by fast cloud networks."
+ }
+]</script>
+  </div>
+
+  <h3>Quick revision</h3>
+  <div class="revision">
+    <h3>Lesson 1.5 in one screen</h3>
+    <ul><li><b>Move the code, not the data</b>: jars are KB, data is TB, the network is the bottleneck.</li><li><b>Data locality</b>: run each task on a node that holds a replica of its input block.</li><li>Levels: <b>node-local</b> (distance 0) → <b>rack-local</b> (2) → <b>off-rack</b> (4).</li><li>The job gets block locations from the NameNode; YARN tries to place containers on those hosts.</li><li><b>Delay scheduling</b>: wait briefly for a local slot before going remote.</li><li><b>Short-circuit reads</b>: a local task reads the block file straight from disk.</li><li>Check counters: <code>Data-local map tasks</code>, <code>Rack-local map tasks</code>.</li><li>The <b>shuffle</b> can't be local; combiners shrink it.</li><li>Cloud object storage gives up locality for elasticity, relying on fast networks.</li></ul>
+  </div>
+
+  <h3>Interview and viva questions</h3>
+  <div class="faq">
+    <details><summary>What is data locality and why is it important in Hadoop?</summary><p>Data locality means running computation on the node where the data is stored. In Hadoop, map tasks are scheduled on DataNodes that hold a replica of their input split. It matters because network bandwidth, especially between racks, is much more limited than the combined disk bandwidth of the cluster. Moving a small program to many nodes avoids moving terabytes of data.</p></details>
+    <details><summary>What are the levels of data locality?</summary><p>Node-local (data-local): the task runs on a node with a replica. Rack-local: the task runs on another node in the same rack, reading over the rack switch. Off-rack: the task runs in a different rack, reading through the core network. The scheduler prefers them in that order.</p></details>
+    <details><summary>How does the scheduler know where the data is?</summary><p>When a job is submitted, the input format computes splits and asks the NameNode for the block locations of each split. The ApplicationMaster includes these hosts and racks in its container requests to the ResourceManager, which tries to allocate containers on those nodes.</p></details>
+    <details><summary>What can cause poor data locality?</summary><p>A busy or full cluster (no free slots on the right nodes), very small files or uneven block placement, replication factor 1, a wrong or missing rack topology script, newly added empty nodes before running the balancer, or reading data that is not in HDFS at all (for example cloud object storage).</p></details>
+    <details><summary>Does Spark use data locality?</summary><p>Yes. Spark records preferred locations for each partition (for HDFS input, the block locations) and its scheduler waits a short time (spark.locality.wait) for a slot at the best locality level: process-local, node-local, rack-local, then any.</p></details>
+    
+  </div>
+
+  <h3 id="practice">Practice problems</h3>
+  <p class="prob-intro">Transfer estimates and small scheduling programs. The business problems are the kind of questions asked when a team argues “just copy the data”.</p>
+  <div class="probs">
+    <article class="prob"><div class="prob__head"><span class="prob__num">P1</span><span class="prob__tag prob__tag--easy">Easy</span><h4>Gigabits to hours</h4></div>
+      <p>How many hours does it take to move 5 TB over a 10 Gbps link?</p>
+      <div class="prob__io"><div><small>Input</small><pre>5 TB · 10 Gbps</pre></div><div><small>Expected output</small><pre>1.14 hours</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>print(round(5 * 1024 * 8 / 10 / 3600, 2), &quot;hours&quot;)</code></pre><div class="output">1.14 hours</div></div>
+        <p><b>How it works:</b> 5 TB = 40,960 Gbit; ÷ 10 Gbit/s = 4,096 s ≈ 1.14 hours, and that is with the link to yourself.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P2</span><span class="prob__tag prob__tag--easy">Easy</span><h4>Jar vs data</h4></div>
+      <p>A job jar is 200 KB and the input is 4 TB. How many times bigger is the data?</p>
+      <div class="prob__io"><div><small>Input</small><pre>200 KB · 4 TB</pre></div><div><small>Expected output</small><pre>21,474,836 times bigger</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>data_kb = 4 * 1024 * 1024 * 1024
+print(f&quot;{data_kb / 200:,.0f} times bigger&quot;)</code></pre><div class="output">21,474,836 times bigger</div></div>
+        <p><b>How it works:</b> About 2 crore times. Sending the program to every node, even 1,000 nodes, is still tiny.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P3</span><span class="prob__tag prob__tag--easy">Easy</span><h4>Classify placements</h4></div>
+      <p>A task's block is on dn2 (rack r1). Classify running the task on dn2, dn3 (r1) and dn7 (r2).</p>
+      <div class="prob__io"><div><small>Input</small><pre>block on dn2 · rack {dn2: r1, dn3: r1, dn7: r2}</pre></div><div><small>Expected output</small><pre>dn2 node-local
+dn3 rack-local
+dn7 off-rack</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>rack = {&quot;dn2&quot;: &quot;r1&quot;, &quot;dn3&quot;: &quot;r1&quot;, &quot;dn7&quot;: &quot;r2&quot;}
+for n in [&quot;dn2&quot;, &quot;dn3&quot;, &quot;dn7&quot;]:
+    kind = &quot;node-local&quot; if n == &quot;dn2&quot; else &quot;rack-local&quot; if rack[n] == rack[&quot;dn2&quot;] else &quot;off-rack&quot;
+    print(n, kind)</code></pre><div class="output">dn2 node-local
+dn3 rack-local
+dn7 off-rack</div></div>
+        <p><b>How it works:</b> Same node, same rack, other rack: the three levels of locality.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P4</span><span class="prob__tag prob__tag--medium">Medium</span><h4>Closest replica to read</h4></div>
+      <p>A client on dn6 must read a block whose replicas are on dn1, dn5 and dn9. Using Hadoop's distance (0, 2, 4), print the replica it should read.</p>
+      <div class="prob__io"><div><small>Input</small><pre>client dn6 · replicas dn1, dn5, dn9 · racks r1: dn1-dn4, r2: dn5-dn8, r3: dn9</pre></div><div><small>Expected output</small><pre>dn5</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>rack = {&quot;dn1&quot;: &quot;r1&quot;, &quot;dn5&quot;: &quot;r2&quot;, &quot;dn6&quot;: &quot;r2&quot;, &quot;dn9&quot;: &quot;r3&quot;}
+def dist(a, b):
+    return 0 if a == b else 2 if rack[a] == rack[b] else 4
+reps = [&quot;dn1&quot;, &quot;dn5&quot;, &quot;dn9&quot;]
+print(min(reps, key=lambda r: dist(&quot;dn6&quot;, r)))</code></pre><div class="output">dn5</div></div>
+        <p><b>How it works:</b> HDFS clients sort replicas by network distance and read the closest: dn5, in the same rack.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P5</span><span class="prob__tag prob__tag--medium">Medium</span><h4>Data-local percentage</h4></div>
+      <p>A job ran 1,250 map tasks: 1,180 data-local and 70 rack-local. Print the data-local percentage and whether it meets a 90% target.</p>
+      <div class="prob__io"><div><small>Input</small><pre>1250 tasks · 1180 data-local</pre></div><div><small>Expected output</small><pre>94.4% data-local; target met: True</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>total, local = 1250, 1180
+pct = local / total * 100
+print(f&quot;{pct:.1f}% data-local; target met: {pct &gt;= 90}&quot;)</code></pre><div class="output">94.4% data-local; target met: True</div></div>
+        <p><b>How it works:</b> 94.4%: healthy. Track this per job over time; a sudden drop is an early warning.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P6</span><span class="prob__tag prob__tag--medium">Medium</span><h4>Network saved by locality</h4></div>
+      <p>A job reads 2,000 blocks of 128 MB. With locality, 3% of tasks are remote; without it, 85% are. How many GB of input cross the network in each case?</p>
+      <div class="prob__io"><div><small>Input</small><pre>2000 × 128 MB · 3% vs 85% remote</pre></div><div><small>Expected output</small><pre>with locality : 7.5 GB over the network
+without       : 212.5 GB over the network</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>blocks, mb = 2000, 128
+for label, remote in [(&quot;with locality&quot;, 0.03), (&quot;without&quot;, 0.85)]:
+    print(f&quot;{label:14}: {blocks * remote * mb / 1024:.1f} GB over the network&quot;)</code></pre><div class="output">with locality : 7.5 GB over the network
+without       : 212.5 GB over the network</div></div>
+        <p><b>How it works:</b> 7.5 GB vs 212.5 GB. Locality keeps the shared uplinks free for the shuffle and for other jobs.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P7</span><span class="prob__tag prob__tag--business">Business problem</span><h4>Copy to a warehouse or query in place?</h4></div>
+      <p>A team wants to copy 30 TB from the Hadoop cluster to a separate analytics server every night over a 10 Gbps link, for a report that needs only 2 GB of aggregated results. Estimate both transfers and print a recommendation.</p>
+      <div class="prob__io"><div><small>Input</small><pre>30 TB vs 2 GB · 10 Gbps</pre></div><div><small>Expected output</small><pre>Copy all data   : 6.8 hours every night
+Copy the result : 1.6 seconds
+Recommendation  : aggregate on the cluster, move only the result</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>link = 10            # Gbps
+full = 30 * 1024 * 8 / link / 3600
+agg = 2 * 8 / link
+print(f&quot;Copy all data   : {full:.1f} hours every night&quot;)
+print(f&quot;Copy the result : {agg:.1f} seconds&quot;)
+print(&quot;Recommendation  : aggregate on the cluster, move only the result&quot;)</code></pre><div class="output">Copy all data   : 6.8 hours every night
+Copy the result : 1.6 seconds
+Recommendation  : aggregate on the cluster, move only the result</div></div>
+        <p><b>How it works:</b> Nearly 7 hours of saturated network every night versus 2 seconds. Push the computation to where the data lives.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P8</span><span class="prob__tag prob__tag--business">Business problem</span><h4>Should the hot file get more replicas?</h4></div>
+      <p>A small lookup file (one block) is read by every one of 600 map tasks. With 3 replicas, each holder serves 200 tasks. How many replicas are needed so no node serves more than 20 tasks?</p>
+      <div class="prob__io"><div><small>Input</small><pre>600 readers · at most 20 per replica</pre></div><div><small>Expected output</small><pre>Replicas needed: 30</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>import math
+readers, limit = 600, 20
+print(&quot;Replicas needed:&quot;, math.ceil(readers / limit))</code></pre><div class="output">Replicas needed: 30</div></div>
+        <p><b>How it works:</b> 30 replicas. Hadoop does this for job files: <code>mapreduce.client.submit.file.replication</code> defaults to 10, and the distributed cache spreads small side files to the nodes that need them.</p>
+      </details>
+    </article>
+  </div>
+
+  <h3 id="scenarios">Real-world scenario questions (asked in company interviews)</h3>
+  <p class="scn-intro">Locality questions that interviewers use to separate people who have memorised definitions from people who understand clusters.</p>
+  <div class="scenarios">
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Analytics team · architecture</span><span class="scn__tag scn__tag--level">Fresher</span></div>
+      <h4>“Let's copy the data to the BI server every night”</h4>
+      <p class="scn__situation">The BI team asks for the full 15 TB clickstream table to be copied from Hadoop to their reporting database every night, so their dashboards can query it. The dashboards show daily totals per city and product.</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> do you apply “move the code, not the data” to a real request?</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>15 TB a night over a 10 Gbps link is over 3 hours of a saturated network, and the BI database must store it all.</li>
+          <li>The dashboards need aggregates. Compute them on the cluster (Hive/Spark job) and export only the summary tables, probably a few GB.</li>
+          <li>If analysts need ad-hoc detail, let them query the cluster directly with Hive, Impala or Spark SQL, or a query engine like Trino that reads the data in place.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> agreeing to copy everything “because the BI tool needs it”.</p>
+      </div></details>
+    </article>
+
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Platform team · performance</span><span class="scn__tag scn__tag--level">1–3 years</span></div>
+      <h4>Data-local tasks dropped from 95% to 55%</h4>
+      <p class="scn__situation">Last month, jobs on the cluster were 95% data-local. This week they are 55% and the core switch uplinks are saturated. Nothing in the job code changed.</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> can you list concrete causes of poor locality and how to verify each?</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ol>
+          <li><b>New nodes added without balancing:</b> data sits on old nodes, but free slots are on new ones. Run the balancer.</li>
+          <li><b>Rack script changed or broken:</b> check <code>hdfs dfsadmin -printTopology</code>.</li>
+          <li><b>Cluster busier:</b> more concurrent jobs mean fewer free slots on the right nodes; review queue capacities and delay-scheduling settings.</li>
+          <li><b>Data written with replication 1</b> (to save space) leaves only one local candidate per block. Check with <code>hdfs fsck</code>.</li>
+          <li><b>Input moved to object storage</b> or another cluster, where node-local reads are impossible.</li>
+        </ol>
+        <p class="scn__avoid"><b>Avoid:</b> “Buy a faster core switch” before finding the cause.</p>
+      </div></details>
+    </article>
+
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Cloud migration · design</span><span class="scn__tag scn__tag--level">3+ years</span></div>
+      <h4>“If locality is so important, why does everyone use S3?”</h4>
+      <p class="scn__situation">During a migration discussion, a senior engineer argues against moving from on-prem HDFS to cloud object storage: “We'll lose data locality and everything will be slow.”</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> do you understand that locality is a trade-off, not a law?</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>True: reads become network reads. But cloud data-centre networks are very fast and object stores serve many parallel reads well.</li>
+          <li>In return: compute and storage scale separately, clusters can be created per job and deleted, and storage is cheap and highly durable.</li>
+          <li>Mitigations: columnar formats (read less), partitioning and predicate pushdown, caching layers, and right-sized instances with high network bandwidth.</li>
+          <li>Benchmark the key jobs on both before deciding.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> treating either side as always right. Measure the workload.</p>
+      </div></details>
+    </article>
+
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Any company · concepts</span><span class="scn__tag scn__tag--level">Fresher</span></div>
+      <h4>Explain data locality to a non-technical manager</h4>
+      <p class="scn__situation">Your manager, who is not technical, asks why the Hadoop cluster can process 10 TB in under an hour when copying 10 TB to one server takes a whole day.</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> can you explain a core idea simply and correctly?</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <p>“Imagine a census. Bringing every family to one office would take forever. Instead, we send counters to every area, they count locally at the same time, and only the totals travel back. Our cluster does the same: the data already lives on 40 machines, so we send the small counting program to each machine, all 40 work in parallel on their own part, and only small results come back.”</p>
+        <p class="scn__avoid"><b>Avoid:</b> jargon such as “node-local container allocation” with a non-technical audience.</p>
+      </div></details>
+    </article>
+  </div>
+</section>
+
+<nav class="lesson-nav" id="lesson-nav" aria-label="Lesson navigation"></nav>
+<div class="ad-slot" data-slot="bottom"></div>
+</article>
+
+<aside class="lesson-side">
+  <nav class="toc" aria-label="In this lesson">
+    <h4>In this lesson</h4>
+    <ol>
+      <li><a href="#story">The story</a></li>
+      <li><a href="#definition">Definition</a></li><li><a href="#levels">Beginner → Advanced</a></li>
+      <li><a href="#types">Types and ways to use it</a></li>
+      <li><a href="#steps">Step by step</a></li>
+      <li><a href="#animation">See it happen</a></li>
+      <li><a href="#real-world">Real-world use</a></li>
+      <li><a href="#run">Run the code</a></li>
+      <li><a href="#tracer">Line by line</a></li>
+      <li><a href="#worked">Worked examples</a></li>
+      <li><a href="#quiz">Quiz and revision</a></li>
+      <li><a href="#practice">Practice problems</a></li>
+      <li><a href="#scenarios">Industry scenarios</a></li>
+    </ol>
+  </nav>
+  <div class="ad-slot" data-slot="side"></div>
+  <div class="outline" id="outline"></div>
+</aside>
+</div>
+</main>
+
+<footer class="site-footer">
+  <div class="wrap">
+    <div><h4>MyPhatshala</h4><p>Free programming and IT lessons that show what happens behind the screen.</p></div>
+    <div><h4>Learn</h4><a href="../../../../#tracks">All courses</a><a href="../../">Apache Hadoop syllabus</a></div>
+    <div><h4>Site</h4><a href="../../../../about.html">About</a><a href="../../../../contact.html">Contact</a><a href="../../../../privacy.html">Privacy policy</a><a href="../../../../disclaimer.html">Disclaimer</a></div>
+    <div class="copyright">© MyPhatshala. All lesson content, diagrams and animations are original. Please do not copy without permission.</div>
+  </div>
+</footer>
+
+<script src="../../../../data/courses/hadoop.js"></script>
+<script src="../../../../assets/js/lesson.js"></script>
+<script src="../../../../assets/js/cluster-sim.js"></script>
+<script src="../../../../assets/js/ads.js"></script>
+<script src="../../../../assets/js/site.js"></script>
+</body>
+</html>

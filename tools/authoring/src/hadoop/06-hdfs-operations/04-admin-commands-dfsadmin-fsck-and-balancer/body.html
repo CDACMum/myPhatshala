@@ -1,0 +1,334 @@
+<!-- ======================= PART 1: THE STORY ======================= -->
+<section class="part" id="story">
+  <span class="part-label"><b>1</b> The story</span>
+  <h2>Retire one server, welcome another</h2>
+  <div class="story">
+    <p class="narration">Monday at the canteen-analytics team. Datanode-4's disk is throwing errors and must go back to the vendor, and a new server has arrived. Riya's first idea: switch datanode-4 off and plug the new one in. Her lead, Arjun, stops her. Switching a node off makes HDFS panic-copy its blocks only after 10 minutes, and until then some blocks have one copy fewer. The new server would sit almost empty while the old ones stay full. There are proper tools for both jobs, and a third one to prove that nothing was lost.</p>
+
+    <div class="scene">
+      <svg viewBox="0 0 640 190" role="img" aria-label="The admin toolkit: dfsadmin to see and control the cluster, fsck to check file health, decommission to retire a node safely, balancer to spread blocks to new nodes.">
+        <g font-size="10">
+          <rect x="16" y="20" width="144" height="128" rx="10" class="s-board"/>
+          <text x="88" y="44" text-anchor="middle" font-weight="700" class="s-chalk">dfsadmin</text>
+          <g font-size="8.6" class="mono" style="fill:#9FD3B8"><text x="28" y="68">-report</text><text x="28" y="84">-refreshNodes</text><text x="28" y="100">-safemode</text><text x="28" y="116">-printTopology</text></g>
+          <text x="88" y="138" text-anchor="middle" font-size="8.6" style="fill:#F5C77E">see and control</text>
+
+          <rect x="172" y="20" width="144" height="128" rx="10" class="s-soft-blue" style="stroke:var(--blue)"/>
+          <text x="244" y="44" text-anchor="middle" font-weight="700" class="s-blue">fsck</text>
+          <g font-size="8.6" class="mono s-ink"><text x="184" y="68">-files -blocks</text><text x="184" y="84">-racks</text><text x="184" y="100">-list-corrupt…</text></g>
+          <text x="244" y="138" text-anchor="middle" font-size="8.6" class="s-ink2">is my data healthy?</text>
+
+          <rect x="328" y="20" width="144" height="128" rx="10" class="s-soft-red" style="stroke:var(--red)"/>
+          <text x="400" y="44" text-anchor="middle" font-weight="700" class="s-red">decommission</text>
+          <g font-size="8.6" class="s-ink"><text x="340" y="68">exclude file</text><text x="340" y="84">+ refreshNodes</text><text x="340" y="100">copy blocks away</text></g>
+          <text x="400" y="138" text-anchor="middle" font-size="8.6" class="s-ink2">retire a node safely</text>
+
+          <rect x="484" y="20" width="144" height="128" rx="10" class="s-soft-green" style="stroke:var(--green)"/>
+          <text x="556" y="44" text-anchor="middle" font-weight="700" class="s-green">balancer</text>
+          <g font-size="8.6" class="s-ink"><text x="496" y="68">full nodes →</text><text x="496" y="84">empty nodes</text><text x="496" y="100">-threshold %</text></g>
+          <text x="556" y="138" text-anchor="middle" font-size="8.6" class="s-ink2">spread blocks evenly</text>
+        </g>
+        <text x="320" y="172" text-anchor="middle" font-size="10" class="s-ink2">All four ran on our 5-DataNode lab cluster; the outputs below are real.</text>
+        <text x="632" y="186" text-anchor="end" class="s-wm">myphatshala.in</text>
+      </svg>
+    </div>
+
+A> Just switching datanode-4 off would be a small disaster on purpose. The NameNode can't tell “retired” from “crashed”, so it waits until the node is declared dead and only then copies its blocks. Decommissioning tells it first: “copy everything this node holds to others, and tell me when it's safe”. On our lab that took one minute.
+R> And the new server?
+A> HDFS never moves existing blocks by itself. New files will use the new node, but the old data stays where it is. The <b>balancer</b> moves blocks from fuller nodes to emptier ones. And after all that, <code>fsck</code> confirms every file still has all its replicas. Today we run all of it.
+  </div>
+</section>
+
+<!-- ======================= PART 2: DEFINITION ======================= -->
+<section class="part" id="definition">
+  <span class="part-label"><b>2</b> Definition</span>
+  <h2>HDFS administration tools</h2>
+  <div class="def">
+    <div class="def__formal"><small>Formal definition (write this in exams)</small>
+      <p><b>hdfs dfsadmin</b> is the administration client for the NameNode: it reports cluster capacity and DataNode status (<code>-report</code>), controls safe mode (<code>-safemode</code>), reloads the include/exclude host lists (<code>-refreshNodes</code>), shows the rack topology (<code>-printTopology</code>), and manages checkpoints, quotas and balancer bandwidth. <b>hdfs fsck</b> checks the health of the namespace: for each file it compares the expected replication with the live replicas and reports missing, corrupt, under- and over-replicated blocks, without repairing anything unless asked (<code>-move</code>, <code>-delete</code>). <b>Decommissioning</b> retires a DataNode by listing it in the file named by <code>dfs.hosts.exclude</code> and running <code>-refreshNodes</code>; the NameNode re-replicates all its blocks to other nodes before marking it <i>Decommissioned</i>. The <b>balancer</b> (<code>hdfs balancer</code>) moves block replicas from over-utilised to under-utilised DataNodes until every node's utilisation is within <code>-threshold</code> percent of the cluster average, never reducing a block's replication or breaking rack placement.</p></div>
+    <div class="def__simple"><small>In simple words</small>
+      <p><code>dfsadmin</code> is the dashboard and control panel, <code>fsck</code> is the health check-up, decommission is a proper farewell for a server, and the balancer is the shelf-arranger who moves boxes from crowded shelves to empty ones.</p></div>
+  </div>
+
+  <h3>Words you'll meet in this lesson</h3>
+  <div class="terms">
+    <div class="term"><b>Decommission</b><span>Retire a DataNode after copying its blocks elsewhere.</span></div>
+    <div class="term"><b>Exclude file</b><span>The file named by <code>dfs.hosts.exclude</code>: nodes listed there are decommissioned.</span></div>
+    <div class="term"><b>refreshNodes</b><span>Tells the NameNode to re-read the include/exclude files, without a restart.</span></div>
+    <div class="term"><b>Recommission</b><span>Remove a node from the exclude file and refresh: it becomes Normal again.</span></div>
+    <div class="term"><b>Utilisation</b><span>How full a DataNode is: used space as a % of its capacity.</span></div>
+    <div class="term"><b>Threshold</b><span>Balancer target: every node within this many % of the average (default 10).</span></div>
+    <div class="term"><b>Iteration</b><span>One round of balancer planning and block moves.</span></div>
+    <div class="term"><b>Maintenance mode</b><span>Short planned downtime for a node without copying all its blocks.</span></div>
+  </div>
+
+  <h3>Defaults and limits (Hadoop 3.5.0, from the lab)</h3>
+  <table class="facts" style="table-layout:fixed;overflow-wrap:anywhere">
+    <tr><th>Balancer threshold</th><td>10% by default; allowed range 1.0 to 100.0 (“Expecting a number in the range of [1.0, 100.0]”)</td></tr>
+    <tr><th>Balancer bandwidth</th><td><code>dfs.datanode.balance.bandwidthPerSec</code> = 104857600 (100 MB/s per DataNode)</td></tr>
+    <tr><th>Concurrent moves</th><td><code>dfs.datanode.balance.max.concurrent.moves</code> = 100</td></tr>
+    <tr><th>Gives up after</th><td>5 iterations with no block moved (“max idle iteration = 5”)</td></tr>
+    <tr><th>Decommission check</th><td>Every 30 s (<code>dfs.namenode.decommission.interval</code>)</td></tr>
+    <tr><th>fsck</th><td>Read-only by default; <code>-move</code> / <code>-delete</code> change files</td></tr>
+  </table>
+
+LEVELS> Admin tools at three levels
+L1> Like moving house
+      <ul>
+        <li>Decommission: before you leave a flat, you pack and move everything out. Only then do you hand back the keys.</li>
+        <li>Balancer: a new cupboard arrives empty; you move some things into it so no cupboard overflows.</li>
+        <li>fsck: walking through the house with the inventory list to check nothing is missing.</li>
+      </ul>
+L2> The admin routine
+      <ul>
+        <li>Daily: <code>hdfs dfsadmin -report</code> (dead nodes? capacity?) and <code>hdfs fsck /</code> (HEALTHY?).</li>
+        <li>Retire a node: add it to the exclude file → <code>-refreshNodes</code> → wait for <i>Decommissioned</i> → stop it.</li>
+        <li>Add a node: start the DataNode (it registers itself) → run <code>hdfs balancer</code>, ideally at night.</li>
+        <li>Investigate a file: <code>hdfs fsck path -files -blocks -locations -racks</code>.</li>
+      </ul>
+L3> What experienced admins watch for
+      <ul>
+        <li>Decommission needs somewhere to put the copies: with 3 racks and replication 3, retiring a whole rack can stall placement.</li>
+        <li>A decommission stuck at “still has 1 blocks to replicate” usually means a block whose copies can't be placed (bad target, full disks, open files).</li>
+        <li>The balancer is safe to stop at any time (Ctrl+C); moved blocks stay moved. Raise <code>-setBalancerBandwidth</code> only when jobs are quiet.</li>
+        <li>Recommissioned nodes often lose their replicas as “excess” and come back nearly empty: plan a balancer run.</li>
+        <li><code>fsck</code> on <code>/</code> of a huge cluster is heavy for the NameNode; run it on sub-trees or off-peak.</li>
+      </ul>
+/LEVELS
+EXAM> “What is decommissioning? How do you add and remove DataNodes?” Removing: add the host to <code>dfs.hosts.exclude</code>, run <code>hdfs dfsadmin -refreshNodes</code>, wait for status <i>Decommissioned</i> (blocks re-replicated), then stop the node. Adding: install Hadoop with the same configuration, start the DataNode (add it to <code>dfs.hosts</code> if an include list is used, then refreshNodes), and run the <b>balancer</b>.
+</section>
+
+<!-- ======================= PART 3: TYPES AND WAYS TO USE IT ======================= -->
+<section class="part" id="types">
+  <span class="part-label"><b>3</b> Types and ways to use it</span>
+  <h2>The commands you will actually use</h2>
+  <div class="table-wrap">
+  <table class="compare" style="min-width:640px">
+    <thead><tr><th>Tool</th><th>Command</th><th>What it tells or does</th></tr></thead>
+    <tbody>
+      <tr><td>dfsadmin</td><td><code>-report [-live|-dead|-decommissioning]</code></td><td>Capacity, used, remaining; per-DataNode status and block counts</td></tr>
+      <tr><td>dfsadmin</td><td><code>-refreshNodes</code></td><td>Re-read include/exclude files: start decommission or recommission</td></tr>
+      <tr><td>dfsadmin</td><td><code>-safemode get|enter|leave|wait</code></td><td>Safe mode control (Lesson 5.6)</td></tr>
+      <tr><td>dfsadmin</td><td><code>-printTopology</code></td><td>Racks and nodes, with In Service / Decommissioned</td></tr>
+      <tr><td>dfsadmin</td><td><code>-getDatanodeInfo host:9867</code></td><td>Uptime and software version of one DataNode</td></tr>
+      <tr><td>dfsadmin</td><td><code>-setBalancerBandwidth bytes</code></td><td>Change balancer speed on all DataNodes, no restart</td></tr>
+      <tr><td>dfsadmin</td><td><code>-saveNamespace</code>, <code>-fetchImage dir</code></td><td>Force a checkpoint (needs safe mode); download the latest fsimage</td></tr>
+      <tr><td>fsck</td><td><code>path -files -blocks -locations -racks</code></td><td>Every file, block and replica location</td></tr>
+      <tr><td>fsck</td><td><code>/ -list-corruptfileblocks</code></td><td>Only the damaged blocks</td></tr>
+      <tr><td>fsck</td><td><code>-move</code> / <code>-delete</code></td><td>Move corrupt files to /lost+found or delete them (last resort)</td></tr>
+      <tr><td>balancer</td><td><code>-threshold N</code>, <code>-exclude</code>, <code>-source</code></td><td>How even, and which nodes may be involved</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <h3>Ways to take a DataNode out</h3>
+  <div class="cards">
+    <div class="card"><h4>Decommission</h4><p>Copies every block away first. For permanent removal. Took 48 to 60 s in our lab.</p><span class="tag">Safe, slow</span></div>
+    <div class="card"><h4>Maintenance mode</h4><p>For a reboot or short repair: blocks with enough other replicas are not copied; the node comes back with its data.</p><span class="tag">Planned, short</span></div>
+    <div class="card"><h4>Just stop it</h4><p>HDFS treats it as a failure: dead after about 10.5 minutes, then re-replication. Fine for crashes, wrong for planned work.</p><span class="tag">Unplanned</span></div>
+    <div class="card"><h4>Stop many at once</h4><p>Several nodes holding all replicas of a block = missing data. Always one at a time, or decommission together.</p><span class="tag">Dangerous</span></div>
+  </div>
+TIP> Run <code>hdfs dfsadmin</code> and <code>hdfs balancer -help</code> with no other arguments for the exact usage of your version. The balancer's own help describes the threshold as “Percentage of disk capacity”.
+</section>
+
+<!-- ======================= PART 4: STEP BY STEP ======================= -->
+<section class="part" id="steps">
+  <span class="part-label"><b>4</b> Step by step</span>
+  <h2>A morning of real admin work</h2>
+  <p>All commands ran in the namenode container of the lab: 5 DataNodes, two racks (<code>/rack1</code>: datanode-1, -2; <code>/rack2</code>: datanode-3, -4, -5).</p>
+  <ol class="stepper">
+    <li><h4>Morning check: dfsadmin -report</h4>
+      <div class="code" data-lang="bash" data-file="Terminal"><pre><code>hdfs dfsadmin -report -dead</code></pre><div class="output">Configured Capacity: 1352765870080 (1.23 TB)
+Present Capacity: 92735646762 (86.37 GB)
+DFS Remaining: 89697912832 (83.54 GB)
+DFS Used: 3037733930 (2.83 GB)
+DFS Used%: 3.28%
+Replicated Blocks:
+	Under replicated blocks: 0
+	Blocks with corrupt replicas: 0
+	Missing blocks: 0
+	Missing blocks (with replication factor 1): 0
+	...
+-------------------------------------------------
+Dead datanodes (0):</div></div>
+      <span class="behind">The three numbers to read first: <b>dead datanodes</b>, <b>missing blocks</b>, <b>under-replicated blocks</b>. Capacity looks odd here (1.23 TB configured, 86 GB present) because all five lab DataNodes sit on one shared laptop disk; on real servers each node has its own disks.</span></li>
+    <li><h4>Health check: fsck</h4>
+      <div class="code" data-lang="bash" data-file="Terminal"><pre><code>hdfs fsck / -list-corruptfileblocks
+hdfs fsck /user/hadoop/canteen -files -blocks -racks</code></pre><div class="output">The filesystem under path '/' has 0 CORRUPT blocks
+/user/hadoop/canteen/raw/day1.csv 47 bytes, replicated: replication=3, 1 block(s):  OK
+0. BP-1507681208-172.19.0.3-1792565333483:blk_1073741852_1029 len=47 Live_repl=3  [/rack1/172.19.0.3:9866, /rack1/172.19.0.4:9866, /rack2/172.19.0.6:9866]
+/user/hadoop/canteen/raw/day2.csv 34 bytes, replicated: replication=3, 1 block(s):  OK
+0. BP-1507681208-172.19.0.3-1792565333483:blk_1073741855_1033 len=34 Live_repl=3  [/rack2/172.19.0.6:9866, /rack1/172.19.0.4:9866, /rack1/172.19.0.3:9866]
+Status: HEALTHY</div></div>
+      <span class="behind">fsck asks the NameNode only; it reads no data. It shows each block's live replicas with their racks: two in one rack and one in the other, exactly the placement rule from Lesson 5.3.</span></li>
+    <li><h4>Who is where: topology and node info</h4>
+      <div class="code" data-lang="bash" data-file="Terminal"><pre><code>hdfs dfsadmin -printTopology
+hdfs dfsadmin -getDatanodeInfo lab5-datanode-1:9867</code></pre><div class="output">Rack: /rack1
+   172.19.0.4:9866 (lab5-datanode-1.lab5_default) In Service
+   172.19.0.3:9866 (lab5-datanode-2.lab5_default) In Service
+
+Rack: /rack2
+   172.19.0.8:9866 (lab5-datanode-5.lab5_default) In Service
+   172.19.0.7:9866 (lab5-datanode-4.lab5_default) In Service
+   172.19.0.6:9866 (lab5-datanode-3.lab5_default) In Service
+
+Uptime: 945, Software version: 3.5.0, Config version: core-3.0.0,hdfs-1</div></div>
+      <span class="behind">9867 is the DataNode's IPC port (9866 is its data port). Uptime is in seconds.</span></li>
+    <li><h4>Decommission datanode-4</h4>
+      <div class="code" data-lang="bash" data-file="Terminal"><pre><code># once: hdfs-site.xml of the NameNode has
+#   dfs.hosts.exclude = /opt/hadoop/etc/hadoop/dfs.exclude
+echo 172.19.0.7 &gt; /opt/hadoop/etc/hadoop/dfs.exclude
+hdfs dfsadmin -refreshNodes
+hdfs dfsadmin -report | grep -A3 'Name: 172.19.0.7'     # repeated every few seconds</code></pre><div class="output">Refresh nodes successful
+t=2s Decommission Status : Decommission in progress
+t=8s Decommission Status : Decommission in progress
+  ...
+t=46s Decommission Status : Decommission in progress
+t=52s Decommission Status : Decommissioned</div></div>
+      <span class="behind">During decommission the node still serves reads, so nothing breaks. The NameNode copies each of its blocks from any live replica to another node, checking progress every 30 seconds. Then it is safe to switch it off.</span></li>
+    <li><h4>Prove it, then bring it back</h4>
+      <div class="code" data-lang="bash" data-file="Terminal"><pre><code>hdfs fsck / | grep -E 'Status|Under-replicated|Number of data-nodes'
+&gt; /opt/hadoop/etc/hadoop/dfs.exclude          # empty the exclude file
+hdfs dfsadmin -refreshNodes</code></pre><div class="output">Status: HEALTHY
+ Number of data-nodes:	4
+ Under-replicated blocks:	0 (0.0 %)
+Refresh nodes successful
+Decommission Status : Normal</div></div>
+      <span class="behind">“4 data-nodes” and 0 under-replicated: every block had 3 replicas without datanode-4. After recommissioning, its replicas became <i>extra</i> copies (4 instead of 3), and the NameNode deleted excess ones. Datanode-4 had 11 blocks before; a minute after coming back it had 0. A recommissioned node often returns nearly empty.</span></li>
+    <li><h4>A new, empty node and the balancer</h4>
+      <div class="code" data-lang="bash" data-file="Terminal"><pre><code>docker run -d --name lab5-datanode-6 ... --tmpfs /tmp/hadoop-hadoop:size=1536m apache/hadoop:3.5.0 hdfs datanode
+hdfs balancer -threshold 5</code></pre><div class="output">INFO  Balancer:568 - 1 underutilized: [172.19.0.9:9866:DISK]
+INFO  Balancer:810 - Need to move 1.32 GB to make the cluster balanced.
+INFO  Balancer:663 - Decided to move 340.33 MB bytes from 172.19.0.7:9866:DISK to 172.19.0.9:9866:DISK
+INFO  Balancer:663 - Decided to move 340.38 MB bytes from 172.19.0.4:9866:DISK to 172.19.0.9:9866:DISK
+  ...
+INFO  Dispatcher:407 - Successfully moved blk_1073741844_1020 with size=134217728 from 172.19.0.4:9866:DISK to 172.19.0.9:9866:DISK through 172.19.0.6:9866
+  ...
+INFO  Dispatcher:1289 - Total bytes (blocks) moved in this iteration 914.72 MB (8)</div></div>
+      <span class="behind">Datanode-6 got its own 1.5 GB disk, so it was the only empty one (the other five share one disk and look equally full). The balancer planned moves, then copied 8 blocks in 16 seconds. “through 172.19.0.6”: the bytes came from a replica in the target's own rack, not necessarily from the node being emptied. Afterwards the source replica is deleted, so replication stays 3.</span></li>
+    <li><h4>When the balancer gives up</h4>
+      <div class="code" data-lang="bash" data-file="Terminal"><pre><code># same run, iterations 1 to 5</code></pre><div class="output">Need to move 430.09 MB to make the cluster balanced.
+... Out of space: The volume with the most available space (=643919872 B) is less than the block size (=134217728 B).
+  ... (the same in iterations 2, 3, 4 and 5)
+No block has been moved for 5 iterations. Exiting...
+Oct 21, 2026, 10:04:11 AM Balancing took 1.1124 minutes
+
+$ hdfs dfsadmin -report  (DFS Used%)
+  172.19.0.3 0.27%   172.19.0.4 0.22%   172.19.0.6 0.27%
+  172.19.0.7 0.00%   172.19.0.8 0.00%   172.19.0.9 60.02%</div></div>
+      <span class="behind">The tiny lab disk started refusing blocks with “Out of space”. A failed move is just skipped: the block stays where it was, with all its replicas. After 5 rounds without progress, the balancer stops. On a real cluster, check the target's disks and rerun.</span></li>
+    <li><h4>Speed limits and mistakes</h4>
+      <div class="code" data-lang="bash" data-file="Terminal"><pre><code>hdfs dfsadmin -setBalancerBandwidth 52428800
+hdfs balancer -threshold 0.5
+hdfs dfsadmin -saveNamespace</code></pre><div class="output">Balancer bandwidth is set to 52428800
+Expecting a number in the range of [1.0, 100.0]: 0.5
+saveNamespace: Safe mode should be turned ON in order to create namespace image.</div></div>
+      <span class="behind">52428800 bytes = 50 MB/s per DataNode, applied at once. The threshold must be at least 1%. <code>-saveNamespace</code> is only allowed in safe mode, so the namespace doesn't change while it is written.</span></li>
+  </ol>
+WARN> Never decommission (or stop) more nodes at once than your replication can survive, and never put every node of a rack in the exclude file unless the other racks have room for all those blocks. Watch <code>-report -decommissioning</code> until it is empty.
+</section>
+
+<!-- ======================= PART 5: SEE IT HAPPEN ======================= -->
+<section class="part" id="animation">
+  <span class="part-label"><b>5</b> See it happen</span>
+  <h2>Decommission, then balance</h2>
+  <p>Block A lives on dn-2, dn-4 and dn-5. We retire dn-4, then add an empty dn-6.</p>
+  <div class="anim" data-frames="6">
+    <div class="anim__title">Retire a node and fill a new one <span>6 steps</span></div>
+    <div class="anim__views">
+      <div class="view view--see">
+        <span class="view__tag">What you see</span>
+        <svg viewBox="0 0 360 250" role="img" aria-label="Admin commands and their output">
+          <rect x="14" y="14" width="332" height="206" rx="8" class="s-board"/>
+          <text x="26" y="32" font-size="9" class="mono" style="fill:#7F8C86">hadoop@namenode : ~</text>
+          <g data-on="1"><text x="26" y="56" font-size="8.6" class="mono" style="fill:#7F8C86">$ hdfs dfsadmin -report</text><text x="26" y="72" font-size="8.6" class="mono" style="fill:#9FD3B8">172.19.0.7  Decommission Status : Normal</text><text x="26" y="86" font-size="8.6" class="mono" style="fill:#9FD3B8">Num of Blocks: 11</text></g>
+          <g data-on="2"><text x="26" y="56" font-size="8.6" class="mono" style="fill:#7F8C86">$ echo 172.19.0.7 &gt; dfs.exclude</text><text x="26" y="72" font-size="8.6" class="mono" style="fill:#7F8C86">$ hdfs dfsadmin -refreshNodes</text><text x="26" y="88" font-size="8.6" class="mono" style="fill:#9FD3B8">Refresh nodes successful</text></g>
+          <g data-on="3"><text x="26" y="56" font-size="8.6" class="mono" style="fill:#9FD3B8">t=2s  Decommission in progress</text><text x="26" y="72" font-size="8.6" class="mono" style="fill:#9FD3B8">t=8s  Decommission in progress</text><text x="26" y="88" font-size="8.6" class="mono" style="fill:#9FD3B8">t=46s Decommission in progress</text></g>
+          <g data-on="4"><text x="26" y="56" font-size="8.6" class="mono" style="fill:#F5C77E">t=52s Decommissioned</text><text x="26" y="72" font-size="8.6" class="mono" style="fill:#7F8C86">$ hdfs fsck /</text><text x="26" y="88" font-size="8.6" class="mono" style="fill:#9FD3B8">Status: HEALTHY  Under-replicated: 0</text></g>
+          <g data-on="5"><text x="26" y="56" font-size="8.6" class="mono" style="fill:#7F8C86">$ hdfs balancer -threshold 5</text><text x="26" y="72" font-size="8.6" class="mono" style="fill:#9FD3B8">1 underutilized: [172.19.0.9]</text><text x="26" y="88" font-size="8.6" class="mono" style="fill:#9FD3B8">Need to move 1.32 GB</text></g>
+          <g data-on="6"><text x="26" y="56" font-size="8.6" class="mono" style="fill:#9FD3B8">Successfully moved blk_…844 to 172.19.0.9</text><text x="26" y="72" font-size="8.6" class="mono" style="fill:#9FD3B8">… moved in this iteration 914.72 MB (8)</text><text x="26" y="88" font-size="8.6" class="mono" style="fill:#F5C77E">172.19.0.9 used 60.02%</text></g>
+          <text x="352" y="244" text-anchor="end" class="s-wm">myphatshala.in</text>
+        </svg>
+        <ol class="caps" hidden>
+          <li>Datanode-4 is Normal and holds 11 blocks.</li>
+          <li>We list it in the exclude file and refresh: no restart needed.</li>
+          <li>Status changes to “Decommission in progress”.</li>
+          <li>52 seconds later: Decommissioned, and fsck shows nothing under-replicated.</li>
+          <li>A new, empty node appears; the balancer calls it underutilised.</li>
+          <li>8 blocks (914.72 MB) move to it in the first iteration.</li>
+        </ol>
+      </div>
+
+      <div class="view view--behind">
+        <span class="view__tag">Behind the screen</span>
+        <svg viewBox="0 0 360 250" role="img" aria-label="DataNodes and replicas of block A">
+          <rect x="130" y="12" width="100" height="34" rx="6" class="s-board"/><text x="180" y="33" text-anchor="middle" font-size="9" font-weight="700" class="s-chalk">NameNode</text>
+          <g font-size="8.6">
+            <rect x="14" y="90" width="72" height="70" rx="6" class="s-soft-green" style="stroke:var(--green)"/><text x="50" y="106" text-anchor="middle" class="s-green">dn-2</text>
+            <rect x="96" y="90" width="72" height="70" rx="6" class="s-soft-green" style="stroke:var(--green)"/><text x="132" y="106" text-anchor="middle" class="s-green">dn-3</text>
+            <g data-on="1"><rect x="178" y="90" width="72" height="70" rx="6" class="s-soft-green" style="stroke:var(--green)"/></g>
+            <g data-on="2,3"><rect x="178" y="90" width="72" height="70" rx="6" class="s-soft-acc" style="stroke:var(--track)"/></g>
+            <g data-on="4,5,6"><rect x="178" y="90" width="72" height="70" rx="6" class="s-card2" style="stroke:var(--red);stroke-dasharray:4 3"/></g>
+            <text x="214" y="106" text-anchor="middle" class="s-ink">dn-4</text>
+            <rect x="260" y="90" width="72" height="70" rx="6" class="s-soft-green" style="stroke:var(--green)"/><text x="296" y="106" text-anchor="middle" class="s-green">dn-5</text>
+            <rect x="20" y="118" width="60" height="16" rx="3" class="s-soft-blue" style="stroke:var(--blue)"/><text x="50" y="130" text-anchor="middle" class="s-blue">A</text>
+            <rect x="266" y="118" width="60" height="16" rx="3" class="s-soft-blue" style="stroke:var(--blue)"/><text x="296" y="130" text-anchor="middle" class="s-blue">A</text>
+            <g data-on="1,2,3,4"><rect x="184" y="118" width="60" height="16" rx="3" class="s-soft-blue" style="stroke:var(--blue)"/><text x="214" y="130" text-anchor="middle" class="s-blue">A</text></g>
+            <g data-on="3,4,5,6"><rect x="102" y="118" width="60" height="16" rx="3" class="s-soft-blue" style="stroke:var(--blue)"/><text x="132" y="130" text-anchor="middle" class="s-blue">A</text></g>
+            <g data-on="5,6"><rect x="96" y="176" width="236" height="30" rx="6" class="s-soft-acc" style="stroke:var(--track)"/><text x="106" y="195" class="s-acc">dn-6 (new, own disk)</text></g>
+            <g data-on="6"><rect x="250" y="183" width="60" height="16" rx="3" class="s-soft-blue" style="stroke:var(--blue)"/><text x="280" y="195" text-anchor="middle" class="s-blue">B</text></g>
+          </g>
+          <g data-on="2"><path d="M180 46v44" style="fill:none;stroke:var(--track);stroke-width:2"/><text x="180" y="226" text-anchor="middle" font-size="9" class="s-ink2">dn-4 marked “decommissioning”: still serves reads</text></g>
+          <g data-on="3"><path d="M50 134v14h82v-14" style="fill:none;stroke:var(--blue);stroke-width:2.4"/><text x="180" y="226" text-anchor="middle" font-size="9" class="s-ink2">copy A from a live replica to dn-3</text></g>
+          <g data-on="4"><text x="180" y="226" text-anchor="middle" font-size="9" class="s-ink2">all blocks have 3 other replicas: safe to switch off</text></g>
+          <g data-on="5"><text x="180" y="226" text-anchor="middle" font-size="9" class="s-ink2">dn-6 empty → “underutilized”</text></g>
+          <g data-on="6"><path d="M296 160v23" style="fill:none;stroke:var(--green);stroke-width:2.4"/><text x="180" y="226" text-anchor="middle" font-size="9" class="s-ink2">block B copied to dn-6, then removed from its source</text></g>
+          <text x="352" y="246" text-anchor="end" class="s-wm">myphatshala.in</text>
+        </svg>
+        <ol class="caps" hidden>
+          <li>Block A has 3 replicas: dn-2, dn-4, dn-5.</li>
+          <li>dn-4 is marked decommissioning. Its replicas no longer count towards the 3, but it still serves reads.</li>
+          <li>The NameNode asks dn-2 to copy A to dn-3, respecting rack placement.</li>
+          <li>Every block of dn-4 now has 3 replicas elsewhere: Decommissioned.</li>
+          <li>dn-6 joins with an empty disk. The average utilisation is far above its 0%, so it is underutilised.</li>
+          <li>The balancer copies block B to dn-6 and deletes one source replica: still 3 copies, just better spread.</li>
+        </ol>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ======================= PART 6: REAL-WORLD USE ======================= -->
+<section class="part" id="real-world">
+  <span class="part-label"><b>6</b> Real-world use</span>
+  <h2>Admin tools at work</h2>
+
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="20" y="20" width="80" height="50" rx="6" class="s-soft-red" style="stroke:var(--red)"/><text x="60" y="42" text-anchor="middle" font-size="8.6" font-weight="700" class="s-red">old servers</text><text x="60" y="58" text-anchor="middle" font-size="8.6" class="s-ink">one by one</text></svg></div>
+    <div><h4>1. Hardware refresh</h4>
+      <p>A bank replaces 200 five-year-old DataNodes. New nodes are added and balanced first; old ones are decommissioned a few at a time, each batch confirmed with fsck before the next. Users notice nothing.</p>
+      <div class="uc-flow"><span>Add new</span><i>→</i><span class="java">Balance + decommission</span><i>→</i><span>Remove old</span></div></div>
+  </div>
+
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="20" y="20" width="80" height="50" rx="6" class="s-soft-green" style="stroke:var(--green)"/><text x="60" y="42" text-anchor="middle" font-size="8.6" font-weight="700" class="s-green">balancer</text><text x="60" y="58" text-anchor="middle" font-size="8.6" class="s-ink">01:00 to 06:00</text></svg></div>
+    <div><h4>2. Night-time balancing</h4>
+      <p>Teams schedule <code>hdfs balancer -threshold 10</code> at night and raise the bandwidth for those hours with <code>-setBalancerBandwidth</code>, then lower it before office jobs start.</p>
+      <div class="uc-flow"><span>Scheduler</span><i>→</i><span class="java">balancer</span><i>→</i><span>Even disks by morning</span></div></div>
+  </div>
+
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="20" y="20" width="80" height="50" rx="6" class="s-board"/><text x="60" y="42" text-anchor="middle" font-size="8.6" class="mono" style="fill:#9FD3B8">HEALTHY</text><text x="60" y="58" text-anchor="middle" font-size="8.6" class="mono" style="fill:#F5C77E">missing: 0</text></svg></div>
+    <div><h4>3. Monitoring and alerts</h4>
+      <p>Monitoring reads the same numbers as <code>-report</code> (dead nodes, missing and under-replicated blocks) from the NameNode's metrics and pages the on-call engineer when missing blocks are above zero.</p>
+      <div class="uc-flow"><span>NameNode metrics</span><i>→</i><span class="java">Alert rules</span><i>→</i><span>On-call</span></div></div>
+  </div>
+
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="20" y="20" width="80" height="50" rx="6" class="s-card2"/><text x="60" y="42" text-anchor="middle" font-size="8.6" font-weight="700" class="s-ink">maintenance</text><text x="60" y="58" text-anchor="middle" font-size="8.6" class="s-ink2">reboot, patch</text></svg></div>
+    <div><h4>4. Patching without copying terabytes</h4>
+      <p>For a 20-minute OS patch, admins put a node into maintenance mode instead of decommissioning it, so HDFS doesn't copy its many terabytes away and back.</p>
+      <div class="uc-flow"><span>Maintenance</span><i>→</i><span class="java">Patch + reboot</span><i>→</i><span>In service</span></div></div>
+  </div>
+  <p class="muted">Simplified; organisations differ in tools and policies.</p>
+</section>

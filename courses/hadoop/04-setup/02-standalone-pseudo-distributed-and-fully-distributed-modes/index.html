@@ -1,0 +1,2125 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Standalone, pseudo-distributed and fully distributed modes | MyPhatshala</title>
+<meta name="description" content="The three ways to run Hadoop: standalone (local) mode with one JVM and local files, pseudo-distributed mode with every daemon on one machine, and fully distributed mode across many machines. The settings that decide the mode (fs.defaultFS, mapreduce.framework.name, dfs.replication, workers), the same job run in all three with real Hadoop 3.5.0 output, a mode-detection script, playground, quiz and interview scenarios.">
+<meta name="mp:minutes" content="24">
+<link rel="canonical" href="https://myphatshala.in/courses/hadoop/04-setup/02-standalone-pseudo-distributed-and-fully-distributed-modes/">
+<meta property="og:title" content="Standalone, pseudo-distributed and fully distributed modes · MyPhatshala">
+<meta property="og:description" content="Same Hadoop download, three modes. See exactly what changes, with real outputs from all three.">
+<link rel="icon" href="../../../../assets/img/logo.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Fraunces:ital,opsz,wght@0,9..144,600;0,9..144,700;1,9..144,600&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../../../../assets/css/style.css">
+<link rel="stylesheet" href="../../../../assets/css/lesson.css">
+<link rel="stylesheet" href="../../../../assets/css/cluster-sim.css">
+<script src="../../../../assets/js/config.js"></script>
+<script>try { const t = localStorage.getItem("mp-theme"); if (t) document.documentElement.dataset.theme = t; } catch (e) {}</script>
+<script type="application/ld+json">{"@context": "https://schema.org", "@type": "LearningResource", "name": "Standalone, pseudo-distributed and fully distributed modes", "learningResourceType": "Lesson", "educationalLevel": "Beginner", "isAccessibleForFree": true, "inLanguage": "en", "isPartOf": {"@type": "Course", "name": "Apache Hadoop", "provider": {"@type": "Organization", "name": "MyPhatshala"}}}</script>
+</head>
+<body style="--track:#B45309" data-lesson="04-setup/02-standalone-pseudo-distributed-and-fully-distributed-modes" data-course-root="../../">
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="site-header">
+  <div class="wrap">
+    <a class="brand" href="../../../../" aria-label="MyPhatshala home"><img src="../../../../assets/img/logo.svg" width="34" height="34" alt=""><span>My<b>Phatshala</b></span></a>
+    <nav class="nav" aria-label="Main">
+      <a href="../../../../#tracks">All courses</a>
+      <a href="../../">Apache Hadoop syllabus</a>
+      <button class="theme-btn" id="theme-btn" aria-label="Toggle dark mode"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg></button>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+<section class="lesson-hero">
+  <div class="wrap">
+    <nav class="crumbs" aria-label="Breadcrumb"><a href="../../../../">Home</a><span>›</span><a href="../../../../#track-big-data">Big Data Engineering</a><span>›</span><a href="../../">Apache Hadoop</a><span>›</span><b>Lesson 4.2</b></nav>
+    <h1>Standalone, pseudo-distributed and fully distributed modes</h1>
+    <p class="lead">The Hadoop you download can run as a simple local program, as a one-machine cluster, or as a real multi-machine cluster. Which one you get depends on a handful of settings. This lesson runs the same job in all three modes on a real Hadoop 3.5.0 install, shows what jps and the configuration report in each, and explains when each mode is used at work.</p>
+    <div class="lesson-meta"><span>Module 4 · Setup</span><span>⏱ 24 min</span><span>Beginner</span><span>Real Hadoop 3.5.0 output</span><span>Cluster Playground</span><span>Runs in your browser (Python)</span><span>8 practice problems</span></div>
+  </div>
+</section>
+
+<div class="wrap lesson-layout">
+<article class="lesson-main">
+<!-- ======================= PART 1: THE STORY ======================= -->
+<section class="part" id="story">
+  <span class="part-label"><b>1</b> The story</span>
+  <h2>One download, three ways to run it</h2>
+  <div class="story">
+    <p class="narration">Riya's WSL Ubuntu now has Java 17 and SSH. She unpacks <code>hadoop-3.5.0.tar.gz</code>, runs the built-in <code>grep</code> example, and it finishes in seconds with a <code>_SUCCESS</code> file. “Done! I have a Hadoop cluster.” Kabir types <code>jps</code> on her machine. The only Java process listed is <code>Jps</code> itself.</p>
+
+    <div class="scene">
+      <svg viewBox="0 0 640 190" role="img" aria-label="The same Hadoop download run three ways: standalone as one Java process with local files, pseudo-distributed as five Java processes on one machine, and fully distributed across many machines.">
+        <g font-size="10">
+          <rect x="16" y="16" width="190" height="140" rx="10" class="s-card2"/>
+          <text x="111" y="38" text-anchor="middle" font-weight="700" class="s-ink">Standalone</text>
+          <rect x="56" y="56" width="110" height="34" rx="6" class="s-soft-acc" style="stroke:var(--track)"/><text x="111" y="77" text-anchor="middle" font-size="9" class="s-acc" font-weight="700">1 Java process</text>
+          <text x="111" y="114" text-anchor="middle" font-size="8.6" class="s-ink2">local files, no HDFS</text><text x="111" y="130" text-anchor="middle" font-size="8.6" class="s-ink2">no daemons, no YARN</text>
+
+          <rect x="225" y="16" width="190" height="140" rx="10" class="s-card2"/>
+          <text x="320" y="38" text-anchor="middle" font-weight="700" class="s-ink">Pseudo-distributed</text>
+          <rect x="245" y="50" width="150" height="76" rx="8" class="s-board"/>
+          <g font-size="8" class="s-chalk"><text x="320" y="68" text-anchor="middle">NameNode · DataNode</text><text x="320" y="84" text-anchor="middle">SecondaryNameNode</text><text x="320" y="100" text-anchor="middle">ResourceManager</text><text x="320" y="116" text-anchor="middle">NodeManager</text></g>
+          <text x="320" y="144" text-anchor="middle" font-size="8.6" class="s-ink2">all daemons on one machine</text>
+
+          <rect x="434" y="16" width="190" height="140" rx="10" class="s-card2"/>
+          <text x="529" y="38" text-anchor="middle" font-weight="700" class="s-ink">Fully distributed</text>
+          <rect x="454" y="50" width="70" height="34" rx="6" class="s-board"/><text x="489" y="71" text-anchor="middle" font-size="8" class="s-chalk">masters</text>
+          <rect x="534" y="50" width="70" height="34" rx="6" class="s-soft-green" style="stroke:var(--green)"/><text x="569" y="71" text-anchor="middle" font-size="8" class="s-green">worker 1</text>
+          <rect x="454" y="92" width="70" height="34" rx="6" class="s-soft-green" style="stroke:var(--green)"/><text x="489" y="113" text-anchor="middle" font-size="8" class="s-green">worker 2</text>
+          <rect x="534" y="92" width="70" height="34" rx="6" class="s-soft-green" style="stroke:var(--green)"/><text x="569" y="113" text-anchor="middle" font-size="8" class="s-green">worker 3</text>
+          <text x="529" y="144" text-anchor="middle" font-size="8.6" class="s-ink2">daemons spread over machines</text>
+        </g>
+        <text x="320" y="180" text-anchor="middle" font-size="10" class="s-ink2">Same files, same commands. Only a few configuration values decide the mode.</text>
+        <text x="632" y="180" text-anchor="end" class="s-wm">myphatshala.in</text>
+      </svg>
+    </div>
+
+    <div class="panel"><div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#E1E9F7"/><path d="M12 64c2-12 10-18 20-18s18 6 20 18z" fill="#B45309"/><circle cx="32" cy="29" r="12" fill="#A9714A"/><path d="M19 27c0-9 6-14 13-14s13 5 13 14c-2-4-5-6-8-6-3 3-9 4-13 3-2 1-4 2-5 3z" fill="#1E1A17"/><circle cx="27.5" cy="30" r="1.5" fill="#1E1A17"/><circle cx="36.5" cy="30" r="1.5" fill="#1E1A17"/><path d="M27 35.5q5 3.5 10 0" stroke="#1E1A17" stroke-width="1.6" fill="none" stroke-linecap="round"/><rect x="41" y="40" width="10" height="7" rx="1.5" fill="#2E5AAC"/></svg></div><div class="bubble"><b class="who">Kabir</b><p>No NameNode, no DataNode. So where did your job run?</p></div></div>
+    <div class="panel"><div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#FCE6D6"/><path d="M14 64c2-12 9-18 18-18s16 6 18 18z" fill="#2E5AAC"/><circle cx="32" cy="29" r="12" fill="#C68B5E"/><path d="M19 29c0-10 6-15 13-15s13 5 13 15c-3-5-7-8-13-8s-10 3-13 8z" fill="#2A1B14"/><path d="M43 27c3 6 3 14 0 20" stroke="#2A1B14" stroke-width="4" fill="none" stroke-linecap="round"/><circle cx="27.5" cy="30" r="1.5" fill="#2A1B14"/><circle cx="36.5" cy="30" r="1.5" fill="#2A1B14"/><path d="M28 35q4 3 8 0" stroke="#2A1B14" stroke-width="1.6" fill="none" stroke-linecap="round"/><circle cx="32" cy="24" r="1.2" fill="#D64545"/></svg></div><div class="bubble"><b class="who">Riya</b><p>But it worked… it even wrote <code>_SUCCESS</code>.</p></div></div>
+    <div class="panel panel--right"><div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#DDEFE6"/><path d="M12 64c2-12 10-18 20-18s18 6 20 18z" fill="#F4F1EA"/><path d="M28 46l4 8 4-8" fill="#2F7D5B"/><circle cx="32" cy="28" r="12" fill="#B57A50"/><path d="M20 26c0-8 5-13 12-13s12 5 12 13c-2-3-6-5-12-5s-10 2-12 5z" fill="#5A5A5A"/><path d="M22 32c1 8 5 11 10 11s9-3 10-11c-2 3-6 4-10 4s-8-1-10-4z" fill="#5A5A5A"/><circle cx="27" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><circle cx="37" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><path d="M30.4 29h3.2" stroke="#1B2433" stroke-width="1.4"/><circle cx="27" cy="29" r="1.1" fill="#1B2433"/><circle cx="37" cy="29" r="1.1" fill="#1B2433"/></svg></div><div class="bubble"><b class="who">Arjun Sir</b><p>It worked in <b>standalone mode</b>. Out of the box, Hadoop runs the whole job inside one Java process and reads plain files from your Linux folder. No HDFS, no YARN, no daemons. Perfect for checking that your MapReduce logic is right; useless for big data.</p></div></div>
+    <div class="panel"><div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#FCE6D6"/><path d="M14 64c2-12 9-18 18-18s16 6 18 18z" fill="#2E5AAC"/><circle cx="32" cy="29" r="12" fill="#C68B5E"/><path d="M19 29c0-10 6-15 13-15s13 5 13 15c-3-5-7-8-13-8s-10 3-13 8z" fill="#2A1B14"/><path d="M43 27c3 6 3 14 0 20" stroke="#2A1B14" stroke-width="4" fill="none" stroke-linecap="round"/><circle cx="27.5" cy="30" r="1.5" fill="#2A1B14"/><circle cx="36.5" cy="30" r="1.5" fill="#2A1B14"/><path d="M28 35q4 3 8 0" stroke="#2A1B14" stroke-width="1.6" fill="none" stroke-linecap="round"/><circle cx="32" cy="24" r="1.2" fill="#D64545"/></svg></div><div class="bubble"><b class="who">Riya</b><p>Then how do I get the real thing?</p></div></div>
+    <div class="panel panel--right"><div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#DDEFE6"/><path d="M12 64c2-12 10-18 20-18s18 6 20 18z" fill="#F4F1EA"/><path d="M28 46l4 8 4-8" fill="#2F7D5B"/><circle cx="32" cy="28" r="12" fill="#B57A50"/><path d="M20 26c0-8 5-13 12-13s12 5 12 13c-2-3-6-5-12-5s-10 2-12 5z" fill="#5A5A5A"/><path d="M22 32c1 8 5 11 10 11s9-3 10-11c-2 3-6 4-10 4s-8-1-10-4z" fill="#5A5A5A"/><circle cx="27" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><circle cx="37" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><path d="M30.4 29h3.2" stroke="#1B2433" stroke-width="1.4"/><circle cx="27" cy="29" r="1.1" fill="#1B2433"/><circle cx="37" cy="29" r="1.1" fill="#1B2433"/></svg></div><div class="bubble"><b class="who">Arjun Sir</b><p>Change three settings and Hadoop starts every daemon on your own laptop, each in its own Java process: <b>pseudo-distributed mode</b>. It behaves like a cluster with one node. And when the same settings point to other machines, with a list of workers, it's <b>fully distributed</b>, like the clusters at work. One download, three modes. Today you'll run all three and see exactly what changes.</p></div></div>
+  </div>
+</section>
+
+<!-- ======================= PART 2: DEFINITION ======================= -->
+<section class="part" id="definition">
+  <span class="part-label"><b>2</b> Definition</span>
+  <h2>Hadoop's three run modes</h2>
+  <div class="def">
+    <div class="def__formal"><small>Formal definition (write this in exams)</small>
+      <p>Hadoop can run in three modes. <b>Standalone (local) mode</b> is the default after unpacking: Hadoop runs as a <b>single Java process</b>, uses the <b>local file system</b> (<code>fs.defaultFS = file:///</code>) and runs MapReduce with the local job runner (<code>mapreduce.framework.name = local</code>); no daemons are started. <b>Pseudo-distributed mode</b> runs <b>every daemon on one machine, each in a separate JVM</b>, with HDFS (<code>fs.defaultFS = hdfs://localhost:9000</code>, <code>dfs.replication = 1</code>) and YARN (<code>mapreduce.framework.name = yarn</code>), simulating a one-node cluster. <b>Fully distributed mode</b> runs the master daemons and worker daemons on <b>separate machines</b>, with configuration pointing to the master hosts, a <code>workers</code> file listing the worker hosts, and normal replication (default 3). This is the mode used in production.</p></div>
+    <div class="def__simple"><small>In simple words</small>
+      <p>Standalone: Hadoop as a simple program on your files, for testing code. Pseudo-distributed: a full, tiny cluster on one computer, for learning. Fully distributed: a real cluster on many computers, for work.</p></div>
+  </div>
+
+  <h3>Words you'll meet in this lesson</h3>
+  <div class="terms">
+    <div class="term"><b>Mode</b><span>How Hadoop is set up to run: local, one-machine cluster, or many-machine cluster.</span></div>
+    <div class="term"><b>Daemon</b><span>A long-running background process, e.g. NameNode or NodeManager. Each Hadoop daemon is its own JVM.</span></div>
+    <div class="term"><b>JVM</b><span>Java Virtual Machine: one running Java program. <code>jps</code> lists them.</span></div>
+    <div class="term"><b>fs.defaultFS</b><span>The default file system: <code>file:///</code> (local disk) or <code>hdfs://host:port</code>.</span></div>
+    <div class="term"><b>LocalJobRunner</b><span>Runs map and reduce tasks inside the same single process, used in standalone mode.</span></div>
+    <div class="term"><b>workers file</b><span><code>etc/hadoop/workers</code>: one host name per line; the start scripts start DataNodes and NodeManagers there.</span></div>
+    <div class="term"><b>Format</b><span><code>hdfs namenode -format</code>: creates an empty HDFS namespace. Done once per new cluster.</span></div>
+    <div class="term"><b>jps</b><span>Lists running Java processes. The quickest way to see which mode you are really in.</span></div>
+  </div>
+
+  <h3>The settings that decide the mode (Hadoop 3.5.0)</h3>
+  <table class="facts">
+    <tr><th>fs.defaultFS</th><td>Standalone <code>file:///</code> (default) · Pseudo <code>hdfs://localhost:9000</code> · Fully <code>hdfs://&lt;namenode-host&gt;:8020</code></td></tr>
+    <tr><th>mapreduce.framework.name</th><td>Standalone <code>local</code> (default) · Pseudo and fully <code>yarn</code></td></tr>
+    <tr><th>dfs.replication</th><td>Default 3 · Pseudo 1 (there is only one DataNode) · Fully 3</td></tr>
+    <tr><th>workers file</th><td>Default <code>localhost</code> · Fully: one worker host name per line</td></tr>
+    <tr><th>Verified with</th><td><code>hdfs getconf -confKey …</code> on a real install (output in Part 4)</td></tr>
+  </table>
+
+  <h3 id="levels">Modes at three levels</h3>
+  <div class="modlab levels"><div class="modlab__bar"><b>Pick your level. New to this? Start at Beginner and climb.</b><button type="button" data-mod="b">Beginner</button><button type="button" data-mod="i">Intermediate</button><button type="button" data-mod="a">Advanced</button></div>
+    <div class="modlab__panel" data-mod="b"><h4><span class="lvl lvl--b">Beginner</span> A cricket match three ways</h4>
+      <ul>
+        <li><b>Standalone</b> is practising alone in the nets: you check your shots, but it isn't a match.</li>
+        <li><b>Pseudo-distributed</b> is a match where one person plays every position, running from bowler to keeper. All the rules apply, just on one body.</li>
+        <li><b>Fully distributed</b> is a real team: each player on their own position, and if one gets injured, a substitute comes in.</li>
+      </ul>
+
+    </div>
+    <div class="modlab__panel" data-mod="i"><h4><span class="lvl lvl--i">Intermediate</span> What actually changes</h4>
+      <ul>
+        <li>Standalone: <code>hadoop jar …</code> reads <code>input/</code> from your Linux folder, runs all tasks in one JVM, and writes <code>output/</code> back to the Linux folder.</li>
+        <li>Pseudo: you edit <code>core-site.xml</code>, <code>hdfs-site.xml</code>, <code>mapred-site.xml</code>, <code>yarn-site.xml</code>; format the NameNode; run <code>start-dfs.sh</code> and <code>start-yarn.sh</code>; files now live in HDFS and jobs go through YARN.</li>
+        <li>Fully: the same files point to the master's host name instead of <code>localhost</code>; the <code>workers</code> file lists the workers; the same configuration is copied to every node.</li>
+        <li>The commands you type (<code>hdfs dfs -put</code>, <code>hadoop jar</code>) are the same in pseudo and fully distributed modes.</li>
+      </ul>
+
+    </div>
+    <div class="modlab__panel" data-mod="a"><h4><span class="lvl lvl--a">Advanced</span> Details that catch people out</h4>
+      <ul>
+        <li>In standalone mode, <code>hadoop fs -ls /</code> lists your <b>Linux root folder</b>, because the default file system is <code>file:///</code>.</li>
+        <li>Pseudo mode needs <code>dfs.replication = 1</code>: with the default 3 and one DataNode, every block would be reported as under-replicated.</li>
+        <li>Without settings, the NameNode keeps its data in <code>/tmp/hadoop-&lt;user&gt;</code>, which may be cleaned on reboot. Set <code>dfs.namenode.name.dir</code> and <code>dfs.datanode.data.dir</code> for anything you want to keep.</li>
+        <li>Fully distributed on one physical machine is possible with containers (Docker) or VMs: each container is a separate “machine” with its own host name and IP.</li>
+        <li>Unit tests often use a <b>MiniDFSCluster</b> / <b>MiniYARNCluster</b>: an in-process mini cluster, a fourth “mode” used only by developers.</li>
+      </ul>
+
+    </div>
+  </div>
+  <div class="callout callout--exam"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19V5a2 2 0 0 1 2-2h12v18H6a2 2 0 0 1-2-2zm0 0a2 2 0 0 1 2-2h12"/></svg><p><b>Exam tip:</b> For “Explain the modes of Hadoop installation”, draw a three-column table: <b>standalone</b> (single JVM, local FS, no daemons, for debugging), <b>pseudo-distributed</b> (all daemons on one machine in separate JVMs, HDFS replication 1, for learning/testing), <b>fully distributed</b> (masters and workers on separate machines, replication 3, for production). Add the key property that changes: <code>fs.defaultFS</code>.</p></div>
+</section>
+
+<!-- ======================= PART 3: TYPES AND WAYS TO USE IT ======================= -->
+<section class="part" id="types">
+  <span class="part-label"><b>3</b> Types and ways to use it</span>
+  <h2>The three modes side by side</h2>
+  <div class="table-wrap">
+  <table class="compare" style="min-width:640px">
+    <thead><tr><th></th><th>Standalone (local)</th><th>Pseudo-distributed</th><th>Fully distributed</th></tr></thead>
+    <tbody>
+      <tr><td><b>Machines</b></td><td>1</td><td>1</td><td>Many (or many containers)</td></tr>
+      <tr><td><b>Java processes</b></td><td>1 (only while a job runs)</td><td>One per daemon: 5–6</td><td>Masters on their own nodes; DataNode + NodeManager on each worker</td></tr>
+      <tr><td><b>File system</b></td><td>Local Linux files</td><td>HDFS (one DataNode)</td><td>HDFS (many DataNodes)</td></tr>
+      <tr><td><b>Job runs on</b></td><td>LocalJobRunner</td><td>YARN</td><td>YARN</td></tr>
+      <tr><td><b>Replication</b></td><td>Not used</td><td>1</td><td>3 (default)</td></tr>
+      <tr><td><b>SSH needed?</b></td><td>No</td><td>Yes, to <code>localhost</code> (for start scripts)</td><td>Yes, master to every worker (or a cluster manager)</td></tr>
+      <tr><td><b>Fault tolerance</b></td><td>None</td><td>None: one node</td><td>Yes: lose a node, keep the data</td></tr>
+      <tr><td><b>Used for</b></td><td>Debugging map/reduce logic</td><td>Learning, demos, small tests</td><td>Production</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <h3>Ways people get each mode</h3>
+  <div class="cards">
+    <div class="card"><h4>Unpack and run</h4><p>Standalone needs nothing but the tarball and Java. The fastest way to test a MapReduce program.</p><span class="tag">Standalone</span></div>
+    <div class="card"><h4>Edit four XML files</h4><p>Pseudo-distributed on Ubuntu or WSL: the classic learning setup, and the one in Lesson 4.3.</p><span class="tag">Pseudo</span></div>
+    <div class="card"><h4>Docker Compose</h4><p>Several containers on one PC, each a “node”: a real multi-node cluster for practice.</p><span class="tag">Fully (practice)</span></div>
+    <div class="card"><h4>Real servers or cloud VMs</h4><p>Installed with a cluster manager or automation; this is what companies run.</p><span class="tag">Fully (production)</span></div>
+  </div>
+  <div class="callout callout--tip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18h6M10 22h4M12 2a7 7 0 0 0-4 12.7V17h8v-2.3A7 7 0 0 0 12 2z"/></svg><p>Whatever mode you think you are in, check with two commands: <code>jps</code> (which daemons are running?) and <code>hdfs getconf -confKey fs.defaultFS</code> (local files or HDFS?).</p></div>
+</section>
+
+<!-- ======================= PART 4: STEP BY STEP ======================= -->
+<section class="part" id="steps">
+  <span class="part-label"><b>4</b> Step by step</span>
+  <h2>Run the same job in all three modes</h2>
+  <p>Every output below is from a real run of Hadoop 3.5.0 on Ubuntu 24.04 with OpenJDK 17. Full installation commands are in Lesson 4.3; here we focus on what changes between the modes.</p>
+  <ol class="stepper">
+    <li><h4>Standalone: run an example job on local files</h4>
+      <div class="code" data-lang="bash" data-file="Terminal"><pre><code>cd ~/hadoop-3.5.0
+mkdir input &amp;&amp; cp etc/hadoop/*.xml input
+hadoop jar share/hadoop/mapreduce/hadoop-mapreduce-examples-3.5.0.jar \
+    grep input output 'dfs[a-z.]+'
+cat output/*
+ls output</code></pre><div class="output">1	dfsadmin
+_SUCCESS
+part-r-00000</div></div>
+      <span class="behind">The <code>grep</code> example counts words matching <code>dfs[a-z.]+</code> in Hadoop's own XML files. <code>input</code> and <code>output</code> are ordinary Linux folders.</span></li>
+    <li><h4>Standalone: prove there is no cluster</h4>
+      <div class="code" data-lang="bash" data-file="Terminal"><pre><code>jps
+hdfs getconf -confKey fs.defaultFS
+hdfs getconf -confKey mapreduce.framework.name
+hadoop fs -ls /</code></pre><div class="output">9241 Jps
+file:///
+local
+drwxr-xr-x   - root root       4096 2026-10-21 05:12 /bin
+drwxr-xr-x   - root root       4096 2026-10-21 05:12 /etc
+drwxr-xr-x   - root root       4096 2026-10-21 05:12 /home
+…</div></div>
+      <span class="behind">No daemons. The default file system is the local disk, so <code>hadoop fs -ls /</code> shows the Linux root folder, owned by <code>root</code>, not an HDFS folder.</span></li>
+    <li><h4>Pseudo-distributed: change the settings</h4>
+      <div class="code" data-lang="xml" data-file="etc/hadoop/core-site.xml"><pre><code>&lt;configuration&gt;
+    &lt;property&gt;
+        &lt;name&gt;fs.defaultFS&lt;/name&gt;
+        &lt;value&gt;hdfs://localhost:9000&lt;/value&gt;
+    &lt;/property&gt;
+&lt;/configuration&gt;</code></pre></div>
+      <div class="code" data-lang="xml" data-file="etc/hadoop/hdfs-site.xml"><pre><code>&lt;configuration&gt;
+    &lt;property&gt;
+        &lt;name&gt;dfs.replication&lt;/name&gt;
+        &lt;value&gt;1&lt;/value&gt;
+    &lt;/property&gt;
+&lt;/configuration&gt;</code></pre></div>
+      <span class="behind">These two files are exactly what the official Apache single-node guide uses. <code>mapred-site.xml</code> and <code>yarn-site.xml</code> (to run jobs on YARN) are shown in Lesson 4.3 and explained in Lesson 4.4.</span></li>
+    <li><h4>Pseudo-distributed: format and start</h4>
+      <div class="code" data-lang="bash" data-file="Terminal"><pre><code>hdfs namenode -format
+start-dfs.sh
+start-yarn.sh
+jps</code></pre><div class="output">Storage directory /tmp/hadoop-riya/dfs/name has been successfully formatted.
+Starting namenodes on [localhost]
+Starting datanodes
+Starting secondary namenodes [vm]
+Starting resourcemanager
+Starting nodemanagers
+5584 SecondaryNameNode
+5283 NameNode
+6567 Jps
+6120 ResourceManager
+5384 DataNode
+6221 NodeManager</div></div>
+      <span class="behind">Five daemons, five JVMs, one machine (here named <code>vm</code>). The numbers are process IDs and will differ on your machine.</span></li>
+    <li><h4>Pseudo-distributed: same job, now on HDFS and YARN</h4>
+      <div class="code" data-lang="bash" data-file="Terminal"><pre><code>hdfs getconf -confKey fs.defaultFS
+hdfs getconf -confKey dfs.replication
+hdfs dfs -mkdir -p /user/riya/input
+hdfs dfs -put etc/hadoop/*.xml input
+hadoop jar share/hadoop/mapreduce/hadoop-mapreduce-examples-3.5.0.jar \
+    grep input output 'dfs[a-z.]+'
+hdfs dfs -cat output/*</code></pre><div class="output">hdfs://localhost:9000
+1
+…
+INFO mapreduce.Job: Job job_1792559666229_0001 completed successfully
+…
+1	dfsadmin
+1	dfs.replication</div></div>
+      <span class="behind">The job now runs through YARN (it has a job ID). The result has a second line, <code>dfs.replication</code>, because the <code>hdfs-site.xml</code> you just edited is one of the input files: the data changed, not the program.</span></li>
+    <li><h4>Fully distributed: many nodes</h4>
+      <div class="code" data-lang="bash" data-file="Terminal (Docker practice cluster, Lesson 4.3)"><pre><code>docker compose up -d --scale datanode=3
+docker compose exec namenode hdfs dfsadmin -printTopology
+docker compose exec namenode hdfs getconf -confKey dfs.replication</code></pre><div class="output">Rack: /default-rack
+   172.18.0.4:9866 (mpcluster-datanode-1.mpcluster_default) In Service
+   172.18.0.6:9866 (mpcluster-datanode-3.mpcluster_default) In Service
+   172.18.0.7:9866 (mpcluster-datanode-2.mpcluster_default) In Service
+3</div></div>
+      <span class="behind">Three DataNodes, each a separate container with its own IP address, and replication back to 3. On real servers the only difference is that each DataNode is a separate computer, listed in the <code>workers</code> file.</span></li>
+  </ol>
+  <div class="callout callout--warn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3 2 21h20L12 3z"/><path d="M12 10v5M12 18v.5"/></svg><p><code>hdfs namenode -format</code> erases the HDFS namespace. Run it once when you create a cluster, never on a cluster that holds data you need.</p></div>
+</section>
+
+<!-- ======================= PART 5: SEE IT HAPPEN ======================= -->
+<section class="part" id="animation">
+  <span class="part-label"><b>5</b> See it happen</span>
+  <h2>From one process to a cluster</h2>
+  <p>On the left, the real terminal output at each step. On the right, the processes and machines behind it.</p>
+  <div class="anim" data-frames="6">
+    <div class="anim__title">Standalone → pseudo → fully distributed <span>6 steps</span></div>
+    <div class="anim__views">
+      <div class="view view--see">
+        <span class="view__tag">What you see</span>
+        <svg viewBox="0 0 360 250" role="img" aria-label="Riya's terminal in each mode">
+          <rect x="14" y="14" width="332" height="206" rx="8" class="s-board"/>
+          <text x="26" y="32" font-size="9" class="mono" style="fill:#7F8C86">riya@vm : ~/hadoop-3.5.0</text>
+          <g data-on="1"><text x="26" y="56" font-size="9" class="mono" style="fill:#7F8C86">$ hadoop jar …examples-3.5.0.jar \</text><text x="26" y="70" font-size="9" class="mono" style="fill:#7F8C86">    grep input output 'dfs[a-z.]+'</text><text x="26" y="88" font-size="9" class="mono" style="fill:#7F8C86">$ cat output/*</text><text x="26" y="104" font-size="9" class="mono" style="fill:#9FD3B8">1	dfsadmin</text></g>
+          <g data-on="2"><text x="26" y="56" font-size="9" class="mono" style="fill:#7F8C86">$ jps</text><text x="26" y="72" font-size="9" class="mono" style="fill:#9FD3B8">9241 Jps</text><text x="26" y="90" font-size="9" class="mono" style="fill:#7F8C86">$ hdfs getconf -confKey fs.defaultFS</text><text x="26" y="106" font-size="9" class="mono" style="fill:#F5C77E">file:///</text><text x="180" y="190" text-anchor="middle" font-size="10" class="s-chalk">No daemons, local files.</text></g>
+          <g data-on="3"><text x="26" y="56" font-size="9" class="mono" style="fill:#7F8C86">$ nano etc/hadoop/core-site.xml</text><text x="26" y="72" font-size="9" class="mono" style="fill:#F5C77E">  fs.defaultFS = hdfs://localhost:9000</text><text x="26" y="90" font-size="9" class="mono" style="fill:#7F8C86">$ nano etc/hadoop/hdfs-site.xml</text><text x="26" y="106" font-size="9" class="mono" style="fill:#F5C77E">  dfs.replication = 1</text><text x="26" y="124" font-size="9" class="mono" style="fill:#7F8C86">$ hdfs namenode -format</text><text x="26" y="140" font-size="9" class="mono" style="fill:#9FD3B8">… successfully formatted.</text></g>
+          <g data-on="4"><text x="26" y="56" font-size="9" class="mono" style="fill:#7F8C86">$ start-dfs.sh ; start-yarn.sh ; jps</text><text x="26" y="74" font-size="9" class="mono" style="fill:#9FD3B8">5283 NameNode</text><text x="26" y="88" font-size="9" class="mono" style="fill:#9FD3B8">5384 DataNode</text><text x="26" y="102" font-size="9" class="mono" style="fill:#9FD3B8">5584 SecondaryNameNode</text><text x="26" y="116" font-size="9" class="mono" style="fill:#9FD3B8">6120 ResourceManager</text><text x="26" y="130" font-size="9" class="mono" style="fill:#9FD3B8">6221 NodeManager</text><text x="26" y="144" font-size="9" class="mono" style="fill:#7F8C86">6567 Jps</text></g>
+          <g data-on="5"><text x="26" y="56" font-size="9" class="mono" style="fill:#7F8C86">$ hadoop jar … grep input output …</text><text x="26" y="72" font-size="9" class="mono" style="fill:#9FD3B8">Job job_…_0001 completed successfully</text><text x="26" y="90" font-size="9" class="mono" style="fill:#7F8C86">$ hdfs dfs -cat output/*</text><text x="26" y="106" font-size="9" class="mono" style="fill:#9FD3B8">1	dfsadmin</text><text x="26" y="120" font-size="9" class="mono" style="fill:#9FD3B8">1	dfs.replication</text></g>
+          <g data-on="6"><text x="26" y="56" font-size="9" class="mono" style="fill:#7F8C86">$ hdfs dfsadmin -printTopology</text><text x="26" y="72" font-size="9" class="mono" style="fill:#9FD3B8">Rack: /default-rack</text><text x="26" y="88" font-size="8.6" class="mono" style="fill:#9FD3B8">  172.18.0.4:9866 (…datanode-1) In Service</text><text x="26" y="102" font-size="8.6" class="mono" style="fill:#9FD3B8">  172.18.0.6:9866 (…datanode-3) In Service</text><text x="26" y="116" font-size="8.6" class="mono" style="fill:#9FD3B8">  172.18.0.7:9866 (…datanode-2) In Service</text><text x="180" y="190" text-anchor="middle" font-size="10" class="s-chalk">Three DataNodes, three addresses.</text></g>
+          <text x="352" y="244" text-anchor="end" class="s-wm">myphatshala.in</text>
+        </svg>
+        <ol class="caps" hidden>
+          <li><b>Standalone.</b> The example job runs and prints a result. It looks like Hadoop is “working”.</li>
+          <li>But <code>jps</code> shows no daemons, and the default file system is <code>file:///</code>: the job ran as one ordinary program on local files.</li>
+          <li><b>Pseudo-distributed.</b> Two settings change: HDFS on <code>localhost:9000</code> and replication 1. Then a one-time format.</li>
+          <li>The start scripts launch five daemons. <code>jps</code> now lists each one as a separate Java process.</li>
+          <li>The same job runs through YARN, reading and writing HDFS. (The extra result line comes from the edited <code>hdfs-site.xml</code> in the input.)</li>
+          <li><b>Fully distributed.</b> On the Docker practice cluster, three DataNodes report in, each on its own address.</li>
+        </ol>
+      </div>
+
+      <div class="view view--behind">
+        <span class="view__tag">Behind the screen</span>
+        <svg viewBox="0 0 360 250" role="img" aria-label="Processes and machines in each mode">
+          <g data-on="1-2">
+            <rect x="40" y="40" width="280" height="150" rx="10" class="s-card2"/><text x="56" y="60" font-size="9" font-weight="700" class="s-ink">Riya's machine</text>
+            <rect x="70" y="76" width="110" height="46" rx="6" class="s-soft-acc" style="stroke:var(--track)"/><text x="125" y="96" text-anchor="middle" font-size="8.6" font-weight="700" class="s-acc">one JVM</text><text x="125" y="111" text-anchor="middle" font-size="8" class="s-ink">map + reduce inside</text>
+            <rect x="210" y="76" width="90" height="46" rx="6" class="s-soft-blue" style="stroke:var(--blue)"/><text x="255" y="96" text-anchor="middle" font-size="8.6" font-weight="700" class="s-blue">Linux disk</text><text x="255" y="111" text-anchor="middle" font-size="8" class="s-ink">input/ output/</text>
+            <path d="M180 99h30" class="s-line"/>
+          </g>
+          <g data-on="1"><text x="180" y="160" text-anchor="middle" font-size="9" class="s-ink2">the program reads and writes ordinary folders</text></g>
+          <g data-on="2"><text x="180" y="160" text-anchor="middle" font-size="9" font-weight="700" class="s-red">no NameNode, no DataNode, no YARN</text><text x="180" y="176" text-anchor="middle" font-size="8.6" class="s-ink2">the JVM exits when the job ends</text></g>
+          <g data-on="3-5">
+            <rect x="30" y="30" width="300" height="180" rx="10" class="s-card2"/><text x="46" y="50" font-size="9" font-weight="700" class="s-ink">Riya's machine (localhost)</text>
+            <rect x="46" y="64" width="128" height="58" rx="6" class="s-soft-blue" style="stroke:var(--blue)"/><text x="110" y="80" text-anchor="middle" font-size="8.6" font-weight="700" class="s-blue">HDFS</text>
+            <rect x="186" y="64" width="128" height="58" rx="6" class="s-soft-green" style="stroke:var(--green)"/><text x="250" y="80" text-anchor="middle" font-size="8.6" font-weight="700" class="s-green">YARN</text>
+          </g>
+          <g data-on="3"><text x="110" y="100" text-anchor="middle" font-size="8" class="s-ink">empty namespace</text><text x="110" y="113" text-anchor="middle" font-size="8" class="s-ink">(formatted)</text><text x="250" y="104" text-anchor="middle" font-size="8" class="s-ink2">not started</text><text x="180" y="160" text-anchor="middle" font-size="9" class="s-ink2">settings now point to hdfs://localhost:9000</text></g>
+          <g data-on="4-5"><text x="110" y="96" text-anchor="middle" font-size="8" class="s-ink">NameNode · DataNode</text><text x="110" y="110" text-anchor="middle" font-size="8" class="s-ink">SecondaryNameNode</text><text x="250" y="96" text-anchor="middle" font-size="8" class="s-ink">ResourceManager</text><text x="250" y="110" text-anchor="middle" font-size="8" class="s-ink">NodeManager</text></g>
+          <g data-on="4"><text x="180" y="150" text-anchor="middle" font-size="9" font-weight="700" class="s-green">5 daemons = 5 separate JVMs</text><text x="180" y="166" text-anchor="middle" font-size="8.6" class="s-ink2">all on one machine, talking over localhost</text></g>
+          <g data-on="5"><rect x="140" y="134" width="80" height="26" rx="5" class="s-soft-acc" style="stroke:var(--track)"/><text x="180" y="151" text-anchor="middle" font-size="8" class="s-acc" font-weight="700">job container</text><path d="M180 134v-12" class="s-line"/><text x="180" y="184" text-anchor="middle" font-size="8.6" class="s-ink2">1 copy of each block: lose the disk, lose the data</text></g>
+          <g data-on="6">
+            <rect x="20" y="30" width="96" height="74" rx="8" class="s-board"/><text x="68" y="52" text-anchor="middle" font-size="8.6" font-weight="700" class="s-chalk">masters</text><text x="68" y="68" text-anchor="middle" font-size="8" class="s-chalk">NameNode</text><text x="68" y="82" text-anchor="middle" font-size="8" class="s-chalk">ResourceManager</text>
+            <rect x="132" y="30" width="96" height="60" rx="8" class="s-soft-green" style="stroke:var(--green)"/><text x="180" y="52" text-anchor="middle" font-size="8.6" font-weight="700" class="s-green">datanode-1</text><text x="180" y="70" text-anchor="middle" font-size="8" class="s-ink">172.18.0.4</text>
+            <rect x="244" y="30" width="96" height="60" rx="8" class="s-soft-green" style="stroke:var(--green)"/><text x="292" y="52" text-anchor="middle" font-size="8.6" font-weight="700" class="s-green">datanode-2</text><text x="292" y="70" text-anchor="middle" font-size="8" class="s-ink">172.18.0.7</text>
+            <rect x="132" y="104" width="96" height="60" rx="8" class="s-soft-green" style="stroke:var(--green)"/><text x="180" y="126" text-anchor="middle" font-size="8.6" font-weight="700" class="s-green">datanode-3</text><text x="180" y="144" text-anchor="middle" font-size="8" class="s-ink">172.18.0.6</text>
+            <path d="M116 60h16M68 104v30h64" class="s-line"/><path d="M228 60h16" class="s-line"/>
+            <text x="180" y="196" text-anchor="middle" font-size="9" font-weight="700" class="s-green">each block stored on 3 nodes</text><text x="180" y="212" text-anchor="middle" font-size="8.6" class="s-ink2">lose a node, keep the data</text>
+          </g>
+          <text x="352" y="246" text-anchor="end" class="s-wm">myphatshala.in</text>
+        </svg>
+        <ol class="caps" hidden>
+          <li>One Java process reads <code>input/</code> from the Linux disk, runs map and reduce inside itself, and writes <code>output/</code>.</li>
+          <li>Nothing keeps running afterwards. There is no HDFS to store data in and no YARN to schedule work.</li>
+          <li>The configuration now points to HDFS on this machine. Formatting creates an empty namespace for the NameNode.</li>
+          <li>HDFS daemons and YARN daemons start, each in its own JVM. It is a real cluster, with exactly one node.</li>
+          <li>YARN runs the job in containers. With replication 1, each block exists once, so there is no protection against a disk failure.</li>
+          <li>Masters and workers live on separate machines (here, containers with separate IPs). Replication 3 spreads every block over three nodes.</li>
+        </ol>
+      </div>
+    </div>
+  </div>
+
+  <h3 id="playground">Try it yourself: from one node to many</h3>
+  <p>The playground starts as a <b>one-node cluster</b>, like pseudo-distributed mode, with replication 1. Break it, then grow it and see what changes.</p>
+  <div class="csim"><script type="application/json">{"title": "One node, then many", "intro": "<p>This cluster starts with <b>one DataNode and replication 1<\/b>, like pseudo-distributed mode. Work through the list: first see why one node is not enough, then grow the cluster.<\/p>", "racks": 1, "nodes": 1, "replication": 1, "features": ["upload", "job", "fail", "scale", "fsck"], "sizes": [1, 3, 6], "preload": [{"name": "canteen_orders.csv", "sizeMB": 300}], "try": [{"text": "Run the job on the one-node cluster. It works: every task runs on the same node.", "on": "job-done"}, {"text": "Click the only DataNode to stop it. No other copy exists anywhere.", "on": "node-stop"}, {"text": "Run <b>hdfs fsck /<\/b> to see the damage.", "on": "fsck"}, {"text": "Grow the cluster to <b>3 nodes<\/b> (this restarts it with the same data).", "on": "resize"}, {"text": "Upload a file with <b>Replication 3<\/b>, then stop any node: the data survives.", "on": "upload-done"}]}</script></div>
+</section>
+
+<!-- ======================= PART 6: REAL-WORLD USE ======================= -->
+<section class="part" id="real-world">
+  <span class="part-label"><b>6</b> Real-world use</span>
+  <h2>Which mode, where?</h2>
+
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="20" y="20" width="80" height="50" rx="6" class="s-soft-acc" style="stroke:var(--track)"/><text x="60" y="42" text-anchor="middle" font-size="8.6" font-weight="700" class="s-acc">local mode</text><text x="60" y="58" text-anchor="middle" font-size="8.6" class="s-ink">unit tests</text></svg></div>
+    <div><h4>1. Developers test logic locally</h4>
+      <p>Before a MapReduce or Spark job reaches the cluster, developers run it in local mode on a small sample, often inside automated tests. Bugs in the logic show up in seconds, without waiting for a cluster.</p>
+      <div class="uc-flow"><span>Sample data</span><i>→</i><span class="java">Local run in tests</span><i>→</i><span>Then the cluster</span></div></div>
+  </div>
+
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="20" y="20" width="80" height="50" rx="6" class="s-board"/><text x="60" y="42" text-anchor="middle" font-size="8.6" font-weight="700" class="s-chalk">CI pipeline</text><text x="60" y="58" text-anchor="middle" font-size="8.6" class="s-chalk">mini cluster</text></svg></div>
+    <div><h4>2. Integration tests on a one-node cluster</h4>
+      <p>Build pipelines start a pseudo-distributed cluster or an in-process mini cluster, run the job end to end against real HDFS and YARN APIs, check the output, and shut it down.</p>
+      <div class="uc-flow"><span>Code change</span><i>→</i><span class="java">One-node cluster test</span><i>→</i><span>Merge</span></div></div>
+  </div>
+
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="14" y="26" width="28" height="40" rx="4" class="s-soft-green" style="stroke:var(--green)"/><rect x="46" y="26" width="28" height="40" rx="4" class="s-soft-green" style="stroke:var(--green)"/><rect x="78" y="26" width="28" height="40" rx="4" class="s-soft-green" style="stroke:var(--green)"/><text x="60" y="80" text-anchor="middle" font-size="8.6" class="s-ink">containers</text></svg></div>
+    <div><h4>3. Multi-node clusters in containers</h4>
+      <p>Teams use Docker Compose or Kubernetes to start throw-away multi-node clusters for development and training. The Apache Hadoop project itself publishes the <code>apache/hadoop</code> images used in this course.</p>
+      <div class="uc-flow"><span>One laptop</span><i>→</i><span class="java">Many containers</span><i>→</i><span>Real distributed behaviour</span></div></div>
+  </div>
+
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="22" y="14" width="76" height="62" rx="6" class="s-card2"/><text x="60" y="36" text-anchor="middle" font-size="8.6" font-weight="700" class="s-ink">dev · test</text><text x="60" y="52" text-anchor="middle" font-size="8.6" font-weight="700" class="s-ink">prod</text><text x="60" y="68" text-anchor="middle" font-size="8" class="s-ink2">all fully distributed</text></svg></div>
+    <div><h4>4. Production: always fully distributed</h4>
+      <p>Companies run several fully distributed clusters: a small one for development, one for testing upgrades, and the large production cluster. Changes move through them in that order.</p>
+      <div class="uc-flow"><span>Dev cluster</span><i>→</i><span class="java">Test cluster</span><i>→</i><span>Production</span></div></div>
+  </div>
+  <p class="muted">Simplified; organisations differ in tools and policies.</p>
+</section>
+
+
+<div class="ad-slot" data-slot="mid"></div>
+
+<section class="part" id="run">
+  <span class="part-label"><b>7</b> Run the code</span>
+  <h2>Work out the mode from the settings</h2>
+  <p>The mode is decided by a few configuration values. This function reads them (here typed in as dictionaries, exactly as <code>hdfs getconf</code> printed them on our three test machines) and names the mode.</p>
+  <div class="code" data-lang="python" data-file="main.py"><pre><code>def mode(conf):
+    fs = conf.get(&quot;fs.defaultFS&quot;, &quot;file:///&quot;)
+    if fs.startswith(&quot;file:&quot;):
+        return &quot;standalone&quot;
+    host = fs.split(&quot;//&quot;)[1].split(&quot;:&quot;)[0]
+    if host in (&quot;localhost&quot;, &quot;127.0.0.1&quot;):
+        return &quot;pseudo-distributed&quot;
+    return &quot;fully distributed (NameNode on &quot; + host + &quot;)&quot;
+
+machines = {
+    &quot;fresh unpack&quot;: {},
+    &quot;Riya&#x27;s WSL&quot;: {&quot;fs.defaultFS&quot;: &quot;hdfs://localhost:9000&quot;, &quot;dfs.replication&quot;: &quot;1&quot;},
+    &quot;Docker cluster&quot;: {&quot;fs.defaultFS&quot;: &quot;hdfs://namenode&quot;, &quot;dfs.replication&quot;: &quot;3&quot;},
+}
+for name, conf in machines.items():
+    print(f&quot;{name:15} -&gt; {mode(conf)}&quot;)</code></pre><div class="output">fresh unpack    -&gt; standalone
+Riya&#x27;s WSL      -&gt; pseudo-distributed
+Docker cluster  -&gt; fully distributed (NameNode on namenode)</div></div>
+  <ul class="anno"><li><code>fs = conf.get(&quot;fs.defaultFS&quot;, &quot;file:///&quot;)</code><span>If the setting is missing, Hadoop uses its default: <code>file:///</code>, the local disk. That is why a fresh unpack is standalone.</span></li><li><code>host = fs.split(&quot;//&quot;)[1].split(&quot;:&quot;)[0]</code><span><code>hdfs://localhost:9000</code> → after <code>//</code> is <code>localhost:9000</code> → before <code>:</code> is <code>localhost</code>.</span></li><li><code>&quot;Docker cluster&quot;: {&quot;fs.defaultFS&quot;: &quot;hdfs://namenode&quot;, &quot;dfs.replication&quot;: &quot;3&quot;},</code><span>No port means the default NameNode RPC port, 8020.</span></li></ul>
+  <div class="runner">
+    <script type="application/json">{
+ "lang": "python",
+ "file": "main.py",
+ "tasks": [
+  {
+   "label": "1 · Three machines",
+   "hint": "Press <b>Run<\/b>. Then add a machine with <code>{\"fs.defaultFS\": \"hdfs://nn1.corp.in:8020\"}<\/code>.",
+   "code": "def mode(conf):\n    fs = conf.get(\"fs.defaultFS\", \"file:///\")\n    if fs.startswith(\"file:\"):\n        return \"standalone\"\n    host = fs.split(\"//\")[1].split(\":\")[0]\n    if host in (\"localhost\", \"127.0.0.1\"):\n        return \"pseudo-distributed\"\n    return \"fully distributed (NameNode on \" + host + \")\"\n\nmachines = {\n    \"fresh unpack\": {},\n    \"Riya's WSL\": {\"fs.defaultFS\": \"hdfs://localhost:9000\", \"dfs.replication\": \"1\"},\n    \"Docker cluster\": {\"fs.defaultFS\": \"hdfs://namenode\", \"dfs.replication\": \"3\"},\n}\nfor name, conf in machines.items():\n    print(f\"{name:15} -> {mode(conf)}\")\n"
+  },
+  {
+   "label": "2 · Count the JVMs",
+   "hint": "<b>Predict first:<\/b> how many Java processes (excluding Jps) does each mode run when idle? A worker runs a DataNode and a NodeManager.",
+   "code": "masters = [\"NameNode\", \"SecondaryNameNode\", \"ResourceManager\"]\nworker = [\"DataNode\", \"NodeManager\"]\nprint(\"standalone, idle  :\", 0)\nprint(\"pseudo            :\", len(masters) + len(worker))\nfor workers in [3, 10]:\n    print(f\"fully, {workers:>2} workers :\", len(masters) + workers * len(worker))\n"
+  },
+  {
+   "label": "3 · Under-replicated?",
+   "hint": "Each block wants <code>dfs.replication<\/code> copies but can have at most one per DataNode. Find which setups would report under-replicated blocks.",
+   "code": "setups = [(\"pseudo, repl 1\", 1, 1), (\"pseudo, repl 3\", 1, 3),\n          (\"3 DataNodes, repl 3\", 3, 3), (\"2 DataNodes, repl 3\", 2, 3)]\nfor name, datanodes, repl in setups:\n    copies = min(datanodes, repl)\n    print(f\"{name:20}: {copies} copies -> {'OK' if copies == repl else 'UNDER-REPLICATED'}\")\n"
+  },
+  {
+   "label": "4 · Build the workers file",
+   "hint": "Fully distributed mode needs one worker host name per line in <code>etc/hadoop/workers<\/code>. Generate it for 4 workers named <code>worker1<\/code>…",
+   "code": "hosts = [f\"worker{i}\" for i in range(1, 5)]\nworkers_file = \"\\n\".join(hosts)\nprint(workers_file)\nprint(\"---\", len(hosts), \"lines\")\n"
+  },
+  {
+   "label": "5 · Spot the error",
+   "hint": "This function says a fresh, unconfigured install is “pseudo-distributed”. Find and fix the default.",
+   "code": "def mode(conf):\n    fs = conf.get(\"fs.defaultFS\", \"hdfs://localhost:9000\")\n    if fs.startswith(\"file:\"):\n        return \"standalone\"\n    return \"pseudo-distributed\"\n\nprint(\"fresh unpack ->\", mode({}))\n"
+  }
+ ]
+}</script>
+  </div>
+  <h3 id="pc">Run it on your machine: which mode am I in?</h3>
+  <p>This script asks Hadoop for its settings and lists the running daemons, then names the mode. Save it as <code>which_mode.sh</code> (Hadoop's <code>bin</code> must be on your <code>PATH</code>). The three outputs below are from real runs.</p>
+  <div class="pcrun"><h4>Standalone: a fresh unpack</h4>
+  <div class="code" data-lang="bash" data-file="which_mode.sh"><pre><code>#!/usr/bin/env bash
+# which_mode.sh: which Hadoop mode is this machine in?
+fs=$(hdfs getconf -confKey fs.defaultFS 2&gt;/dev/null)
+fw=$(hdfs getconf -confKey mapreduce.framework.name 2&gt;/dev/null)
+daemons=$(jps | awk &#x27;$2 != &quot;Jps&quot; {print $2}&#x27; | sort | tr &#x27;\n&#x27; &#x27; &#x27;)
+echo &quot;fs.defaultFS             : $fs&quot;
+echo &quot;mapreduce.framework.name : $fw&quot;
+echo &quot;daemons on this machine  : ${daemons:-none}&quot;
+case &quot;$fs&quot; in
+  file:*)                              echo &quot;MODE: standalone (local files, no daemons)&quot; ;;
+  hdfs://localhost*|hdfs://127.0.0.1*) echo &quot;MODE: pseudo-distributed (every daemon on this machine)&quot; ;;
+  hdfs://*)                            echo &quot;MODE: fully distributed (NameNode at ${fs#hdfs://})&quot; ;;
+esac
+
+# In the terminal:
+#   bash which_mode.sh</code></pre><div class="output">fs.defaultFS             : file:///
+mapreduce.framework.name : local
+daemons on this machine  : none
+MODE: standalone (local files, no daemons)</div></div>
+  <p class="muted">Nothing configured, nothing running. Jobs still work, inside one JVM, on local files.</p></div>
+  <div class="pcrun"><h4>Pseudo-distributed: after start-dfs.sh and start-yarn.sh</h4>
+  <div class="code" data-lang="bash" data-file="which_mode.sh"><pre><code>start-dfs.sh
+start-yarn.sh
+bash which_mode.sh</code></pre><div class="output">Starting namenodes on [localhost]
+Starting datanodes
+Starting secondary namenodes [vm]
+Starting resourcemanager
+Starting nodemanagers
+fs.defaultFS             : hdfs://localhost:9000
+mapreduce.framework.name : yarn
+daemons on this machine  : DataNode NameNode NodeManager ResourceManager SecondaryNameNode
+MODE: pseudo-distributed (every daemon on this machine)</div></div>
+  <p class="muted">Five daemons on one machine. Your machine name will appear instead of <code>vm</code>.</p></div>
+  <div class="pcrun"><h4>Fully distributed: on the Docker practice cluster</h4>
+  <div class="code" data-lang="bash" data-file="which_mode.sh"><pre><code>docker cp which_mode.sh mpcluster-namenode-1:/tmp/
+docker exec mpcluster-namenode-1 bash /tmp/which_mode.sh
+docker cp which_mode.sh mpcluster-datanode-1:/tmp/
+docker exec mpcluster-datanode-1 bash /tmp/which_mode.sh</code></pre><div class="output">fs.defaultFS             : hdfs://namenode
+mapreduce.framework.name : yarn
+daemons on this machine  : NameNode
+MODE: fully distributed (NameNode at namenode)
+fs.defaultFS             : hdfs://namenode
+mapreduce.framework.name : yarn
+daemons on this machine  : DataNode
+MODE: fully distributed (NameNode at namenode)</div></div>
+  <p class="muted">Each container runs only its own role: the master container has just the NameNode, a worker container has just a DataNode. The cluster is set up in Lesson 4.3.</p></div>
+</section>
+
+<section class="part" id="tracer">
+  <span class="part-label"><b>8</b> Line by line</span>
+  <h2>Deciding the mode, one line at a time</h2>
+  <p>Follow Riya's pseudo-distributed setting through the function and watch how the host name is cut out of the address.</p>
+  <div class="tracer">
+    <script type="application/json">{
+ "lang": "python",
+ "code": [
+  "fs = \"hdfs://localhost:9000\"",
+  "after = fs.split(\"//\")[1]",
+  "host = after.split(\":\")[0]",
+  "if fs.startswith(\"file:\"):",
+  "    mode = \"standalone\"",
+  "elif host == \"localhost\":",
+  "    mode = \"pseudo-distributed\"",
+  "else:",
+  "    mode = \"fully distributed\"",
+  "print(host, \"->\", mode)"
+ ],
+ "steps": [
+  {
+   "line": 1,
+   "phase": "Input",
+   "note": "The value of fs.defaultFS from core-site.xml. <code>fs<\/code> is created: &#x27;hdfs://localhost:9000&#x27;.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "fs",
+       "'hdfs://localhost:9000'"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "fs"
+  },
+  {
+   "line": 2,
+   "phase": "Cut",
+   "note": "Everything after <code>//<\/code>: <code>localhost:9000<\/code>. <code>after<\/code> is created: &#x27;localhost:9000&#x27;.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "fs",
+       "'hdfs://localhost:9000'"
+      ],
+      [
+       "after",
+       "'localhost:9000'"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "after"
+  },
+  {
+   "line": 3,
+   "phase": "Host",
+   "note": "Everything before the colon. <code>host<\/code> is created: &#x27;localhost&#x27;.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "fs",
+       "'hdfs://localhost:9000'"
+      ],
+      [
+       "after",
+       "'localhost:9000'"
+      ],
+      [
+       "host",
+       "'localhost'"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "host"
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "The condition is <b>False<\/b>, so the indented block is skipped.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "fs",
+       "'hdfs://localhost:9000'"
+      ],
+      [
+       "after",
+       "'localhost:9000'"
+      ],
+      [
+       "host",
+       "'localhost'"
+      ]
+     ]
+    }
+   ],
+   "heap": []
+  },
+  {
+   "line": 6,
+   "phase": "Decide",
+   "note": "The NameNode is on this same machine. The condition is <b>True<\/b>, so the indented block runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "fs",
+       "'hdfs://localhost:9000'"
+      ],
+      [
+       "after",
+       "'localhost:9000'"
+      ],
+      [
+       "host",
+       "'localhost'"
+      ]
+     ]
+    }
+   ],
+   "heap": []
+  },
+  {
+   "line": 7,
+   "phase": "Python",
+   "note": "<code>mode<\/code> is created: &#x27;pseudo-distributed&#x27;.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "fs",
+       "'hdfs://localhost:9000'"
+      ],
+      [
+       "after",
+       "'localhost:9000'"
+      ],
+      [
+       "host",
+       "'localhost'"
+      ],
+      [
+       "mode",
+       "'pseudo-distributed'"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "mode"
+  },
+  {
+   "line": 10,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "fs",
+       "'hdfs://localhost:9000'"
+      ],
+      [
+       "after",
+       "'localhost:9000'"
+      ],
+      [
+       "host",
+       "'localhost'"
+      ],
+      [
+       "mode",
+       "'pseudo-distributed'"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "out": "localhost -> pseudo-distributed\n"
+  }
+ ]
+}</script>
+  </div>
+
+<h3 id="worked">Worked examples: real problems, solved and traced in memory</h3>
+  <p class="wx-intro">Three questions people really answer when choosing or checking a mode: what fits on a laptop, what a one-node cluster risks, and how to check that every node of a real cluster has the same configuration. Each runs live and is traced in memory.</p>
+  <article class="wx">
+    <div class="wx__head"><span class="wx__num">Example 1</span><span class="lvl lvl--b">Beginner</span><span class="wx__tag">Learning · resources</span></div>
+    <h4>Can my laptop run pseudo-distributed mode?</h4>
+    <div class="wx__problem"><p class="wx__label">Problem statement</p><p>In pseudo-distributed mode, give each of the five daemons 1 GB of heap, keep 2 GB for the operating system and the WSL/IDE, and allow 1 GB per task container. For laptops with 8 GB and 16 GB of RAM, how many containers can run at once?</p></div>
+    <div class="prob__io"><div><small>Input</small><pre>5 daemons × 1 GB · OS 2 GB · 1 GB per container · 8 GB and 16 GB</pre></div><div><small>Expected output</small><pre>8 GB laptop: 1 GB free -&gt; 1 container(s) at once
+16 GB laptop: 9 GB free -&gt; 9 container(s) at once</pre></div></div>
+    <div class="wx__approach"><p class="wx__label">Approach</p><ol><li>Fixed memory = daemons + OS.</li><li>Free memory = RAM − fixed.</li><li>Containers = whole GB left.</li></ol></div>
+    <p class="wx__label">Solution: run it live</p>
+    <div class="runner">
+    <script type="application/json">{
+ "lang": "python",
+ "file": "main.py",
+ "tasks": [
+  {
+   "label": "Solution",
+   "hint": "With 8 GB, only one container fits, and every MapReduce job needs one for its ApplicationMaster, so no map task could start and the job would wait. Small heaps (512 MB) help on 8 GB machines.",
+   "code": "daemons, heap, os_gb, per_container = 5, 1, 2, 1\nfor ram in [8, 16]:\n    free = ram - daemons * heap - os_gb\n    print(f\"{ram} GB laptop: {free} GB free -> {free // per_container} container(s) at once\")\n"
+  }
+ ]
+}</script>
+    </div>
+    <p class="wx__label">What happens in memory, step by step</p>
+    <p class="wx__how">Recorded from a real Python run: press <b>Next</b> to execute one line at a time. Watch variables change in each frame, and lists and dictionaries (numbered #1, #2 …) fill up as objects.</p>
+    <div class="tracer">
+    <script type="application/json">{
+ "lang": "python",
+ "code": [
+  "daemons, heap, os_gb, per_container = 5, 1, 2, 1",
+  "for ram in [8, 16]:",
+  "    free = ram - daemons * heap - os_gb",
+  "    print(f\"{ram} GB laptop: {free} GB free -> {free // per_container} container(s) at once\")"
+ ],
+ "steps": [
+  {
+   "line": 1,
+   "phase": "Python",
+   "note": "<code>daemons<\/code> is created: 5. <code>heap<\/code> is created: 1. <code>os_gb<\/code> is created: 2. <code>per_container<\/code> is created: 1.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "daemons",
+       "5"
+      ],
+      [
+       "heap",
+       "1"
+      ],
+      [
+       "os_gb",
+       "2"
+      ],
+      [
+       "per_container",
+       "1"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "per_container"
+  },
+  {
+   "line": 2,
+   "phase": "Python",
+   "note": "<code>ram<\/code> is created: 8.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "daemons",
+       "5"
+      ],
+      [
+       "heap",
+       "1"
+      ],
+      [
+       "os_gb",
+       "2"
+      ],
+      [
+       "per_container",
+       "1"
+      ],
+      [
+       "ram",
+       "8"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "ram"
+  },
+  {
+   "line": 3,
+   "phase": "Fixed",
+   "note": "5 × 1 + 2 = 7 GB used before any job. <code>free<\/code> is created: 1.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "daemons",
+       "5"
+      ],
+      [
+       "heap",
+       "1"
+      ],
+      [
+       "os_gb",
+       "2"
+      ],
+      [
+       "per_container",
+       "1"
+      ],
+      [
+       "ram",
+       "8"
+      ],
+      [
+       "free",
+       "1"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "free"
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "daemons",
+       "5"
+      ],
+      [
+       "heap",
+       "1"
+      ],
+      [
+       "os_gb",
+       "2"
+      ],
+      [
+       "per_container",
+       "1"
+      ],
+      [
+       "ram",
+       "8"
+      ],
+      [
+       "free",
+       "1"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "out": "8 GB laptop: 1 GB free -> 1 container(s) at once\n"
+  },
+  {
+   "line": 2,
+   "phase": "Python",
+   "note": "<code>ram<\/code> changes to 16.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "daemons",
+       "5"
+      ],
+      [
+       "heap",
+       "1"
+      ],
+      [
+       "os_gb",
+       "2"
+      ],
+      [
+       "per_container",
+       "1"
+      ],
+      [
+       "ram",
+       "16"
+      ],
+      [
+       "free",
+       "1"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "ram"
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "<code>free<\/code> changes to 9.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "daemons",
+       "5"
+      ],
+      [
+       "heap",
+       "1"
+      ],
+      [
+       "os_gb",
+       "2"
+      ],
+      [
+       "per_container",
+       "1"
+      ],
+      [
+       "ram",
+       "16"
+      ],
+      [
+       "free",
+       "9"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "free"
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "daemons",
+       "5"
+      ],
+      [
+       "heap",
+       "1"
+      ],
+      [
+       "os_gb",
+       "2"
+      ],
+      [
+       "per_container",
+       "1"
+      ],
+      [
+       "ram",
+       "16"
+      ],
+      [
+       "free",
+       "9"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "out": "16 GB laptop: 9 GB free -> 9 container(s) at once\n"
+  },
+  {
+   "line": 2,
+   "phase": "Python",
+   "note": "Nothing is left to loop over, so the loop ends and Python moves on.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "daemons",
+       "5"
+      ],
+      [
+       "heap",
+       "1"
+      ],
+      [
+       "os_gb",
+       "2"
+      ],
+      [
+       "per_container",
+       "1"
+      ],
+      [
+       "ram",
+       "16"
+      ],
+      [
+       "free",
+       "9"
+      ]
+     ]
+    }
+   ],
+   "heap": []
+  }
+ ]
+}</script>
+    </div>
+  </article>
+  <article class="wx">
+    <div class="wx__head"><span class="wx__num">Example 2</span><span class="lvl lvl--i">Intermediate</span><span class="wx__tag">Risk · data safety</span></div>
+    <h4>What does replication 1 really risk?</h4>
+    <div class="wx__problem"><p class="wx__label">Problem statement</p><p>A team keeps 2 TB of test data on a pseudo-distributed node (replication 1, one disk). Assume a disk has a 2% chance of failing in a year. Compare the chance of losing data within a year with a 3-node cluster at replication 3, assuming failures are independent and a failed disk is replaced and re-replicated within a day.</p></div>
+    <div class="prob__io"><div><small>Input</small><pre>2% yearly disk failure · one disk vs three copies · repair within 1 day</pre></div><div><small>Expected output</small><pre>replication 1: 2.00% chance of loss per year
+replication 3: 0.00000002% chance of loss per year
+about 111,020,833 times safer</pre></div></div>
+    <div class="wx__approach"><p class="wx__label">Approach</p><ol><li>One copy: data is lost if that one disk fails: 2%.</li><li>Three copies: all three must fail within the same day of repair. Per-day failure chance = 2% / 365.</li><li>Approximate: first failure (about 3 × 2% in a year), then both others fail the same day.</li></ol></div>
+    <p class="wx__label">Solution: run it live</p>
+    <div class="runner">
+    <script type="application/json">{
+ "lang": "python",
+ "file": "main.py",
+ "tasks": [
+  {
+   "label": "Solution",
+   "hint": "This simple model ignores racks, correlated failures and slow repairs, which make real numbers worse. It still shows why production never uses replication 1 for data that matters.",
+   "code": "p_year = 0.02\np_day = p_year / 365\none_copy = p_year\nthree_copies = 3 * p_year * (p_day ** 2)\nprint(f\"replication 1: {one_copy:.2%} chance of loss per year\")\nprint(f\"replication 3: {three_copies:.8%} chance of loss per year\")\nprint(f\"about {one_copy / three_copies:,.0f} times safer\")\n"
+  }
+ ]
+}</script>
+    </div>
+    <p class="wx__label">What happens in memory, step by step</p>
+    <p class="wx__how">Recorded from a real Python run: press <b>Next</b> to execute one line at a time. Watch variables change in each frame, and lists and dictionaries (numbered #1, #2 …) fill up as objects.</p>
+    <div class="tracer">
+    <script type="application/json">{
+ "lang": "python",
+ "code": [
+  "p_year = 0.02",
+  "p_day = p_year / 365",
+  "one_copy = p_year",
+  "three_copies = 3 * p_year * (p_day ** 2)",
+  "print(f\"replication 1: {one_copy:.2%} chance of loss per year\")",
+  "print(f\"replication 3: {three_copies:.8%} chance of loss per year\")",
+  "print(f\"about {one_copy / three_copies:,.0f} times safer\")"
+ ],
+ "steps": [
+  {
+   "line": 1,
+   "phase": "Python",
+   "note": "<code>p_year<\/code> is created: 0.02.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "p_year",
+       "0.02"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "p_year"
+  },
+  {
+   "line": 2,
+   "phase": "Python",
+   "note": "<code>p_day<\/code> is created: 0.0001.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "p_year",
+       "0.02"
+      ],
+      [
+       "p_day",
+       "0.0001"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "p_day"
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "<code>one_copy<\/code> is created: 0.02.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "p_year",
+       "0.02"
+      ],
+      [
+       "p_day",
+       "0.0001"
+      ],
+      [
+       "one_copy",
+       "0.02"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "one_copy"
+  },
+  {
+   "line": 4,
+   "phase": "Model",
+   "note": "A rough estimate: a first failure, then two more within the repair window. <code>three_copies<\/code> is created: 0.0.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "p_year",
+       "0.02"
+      ],
+      [
+       "p_day",
+       "0.0001"
+      ],
+      [
+       "one_copy",
+       "0.02"
+      ],
+      [
+       "three_copies",
+       "0.0"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "three_copies"
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "p_year",
+       "0.02"
+      ],
+      [
+       "p_day",
+       "0.0001"
+      ],
+      [
+       "one_copy",
+       "0.02"
+      ],
+      [
+       "three_copies",
+       "0.0"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "out": "replication 1: 2.00% chance of loss per year\n"
+  },
+  {
+   "line": 6,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "p_year",
+       "0.02"
+      ],
+      [
+       "p_day",
+       "0.0001"
+      ],
+      [
+       "one_copy",
+       "0.02"
+      ],
+      [
+       "three_copies",
+       "0.0"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "out": "replication 3: 0.00000002% chance of loss per year\n"
+  },
+  {
+   "line": 7,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "p_year",
+       "0.02"
+      ],
+      [
+       "p_day",
+       "0.0001"
+      ],
+      [
+       "one_copy",
+       "0.02"
+      ],
+      [
+       "three_copies",
+       "0.0"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "out": "about 111,020,833 times safer\n"
+  }
+ ]
+}</script>
+    </div>
+  </article>
+  <article class="wx">
+    <div class="wx__head"><span class="wx__num">Example 3</span><span class="lvl lvl--a">Advanced</span><span class="wx__tag">Admin · consistency</span></div>
+    <h4>Do all nodes have the same configuration?</h4>
+    <div class="wx__problem"><p class="wx__label">Problem statement</p><p>In fully distributed mode, every node must have the same core settings. A script collected <code>fs.defaultFS</code> and <code>dfs.replication</code> from four nodes. Find the nodes that differ from the majority.</p></div>
+    <div class="prob__io"><div><small>Input</small><pre>nn1, dn1, dn3: hdfs://nn1:8020, 3 · dn2: hdfs://localhost:9000, 1</pre></div><div><small>Expected output</small><pre>expected: (&#x27;hdfs://nn1:8020&#x27;, &#x27;3&#x27;) (3 of 4 nodes)
+MISMATCH on dn2 -&gt; (&#x27;hdfs://localhost:9000&#x27;, &#x27;1&#x27;)</pre></div></div>
+    <div class="wx__approach"><p class="wx__label">Approach</p><ol><li>Build one key per node from the settings.</li><li>Count how many nodes share each key; the most common is the expected one.</li><li>Report every node whose key differs.</li></ol></div>
+    <p class="wx__label">Solution: run it live</p>
+    <div class="runner">
+    <script type="application/json">{
+ "lang": "python",
+ "file": "main.py",
+ "tasks": [
+  {
+   "label": "Solution",
+   "hint": "dn2 still has a pseudo-distributed config, so its DataNode would look for a NameNode on itself and never join. Cluster managers prevent this by pushing one configuration to every node.",
+   "code": "from collections import Counter\nnodes = {\"nn1\": (\"hdfs://nn1:8020\", \"3\"), \"dn1\": (\"hdfs://nn1:8020\", \"3\"),\n         \"dn2\": (\"hdfs://localhost:9000\", \"1\"), \"dn3\": (\"hdfs://nn1:8020\", \"3\")}\nexpected, count = Counter(nodes.values()).most_common(1)[0]\nprint(\"expected:\", expected, f\"({count} of {len(nodes)} nodes)\")\nfor name, conf in nodes.items():\n    if conf != expected:\n        print(\"MISMATCH on\", name, \"->\", conf)\n"
+  }
+ ]
+}</script>
+    </div>
+    <p class="wx__label">What happens in memory, step by step</p>
+    <p class="wx__how">Recorded from a real Python run: press <b>Next</b> to execute one line at a time. Watch variables change in each frame, and lists and dictionaries (numbered #1, #2 …) fill up as objects.</p>
+    <div class="tracer">
+    <script type="application/json">{
+ "lang": "python",
+ "code": [
+  "from collections import Counter",
+  "nodes = {\"nn1\": (\"hdfs://nn1:8020\", \"3\"), \"dn1\": (\"hdfs://nn1:8020\", \"3\"),",
+  "         \"dn2\": (\"hdfs://localhost:9000\", \"1\"), \"dn3\": (\"hdfs://nn1:8020\", \"3\")}",
+  "expected, count = Counter(nodes.values()).most_common(1)[0]",
+  "print(\"expected:\", expected, f\"({count} of {len(nodes)} nodes)\")",
+  "for name, conf in nodes.items():",
+  "    if conf != expected:",
+  "        print(\"MISMATCH on\", name, \"->\", conf)"
+ ],
+ "steps": [
+  {
+   "line": 1,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": []
+    }
+   ],
+   "heap": []
+  },
+  {
+   "line": 2,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": []
+    }
+   ],
+   "heap": []
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": []
+    }
+   ],
+   "heap": []
+  },
+  {
+   "line": 2,
+   "phase": "Python",
+   "note": "<code>nodes<\/code> is created: → dict #1. A new dict object (#1) is created: {&#x27;nn1&#x27;: → tuple #2, &#x27;dn1&#x27;: → tuple #2, &#x27;dn2&#x27;: → tuple #3, &#x27;dn3&#x27;: → tuple #2} A new tuple object (#2) is created: (&#x27;hdfs://nn1:8020&#x27;, &#x27;3&#x27;) A new tuple object (#3) is created: (&#x27;hdfs://localhost:9000&#x27;, &#x27;1&#x27;)",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "nodes",
+       "→ dict #1"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (4)<\/b> {&#x27;nn1&#x27;: → tuple #2, &#x27;dn1&#x27;: → tuple #2, &#x27;dn2&#x27;: → tuple #3, &#x27;dn3&#x27;: → tuple #2}",
+    "<b>#2 tuple (2)<\/b> (&#x27;hdfs://nn1:8020&#x27;, &#x27;3&#x27;)",
+    "<b>#3 tuple (2)<\/b> (&#x27;hdfs://localhost:9000&#x27;, &#x27;1&#x27;)"
+   ],
+   "newVar": "nodes"
+  },
+  {
+   "line": 4,
+   "phase": "Majority",
+   "note": "<code>most_common(1)<\/code> returns the most frequent settings and their count. <code>expected<\/code> is created: → tuple #2. <code>count<\/code> is created: 3.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "nodes",
+       "→ dict #1"
+      ],
+      [
+       "expected",
+       "→ tuple #2"
+      ],
+      [
+       "count",
+       "3"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (4)<\/b> {&#x27;nn1&#x27;: → tuple #2, &#x27;dn1&#x27;: → tuple #2, &#x27;dn2&#x27;: → tuple #3, &#x27;dn3&#x27;: → tuple #2}",
+    "<b>#2 tuple (2)<\/b> (&#x27;hdfs://nn1:8020&#x27;, &#x27;3&#x27;)",
+    "<b>#3 tuple (2)<\/b> (&#x27;hdfs://localhost:9000&#x27;, &#x27;1&#x27;)"
+   ],
+   "newVar": "count"
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "nodes",
+       "→ dict #1"
+      ],
+      [
+       "expected",
+       "→ tuple #2"
+      ],
+      [
+       "count",
+       "3"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (4)<\/b> {&#x27;nn1&#x27;: → tuple #2, &#x27;dn1&#x27;: → tuple #2, &#x27;dn2&#x27;: → tuple #3, &#x27;dn3&#x27;: → tuple #2}",
+    "<b>#2 tuple (2)<\/b> (&#x27;hdfs://nn1:8020&#x27;, &#x27;3&#x27;)",
+    "<b>#3 tuple (2)<\/b> (&#x27;hdfs://localhost:9000&#x27;, &#x27;1&#x27;)"
+   ],
+   "out": "expected: ('hdfs://nn1:8020', '3') (3 of 4 nodes)\n"
+  },
+  {
+   "line": 6,
+   "phase": "Python",
+   "note": "<code>name<\/code> is created: &#x27;nn1&#x27;. <code>conf<\/code> is created: → tuple #2.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "nodes",
+       "→ dict #1"
+      ],
+      [
+       "expected",
+       "→ tuple #2"
+      ],
+      [
+       "count",
+       "3"
+      ],
+      [
+       "name",
+       "'nn1'"
+      ],
+      [
+       "conf",
+       "→ tuple #2"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (4)<\/b> {&#x27;nn1&#x27;: → tuple #2, &#x27;dn1&#x27;: → tuple #2, &#x27;dn2&#x27;: → tuple #3, &#x27;dn3&#x27;: → tuple #2}",
+    "<b>#2 tuple (2)<\/b> (&#x27;hdfs://nn1:8020&#x27;, &#x27;3&#x27;)",
+    "<b>#3 tuple (2)<\/b> (&#x27;hdfs://localhost:9000&#x27;, &#x27;1&#x27;)"
+   ],
+   "newVar": "conf"
+  },
+  {
+   "line": 7,
+   "phase": "Python",
+   "note": "The condition is <b>False<\/b>, so the indented block is skipped.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "nodes",
+       "→ dict #1"
+      ],
+      [
+       "expected",
+       "→ tuple #2"
+      ],
+      [
+       "count",
+       "3"
+      ],
+      [
+       "name",
+       "'nn1'"
+      ],
+      [
+       "conf",
+       "→ tuple #2"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (4)<\/b> {&#x27;nn1&#x27;: → tuple #2, &#x27;dn1&#x27;: → tuple #2, &#x27;dn2&#x27;: → tuple #3, &#x27;dn3&#x27;: → tuple #2}",
+    "<b>#2 tuple (2)<\/b> (&#x27;hdfs://nn1:8020&#x27;, &#x27;3&#x27;)",
+    "<b>#3 tuple (2)<\/b> (&#x27;hdfs://localhost:9000&#x27;, &#x27;1&#x27;)"
+   ]
+  },
+  {
+   "line": 6,
+   "phase": "Python",
+   "note": "<code>name<\/code> changes to &#x27;dn1&#x27;.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "nodes",
+       "→ dict #1"
+      ],
+      [
+       "expected",
+       "→ tuple #2"
+      ],
+      [
+       "count",
+       "3"
+      ],
+      [
+       "name",
+       "'dn1'"
+      ],
+      [
+       "conf",
+       "→ tuple #2"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (4)<\/b> {&#x27;nn1&#x27;: → tuple #2, &#x27;dn1&#x27;: → tuple #2, &#x27;dn2&#x27;: → tuple #3, &#x27;dn3&#x27;: → tuple #2}",
+    "<b>#2 tuple (2)<\/b> (&#x27;hdfs://nn1:8020&#x27;, &#x27;3&#x27;)",
+    "<b>#3 tuple (2)<\/b> (&#x27;hdfs://localhost:9000&#x27;, &#x27;1&#x27;)"
+   ],
+   "newVar": "name"
+  },
+  {
+   "line": 7,
+   "phase": "Python",
+   "note": "The condition is <b>False<\/b>, so the indented block is skipped.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "nodes",
+       "→ dict #1"
+      ],
+      [
+       "expected",
+       "→ tuple #2"
+      ],
+      [
+       "count",
+       "3"
+      ],
+      [
+       "name",
+       "'dn1'"
+      ],
+      [
+       "conf",
+       "→ tuple #2"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (4)<\/b> {&#x27;nn1&#x27;: → tuple #2, &#x27;dn1&#x27;: → tuple #2, &#x27;dn2&#x27;: → tuple #3, &#x27;dn3&#x27;: → tuple #2}",
+    "<b>#2 tuple (2)<\/b> (&#x27;hdfs://nn1:8020&#x27;, &#x27;3&#x27;)",
+    "<b>#3 tuple (2)<\/b> (&#x27;hdfs://localhost:9000&#x27;, &#x27;1&#x27;)"
+   ]
+  },
+  {
+   "line": 6,
+   "phase": "Python",
+   "note": "<code>name<\/code> changes to &#x27;dn2&#x27;. <code>conf<\/code> changes to → tuple #3.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "nodes",
+       "→ dict #1"
+      ],
+      [
+       "expected",
+       "→ tuple #2"
+      ],
+      [
+       "count",
+       "3"
+      ],
+      [
+       "name",
+       "'dn2'"
+      ],
+      [
+       "conf",
+       "→ tuple #3"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (4)<\/b> {&#x27;nn1&#x27;: → tuple #2, &#x27;dn1&#x27;: → tuple #2, &#x27;dn2&#x27;: → tuple #3, &#x27;dn3&#x27;: → tuple #2}",
+    "<b>#2 tuple (2)<\/b> (&#x27;hdfs://nn1:8020&#x27;, &#x27;3&#x27;)",
+    "<b>#3 tuple (2)<\/b> (&#x27;hdfs://localhost:9000&#x27;, &#x27;1&#x27;)"
+   ],
+   "newVar": "conf"
+  },
+  {
+   "line": 7,
+   "phase": "Python",
+   "note": "The condition is <b>True<\/b>, so the indented block runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "nodes",
+       "→ dict #1"
+      ],
+      [
+       "expected",
+       "→ tuple #2"
+      ],
+      [
+       "count",
+       "3"
+      ],
+      [
+       "name",
+       "'dn2'"
+      ],
+      [
+       "conf",
+       "→ tuple #3"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (4)<\/b> {&#x27;nn1&#x27;: → tuple #2, &#x27;dn1&#x27;: → tuple #2, &#x27;dn2&#x27;: → tuple #3, &#x27;dn3&#x27;: → tuple #2}",
+    "<b>#2 tuple (2)<\/b> (&#x27;hdfs://nn1:8020&#x27;, &#x27;3&#x27;)",
+    "<b>#3 tuple (2)<\/b> (&#x27;hdfs://localhost:9000&#x27;, &#x27;1&#x27;)"
+   ]
+  },
+  {
+   "line": 8,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "nodes",
+       "→ dict #1"
+      ],
+      [
+       "expected",
+       "→ tuple #2"
+      ],
+      [
+       "count",
+       "3"
+      ],
+      [
+       "name",
+       "'dn2'"
+      ],
+      [
+       "conf",
+       "→ tuple #3"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (4)<\/b> {&#x27;nn1&#x27;: → tuple #2, &#x27;dn1&#x27;: → tuple #2, &#x27;dn2&#x27;: → tuple #3, &#x27;dn3&#x27;: → tuple #2}",
+    "<b>#2 tuple (2)<\/b> (&#x27;hdfs://nn1:8020&#x27;, &#x27;3&#x27;)",
+    "<b>#3 tuple (2)<\/b> (&#x27;hdfs://localhost:9000&#x27;, &#x27;1&#x27;)"
+   ],
+   "out": "MISMATCH on dn2 -> ('hdfs://localhost:9000', '1')\n"
+  },
+  {
+   "line": 6,
+   "phase": "Python",
+   "note": "<code>name<\/code> changes to &#x27;dn3&#x27;. <code>conf<\/code> changes to → tuple #2.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "nodes",
+       "→ dict #1"
+      ],
+      [
+       "expected",
+       "→ tuple #2"
+      ],
+      [
+       "count",
+       "3"
+      ],
+      [
+       "name",
+       "'dn3'"
+      ],
+      [
+       "conf",
+       "→ tuple #2"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (4)<\/b> {&#x27;nn1&#x27;: → tuple #2, &#x27;dn1&#x27;: → tuple #2, &#x27;dn2&#x27;: → tuple #3, &#x27;dn3&#x27;: → tuple #2}",
+    "<b>#2 tuple (2)<\/b> (&#x27;hdfs://nn1:8020&#x27;, &#x27;3&#x27;)",
+    "<b>#3 tuple (2)<\/b> (&#x27;hdfs://localhost:9000&#x27;, &#x27;1&#x27;)"
+   ],
+   "newVar": "conf"
+  },
+  {
+   "line": 7,
+   "phase": "Python",
+   "note": "The condition is <b>False<\/b>, so the indented block is skipped.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "nodes",
+       "→ dict #1"
+      ],
+      [
+       "expected",
+       "→ tuple #2"
+      ],
+      [
+       "count",
+       "3"
+      ],
+      [
+       "name",
+       "'dn3'"
+      ],
+      [
+       "conf",
+       "→ tuple #2"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (4)<\/b> {&#x27;nn1&#x27;: → tuple #2, &#x27;dn1&#x27;: → tuple #2, &#x27;dn2&#x27;: → tuple #3, &#x27;dn3&#x27;: → tuple #2}",
+    "<b>#2 tuple (2)<\/b> (&#x27;hdfs://nn1:8020&#x27;, &#x27;3&#x27;)",
+    "<b>#3 tuple (2)<\/b> (&#x27;hdfs://localhost:9000&#x27;, &#x27;1&#x27;)"
+   ]
+  },
+  {
+   "line": 6,
+   "phase": "Python",
+   "note": "Nothing is left to loop over, so the loop ends and Python moves on.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "nodes",
+       "→ dict #1"
+      ],
+      [
+       "expected",
+       "→ tuple #2"
+      ],
+      [
+       "count",
+       "3"
+      ],
+      [
+       "name",
+       "'dn3'"
+      ],
+      [
+       "conf",
+       "→ tuple #2"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (4)<\/b> {&#x27;nn1&#x27;: → tuple #2, &#x27;dn1&#x27;: → tuple #2, &#x27;dn2&#x27;: → tuple #3, &#x27;dn3&#x27;: → tuple #2}",
+    "<b>#2 tuple (2)<\/b> (&#x27;hdfs://nn1:8020&#x27;, &#x27;3&#x27;)",
+    "<b>#3 tuple (2)<\/b> (&#x27;hdfs://localhost:9000&#x27;, &#x27;1&#x27;)"
+   ]
+  }
+ ]
+}</script>
+    </div>
+  </article>
+</section>
+
+<section class="part" id="quiz">
+  <span class="part-label"><b>9</b> Quiz and revision</span>
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <script type="application/json">[
+ {
+  "q": "After simply unpacking Hadoop and running an example job, which mode is it in?",
+  "options": [
+   "Fully distributed",
+   "Pseudo-distributed",
+   "Standalone (local)",
+   "High availability"
+  ],
+  "answer": 2,
+  "why": "With no configuration, fs.defaultFS is file:/// and mapreduce.framework.name is local: one JVM, local files."
+ },
+ {
+  "q": "Which setting most directly separates standalone from the other two modes?",
+  "options": [
+   "dfs.blocksize",
+   "fs.defaultFS",
+   "yarn.nodemanager.resource.memory-mb",
+   "hadoop.tmp.dir"
+  ],
+  "answer": 1,
+  "why": "file:/// means local files (standalone). hdfs://host:port means HDFS, as in pseudo and fully distributed modes."
+ },
+ {
+  "q": "In pseudo-distributed mode, how are the daemons run?",
+  "options": [
+   "Each daemon in its own JVM, all on one machine",
+   "All inside one JVM",
+   "On separate machines",
+   "Inside the browser"
+  ],
+  "answer": 0,
+  "why": "That is what makes it a real (one-node) cluster: NameNode, DataNode, ResourceManager and so on are separate processes."
+ },
+ {
+  "q": "Why is dfs.replication set to 1 in pseudo-distributed mode?",
+  "options": [
+   "To make it faster",
+   "Replication is not supported there",
+   "To save NameNode memory",
+   "There is only one DataNode, so a block cannot have more than one copy"
+  ],
+  "answer": 3,
+  "why": "With the default of 3 and only one DataNode, every block would be under-replicated."
+ },
+ {
+  "q": "In standalone mode, what does hadoop fs -ls / list?",
+  "options": [
+   "The HDFS root folder",
+   "Nothing: it fails",
+   "The Linux root folder (/bin, /etc, /home …)",
+   "The YARN queues"
+  ],
+  "answer": 2,
+  "why": "The default file system is the local one, so “/” is the Linux root."
+ },
+ {
+  "q": "Which mode is used for production clusters?",
+  "options": [
+   "Standalone",
+   "Fully distributed",
+   "Pseudo-distributed",
+   "Any of them"
+  ],
+  "answer": 1,
+  "why": "Only fully distributed mode spreads data and work over many machines and survives node failures."
+ },
+ {
+  "q": "What does the workers file contain in fully distributed mode?",
+  "options": [
+   "One worker host name per line",
+   "User names",
+   "Block IDs",
+   "The NameNode password"
+  ],
+  "answer": 0,
+  "why": "start-dfs.sh and start-yarn.sh read it to start DataNodes and NodeManagers on those hosts."
+ },
+ {
+  "q": "Which mode needs no SSH at all?",
+  "options": [
+   "Pseudo-distributed",
+   "Fully distributed",
+   "All need SSH",
+   "Standalone"
+  ],
+  "answer": 3,
+  "why": "Standalone starts no daemons, so the start scripts (which use SSH) are not used."
+ }
+]</script>
+  </div>
+
+  <h3>Quick revision</h3>
+  <div class="revision">
+    <h3>Lesson 4.2 in one screen</h3>
+    <ul><li><b>Standalone</b>: default; one JVM; local files (<code>file:///</code>); no daemons; for debugging.</li><li><b>Pseudo-distributed</b>: all daemons on one machine, each its own JVM; HDFS + YARN; replication 1; for learning.</li><li><b>Fully distributed</b>: masters and workers on separate machines; replication 3; for production.</li><li>Mode settings: <code>fs.defaultFS</code>, <code>mapreduce.framework.name</code>, <code>dfs.replication</code>, <code>workers</code> file.</li><li>Pseudo: <code>hdfs://localhost:9000</code>; fully: <code>hdfs://&lt;namenode-host&gt;:8020</code>.</li><li>Check with <code>jps</code> and <code>hdfs getconf -confKey fs.defaultFS</code>.</li><li><code>hdfs namenode -format</code> once per new cluster: it wipes the namespace.</li><li>Docker Compose gives a fully distributed cluster on one PC: each container is a node.</li></ul>
+  </div>
+
+  <h3>Interview and viva questions</h3>
+  <div class="faq">
+    <details><summary>What are the modes of Hadoop?</summary><p>Standalone (local) mode: a single JVM with the local file system and no daemons, used for debugging. Pseudo-distributed mode: all Hadoop daemons run on one machine in separate JVMs with HDFS and YARN, used for learning and testing. Fully distributed mode: daemons run on separate master and worker machines, used in production.</p></details>
+    <details><summary>What is the default mode of Hadoop?</summary><p>Standalone (local) mode. Without configuration, fs.defaultFS is file:/// and mapreduce.framework.name is local.</p></details>
+    <details><summary>What is the difference between standalone and pseudo-distributed mode?</summary><p>Standalone runs everything inside one Java process on local files, with no HDFS or YARN. Pseudo-distributed runs the real daemons (NameNode, DataNode, ResourceManager, NodeManager…) as separate processes on one machine, so jobs use HDFS and YARN just as on a cluster.</p></details>
+    <details><summary>Which configuration files change between modes?</summary><p>core-site.xml (fs.defaultFS), hdfs-site.xml (dfs.replication and storage folders), mapred-site.xml (mapreduce.framework.name=yarn) and yarn-site.xml (ResourceManager host, shuffle service), plus the workers file for fully distributed mode.</p></details>
+    <details><summary>Can I run fully distributed mode on one laptop?</summary><p>Yes, with containers or virtual machines: each container or VM is a separate node with its own host name and IP. The Docker practice cluster in Lesson 4.3 does exactly this.</p></details>
+    <details><summary>Why do I need to format the NameNode?</summary><p>Formatting creates an empty HDFS namespace (the fsimage and a new cluster ID) in the NameNode's storage folder. It is done once when creating a cluster; formatting again erases the namespace and makes existing DataNodes incompatible.</p></details>
+    <details><summary>Is pseudo-distributed mode fault tolerant?</summary><p>No. There is one DataNode and one copy of each block, so a disk failure loses data and a crash stops everything.</p></details>
+    
+  </div>
+
+  <h3 id="practice">Practice problems</h3>
+  <p class="prob-intro">Short exercises on reading settings, counting daemons and checking configurations, all runnable in the browser.</p>
+  <div class="probs">
+    <article class="prob"><div class="prob__head"><span class="prob__num">P1</span><span class="prob__tag prob__tag--easy">Easy</span><h4>Local or HDFS?</h4></div>
+      <p>For each fs.defaultFS value, print "local files" or "HDFS".</p>
+      <div class="prob__io"><div><small>Input</small><pre>file:/// · hdfs://localhost:9000 · hdfs://namenode</pre></div><div><small>Expected output</small><pre>file:/// -&gt; local files
+hdfs://localhost:9000 -&gt; HDFS
+hdfs://namenode -&gt; HDFS</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>for fs in [&quot;file:///&quot;, &quot;hdfs://localhost:9000&quot;, &quot;hdfs://namenode&quot;]:
+    print(fs, &quot;-&gt;&quot;, &quot;local files&quot; if fs.startswith(&quot;file:&quot;) else &quot;HDFS&quot;)</code></pre><div class="output">file:/// -&gt; local files
+hdfs://localhost:9000 -&gt; HDFS
+hdfs://namenode -&gt; HDFS</div></div>
+        <p><b>How it works:</b> Only file:/// is the local disk; both hdfs:// values use HDFS.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P2</span><span class="prob__tag prob__tag--easy">Easy</span><h4>Port or default?</h4></div>
+      <p>Print the NameNode port for hdfs://localhost:9000 and hdfs://namenode (the default RPC port is 8020).</p>
+      <div class="prob__io"><div><small>Input</small><pre>hdfs://localhost:9000 · hdfs://namenode</pre></div><div><small>Expected output</small><pre>hdfs://localhost:9000 -&gt; port 9000
+hdfs://namenode -&gt; port 8020</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>for fs in [&quot;hdfs://localhost:9000&quot;, &quot;hdfs://namenode&quot;]:
+    hostport = fs.split(&quot;//&quot;)[1]
+    port = hostport.split(&quot;:&quot;)[1] if &quot;:&quot; in hostport else &quot;8020&quot;
+    print(fs, &quot;-&gt; port&quot;, port)</code></pre><div class="output">hdfs://localhost:9000 -&gt; port 9000
+hdfs://namenode -&gt; port 8020</div></div>
+        <p><b>How it works:</b> 9000 is written explicitly in the pseudo setup; without a port, Hadoop uses 8020.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P3</span><span class="prob__tag prob__tag--easy">Easy</span><h4>Name the daemons</h4></div>
+      <p>Given the jps output of a pseudo-distributed machine, list the daemons (skip Jps itself).</p>
+      <div class="prob__io"><div><small>Input</small><pre>5584 SecondaryNameNode · 5283 NameNode · 6567 Jps · 6120 ResourceManager · 5384 DataNode · 6221 NodeManager</pre></div><div><small>Expected output</small><pre>5 daemons: DataNode, NameNode, NodeManager, ResourceManager, SecondaryNameNode</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>jps = &quot;&quot;&quot;5584 SecondaryNameNode
+5283 NameNode
+6567 Jps
+6120 ResourceManager
+5384 DataNode
+6221 NodeManager&quot;&quot;&quot;
+names = sorted(line.split()[1] for line in jps.splitlines() if not line.endswith(&quot; Jps&quot;))
+print(len(names), &quot;daemons:&quot;, &quot;, &quot;.join(names))</code></pre><div class="output">5 daemons: DataNode, NameNode, NodeManager, ResourceManager, SecondaryNameNode</div></div>
+        <p><b>How it works:</b> 5 daemons: DataNode, NameNode, NodeManager, ResourceManager, SecondaryNameNode (the real jps output from Part 4).</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P4</span><span class="prob__tag prob__tag--medium">Medium</span><h4>Guess the mode from jps</h4></div>
+      <p>Write a function that guesses the mode from the set of daemons on a machine: none → standalone; NameNode and DataNode together → pseudo-distributed; otherwise → part of a fully distributed cluster.</p>
+      <div class="prob__io"><div><small>Input</small><pre>{} · {NameNode, DataNode, …} · {DataNode, NodeManager}</pre></div><div><small>Expected output</small><pre>[] -&gt; standalone
+[&#x27;DataNode&#x27;, &#x27;NameNode&#x27;, &#x27;ResourceManager&#x27;] -&gt; pseudo-distributed
+[&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;] -&gt; node of a fully distributed cluster</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>def guess(daemons):
+    if not daemons:
+        return &quot;standalone&quot;
+    if {&quot;NameNode&quot;, &quot;DataNode&quot;} &lt;= daemons:
+        return &quot;pseudo-distributed&quot;
+    return &quot;node of a fully distributed cluster&quot;
+for d in [set(), {&quot;NameNode&quot;, &quot;DataNode&quot;, &quot;ResourceManager&quot;}, {&quot;DataNode&quot;, &quot;NodeManager&quot;}]:
+    print(sorted(d), &quot;-&gt;&quot;, guess(d))</code></pre><div class="output">[] -&gt; standalone
+[&#x27;DataNode&#x27;, &#x27;NameNode&#x27;, &#x27;ResourceManager&#x27;] -&gt; pseudo-distributed
+[&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;] -&gt; node of a fully distributed cluster</div></div>
+        <p><b>How it works:</b> A worker of a real cluster runs only DataNode and NodeManager; seeing the NameNode and a DataNode together on one machine suggests pseudo mode (small real clusters sometimes do this too, so check fs.defaultFS).</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P5</span><span class="prob__tag prob__tag--medium">Medium</span><h4>Raw disk for 3 copies</h4></div>
+      <p>A team will store 4 TB of data. How much raw disk is needed with replication 1 (pseudo) and replication 3 (fully), keeping 25% of the disk free?</p>
+      <div class="prob__io"><div><small>Input</small><pre>4 TB · replication 1 and 3 · 25% free</pre></div><div><small>Expected output</small><pre>replication 1: 5.3 TB raw disk
+replication 3: 16.0 TB raw disk</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>data = 4
+for repl in [1, 3]:
+    raw = data * repl / 0.75
+    print(f&quot;replication {repl}: {raw:.1f} TB raw disk&quot;)</code></pre><div class="output">replication 1: 5.3 TB raw disk
+replication 3: 16.0 TB raw disk</div></div>
+        <p><b>How it works:</b> About 5.3 TB with one copy and 16 TB with three. Replication triples the disk you buy.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P6</span><span class="prob__tag prob__tag--medium">Medium</span><h4>Pseudo to fully: what to change</h4></div>
+      <p>Given a pseudo-distributed configuration, produce the fully distributed one for a NameNode host nn1 and 3 workers.</p>
+      <div class="prob__io"><div><small>Input</small><pre>fs.defaultFS=hdfs://localhost:9000 · dfs.replication=1 · workers=localhost</pre></div><div><small>Expected output</small><pre>fs.defaultFS    : hdfs://localhost:9000  -&gt;  hdfs://nn1:8020
+dfs.replication : 1  -&gt;  3
+workers         : [&#x27;localhost&#x27;]  -&gt;  [&#x27;worker1&#x27;, &#x27;worker2&#x27;, &#x27;worker3&#x27;]</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>pseudo = {&quot;fs.defaultFS&quot;: &quot;hdfs://localhost:9000&quot;, &quot;dfs.replication&quot;: &quot;1&quot;, &quot;workers&quot;: [&quot;localhost&quot;]}
+fully = dict(pseudo)
+fully[&quot;fs.defaultFS&quot;] = &quot;hdfs://nn1:8020&quot;
+fully[&quot;dfs.replication&quot;] = &quot;3&quot;
+fully[&quot;workers&quot;] = [&quot;worker1&quot;, &quot;worker2&quot;, &quot;worker3&quot;]
+for k in pseudo:
+    print(f&quot;{k:16}: {pseudo[k]}  -&gt;  {fully[k]}&quot;)</code></pre><div class="output">fs.defaultFS    : hdfs://localhost:9000  -&gt;  hdfs://nn1:8020
+dfs.replication : 1  -&gt;  3
+workers         : [&#x27;localhost&#x27;]  -&gt;  [&#x27;worker1&#x27;, &#x27;worker2&#x27;, &#x27;worker3&#x27;]</div></div>
+        <p><b>How it works:</b> Three things change: the NameNode address, the replication factor and the workers list. The same files are then copied to every node.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P7</span><span class="prob__tag prob__tag--business">Business problem</span><h4>Time saved by testing locally first</h4></div>
+      <p>A developer's job has a bug found only after 3 attempts. Each cluster attempt takes 15 minutes (queue + run); a local-mode attempt on sample data takes 1 minute. How much time does testing locally first save if the 3 failing attempts are local and only the final run uses the cluster?</p>
+      <div class="prob__io"><div><small>Input</small><pre>3 failed attempts · 15 min on cluster · 1 min local · 1 final cluster run</pre></div><div><small>Expected output</small><pre>cluster only 60 min, local first 18 min, saved 42 min</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>cluster_only = 4 * 15
+local_first = 3 * 1 + 15
+print(f&quot;cluster only {cluster_only} min, local first {local_first} min, saved {cluster_only - local_first} min&quot;)</code></pre><div class="output">cluster only 60 min, local first 18 min, saved 42 min</div></div>
+        <p><b>How it works:</b> 60 minutes against 18: 42 minutes saved per bug, and the shared cluster is not wasted on broken jobs.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P8</span><span class="prob__tag prob__tag--advanced">Advanced</span><h4>Find the misconfigured worker</h4></div>
+      <p>Workers report the NameNode address they use. List the workers that will not join the cluster whose NameNode is hdfs://nn1:8020.</p>
+      <div class="prob__io"><div><small>Input</small><pre>w1: hdfs://nn1:8020 · w2: hdfs://localhost:9000 · w3: hdfs://nn1:8020 · w4: file:///</pre></div><div><small>Expected output</small><pre>will not join: [&#x27;w2&#x27;, &#x27;w4&#x27;]</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>expected = &quot;hdfs://nn1:8020&quot;
+workers = {&quot;w1&quot;: &quot;hdfs://nn1:8020&quot;, &quot;w2&quot;: &quot;hdfs://localhost:9000&quot;,
+           &quot;w3&quot;: &quot;hdfs://nn1:8020&quot;, &quot;w4&quot;: &quot;file:///&quot;}
+bad = [w for w, fs in workers.items() if fs != expected]
+print(&quot;will not join:&quot;, bad)</code></pre><div class="output">will not join: [&#x27;w2&#x27;, &#x27;w4&#x27;]</div></div>
+        <p><b>How it works:</b> w2 looks for a NameNode on itself and w4 has no HDFS setting at all (standalone defaults), so neither registers with nn1.</p>
+      </details>
+    </article>
+  </div>
+
+  <h3 id="scenarios">Real-world scenario questions (asked in company interviews)</h3>
+  <p class="scn-intro">Interviewers use the modes to check whether you understand what a cluster really is, not just the names.</p>
+  <div class="scenarios">
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Learning · concepts</span><span class="scn__tag scn__tag--level">Fresher</span></div>
+      <h4>“My job ran, so my Hadoop cluster works”</h4>
+      <p class="scn__situation">A fresher says they installed Hadoop and ran the example job successfully. When asked, jps shows only “Jps”.</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> can you tell standalone mode from a real cluster?</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>The job ran in standalone mode: one JVM, local files, no HDFS or YARN.</li>
+          <li>Proof: no daemons in <code>jps</code>, and <code>hdfs getconf -confKey fs.defaultFS</code> prints <code>file:///</code>.</li>
+          <li>For a one-node cluster, set <code>fs.defaultFS=hdfs://localhost:9000</code>, <code>dfs.replication=1</code>, YARN settings, format the NameNode, then <code>start-dfs.sh</code> and <code>start-yarn.sh</code>.</li>
+        </ul>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Admin · HDFS</span><span class="scn__tag scn__tag--level">Fresher</span></div>
+      <h4>Every block is under-replicated on the test machine</h4>
+      <p class="scn__situation">On a single-machine setup, <code>hdfs fsck /</code> reports all blocks as under-replicated.</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> do you connect replication to the number of DataNodes?</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>Replication is probably still the default 3 while there is only one DataNode.</li>
+          <li>Set <code>dfs.replication=1</code> in <code>hdfs-site.xml</code> for new files, and change existing files with <code>hdfs dfs -setrep -w 1 /path</code>.</li>
+          <li>Explain that this is only acceptable for test data: one copy means no protection.</li>
+        </ul>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Admin · cluster build</span><span class="scn__tag scn__tag--level">Experienced</span></div>
+      <h4>A new DataNode never appears in the NameNode UI</h4>
+      <p class="scn__situation">You add a fourth worker to a fully distributed cluster. Its DataNode process is running, but the NameNode still shows 3 live DataNodes.</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> a systematic check of configuration and connectivity.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>On the new node, check <code>hdfs getconf -confKey fs.defaultFS</code>: a leftover <code>localhost</code> value (pseudo config) is common.</li>
+          <li>Check that the NameNode host name resolves and port 8020 is reachable from the worker.</li>
+          <li>Read the DataNode log in <code>$HADOOP_HOME/logs</code> for errors such as “Incompatible clusterIDs” (an old data folder from another cluster).</li>
+          <li>Make sure the host is in the <code>workers</code> file (and in any include file) and the configuration is the same as on other nodes.</li>
+        </ul>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Engineering · testing</span><span class="scn__tag scn__tag--level">Experienced</span></div>
+      <h4>Which mode would you use for which stage?</h4>
+      <p class="scn__situation">A team lead asks how you would test a new MapReduce job before it runs on the production cluster.</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> do you know the purpose of each mode?</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>Unit tests in local mode on small samples: fast feedback on logic.</li>
+          <li>Integration tests on a one-node or mini cluster: real HDFS and YARN APIs, file formats and configuration.</li>
+          <li>A run on a fully distributed test cluster with realistic data size, then production.</li>
+          <li>Each stage catches different problems: logic, integration, then scale and performance.</li>
+        </ul>
+      </div></details>
+    </article>
+
+  </div>
+</section>
+
+<nav class="lesson-nav" id="lesson-nav" aria-label="Lesson navigation"></nav>
+<div class="ad-slot" data-slot="bottom"></div>
+</article>
+
+<aside class="lesson-side">
+  <nav class="toc" aria-label="In this lesson">
+    <h4>In this lesson</h4>
+    <ol>
+      <li><a href="#story">The story</a></li>
+      <li><a href="#definition">Definition</a></li><li><a href="#levels">Beginner → Advanced</a></li>
+      <li><a href="#types">Types and ways to use it</a></li>
+      <li><a href="#steps">Step by step</a></li>
+      <li><a href="#animation">See it happen</a></li>
+      <li><a href="#real-world">Real-world use</a></li>
+      <li><a href="#run">Run the code</a></li><li><a href="#pc">Run on your PC</a></li>
+      <li><a href="#tracer">Line by line</a></li>
+      <li><a href="#worked">Worked examples</a></li>
+      <li><a href="#quiz">Quiz and revision</a></li>
+      <li><a href="#practice">Practice problems</a></li>
+      <li><a href="#scenarios">Industry scenarios</a></li>
+    </ol>
+  </nav>
+  <div class="ad-slot" data-slot="side"></div>
+  <div class="outline" id="outline"></div>
+</aside>
+</div>
+</main>
+
+<footer class="site-footer">
+  <div class="wrap">
+    <div><h4>MyPhatshala</h4><p>Free programming and IT lessons that show what happens behind the screen.</p></div>
+    <div><h4>Learn</h4><a href="../../../../#tracks">All courses</a><a href="../../">Apache Hadoop syllabus</a></div>
+    <div><h4>Site</h4><a href="../../../../about.html">About</a><a href="../../../../contact.html">Contact</a><a href="../../../../privacy.html">Privacy policy</a><a href="../../../../disclaimer.html">Disclaimer</a></div>
+    <div class="copyright">© MyPhatshala. All lesson content, diagrams and animations are original. Please do not copy without permission.</div>
+  </div>
+</footer>
+
+<script src="../../../../data/courses/hadoop.js"></script>
+<script src="../../../../assets/js/lesson.js"></script>
+<script src="../../../../assets/js/cluster-sim.js"></script>
+<script src="../../../../assets/js/ads.js"></script>
+<script src="../../../../assets/js/site.js"></script>
+</body>
+</html>

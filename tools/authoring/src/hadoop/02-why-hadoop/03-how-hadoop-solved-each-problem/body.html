@@ -1,0 +1,279 @@
+<!-- ======================= PART 1: THE STORY ======================= -->
+<section class="part" id="story">
+  <span class="part-label"><b>1</b> The story</span>
+  <h2>Riya's problem list, ticked off one by one</h2>
+  <div class="story">
+    <p class="narration">On the whiteboard, Riya has written every problem BharatSearch hit while growing: <i>doesn't fit, disks die, too slow, network jammed, too much plumbing code, adding machines is painful, costs too much</i>. Arjun Sir hands her a green marker. “For each one, write the part of Hadoop that fixes it. If you can fill this board, you understand Hadoop's architecture.”</p>
+
+    <div class="scene">
+      <svg viewBox="0 0 640 186" role="img" aria-label="A whiteboard with problems on the left and Hadoop's answers on the right, connected by arrows.">
+        <g font-size="10">
+          <rect x="10" y="10" width="620" height="150" rx="10" class="s-board"/>
+          <text x="40" y="34" font-weight="700" style="fill:#FF8A80">Problem</text>
+          <text x="370" y="34" font-weight="700" style="fill:#9FD3B8">Hadoop's answer</text>
+          <g font-size="9" class="mono">
+            <text x="40" y="56" style="fill:#EDEBE3">data doesn't fit</text><text x="370" y="56" style="fill:#9FD3B8">HDFS blocks on many nodes</text>
+            <text x="40" y="74" style="fill:#EDEBE3">disks and nodes die</text><text x="370" y="74" style="fill:#9FD3B8">3 replicas + re-replication</text>
+            <text x="40" y="92" style="fill:#EDEBE3">processing too slow</text><text x="370" y="92" style="fill:#9FD3B8">MapReduce: parallel tasks</text>
+            <text x="40" y="110" style="fill:#EDEBE3">network jammed</text><text x="370" y="110" style="fill:#9FD3B8">data locality</text>
+            <text x="40" y="128" style="fill:#EDEBE3">too much plumbing code</text><text x="370" y="128" style="fill:#9FD3B8">write map + reduce only</text>
+            <text x="40" y="146" style="fill:#EDEBE3">growing is painful</text><text x="370" y="146" style="fill:#9FD3B8">add nodes; NameNode tracks blocks</text>
+          </g>
+          <path d="M250 53h100M250 71h100M250 89h100M250 107h100M250 125h100M250 143h100" style="stroke:#F5C77E;stroke-width:1.5;stroke-dasharray:4 3"/>
+        </g>
+        <text x="320" y="180" text-anchor="middle" font-size="10" class="s-ink2">Every part of Hadoop exists because of one line on this board.</text>
+        <text x="632" y="180" text-anchor="end" class="s-wm">myphatshala.in</text>
+      </svg>
+    </div>
+
+R> “Doesn't fit”: HDFS cuts files into blocks and spreads them over many machines.
+A> Good. And “disks die”?
+K> Three copies of every block, on different racks. And the NameNode re-copies when a node dies.
+R> “Too slow” is MapReduce: thousands of small tasks running at the same time. “Network jammed” is data locality.
+A> And the one most people forget?
+K> “Too much plumbing.” We only write <code>map</code> and <code>reduce</code>, and Hadoop does the splitting, scheduling, retrying and merging.
+A> Then I'll add two harder lines to your board: “the master is a single point of failure” and “only one kind of job can run”. Hadoop 1 couldn't fix those. Hadoop 2 did, with High Availability and YARN. Today we'll go through every line, see each fix in action, and then be honest about the problems Hadoop <b>didn't</b> solve.
+  </div>
+</section>
+
+<!-- ======================= PART 2: DEFINITION ======================= -->
+<section class="part" id="definition">
+  <span class="part-label"><b>2</b> Definition</span>
+  <h2>Hadoop's architecture as a set of answers</h2>
+  <div class="def">
+    <div class="def__formal"><small>Formal definition (write this in exams)</small>
+      <p>Apache Hadoop consists of four core modules. <b>Hadoop Common</b>: shared libraries and utilities. <b>HDFS</b>: a distributed file system that splits files into large blocks, replicates each block across DataNodes and racks, and keeps metadata on a NameNode, providing scalable, fault-tolerant, high-throughput storage. <b>YARN</b> (since Hadoop 2): a cluster resource manager that allocates CPU and memory as containers to many applications. <b>MapReduce</b>: a programming model and engine in which user-defined <i>map</i> and <i>reduce</i> functions are executed in parallel near the data, with the framework handling partitioning, scheduling, shuffling, sorting and failure recovery.</p></div>
+    <div class="def__simple"><small>In simple words</small>
+      <p>Hadoop is four pieces. HDFS stores huge files safely across many machines. MapReduce processes them in parallel. YARN decides which job gets which machines' CPU and memory. Common holds the shared code. Each piece was built to fix a specific problem of big data.</p></div>
+  </div>
+
+  <h3>Words you'll meet in this lesson</h3>
+  <div class="terms">
+    <div class="term"><b>Hadoop Common</b><span>Shared Java libraries, configuration and tools used by all other Hadoop modules.</span></div>
+    <div class="term"><b>HDFS</b><span>Hadoop Distributed File System: blocks + replicas on DataNodes, metadata on the NameNode.</span></div>
+    <div class="term"><b>YARN</b><span>Yet Another Resource Negotiator: shares the cluster's CPU and memory between applications.</span></div>
+    <div class="term"><b>MapReduce</b><span>Map tasks turn records into key–value pairs; reduce tasks combine all values for each key.</span></div>
+    <div class="term"><b>Shuffle and sort</b><span>Moving map outputs to reducers, grouped and sorted by key. Done by the framework.</span></div>
+    <div class="term"><b>Horizontal scalability</b><span>Capacity grows roughly in line with the number of nodes added.</span></div>
+    <div class="term"><b>Schema-on-read</b><span>Store raw data as it is; apply structure when reading it.</span></div>
+    <div class="term"><b>High Availability (HA)</b><span>An active and a standby master, with automatic failover.</span></div>
+  </div>
+
+  <h3>Problem → solution map</h3>
+  <table class="facts">
+    <tr><th>Data bigger than one machine</th><td><b>HDFS</b> splits files into 128 MB blocks across many DataNodes</td></tr>
+    <tr><th>Cheap hardware fails</th><td><b>Replication</b> (3, rack-aware), heartbeats, re-replication, checksums</td></tr>
+    <tr><th>Processing too slow</th><td><b>MapReduce</b>: one map task per block, thousands in parallel</td></tr>
+    <tr><th>Network too slow to move data</th><td><b>Data locality</b>: tasks scheduled on nodes holding the block</td></tr>
+    <tr><th>Distributed code is hard</th><td>Write <b>map</b> and <b>reduce</b>; the framework does splits, scheduling, shuffle, retries</td></tr>
+    <tr><th>Tasks fail mid-job</th><td>Automatic <b>re-execution</b> (up to 4 attempts) and speculative execution</td></tr>
+    <tr><th>Need to grow</th><td><b>Add nodes</b>; the NameNode tracks every block, the balancer spreads data</td></tr>
+    <tr><th>Raw, messy data</th><td>HDFS stores any bytes: <b>schema-on-read</b></td></tr>
+    <tr><th>Master is a single point of failure</th><td><b>NameNode HA</b> (Hadoop 2+), multiple standbys (Hadoop 3)</td></tr>
+    <tr><th>Only MapReduce could run</th><td><b>YARN</b> (Hadoop 2+): Spark, Tez, Hive and others share one cluster</td></tr>
+    <tr><th>3× storage is expensive</th><td><b>Erasure coding</b> (Hadoop 3): about 1.5× for cold data</td></tr>
+  </table>
+
+LEVELS> The architecture at three levels
+L1> A courier company
+      <ul>
+        <li><b>HDFS is the warehouse network:</b> parcels (blocks) stored in many warehouses (nodes), each parcel copied to three warehouses in different areas.</li>
+        <li><b>The NameNode is the head office register:</b> it knows which warehouse holds which parcel, but never touches the parcels.</li>
+        <li><b>MapReduce is the sorting work:</b> every warehouse sorts its own parcels by city at the same time (map), then all parcels for one city go to one hub (shuffle) to be counted (reduce).</li>
+        <li><b>YARN is the staff manager:</b> it decides which team uses which warehouse workers today.</li>
+      </ul>
+L2> How the pieces work together on one job
+      <ul>
+        <li>You copy a file into HDFS: the NameNode picks DataNodes, the client writes blocks to them in a pipeline.</li>
+        <li>You submit a job: YARN starts an ApplicationMaster for it.</li>
+        <li>The ApplicationMaster asks the NameNode where the input blocks are, then asks YARN for containers on those nodes.</li>
+        <li>Map tasks read their local blocks; outputs are shuffled to reducers; reducers write results back to HDFS.</li>
+        <li>Throughout, heartbeats let the masters notice failures and re-run work.</li>
+      </ul>
+L3> What Hadoop did not solve (and what came next)
+      <ul>
+        <li><b>Latency:</b> MapReduce jobs take seconds to start and write intermediate data to disk. Interactive SQL came from Impala, Presto/Trino, Hive LLAP and cloud warehouses.</li>
+        <li><b>Iterative algorithms</b> (machine learning, graph processing) reread data in every pass. <b>Spark</b> keeps working data in memory and became the main engine.</li>
+        <li><b>Streaming:</b> MapReduce is batch-only. Kafka, Flink and Spark Structured Streaming handle real-time data.</li>
+        <li><b>Small files:</b> every file and block costs NameNode memory. Mitigations: bigger files, HAR/SequenceFiles, compaction, federation.</li>
+        <li><b>Updates:</b> HDFS files are write-once. Table formats like Apache Iceberg, Delta Lake and Hudi added updates and deletes on top of files.</li>
+        <li><b>Operations and security:</b> running Kerberos, Ranger, upgrades and capacity planning takes skilled staff. Managed cloud services reduced this burden.</li>
+      </ul>
+/LEVELS
+EXAM> For “Explain the core components of Hadoop”, name all four (<b>Common, HDFS, YARN, MapReduce</b>), give each one's job in one line, and connect each to the problem it solves. Adding one line on Hadoop's limitations (latency, small files, iterative jobs) shows real understanding.
+</section>
+
+<!-- ======================= PART 3: TYPES AND WAYS TO USE IT ======================= -->
+<section class="part" id="types">
+  <span class="part-label"><b>3</b> Types and ways to use it</span>
+  <h2>The four core modules, side by side</h2>
+  <div class="cards">
+    <div class="card"><h4>Hadoop Common</h4><p>Configuration system (<code>core-site.xml</code>), file-system abstraction, RPC, security, command-line tools. Everything else is built on it.</p><span class="tag">Foundation</span></div>
+    <div class="card"><h4>HDFS</h4><p>NameNode (metadata), DataNodes (blocks), optional standby NameNode and JournalNodes for HA. Commands: <code>hdfs dfs …</code>.</p><span class="tag">Storage</span></div>
+    <div class="card"><h4>YARN</h4><p>ResourceManager (cluster-wide scheduler), NodeManagers (run containers), one ApplicationMaster per job.</p><span class="tag">Resources</span></div>
+    <div class="card"><h4>MapReduce</h4><p>Java API (<code>Mapper</code>, <code>Reducer</code>, <code>Job</code>) and the engine that runs map, shuffle, sort and reduce as a YARN application.</p><span class="tag">Processing</span></div>
+  </div>
+
+  <h3>Hadoop's strengths and limits</h3>
+  <div class="table-wrap">
+  <table class="compare" style="min-width:560px">
+    <thead><tr><th>Hadoop is good at</th><th>Hadoop is weak at</th></tr></thead>
+    <tbody>
+      <tr><td>Storing petabytes cheaply and safely</td><td>Millisecond lookups of single records</td></tr>
+      <tr><td>Scanning whole data sets in parallel</td><td>Interactive queries with MapReduce (start-up cost)</td></tr>
+      <tr><td>Surviving hardware failures automatically</td><td>Many small files</td></tr>
+      <tr><td>Raw and semi-structured data (logs, JSON, text)</td><td>Updating records in place</td></tr>
+      <tr><td>Long-running batch pipelines</td><td>Real-time streams and iterative ML (without Spark etc.)</td></tr>
+    </tbody>
+  </table>
+  </div>
+TIP> When someone asks “Can Hadoop do X?”, ask yourself which problem on Riya's board X belongs to. If X is about <b>large, batch, throughput</b>, Hadoop fits. If X is about <b>small, instant, constantly changing</b>, another tool is usually better, even if it stores its history in HDFS.
+</section>
+
+<!-- ======================= PART 4: STEP BY STEP ======================= -->
+<section class="part" id="steps">
+  <span class="part-label"><b>4</b> Step by step</span>
+  <h2>A word count, and which Hadoop part handles each step</h2>
+  <ol class="stepper">
+    <li><h4>Store: put the file in HDFS</h4>
+      <div class="code" data-lang="bash" data-file="Terminal"><pre><code>hdfs dfs -put pages.txt /data/pages.txt</code></pre></div>
+      <span class="behind"><b>HDFS</b> splits the file into 128 MB blocks and writes 3 replicas of each to DataNodes on two racks. Solves: <i>doesn't fit</i> and <i>disks die</i>.</span></li>
+    <li><h4>Map: each task reads one block</h4>
+      <div class="code" data-lang="python" data-file="map.py"><pre><code>def map_words(line):
+    return [(w, 1) for w in line.lower().split()]
+print(map_words("Pune Delhi Pune"))</code></pre><div class="output">[('pune', 1), ('delhi', 1), ('pune', 1)]</div></div>
+      <span class="behind">Your only code. <b>MapReduce</b> runs one copy per block, in parallel, on nodes that hold the blocks (<b>locality</b>). Solves: <i>too slow</i> and <i>network jammed</i>.</span></li>
+    <li><h4>Shuffle and sort: group by key</h4>
+      <div class="code" data-lang="python" data-file="shuffle.py"><pre><code>pairs = [("pune", 1), ("delhi", 1), ("pune", 1)]
+groups = {}
+for k, v in sorted(pairs):
+    groups.setdefault(k, []).append(v)
+print(groups)</code></pre><div class="output">{'delhi': [1], 'pune': [1, 1]}</div></div>
+      <span class="behind">Done entirely by the <b>framework</b>: map outputs are partitioned by key, copied over the network to reducers and sorted. Solves: <i>too much plumbing</i>.</span></li>
+    <li><h4>Reduce: combine each key's values</h4>
+      <div class="code" data-lang="python" data-file="reduce.py"><pre><code>def reduce_count(word, ones):
+    return word, sum(ones)
+print(reduce_count("pune", [1, 1]))</code></pre><div class="output">('pune', 2)</div></div>
+      <span class="behind">Your second function. Reducers write results back to HDFS, replicated like any other file.</span></li>
+    <li><h4>Recover: a node dies halfway</h4>
+      <p>A DataNode with three running map tasks loses power.</p>
+      <span class="behind"><b>YARN</b> and the ApplicationMaster re-run those tasks on other nodes, reading other replicas. The job finishes. Solves: <i>tasks fail mid-job</i>.</span></li>
+  </ol>
+</section>
+
+<!-- ======================= PART 5: SEE IT HAPPEN ======================= -->
+<section class="part" id="animation">
+  <span class="part-label"><b>5</b> See it happen</span>
+  <h2>Six problems, six fixes: the board and the cluster</h2>
+  <p>Each frame takes one line from Riya's board. Left: the problem as a user feels it. Right: the Hadoop mechanism that fixes it.</p>
+  <div class="anim" data-frames="6">
+    <div class="anim__title">Problem → Hadoop mechanism <span>6 steps</span></div>
+    <div class="anim__views">
+      <div class="view view--see">
+        <span class="view__tag">The problem</span>
+        <svg viewBox="0 0 360 250" role="img" aria-label="Each big data problem">
+          <rect x="14" y="14" width="332" height="206" rx="8" class="s-soft-acc" style="stroke:#D64545"/>
+          <g data-on="1"><text x="180" y="50" text-anchor="middle" font-size="12" font-weight="700" class="s-red">“It doesn't fit.”</text><rect x="60" y="80" width="90" height="90" rx="8" class="s-card2"/><text x="105" y="130" text-anchor="middle" font-size="9" class="s-ink">4 TB disk</text><rect x="190" y="70" width="110" height="110" rx="8" class="s-red"/><text x="245" y="130" text-anchor="middle" font-size="11" font-weight="700" style="fill:#fff">400 TB</text></g>
+          <g data-on="2"><text x="180" y="50" text-anchor="middle" font-size="12" font-weight="700" class="s-red">“A disk died. Data gone.”</text><rect x="130" y="80" width="100" height="80" rx="8" class="s-board"/><text x="180" y="126" text-anchor="middle" font-size="12" font-weight="700" style="fill:#FF8A80">✕ disk</text></g>
+          <g data-on="3"><text x="180" y="50" text-anchor="middle" font-size="12" font-weight="700" class="s-red">“The report takes 3 days.”</text><rect x="40" y="96" width="280" height="18" rx="5" class="s-card2"/><rect x="40" y="96" width="30" height="18" rx="5" class="s-red"/><text x="180" y="146" text-anchor="middle" font-size="9" class="s-ink">one machine reading 400 TB</text></g>
+          <g data-on="4"><text x="180" y="50" text-anchor="middle" font-size="12" font-weight="700" class="s-red">“The network is jammed.”</text><path d="M60 110h240" style="stroke:#D64545;stroke-width:14;opacity:.8"/><text x="180" y="150" text-anchor="middle" font-size="9" class="s-ink">everyone copying data to one place</text></g>
+          <g data-on="5"><text x="180" y="50" text-anchor="middle" font-size="12" font-weight="700" class="s-red">“Our retry script is 900 lines.”</text><rect x="80" y="74" width="200" height="110" rx="6" class="s-board"/><text x="94" y="96" font-size="8" class="mono" style="fill:#7F8C86">split() schedule() retry()</text><text x="94" y="112" font-size="8" class="mono" style="fill:#7F8C86">merge() rebalance() monitor()</text><text x="94" y="128" font-size="8" class="mono" style="fill:#7F8C86">recover() copy() wait() …</text><text x="94" y="160" font-size="8" class="mono" style="fill:#F5C77E">count_words()  ← the real work</text></g>
+          <g data-on="6"><text x="180" y="50" text-anchor="middle" font-size="12" font-weight="700" class="s-red">“We need more capacity.”</text><text x="180" y="110" text-anchor="middle" font-size="9" class="s-ink">adding machines means</text><text x="180" y="126" text-anchor="middle" font-size="9" class="s-ink">re-sharding all the data by hand</text></g>
+          <text x="352" y="244" text-anchor="end" class="s-wm">myphatshala.in</text>
+        </svg>
+        <ol class="caps" hidden>
+          <li><b>Storage:</b> 400 TB of data and disks of 4 TB. No single machine can hold it.</li>
+          <li><b>Reliability:</b> with one copy, a dead disk means lost data and a failed job.</li>
+          <li><b>Speed:</b> one machine reading 400 TB takes days.</li>
+          <li><b>Network:</b> pulling all the data to a central place saturates the network.</li>
+          <li><b>Complexity:</b> distribution code dwarfs the actual business logic.</li>
+          <li><b>Growth:</b> adding machines forces a painful manual re-shard.</li>
+        </ol>
+      </div>
+
+      <div class="view view--behind">
+        <span class="view__tag">Hadoop's fix</span>
+        <svg viewBox="0 0 360 250" role="img" aria-label="Hadoop mechanisms">
+          <rect x="14" y="14" width="332" height="206" rx="8" class="s-soft-green" style="stroke:var(--green)"/>
+          <g data-on="1"><text x="180" y="44" text-anchor="middle" font-size="11" font-weight="700" class="s-green">HDFS blocks on many nodes</text>
+            <g><rect x="30" y="66" width="56" height="44" rx="5" class="s-card"/><rect x="92" y="66" width="56" height="44" rx="5" class="s-card"/><rect x="154" y="66" width="56" height="44" rx="5" class="s-card"/><rect x="216" y="66" width="56" height="44" rx="5" class="s-card"/><rect x="278" y="66" width="56" height="44" rx="5" class="s-card"/>
+            <rect x="38" y="78" width="16" height="12" rx="2" style="fill:var(--track)"/><rect x="58" y="78" width="16" height="12" rx="2" style="fill:var(--track)"/><rect x="100" y="78" width="16" height="12" rx="2" style="fill:var(--track)"/><rect x="120" y="78" width="16" height="12" rx="2" style="fill:var(--track)"/><rect x="162" y="78" width="16" height="12" rx="2" style="fill:var(--track)"/><rect x="224" y="78" width="16" height="12" rx="2" style="fill:var(--track)"/><rect x="244" y="78" width="16" height="12" rx="2" style="fill:var(--track)"/><rect x="286" y="78" width="16" height="12" rx="2" style="fill:var(--track)"/></g>
+            <text x="180" y="146" text-anchor="middle" font-size="9" class="s-ink">capacity = sum of all nodes' disks</text></g>
+          <g data-on="2"><text x="180" y="44" text-anchor="middle" font-size="11" font-weight="700" class="s-green">3 replicas + re-replication</text>
+            <rect x="40" y="70" width="80" height="60" rx="6" class="s-card" style="stroke:var(--red);stroke-dasharray:5 3"/><rect x="140" y="70" width="80" height="60" rx="6" class="s-card"/><rect x="240" y="70" width="80" height="60" rx="6" class="s-card"/>
+            <rect x="64" y="92" width="32" height="16" rx="3" style="fill:var(--track);opacity:.3"/><rect x="164" y="92" width="32" height="16" rx="3" style="fill:var(--track)"/><rect x="264" y="92" width="32" height="16" rx="3" style="fill:var(--track)"/>
+            <text x="180" y="156" text-anchor="middle" font-size="9" class="s-ink">two copies left; a new one is made automatically</text></g>
+          <g data-on="3"><text x="180" y="44" text-anchor="middle" font-size="11" font-weight="700" class="s-green">MapReduce: 1,000s of tasks at once</text>
+            <rect x="40" y="70" width="280" height="10" rx="3" class="s-green"/><rect x="40" y="86" width="280" height="10" rx="3" class="s-green"/><rect x="40" y="102" width="280" height="10" rx="3" class="s-green"/><rect x="40" y="118" width="280" height="10" rx="3" class="s-green"/>
+            <text x="180" y="156" text-anchor="middle" font-size="9" class="s-ink">every node reads its share in parallel: minutes</text></g>
+          <g data-on="4"><text x="180" y="44" text-anchor="middle" font-size="11" font-weight="700" class="s-green">Data locality</text>
+            <rect x="40" y="70" width="80" height="60" rx="6" class="s-card"/><rect x="140" y="70" width="80" height="60" rx="6" class="s-card"/><rect x="240" y="70" width="80" height="60" rx="6" class="s-card"/>
+            <text x="80" y="104" text-anchor="middle" font-size="9" class="s-green" font-weight="700">task ↔ block</text><text x="180" y="104" text-anchor="middle" font-size="9" class="s-green" font-weight="700">task ↔ block</text><text x="280" y="104" text-anchor="middle" font-size="9" class="s-green" font-weight="700">task ↔ block</text>
+            <text x="180" y="156" text-anchor="middle" font-size="9" class="s-ink">the program goes to the data; the network stays free</text></g>
+          <g data-on="5"><text x="180" y="44" text-anchor="middle" font-size="11" font-weight="700" class="s-green">You write map + reduce</text>
+            <rect x="80" y="64" width="200" height="40" rx="6" class="s-board"/><text x="94" y="82" font-size="8.6" class="mono" style="fill:#9FD3B8">map(line)  → (word, 1)</text><text x="94" y="96" font-size="8.6" class="mono" style="fill:#9FD3B8">reduce(w, ones) → sum</text>
+            <text x="180" y="130" text-anchor="middle" font-size="9" class="s-ink">splits, scheduling, shuffle, sort,</text><text x="180" y="144" text-anchor="middle" font-size="9" class="s-ink">retries, output: the framework</text></g>
+          <g data-on="6"><text x="180" y="44" text-anchor="middle" font-size="11" font-weight="700" class="s-green">Add a node: it just joins</text>
+            <rect x="30" y="72" width="56" height="44" rx="5" class="s-card"/><rect x="92" y="72" width="56" height="44" rx="5" class="s-card"/><rect x="154" y="72" width="56" height="44" rx="5" class="s-card"/><rect x="216" y="72" width="56" height="44" rx="5" class="s-card"/><rect x="278" y="72" width="56" height="44" rx="5" class="s-card" style="stroke:var(--green);stroke-width:2.5"/>
+            <text x="306" y="98" text-anchor="middle" font-size="9" font-weight="700" class="s-green">new</text>
+            <text x="180" y="146" text-anchor="middle" font-size="9" class="s-ink">NameNode tracks each block; nothing re-sharded</text><text x="180" y="160" text-anchor="middle" font-size="9" class="s-ink">(balancer moves some blocks when you want)</text></g>
+          <text x="352" y="244" text-anchor="end" class="s-wm">myphatshala.in</text>
+        </svg>
+        <ol class="caps" hidden>
+          <li><b>HDFS</b> cuts the file into blocks and spreads them, so capacity is the sum of every node's disks.</li>
+          <li><b>Replication:</b> each block lives on three nodes; when one dies, the NameNode makes a new copy from the others.</li>
+          <li><b>MapReduce</b> runs one task per block, all at the same time, so reading 400 TB takes minutes, not days.</li>
+          <li><b>Locality:</b> tasks run where their blocks are, so input data doesn't cross the network.</li>
+          <li><b>The programming model:</b> you write two small functions; Hadoop handles everything around them.</li>
+          <li><b>Growth:</b> a new DataNode registers and starts receiving blocks. The NameNode tracks blocks individually, so no re-sharding.</li>
+        </ol>
+      </div>
+    </div>
+  </div>
+
+  <h3 id="playground">Try it yourself: test every fix</h3>
+  <p>This cluster has everything switched on, including High Availability for the NameNode. Work through the checklist to see each fix with your own eyes.</p>
+  {{PLAYGROUND}}
+</section>
+
+<!-- ======================= PART 6: REAL-WORLD USE ======================= -->
+<section class="part" id="real-world">
+  <span class="part-label"><b>6</b> Real-world use</span>
+  <h2>Which fix matters most, by industry</h2>
+
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="18" y="22" width="84" height="46" rx="6" class="s-soft-blue" style="stroke:var(--blue)"/><text x="60" y="50" text-anchor="middle" font-size="9" font-weight="700" class="s-blue">7 years</text></svg></div>
+    <div><h4>1. Telecom: cheap, safe storage for years</h4>
+      <p>Regulations require keeping call and data records for years. HDFS on commodity disks with replication (or erasure coding for old data) is far cheaper per TB than enterprise storage.</p>
+      <div class="uc-flow"><span>Records</span><i>→</i><span class="java">HDFS + replication / EC</span><i>→</i><span>Retained for years</span></div></div>
+  </div>
+
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="20" y="20" width="80" height="50" rx="6" class="s-board"/><text x="60" y="50" text-anchor="middle" font-size="9" font-weight="700" class="s-chalk">EOD batch</text></svg></div>
+    <div><h4>2. Banking: finishing the batch window</h4>
+      <p>End-of-day risk and reconciliation jobs must finish before morning. Parallel processing near the data and automatic retries make the deadline reliable, even when nodes fail at night.</p>
+      <div class="uc-flow"><span>Day's transactions</span><i>→</i><span class="java">Parallel jobs + retries</span><i>→</i><span>Ready by 6 am</span></div></div>
+  </div>
+
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="18" y="18" width="84" height="54" rx="6" class="s-card2"/><text x="60" y="42" text-anchor="middle" font-size="9" class="mono s-ink">{"evt":"tap"}</text><text x="60" y="58" text-anchor="middle" font-size="8.6" class="s-ink2">raw JSON</text></svg></div>
+    <div><h4>3. E-commerce: schema-on-read for app events</h4>
+      <p>App events change format every few weeks as new features ship. Storing them raw in HDFS and applying a schema at query time (Hive, Spark) means nothing is lost when the format changes.</p>
+      <div class="uc-flow"><span>Raw events</span><i>→</i><span class="java">Stored as-is</span><i>→</i><span>Schema applied by queries</span></div></div>
+  </div>
+
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="16" y="20" width="40" height="50" rx="6" class="s-soft-acc" style="stroke:var(--track)"/><rect x="64" y="20" width="40" height="50" rx="6" class="s-soft-green" style="stroke:var(--green)"/><text x="36" y="49" text-anchor="middle" font-size="8.6" font-weight="700" class="s-acc">Spark</text><text x="84" y="49" text-anchor="middle" font-size="8.6" font-weight="700" class="s-green">Hive</text></svg></div>
+    <div><h4>4. Many teams, one cluster</h4>
+      <p>With YARN, the fraud team's Spark jobs, the BI team's Hive queries and nightly MapReduce jobs share one cluster, each in its own queue with guaranteed capacity (Module 11).</p>
+      <div class="uc-flow"><span>Many teams</span><i>→</i><span class="java">YARN queues</span><i>→</i><span>One shared cluster</span></div></div>
+  </div>
+
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="20" y="22" width="34" height="46" rx="5" class="s-board"/><rect x="66" y="22" width="34" height="46" rx="5" class="s-board" style="opacity:.6"/><path d="M54 45h12" style="stroke:var(--green);stroke-width:3"/><text x="37" y="80" text-anchor="middle" font-size="8.6" class="s-ink">active</text><text x="83" y="80" text-anchor="middle" font-size="8.6" class="s-ink">standby</text></svg></div>
+    <div><h4>5. Always-on data platforms</h4>
+      <p>When dashboards and pipelines depend on HDFS around the clock, NameNode High Availability turns a master failure from an outage into a short pause.</p>
+      <div class="uc-flow"><span>Active NN fails</span><i>→</i><span class="java">Standby takes over</span><i>→</i><span>Pipelines continue</span></div></div>
+  </div>
+  <p class="muted">Examples are simplified descriptions of common patterns.</p>
+</section>

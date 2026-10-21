@@ -204,6 +204,7 @@ for (const c of courses) {
     .replaceAll("{{SYLLABUS}}", syllabus)
     .replaceAll("{{RELATED}}", related || "<p class=\"muted\">More courses coming to this track.</p>")
     .replaceAll("{{PATHS}}", inPaths ? `<h4>Part of these career paths</h4>${inPaths}` : "")
+    .replaceAll("{{EXTRAS}}", (c.extras || []).length ? `<div class="aside-card"><h4>Course tools</h4>${c.extras.map(x => `<a href="${esc(x.href)}">${esc(x.title)}<span>${esc(x.note || "")}</span></a>`).join("")}</div>` : "")
     .replaceAll("{{JSONLD}}", jsonld);
   fs.writeFileSync(out, html);
 }
@@ -213,6 +214,7 @@ const today = stamp.slice(0, 10);
 const urls = [`${base}/`, ...courses.map(c => `${base}/${c.url}`)];
 for (const c of courses) for (const m of c.modules) for (const l of m.lessons)
   if (l.status === "live") urls.push(`${base}/${c.url}${l.rel}`);
+for (const c of courses) for (const x of c.extras || []) if (!/^(https?:|\/|\.\.)/.test(x.href)) urls.push(`${base}/${c.url}${x.href}`);
 fs.writeFileSync(path.join(ROOT, "sitemap.xml"),
   `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n` +
   urls.map(u => `  <url><loc>${u}</loc><lastmod>${today}</lastmod></url>`).join("\n") + `\n</urlset>\n`);

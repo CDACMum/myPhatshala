@@ -1,0 +1,3033 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Failures are normal | MyPhatshala</title>
+<meta name="description" content="Why failures are expected in big clusters, the arithmetic of disk and node failure rates, every kind of failure (disk, node, rack, corruption, stragglers, masters, human error) and how Hadoop survives each one: replication, heartbeats, re-replication, checksums, retries and HA. With animations, a break-it-yourself playground, a Monte Carlo simulation, quiz and interview scenarios.">
+<meta name="mp:minutes" content="26">
+<link rel="canonical" href="https://myphatshala.in/courses/hadoop/01-foundations/04-failures-are-normal/">
+<meta property="og:title" content="Failures are normal · MyPhatshala">
+<meta property="og:description" content="With 10,000 disks, something breaks every day. See how Hadoop makes failures not matter, then break a cluster yourself.">
+<link rel="icon" href="../../../../assets/img/logo.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Fraunces:ital,opsz,wght@0,9..144,600;0,9..144,700;1,9..144,600&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../../../../assets/css/style.css">
+<link rel="stylesheet" href="../../../../assets/css/lesson.css">
+<link rel="stylesheet" href="../../../../assets/css/cluster-sim.css">
+<script src="../../../../assets/js/config.js"></script>
+<script>try { const t = localStorage.getItem("mp-theme"); if (t) document.documentElement.dataset.theme = t; } catch (e) {}</script>
+<script type="application/ld+json">{"@context": "https://schema.org", "@type": "LearningResource", "name": "Failures are normal", "learningResourceType": "Lesson", "educationalLevel": "Beginner → Advanced", "isAccessibleForFree": true, "inLanguage": "en", "isPartOf": {"@type": "Course", "name": "Apache Hadoop", "provider": {"@type": "Organization", "name": "MyPhatshala"}}}</script>
+</head>
+<body style="--track:#B45309" data-lesson="01-foundations/04-failures-are-normal" data-course-root="../../">
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="site-header">
+  <div class="wrap">
+    <a class="brand" href="../../../../" aria-label="MyPhatshala home"><img src="../../../../assets/img/logo.svg" width="34" height="34" alt=""><span>My<b>Phatshala</b></span></a>
+    <nav class="nav" aria-label="Main">
+      <a href="../../../../#tracks">All courses</a>
+      <a href="../../">Apache Hadoop syllabus</a>
+      <button class="theme-btn" id="theme-btn" aria-label="Toggle dark mode"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg></button>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+<section class="lesson-hero">
+  <div class="wrap">
+    <nav class="crumbs" aria-label="Breadcrumb"><a href="../../../../">Home</a><span>›</span><a href="../../../../#track-big-data">Big Data Engineering</a><span>›</span><a href="../../">Apache Hadoop</a><span>›</span><b>Lesson 1.4</b></nav>
+    <h1>Failures are normal</h1>
+    <p class="lead">On your laptop a dead disk is a disaster. In a cluster of thousands of disks it is a normal Tuesday. This lesson does the arithmetic of how often hardware fails at scale, walks through every kind of failure a Hadoop cluster meets, and shows the mechanisms that make them harmless: three copies on two racks, heartbeats, automatic re-replication, checksums and task retries. Then you get to break the playground cluster on purpose.</p>
+    <div class="lesson-meta"><span>Module 1 · Foundations: before Hadoop</span><span>⏱ 26 min</span><span>Beginner → Advanced</span><span>Break-it playground</span><span>Runs in your browser (Python)</span><span>Data-loss simulation</span><span>8 practice problems</span></div>
+  </div>
+</section>
+
+<div class="wrap lesson-layout">
+<article class="lesson-main">
+<!-- ======================= PART 1: THE STORY ======================= -->
+<section class="part" id="story">
+  <span class="part-label"><b>1</b> The story</span>
+  <h2>The night Riya's laptop died</h2>
+  <div class="story">
+    <p class="narration">The night before the project submission, Riya's laptop shows a black screen and a clicking sound. The hard disk is dead. Her code, her report, three weeks of work: all on that one disk. Kabir's copy is on his laptop and on Google Drive, so the team survives. The next morning Arjun Sir hears the story and smiles. “Now imagine you are responsible for <b>ten thousand</b> disks,” he says.</p>
+
+    <div class="scene">
+      <svg viewBox="0 0 640 180" role="img" aria-label="Left: one laptop with one copy of the project; its disk fails and the work is lost. Right: a cluster where each block has three copies on different racks; one disk fails and the block is still available.">
+        <g font-size="10">
+          <rect x="10" y="14" width="250" height="140" rx="10" class="s-soft-acc" style="stroke:#D64545;stroke-width:1.5"/>
+          <text x="135" y="34" text-anchor="middle" font-weight="700" class="s-red">One copy</text>
+          <rect x="70" y="48" width="130" height="66" rx="6" class="s-board"/><rect x="56" y="114" width="158" height="9" rx="3" class="s-card2"/>
+          <text x="135" y="76" text-anchor="middle" font-size="9" class="mono" style="fill:#FF8A80">disk failure</text>
+          <text x="135" y="94" text-anchor="middle" font-size="9" class="mono" style="fill:#7F8C86">project_final.docx</text>
+          <text x="135" y="144" text-anchor="middle" font-size="9" font-weight="700" class="s-red">3 weeks of work: gone</text>
+          <rect x="290" y="14" width="340" height="140" rx="10" class="s-soft-green" style="stroke:var(--green);stroke-width:1.5"/>
+          <text x="460" y="34" text-anchor="middle" font-weight="700" class="s-green">Three copies on different racks</text>
+          <g>
+            <rect x="306" y="46" width="96" height="78" rx="6" class="s-card2"/><text x="354" y="62" text-anchor="middle" font-size="8.6" font-weight="700" class="s-ink">rack 1</text>
+            <rect x="412" y="46" width="96" height="78" rx="6" class="s-card2"/><text x="460" y="62" text-anchor="middle" font-size="8.6" font-weight="700" class="s-ink">rack 2</text>
+            <rect x="518" y="46" width="96" height="78" rx="6" class="s-card2"/><text x="566" y="62" text-anchor="middle" font-size="8.6" font-weight="700" class="s-ink">rack 3</text>
+            <rect x="320" y="76" width="68" height="18" rx="4" style="fill:var(--track);opacity:.35"/><text x="354" y="89" text-anchor="middle" font-size="8.6" font-weight="700" class="s-red">✕ copy 1</text>
+            <rect x="426" y="76" width="68" height="18" rx="4" style="fill:var(--track)"/><text x="460" y="89" text-anchor="middle" font-size="8.6" font-weight="700" style="fill:#fff">copy 2</text>
+            <rect x="426" y="98" width="68" height="18" rx="4" style="fill:var(--track)"/><text x="460" y="111" text-anchor="middle" font-size="8.6" font-weight="700" style="fill:#fff">copy 3</text>
+            <rect x="532" y="76" width="68" height="18" rx="4" class="s-green"/><text x="566" y="89" text-anchor="middle" font-size="8.6" font-weight="700" style="fill:#fff">new copy</text>
+          </g>
+          <text x="460" y="144" text-anchor="middle" font-size="9" font-weight="700" class="s-green">a disk dies → read another copy, make a new one</text>
+        </g>
+        <text x="320" y="174" text-anchor="middle" font-size="10" class="s-ink2">On one laptop, a failure is a disaster. On a big cluster, it is a <tspan font-weight="700" class="s-acc">normal Tuesday</tspan>.</text>
+        <text x="632" y="174" text-anchor="end" class="s-wm">myphatshala.in</text>
+      </svg>
+    </div>
+
+    <div class="panel"><div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#FCE6D6"/><path d="M14 64c2-12 9-18 18-18s16 6 18 18z" fill="#2E5AAC"/><circle cx="32" cy="29" r="12" fill="#C68B5E"/><path d="M19 29c0-10 6-15 13-15s13 5 13 15c-3-5-7-8-13-8s-10 3-13 8z" fill="#2A1B14"/><path d="M43 27c3 6 3 14 0 20" stroke="#2A1B14" stroke-width="4" fill="none" stroke-linecap="round"/><circle cx="27.5" cy="30" r="1.5" fill="#2A1B14"/><circle cx="36.5" cy="30" r="1.5" fill="#2A1B14"/><path d="M28 35q4 3 8 0" stroke="#2A1B14" stroke-width="1.6" fill="none" stroke-linecap="round"/><circle cx="32" cy="24" r="1.2" fill="#D64545"/></svg></div><div class="bubble"><b class="who">Riya</b><p>Ten thousand disks, Sir? Then something must be breaking every day!</p></div></div>
+    <div class="panel panel--right"><div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#DDEFE6"/><path d="M12 64c2-12 10-18 20-18s18 6 20 18z" fill="#F4F1EA"/><path d="M28 46l4 8 4-8" fill="#2F7D5B"/><circle cx="32" cy="28" r="12" fill="#B57A50"/><path d="M20 26c0-8 5-13 12-13s12 5 12 13c-2-3-6-5-12-5s-10 2-12 5z" fill="#5A5A5A"/><path d="M22 32c1 8 5 11 10 11s9-3 10-11c-2 3-6 4-10 4s-8-1-10-4z" fill="#5A5A5A"/><circle cx="27" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><circle cx="37" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><path d="M30.4 29h3.2" stroke="#1B2433" stroke-width="1.4"/><circle cx="27" cy="29" r="1.1" fill="#1B2433"/><circle cx="37" cy="29" r="1.1" fill="#1B2433"/></svg></div><div class="bubble"><b class="who">Arjun Sir</b><p>Several things, every day. Disks, power supplies, memory chips, network cables, whole switches. If one disk fails 1 or 2 times in a hundred per year, ten thousand disks give you a failure almost every day.</p></div></div>
+    <div class="panel"><div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#E1E9F7"/><path d="M12 64c2-12 10-18 20-18s18 6 20 18z" fill="#B45309"/><circle cx="32" cy="29" r="12" fill="#A9714A"/><path d="M19 27c0-9 6-14 13-14s13 5 13 14c-2-4-5-6-8-6-3 3-9 4-13 3-2 1-4 2-5 3z" fill="#1E1A17"/><circle cx="27.5" cy="30" r="1.5" fill="#1E1A17"/><circle cx="36.5" cy="30" r="1.5" fill="#1E1A17"/><path d="M27 35.5q5 3.5 10 0" stroke="#1E1A17" stroke-width="1.6" fill="none" stroke-linecap="round"/><rect x="41" y="40" width="10" height="7" rx="1.5" fill="#2E5AAC"/></svg></div><div class="bubble"><b class="who">Kabir</b><p>At my internship nobody seemed worried when a node died yesterday. They just opened a ticket to replace the disk.</p></div></div>
+    <div class="panel panel--right"><div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#DDEFE6"/><path d="M12 64c2-12 10-18 20-18s18 6 20 18z" fill="#F4F1EA"/><path d="M28 46l4 8 4-8" fill="#2F7D5B"/><circle cx="32" cy="28" r="12" fill="#B57A50"/><path d="M20 26c0-8 5-13 12-13s12 5 12 13c-2-3-6-5-12-5s-10 2-12 5z" fill="#5A5A5A"/><path d="M22 32c1 8 5 11 10 11s9-3 10-11c-2 3-6 4-10 4s-8-1-10-4z" fill="#5A5A5A"/><circle cx="27" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><circle cx="37" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><path d="M30.4 29h3.2" stroke="#1B2433" stroke-width="1.4"/><circle cx="27" cy="29" r="1.1" fill="#1B2433"/><circle cx="37" cy="29" r="1.1" fill="#1B2433"/></svg></div><div class="bubble"><b class="who">Arjun Sir</b><p>Because the system was <b>designed for failure</b>. That was the big idea behind Google's file system and then Hadoop: buy ordinary hardware, <b>expect</b> it to fail, and let the software keep extra copies, notice failures and repair itself.</p></div></div>
+    <div class="panel"><div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#FCE6D6"/><path d="M14 64c2-12 9-18 18-18s16 6 18 18z" fill="#2E5AAC"/><circle cx="32" cy="29" r="12" fill="#C68B5E"/><path d="M19 29c0-10 6-15 13-15s13 5 13 15c-3-5-7-8-13-8s-10 3-13 8z" fill="#2A1B14"/><path d="M43 27c3 6 3 14 0 20" stroke="#2A1B14" stroke-width="4" fill="none" stroke-linecap="round"/><circle cx="27.5" cy="30" r="1.5" fill="#2A1B14"/><circle cx="36.5" cy="30" r="1.5" fill="#2A1B14"/><path d="M28 35q4 3 8 0" stroke="#2A1B14" stroke-width="1.6" fill="none" stroke-linecap="round"/><circle cx="32" cy="24" r="1.2" fill="#D64545"/></svg></div><div class="bubble"><b class="who">Riya</b><p>So we don't try to stop failures. We make them not matter.</p></div></div>
+    <div class="panel panel--right"><div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#DDEFE6"/><path d="M12 64c2-12 10-18 20-18s18 6 20 18z" fill="#F4F1EA"/><path d="M28 46l4 8 4-8" fill="#2F7D5B"/><circle cx="32" cy="28" r="12" fill="#B57A50"/><path d="M20 26c0-8 5-13 12-13s12 5 12 13c-2-3-6-5-12-5s-10 2-12 5z" fill="#5A5A5A"/><path d="M22 32c1 8 5 11 10 11s9-3 10-11c-2 3-6 4-10 4s-8-1-10-4z" fill="#5A5A5A"/><circle cx="27" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><circle cx="37" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><path d="M30.4 29h3.2" stroke="#1B2433" stroke-width="1.4"/><circle cx="27" cy="29" r="1.1" fill="#1B2433"/><circle cx="37" cy="29" r="1.1" fill="#1B2433"/></svg></div><div class="bubble"><b class="who">Arjun Sir</b><p>Perfect, Riya. Today you'll see every kind of failure a cluster faces, do the arithmetic of how often they happen, and break the playground cluster on purpose to watch HDFS heal.</p></div></div>
+  </div>
+</section>
+
+<!-- ======================= PART 2: DEFINITION ======================= -->
+<section class="part" id="definition">
+  <span class="part-label"><b>2</b> Definition</span>
+  <h2>Failures are normal: fault tolerance</h2>
+  <div class="def">
+    <div class="def__formal"><small>Formal definition (write this in exams)</small>
+      <p>In a large cluster of commodity hardware, component failures (disks, nodes, network links, racks) are <b>expected events</b> rather than exceptions, because the probability of at least one failure grows with the number of components. <b>Fault tolerance</b> is the ability of a system to continue operating correctly when some of its components fail. Hadoop achieves it through <b>data replication</b> across nodes and racks, <b>failure detection</b> using heartbeats and timeouts, automatic <b>re-replication</b> and <b>task re-execution</b>, <b>checksums</b> to detect corrupted data, and <b>high-availability masters</b>.</p></div>
+    <div class="def__simple"><small>In simple words</small>
+      <p>With thousands of parts, something is always breaking. So instead of buying perfect machines, Hadoop keeps several copies of everything, notices quickly when something dies, and automatically re-copies data and re-runs work somewhere else. Users usually never notice.</p></div>
+  </div>
+
+  <h3>Words you'll meet in this lesson</h3>
+  <div class="terms">
+    <div class="term"><b>Fault tolerance</b><span>Keep working correctly even when some parts fail.</span></div>
+    <div class="term"><b>AFR</b><span>Annualised failure rate: the share of devices that fail in a year, for example 1.5% of disks.</span></div>
+    <div class="term"><b>MTBF</b><span>Mean time between failures: the average time a device runs before it fails.</span></div>
+    <div class="term"><b>Replica</b><span>One copy of a block. HDFS keeps 3 by default.</span></div>
+    <div class="term"><b>Re-replication</b><span>Making new copies when some are lost, until every block is back to its replication factor.</span></div>
+    <div class="term"><b>Checksum</b><span>A small number computed from data. If the data changes, the checksum no longer matches, so corruption is detected.</span></div>
+    <div class="term"><b>Failure domain</b><span>A group of parts that can fail together: a disk, a node, a rack, a data centre.</span></div>
+    <div class="term"><b>Straggler</b><span>A node that is alive but very slow. Can hold up a whole job.</span></div>
+    <div class="term"><b>Retry / re-execution</b><span>Running a failed task again, usually on another node.</span></div>
+  </div>
+
+  <h3>Typical numbers (approximate)</h3>
+  <table class="facts">
+    <tr><th>Hard disk annual failure rate</th><td>around 1–2% per year in large fleets (varies by model and age)</td></tr>
+    <tr><th>HDFS default replication</th><td><b>3</b> copies, on at least 2 racks (<code>dfs.replication</code>)</td></tr>
+    <tr><th>HDFS checksum</th><td>CRC32C for every 512 bytes of data, checked on every read</td></tr>
+    <tr><th>DataNode block scanner</th><td>re-reads and verifies every block in the background, by default about once every 3 weeks</td></tr>
+    <tr><th>Map/reduce task attempts</th><td>a failing task is tried up to <b>4</b> times before the job fails (default)</td></tr>
+    <tr><th>Dead DataNode timeout</th><td>about 10 minutes 30 seconds without heartbeats</td></tr>
+  </table>
+  <p class="muted">Failure rates are ballpark figures from public reports on large disk fleets. Your hardware may be better or worse.</p>
+
+  <h3 id="levels">Failures at three levels</h3>
+  <div class="modlab levels"><div class="modlab__bar"><b>Pick your level. New to this? Start at Beginner and climb.</b><button type="button" data-mod="b">Beginner</button><button type="button" data-mod="i">Intermediate</button><button type="button" data-mod="a">Advanced</button></div>
+    <div class="modlab__panel" data-mod="b"><h4><span class="lvl lvl--b">Beginner</span> The tiffin delivery team</h4>
+      <ul>
+        <li>A delivery boy's bike gets a puncture every few weeks. With 500 delivery boys, several punctures happen <b>every day</b>.</li>
+        <li>The company doesn't buy puncture-proof bikes (too expensive). It keeps <b>spare</b> boys nearby, so a tiffin is handed over and still arrives.</li>
+        <li>The office knows where every boy is (heartbeat from the app). If one goes silent, his tiffins are reassigned.</li>
+        <li>That is Hadoop: cheap parts, spares, tracking and automatic reassignment.</li>
+      </ul>
+
+    </div>
+    <div class="modlab__panel" data-mod="i"><h4><span class="lvl lvl--i">Intermediate</span> The arithmetic of “normal”</h4>
+      <ul>
+        <li><b>Expected failures per year</b> = number of devices × AFR. 3,000 disks × 1.5% ≈ <b>45 a year</b>, almost one a week.</li>
+        <li><b>Chance of at least one failure</b> among <i>n</i> devices = 1 − (1 − p)<sup><i>n</i></sup>. It climbs quickly as <i>n</i> grows.</li>
+        <li>A long job is more likely to see a failure than a short one: a 6-hour job on 500 nodes will often see a task fail.</li>
+        <li>With 3 replicas, losing data needs <b>all three</b> copies to die <b>before</b> re-replication finishes. That is very unlikely if copies are on independent nodes and racks.</li>
+      </ul>
+
+    </div>
+    <div class="modlab__panel" data-mod="a"><h4><span class="lvl lvl--a">Advanced</span> Failures that are harder than “a node dies”</h4>
+      <ul>
+        <li><b>Correlated failures:</b> a rack's power strip or switch takes 20–40 nodes down at once. That's why HDFS puts replicas on at least two racks.</li>
+        <li><b>Silent data corruption:</b> a disk returns wrong bytes without an error. HDFS stores a checksum with every 512 bytes; a mismatch marks that replica corrupt, and a good copy is used and re-replicated.</li>
+        <li><b>Gray failures / stragglers:</b> a node is “alive” but very slow (failing disk, overheating). Speculative execution runs a backup copy of its slow task.</li>
+        <li><b>Network partitions:</b> nodes are alive but can't reach the master. The master must decide whether to treat them as dead, which is why timeouts are not too short.</li>
+        <li><b>Master failure and split-brain:</b> with two NameNodes, they must never both act as active. HDFS HA uses ZooKeeper and <b>fencing</b> to guarantee only one is active.</li>
+        <li><b>Human error:</b> a wrong <code>rm -r</code> on HDFS is copied to all replicas instantly. Replication is not backup: use HDFS trash, snapshots and copies in another cluster.</li>
+      </ul>
+
+    </div>
+  </div>
+  <div class="callout callout--exam"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19V5a2 2 0 0 1 2-2h12v18H6a2 2 0 0 1-2-2zm0 0a2 2 0 0 1 2-2h12"/></svg><p><b>Exam tip:</b> Explain <b>“failure is the norm, not the exception”</b> with the formula <i>expected failures = devices × failure rate</i> and a worked number. Then list Hadoop's fault-tolerance mechanisms: <b>replication (3, rack-aware)</b>, <b>heartbeats</b>, <b>re-replication</b>, <b>task re-execution</b>, <b>checksums</b>, <b>NameNode HA</b>.</p></div>
+</section>
+
+<!-- ======================= PART 3: TYPES AND WAYS TO USE IT ======================= -->
+<section class="part" id="types">
+  <span class="part-label"><b>3</b> Types and ways to use it</span>
+  <h2>What fails, and how Hadoop survives it</h2>
+  <div class="table-wrap">
+  <table class="compare" style="min-width:620px">
+    <thead><tr><th>Failure</th><th>How often (big cluster)</th><th>Hadoop's answer</th></tr></thead>
+    <tbody>
+      <tr><td><b>One disk</b></td><td>Weekly or daily</td><td>Other replicas are read; the DataNode reports the lost blocks; NameNode re-replicates. The node can keep running on its other disks if configured to tolerate failed volumes.</td></tr>
+      <tr><td><b>Whole node</b> (power supply, motherboard, OS crash)</td><td>Weekly to monthly</td><td>Heartbeats stop → dead after timeout → re-replicate all its blocks; YARN re-runs its tasks.</td></tr>
+      <tr><td><b>Whole rack</b> (ToR switch, power strip)</td><td>A few times a year</td><td>Rack-aware placement: every block has a copy on another rack, so data stays available.</td></tr>
+      <tr><td><b>Corrupt data</b> (bad sectors, bit flips)</td><td>Occasional</td><td>Checksums on every read and a background block scanner; corrupt replica replaced from a good one.</td></tr>
+      <tr><td><b>Slow node</b> (straggler)</td><td>Common</td><td>Speculative execution runs a backup task; the faster copy wins.</td></tr>
+      <tr><td><b>Task bug or out of memory</b></td><td>Common</td><td>Task retried (up to 4 attempts by default); then the job fails with a clear error.</td></tr>
+      <tr><td><b>Master (NameNode) failure</b></td><td>Rare, but serious</td><td>High Availability: standby NameNode takes over automatically.</td></tr>
+      <tr><td><b>Whole data centre</b> (flood, fire, power)</td><td>Very rare</td><td>Not handled by one cluster. A second cluster in another city, kept in sync with DistCp (Module 12).</td></tr>
+      <tr><td><b>Human mistake</b> (deleting data)</td><td>Happens!</td><td>HDFS trash, snapshots, backups. Replication alone copies the mistake.</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <h3>Four ways to tolerate faults</h3>
+  <div class="cards">
+    <div class="card"><h4>Redundancy</h4><p>Keep extra copies of data (replicas or erasure-coded parity) and extra machines (standby masters, spare nodes).</p><span class="tag">Data survives</span></div>
+    <div class="card"><h4>Detection</h4><p>Heartbeats, timeouts, checksums and block reports find failures quickly and automatically.</p><span class="tag">Notice fast</span></div>
+    <div class="card"><h4>Recovery</h4><p>Re-replicate lost blocks, re-run lost tasks, fail over to a standby master, without a human.</p><span class="tag">Self-healing</span></div>
+    <div class="card"><h4>Isolation</h4><p>Spread copies across failure domains (nodes, racks, data centres) so one event can't hit them all.</p><span class="tag">Limit blast radius</span></div>
+  </div>
+  <div class="callout callout--warn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3 2 21h20L12 3z"/><path d="M12 10v5M12 18v.5"/></svg><p><b>Replication is not a backup.</b> If someone deletes a file or a buggy job overwrites good data, HDFS faithfully applies that change to all three copies. Protect important data with trash, snapshots and a copy in another cluster.</p></div>
+</section>
+
+<!-- ======================= PART 4: STEP BY STEP ======================= -->
+<section class="part" id="steps">
+  <span class="part-label"><b>4</b> Step by step</span>
+  <h2>A disk dies at 3 am: what happens, minute by minute</h2>
+  <ol class="stepper">
+    <li><h4>03:00 · The disk stops responding</h4>
+      <p>One of the 12 disks in <code>dn17</code> fails. The DataNode's reads and writes to that disk return errors.</p>
+      <span class="behind">If the DataNode is set to tolerate a failed volume (<code>dfs.datanode.failed.volumes.tolerated</code>), it keeps running on its other 11 disks. With the default of 0, the whole DataNode shuts down, which is handled like a node failure.</span></li>
+    <li><h4>03:00 · A job was reading from it</h4>
+      <p>A map task was reading block 42 from that disk. The read fails.</p>
+      <span class="behind">The HDFS client simply switches to <b>another replica</b> of block 42 on another node and continues. The task may not even fail.</span></li>
+    <li><h4>03:01 · The NameNode learns what was lost</h4>
+      <p><code>dn17</code> reports the failed volume; its blocks on that disk no longer count.</p>
+      <span class="behind">Every block that had a replica on that disk is now <b>under-replicated</b>: 2 copies instead of 3. The NameNode puts them in its re-replication queue, most endangered first (blocks with only 1 copy left go to the front).</span></li>
+    <li><h4>03:02 → 04:30 · Re-replication</h4>
+      <div class="code" data-lang="python" data-file="rerepl.py"><pre><code>lost_tb = 12                       # one 12 TB disk, full of replicas
+rate_mb = 40 * 50                  # 40 nodes copying at 50 MB/s each
+print(round(lost_tb * 1024**2 / rate_mb / 3600, 1), "hours to restore 3 copies")</code></pre><div class="output">1.7 hours to restore 3 copies</div></div>
+      <span class="behind">Many nodes copy in parallel, each block from a surviving replica to a new node chosen with the rack rules. The NameNode limits how fast this goes so that normal jobs aren't starved.</span></li>
+    <li><h4>Morning · A technician swaps the disk</h4>
+      <p>The ops team gets an alert, replaces the disk, and the DataNode starts using it again (empty).</p>
+      <span class="behind">No data was lost, no job failed, and the replacement is not urgent: the cluster was healthy again within two hours on its own. That is “failures are normal” in practice.</span></li>
+  </ol>
+</section>
+
+<!-- ======================= PART 5: SEE IT HAPPEN ======================= -->
+<section class="part" id="animation">
+  <span class="part-label"><b>5</b> See it happen</span>
+  <h2>A node dies: what Riya sees, and how HDFS heals</h2>
+  <p>A file with 4 blocks is stored on 6 nodes in 2 racks. Node <b>dn2</b> dies. Left: Riya's commands. Right: the replicas.</p>
+  <div class="anim" data-frames="6">
+    <div class="anim__title">Losing a node, keeping the data <span>6 steps</span></div>
+    <div class="anim__views">
+      <div class="view view--see">
+        <span class="view__tag">What you see</span>
+        <svg viewBox="0 0 360 250" role="img" aria-label="Riya's terminal running HDFS commands">
+          <rect x="14" y="14" width="332" height="206" rx="8" class="s-board"/>
+          <text x="26" y="32" font-size="9" class="mono" style="fill:#7F8C86">riya@edge-01 : ~ (output shortened)</text>
+          <g data-on="1">
+            <text x="26" y="56" font-size="9" class="mono" style="fill:#7F8C86">$ hdfs fsck /data/sales.csv</text>
+            <text x="26" y="74" font-size="9" class="mono" style="fill:#9FD3B8">Total blocks (validated): 4</text>
+            <text x="26" y="90" font-size="9" class="mono" style="fill:#9FD3B8">Under-replicated blocks: 0</text>
+            <text x="26" y="106" font-size="9" class="mono" style="fill:#9FD3B8">Status: HEALTHY</text>
+          </g>
+          <g data-on="2">
+            <text x="26" y="56" font-size="9" class="mono" style="fill:#FF8A80">[alert] dn2: no heartbeat</text>
+            <text x="26" y="80" font-size="9" class="mono" style="fill:#7F8C86">$ hdfs dfs -cat /data/sales.csv | head -2</text>
+            <text x="26" y="98" font-size="9" class="mono" style="fill:#9FD3B8">order_id,city,amount</text>
+            <text x="26" y="114" font-size="9" class="mono" style="fill:#9FD3B8">10001,Pune,240</text>
+            <text x="180" y="190" text-anchor="middle" font-size="10" class="s-chalk">The file still reads fine.</text>
+          </g>
+          <g data-on="3">
+            <text x="26" y="56" font-size="9" class="mono" style="fill:#7F8C86">(10 min 30 s later)</text>
+            <text x="26" y="74" font-size="9" class="mono" style="fill:#7F8C86">$ hdfs dfsadmin -report | grep Dead</text>
+            <text x="26" y="92" font-size="9" class="mono" style="fill:#FF8A80">Dead datanodes (1):</text>
+          </g>
+          <g data-on="4">
+            <text x="26" y="56" font-size="9" class="mono" style="fill:#7F8C86">$ hdfs fsck /data/sales.csv</text>
+            <text x="26" y="74" font-size="9" class="mono" style="fill:#9FD3B8">Total blocks (validated): 4</text>
+            <text x="26" y="90" font-size="9" class="mono" style="fill:#F5C77E">Under-replicated blocks: 2</text>
+            <text x="26" y="106" font-size="9" class="mono" style="fill:#9FD3B8">Missing blocks: 0</text>
+            <text x="26" y="122" font-size="9" class="mono" style="fill:#9FD3B8">Status: HEALTHY</text>
+          </g>
+          <g data-on="5">
+            <text x="26" y="56" font-size="9" class="mono" style="fill:#7F8C86">(a few minutes later)</text>
+            <text x="26" y="74" font-size="9" class="mono" style="fill:#7F8C86">$ hdfs fsck /data/sales.csv</text>
+            <text x="26" y="92" font-size="9" class="mono" style="fill:#9FD3B8">Under-replicated blocks: 0</text>
+            <text x="26" y="108" font-size="9" class="mono" style="fill:#9FD3B8">Status: HEALTHY</text>
+          </g>
+          <g data-on="6">
+            <text x="26" y="56" font-size="9" class="mono" style="fill:#7F8C86">(dn2 repaired and restarted)</text>
+            <text x="26" y="74" font-size="9" class="mono" style="fill:#9FD3B8">Over-replicated blocks: 0</text>
+            <text x="26" y="90" font-size="9" class="mono" style="fill:#9FD3B8">Status: HEALTHY</text>
+            <text x="180" y="190" text-anchor="middle" font-size="10" class="s-chalk">Riya never lost a byte.</text>
+          </g>
+          <text x="352" y="244" text-anchor="end" class="s-wm">myphatshala.in</text>
+        </svg>
+        <ol class="caps" hidden>
+          <li><code>hdfs fsck</code> checks the file: 4 blocks, all with 3 copies. <b>HEALTHY</b>.</li>
+          <li>dn2 crashes. An alert fires, but reading the file still works: the client uses other replicas.</li>
+          <li>After about 10.5 minutes without heartbeats, the NameNode lists dn2 as a <b>dead</b> DataNode.</li>
+          <li>fsck now shows 2 <b>under-replicated</b> blocks (they had a copy on dn2), 0 missing. Data is safe, just less protected.</li>
+          <li>Re-replication finishes: every block has 3 copies again. Nobody typed a single repair command.</li>
+          <li>When dn2 comes back, its old copies are extra. HDFS deletes the surplus so each block has exactly 3.</li>
+        </ol>
+      </div>
+
+      <div class="view view--behind">
+        <span class="view__tag">Behind the screen</span>
+        <svg viewBox="0 0 360 250" role="img" aria-label="Six DataNodes in two racks holding replicas of four blocks">
+          <rect x="10" y="14" width="164" height="206" rx="8" class="s-card2"/><text x="92" y="32" text-anchor="middle" font-size="9" font-weight="700" class="s-ink">rack 1</text>
+          <rect x="186" y="14" width="164" height="206" rx="8" class="s-card2"/><text x="268" y="32" text-anchor="middle" font-size="9" font-weight="700" class="s-ink">rack 2</text>
+          <g>
+            <rect x="20" y="42" width="144" height="50" rx="6" class="s-card"/><text x="28" y="56" font-size="8.6" font-weight="700" class="s-ink">dn1</text>
+            <rect x="20" y="100" width="144" height="50" rx="6" class="s-card"/><text x="28" y="114" font-size="8.6" font-weight="700" class="s-ink">dn2</text>
+            <rect x="20" y="158" width="144" height="50" rx="6" class="s-card"/><text x="28" y="172" font-size="8.6" font-weight="700" class="s-ink">dn3</text>
+            <rect x="196" y="42" width="144" height="50" rx="6" class="s-card"/><text x="204" y="56" font-size="8.6" font-weight="700" class="s-ink">dn4</text>
+            <rect x="196" y="100" width="144" height="50" rx="6" class="s-card"/><text x="204" y="114" font-size="8.6" font-weight="700" class="s-ink">dn5</text>
+            <rect x="196" y="158" width="144" height="50" rx="6" class="s-card"/><text x="204" y="172" font-size="8.6" font-weight="700" class="s-ink">dn6</text>
+          </g>
+          <!-- replicas: B1 dn1 dn4 dn5 · B2 dn2 dn4 dn6 · B3 dn2 dn3 dn5 · B4 dn3 dn5 dn6 -->
+          <g font-size="8.6" font-weight="700">
+            <rect x="28" y="64" width="24" height="18" rx="3" style="fill:#E8772E"/><text x="40" y="77" text-anchor="middle" style="fill:#fff">B1</text>
+            <rect x="204" y="64" width="24" height="18" rx="3" style="fill:#E8772E"/><text x="216" y="77" text-anchor="middle" style="fill:#fff">B1</text>
+            <rect x="204" y="122" width="24" height="18" rx="3" style="fill:#E8772E"/><text x="216" y="135" text-anchor="middle" style="fill:#fff">B1</text>
+            <rect x="232" y="64" width="24" height="18" rx="3" style="fill:#2E5AAC"/><text x="244" y="77" text-anchor="middle" style="fill:#fff">B2</text>
+            <rect x="204" y="180" width="24" height="18" rx="3" style="fill:#2E5AAC"/><text x="216" y="193" text-anchor="middle" style="fill:#fff">B2</text>
+            <rect x="28" y="180" width="24" height="18" rx="3" style="fill:#2F7D5B"/><text x="40" y="193" text-anchor="middle" style="fill:#fff">B3</text>
+            <rect x="232" y="122" width="24" height="18" rx="3" style="fill:#2F7D5B"/><text x="244" y="135" text-anchor="middle" style="fill:#fff">B3</text>
+            <rect x="56" y="180" width="24" height="18" rx="3" style="fill:#8B5CF6"/><text x="68" y="193" text-anchor="middle" style="fill:#fff">B4</text>
+            <rect x="260" y="122" width="24" height="18" rx="3" style="fill:#8B5CF6"/><text x="272" y="135" text-anchor="middle" style="fill:#fff">B4</text>
+            <rect x="232" y="180" width="24" height="18" rx="3" style="fill:#8B5CF6"/><text x="244" y="193" text-anchor="middle" style="fill:#fff">B4</text>
+          </g>
+          <g data-on="1,6" font-size="8.6" font-weight="700">
+            <rect x="28" y="122" width="24" height="18" rx="3" style="fill:#2E5AAC"/><text x="40" y="135" text-anchor="middle" style="fill:#fff">B2</text>
+            <rect x="56" y="122" width="24" height="18" rx="3" style="fill:#2F7D5B"/><text x="68" y="135" text-anchor="middle" style="fill:#fff">B3</text>
+          </g>
+          <g data-on="2-5">
+            <rect x="20" y="100" width="144" height="50" rx="6" style="fill:none;stroke:var(--red);stroke-width:2.5;stroke-dasharray:6 4"/>
+            <text x="92" y="135" text-anchor="middle" font-size="9" font-weight="700" class="s-red">✕ dn2 down</text>
+          </g>
+          <g data-on="2"><text x="156" y="114" text-anchor="end" font-size="8" class="s-acc" font-weight="700">silent…</text></g>
+          <g data-on="3"><text x="156" y="114" text-anchor="end" font-size="8" class="s-red" font-weight="700">DEAD</text></g>
+          <g data-on="4">
+            <path d="M216 180C160 130 110 96 82 76" class="s-line" style="fill:none;stroke:var(--green);stroke-width:2;stroke-dasharray:5 3"/><path d="M270 140v38" class="s-line" style="fill:none;stroke:var(--green);stroke-width:2;stroke-dasharray:5 3"/>
+            <text x="180" y="236" text-anchor="middle" font-size="9" class="s-acc" font-weight="700">B2 and B3 have only 2 copies: copying…</text>
+          </g>
+          <g data-on="5-" font-size="8.6" font-weight="700">
+            <rect x="56" y="64" width="24" height="18" rx="3" style="fill:#2E5AAC;stroke:#fff;stroke-width:1.5"/><text x="68" y="77" text-anchor="middle" style="fill:#fff">B2</text>
+            <rect x="260" y="180" width="24" height="18" rx="3" style="fill:#2F7D5B;stroke:#fff;stroke-width:1.5"/><text x="272" y="193" text-anchor="middle" style="fill:#fff">B3</text>
+          </g>
+          <g data-on="5"><text x="180" y="236" text-anchor="middle" font-size="9" class="s-green" font-weight="700">new copies on dn1 and dn6: 3 each again</text></g>
+          <g data-on="6"><text x="180" y="236" text-anchor="middle" font-size="9" class="s-ink2">dn2 back: 4 copies of B2, B3 → NameNode deletes extras</text></g>
+          <g data-on="1"><text x="180" y="236" text-anchor="middle" font-size="9" class="s-ink2">each block: 3 copies, on both racks</text></g>
+          <text x="352" y="246" text-anchor="end" class="s-wm">myphatshala.in</text>
+        </svg>
+        <ol class="caps" hidden>
+          <li>Four blocks, three replicas each, spread over 6 nodes and <b>both racks</b>. dn2 holds copies of B2 and B3.</li>
+          <li>dn2 crashes. Its copies of B2 and B3 are unreachable, but each block still has 2 other copies, so reads continue.</li>
+          <li>The NameNode waits for the timeout, then marks dn2 <b>dead</b> and stops counting its replicas.</li>
+          <li>B2 and B3 are <b>under-replicated</b> (2 of 3). The NameNode asks surviving holders to copy them to other nodes.</li>
+          <li>New replicas land on dn1 (B2) and dn6 (B3), keeping copies on both racks. Every block is back to 3.</li>
+          <li>When dn2 returns with its old copies, those blocks have 4 replicas; the NameNode removes the extra ones.</li>
+        </ol>
+      </div>
+    </div>
+  </div>
+
+  <h3 id="playground">Try it yourself: break the cluster on purpose</h3>
+  <p>Every block here has 3 copies on 2 racks. Find out how much you can break before data is lost.</p>
+  <div class="csim"><script type="application/json">{"title": "How much can you break?", "intro": "<p>A 1 GB file is stored with 3 replicas on 2 racks. Click nodes to stop them, use <b>⏩ Skip to timeout<\/b> to jump past the 10.5-minute wait, and run <b>hdfs fsck /<\/b> to check the file system.<\/p>", "racks": 2, "nodes": 3, "features": ["fail", "chaos", "fsck", "job"], "preload": [{"name": "irctc_bookings.log", "sizeMB": 1024}], "try": [{"text": "Stop one DataNode, then skip to the timeout. Watch the green “copy” packets re-replicate its blocks.", "on": "rereplicated"}, {"text": "Press <b>Reset<\/b>. Now stop <b>all three nodes of rack 1<\/b>, skip to the timeout and run <b>hdfs fsck /<\/b>. Under-replicated, yes, but is any block missing? (Rack awareness at work.)", "on": "fsck"}, {"text": "Press <b>Reset<\/b> again. Quickly stop all of rack 1 <b>and<\/b> one node of rack 2, then skip to the timeout. Now some blocks are <b>MISSING<\/b>.", "on": "block-missing"}, {"text": "With a block missing, run the job. It fails with <code>BlockMissingException<\/code>. Start a node again to bring the data back.", "on": "job-failed"}]}</script></div>
+</section>
+
+<!-- ======================= PART 6: REAL-WORLD USE ======================= -->
+<section class="part" id="real-world">
+  <span class="part-label"><b>6</b> Real-world use</span>
+  <h2>Living with failure every day</h2>
+
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="20" y="20" width="80" height="50" rx="6" class="s-board"/><circle cx="44" cy="45" r="14" style="fill:none;stroke:#9FD3B8;stroke-width:3"/><circle cx="44" cy="45" r="3" style="fill:#9FD3B8"/><path d="M70 36h20M70 46h20M70 56h14" style="stroke:#FF8A80;stroke-width:3"/></svg></div>
+    <div><h4>1. Disk replacement as routine work</h4>
+      <p>Large companies replace failed disks every day as a normal ticket. The cluster has already re-copied the data, so the swap can wait for the next working day.</p>
+      <div class="uc-flow"><span>Disk fails</span><i>→</i><span class="java">HDFS re-replicates</span><i>→</i><span>Swap tomorrow</span></div></div>
+  </div>
+
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="16" y="16" width="40" height="58" rx="5" class="s-soft-acc" style="stroke:#D64545"/><rect x="64" y="16" width="40" height="58" rx="5" class="s-soft-green" style="stroke:var(--green)"/><text x="36" y="50" text-anchor="middle" font-size="9" font-weight="700" class="s-red">✕</text><text x="84" y="50" text-anchor="middle" font-size="9" font-weight="700" class="s-green">✓</text></svg></div>
+    <div><h4>2. A rack goes dark during maintenance</h4>
+      <p>An electrician switches off the wrong power strip and a whole rack goes down. With rack-aware placement every block still has a copy on another rack: jobs slow a little, nothing is lost.</p>
+      <div class="uc-flow"><span>Rack offline</span><i>→</i><span class="java">Copies on other racks</span><i>→</i><span>Jobs continue</span></div></div>
+  </div>
+
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="18" y="22" width="84" height="46" rx="6" class="s-card2"/><text x="60" y="42" text-anchor="middle" font-size="9" font-weight="700" class="s-ink mono">CRC ✓ ✓ ✕</text><text x="60" y="58" text-anchor="middle" font-size="8.6" class="s-red">corrupt replica</text></svg></div>
+    <div><h4>3. Silent corruption caught by checksums</h4>
+      <p>A worn disk returns a few wrong bytes without any error. The checksum check on read catches it; the client reads a good replica, reports the bad one, and HDFS replaces it. Without checksums, wrong numbers could reach a bank report.</p>
+      <div class="uc-flow"><span>Bad bytes</span><i>→</i><span class="java">Checksum mismatch</span><i>→</i><span>Good replica used</span></div></div>
+  </div>
+
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><path d="M14 66h92" class="s-line"/><rect x="18" y="30" width="20" height="36" rx="3" class="s-green"/><rect x="42" y="30" width="20" height="36" rx="3" class="s-green"/><rect x="66" y="30" width="20" height="36" rx="3" class="s-green"/><rect x="90" y="14" width="20" height="52" rx="3" style="fill:#E0A100"/></svg></div>
+    <div><h4>4. The straggler that delays the report</h4>
+      <p>A node with a dying disk runs tasks five times slower. Speculative execution starts a copy of its slow task elsewhere, and the report finishes on time. The monitoring team then removes the node for repair.</p>
+      <div class="uc-flow"><span>Slow task</span><i>→</i><span class="java">Backup attempt</span><i>→</i><span>First one wins</span></div></div>
+  </div>
+
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="10" y="28" width="40" height="34" rx="5" class="s-board"/><rect x="70" y="28" width="40" height="34" rx="5" class="s-board"/><path d="M50 45h20" style="stroke:var(--track);stroke-width:3;stroke-dasharray:4 3"/><text x="30" y="80" text-anchor="middle" font-size="8.6" class="s-ink">Mumbai</text><text x="90" y="80" text-anchor="middle" font-size="8.6" class="s-ink">Chennai</text></svg></div>
+    <div><h4>5. A whole site down: disaster recovery</h4>
+      <p>Regulated businesses such as banks and stock exchanges keep a disaster-recovery site in another city. Important HDFS data is copied there regularly, so if the main data centre is lost, work moves to the DR cluster.</p>
+      <div class="uc-flow"><span>Main DC</span><i>→</i><span class="java">Scheduled copies</span><i>→</i><span>DR cluster ready</span></div></div>
+  </div>
+  <p class="muted">Examples are simplified. Exact procedures differ between companies.</p>
+</section>
+
+
+<div class="ad-slot" data-slot="mid"></div>
+
+<section class="part" id="run">
+  <span class="part-label"><b>7</b> Run the code</span>
+  <h2>The arithmetic of failure</h2>
+  <p>How many failures should a cluster expect? Multiply the number of devices by the yearly failure rate. Run it, then try the challenges, including the chance that every copy of a block is lost.</p>
+  <div class="code" data-lang="python" data-file="main.py"><pre><code>afr = {&quot;disk&quot;: 0.015, &quot;node&quot;: 0.04, &quot;rack switch&quot;: 0.02}
+count = {&quot;disk&quot;: 3000, &quot;node&quot;: 250, &quot;rack switch&quot;: 10}
+
+for part in afr:
+    per_year = count[part] * afr[part]
+    print(f&quot;{part:12}: {per_year:5.1f} failures a year &quot;
+          f&quot;(one every {365 / per_year:.0f} days)&quot;)</code></pre><div class="output">disk        :  45.0 failures a year (one every 8 days)
+node        :  10.0 failures a year (one every 36 days)
+rack switch :   0.2 failures a year (one every 1825 days)</div></div>
+  <ul class="anno"><li><code>afr = {&quot;disk&quot;: 0.015, ...}</code><span>Annualised failure rates (illustrative): 1.5% of disks, 4% of whole nodes, 2% of rack switches fail in a year.</span></li><li><code>per_year = count[part] * afr[part]</code><span>Expected failures = devices × rate. 3,000 × 0.015 = 45.</span></li><li><code>365 / per_year</code><span>The average gap between failures in days.</span></li></ul>
+  <div class="runner">
+    <script type="application/json">{
+ "lang": "python",
+ "file": "main.py",
+ "tasks": [
+  {
+   "label": "1 · Failures per year",
+   "hint": "Press <b>Run<\/b>. Then make the cluster 10 times bigger. How often does a disk fail now?",
+   "code": "afr = {\"disk\": 0.015, \"node\": 0.04, \"rack switch\": 0.02}\ncount = {\"disk\": 3000, \"node\": 250, \"rack switch\": 10}\n\nfor part in afr:\n    per_year = count[part] * afr[part]\n    print(f\"{part:12}: {per_year:5.1f} failures a year \"\n          f\"(one every {365 / per_year:.0f} days)\")\n"
+  },
+  {
+   "label": "2 · At least one today",
+   "hint": "<b>Predict first:<\/b> with 10,000 disks, is the chance that at least one fails <i>today<\/i> closer to 4%, 34% or 98%?",
+   "code": "p_day = 0.015 / 365          # one disk failing on a given day\nfor n in [100, 1000, 10000]:\n    p_any = 1 - (1 - p_day) ** n\n    print(f\"{n:>6} disks: {p_any:.0%} chance of at least one failure today\")\n"
+  },
+  {
+   "label": "3 · All copies lost?",
+   "hint": "Chance that all copies of one block are on nodes that are down at the same moment, if 0.1% of nodes are down at any time. Compare 1, 2 and 3 copies.",
+   "code": "down = 0.001           # 0.1% of nodes are down at any moment\nfor copies in [1, 2, 3]:\n    p = down ** copies\n    print(f\"{copies} copies: 1 in {1 / p:,.0f}\")\n"
+  },
+  {
+   "label": "4 · Retries",
+   "hint": "A task fails 10% of the time because of a bad node. Hadoop tries up to 4 times. What is the chance the task finally fails? Try a 30% failure rate.",
+   "code": "p_fail = 0.10\nfor attempts in [1, 2, 3, 4]:\n    print(attempts, \"attempt(s): job fails with probability\", f\"{p_fail ** attempts:.4%}\")\n"
+  },
+  {
+   "label": "5 · Is any block on one rack only?",
+   "hint": "This checks a placement for blocks whose copies are all on the same rack. Move one copy of B3 to rack r2 and run again.",
+   "code": "rack_of = {\"dn1\": \"r1\", \"dn2\": \"r1\", \"dn3\": \"r1\", \"dn4\": \"r2\", \"dn5\": \"r2\"}\nblocks = {\"B1\": [\"dn1\", \"dn4\", \"dn5\"], \"B2\": [\"dn2\", \"dn4\", \"dn1\"], \"B3\": [\"dn1\", \"dn2\", \"dn3\"]}\n\nfor b, nodes in blocks.items():\n    racks = {rack_of[n] for n in nodes}\n    status = \"OK\" if len(racks) >= 2 else \"DANGER: one rack only\"\n    print(b, sorted(racks), status)\n"
+  }
+ ]
+}</script>
+  </div>
+  <h3 id="pc">Run it on your PC: five years of failures, simulated</h3>
+  <p>This Monte Carlo simulation places 20,000 blocks on 200 nodes with 1, 2 or 3 copies, then lets nodes fail at random for five simulated years. A failed node is repaired within a day. Each “block-loss event” is a day on which every copy of some block was on a dead node. Save it as <code>loss_sim.py</code> and run it.</p>
+  <div class="pcrun"><h4>Why HDFS keeps three copies</h4>
+  <div class="code" data-lang="bash" data-file="loss_sim.py"><pre><code># loss_sim.py: how likely is data loss with 1, 2 or 3 copies? (a Monte Carlo simulation)
+import random
+
+random.seed(42)
+NODES, BLOCKS = 200, 20_000
+AFR = 0.04            # chance that a node fails in one year (disk, power supply, board …)
+REPAIR_DAYS = 1       # time to re-copy a dead node&#x27;s blocks
+YEARS = 5
+
+def lost_blocks(copies):
+    placement = [random.sample(range(NODES), copies) for _ in range(BLOCKS)]
+    lost = 0
+    for day in range(365 * YEARS):
+        # which nodes are down today (failed within the last REPAIR_DAYS)?
+        down = {n for n in range(NODES) if random.random() &lt; AFR / 365 * REPAIR_DAYS}
+        if len(down) &lt; copies:
+            continue
+        for p in placement:
+            if all(n in down for n in p):
+                lost += 1
+    return lost
+
+for c in [1, 2, 3]:
+    print(f&quot;{c} cop{&#x27;y&#x27; if c == 1 else &#x27;ies&#x27;}: {lost_blocks(c):&gt;6} block-loss events in {YEARS} years&quot;)
+
+# In a terminal:  python loss_sim.py</code></pre><div class="output">1 copy:   4850 block-loss events in 5 years
+2 copies:      4 block-loss events in 5 years
+3 copies:      0 block-loss events in 5 years</div></div>
+  <p class="muted">Recorded with <code>random.seed(42)</code>, so you will get the same numbers. Change the seed or the failure rate and run again: one copy always loses data, two copies sometimes do, three almost never. This model is simplified (it ignores racks and whole-rack failures), which is exactly why real HDFS also spreads copies over racks.</p></div>
+</section>
+
+<section class="part" id="tracer">
+  <span class="part-label"><b>8</b> Line by line</span>
+  <h2>Re-replication planning, one line at a time</h2>
+  <p>A node has died. Watch the NameNode-style loop count the surviving copies of each block and decide how many new copies to make.</p>
+  <div class="tracer">
+    <script type="application/json">{
+ "lang": "python",
+ "code": [
+  "target = 3",
+  "replicas = {\"B1\": [\"dn1\", \"dn4\", \"dn5\"], \"B2\": [\"dn2\", \"dn4\", \"dn6\"], \"B3\": [\"dn2\", \"dn3\", \"dn5\"]}",
+  "dead = \"dn2\"",
+  "",
+  "to_copy = {}",
+  "for block, nodes in replicas.items():",
+  "    alive = [n for n in nodes if n != dead]",
+  "    if len(alive) < target:",
+  "        to_copy[block] = target - len(alive)",
+  "print(\"New copies needed:\", to_copy)"
+ ],
+ "steps": [
+  {
+   "line": 1,
+   "phase": "Python",
+   "note": "<code>target<\/code> is created: 3.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "target",
+       "3"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "target"
+  },
+  {
+   "line": 2,
+   "phase": "Python",
+   "note": "<code>replicas<\/code> is created: → dict #1. A new dict object (#1) is created: {&#x27;B1&#x27;: → list #2, &#x27;B2&#x27;: → list #3, &#x27;B3&#x27;: → list #4} A new list object (#2) is created: [&#x27;dn1&#x27;, &#x27;dn4&#x27;, &#x27;dn5&#x27;] A new list object (#3) is created: [&#x27;dn2&#x27;, &#x27;dn4&#x27;, &#x27;dn6&#x27;] A new list object (#4) is created: [&#x27;dn2&#x27;, &#x27;dn3&#x27;, &#x27;dn5&#x27;]",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "target",
+       "3"
+      ],
+      [
+       "replicas",
+       "→ dict #1"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;B1&#x27;: → list #2, &#x27;B2&#x27;: → list #3, &#x27;B3&#x27;: → list #4}",
+    "<b>#2 list (3)<\/b> [&#x27;dn1&#x27;, &#x27;dn4&#x27;, &#x27;dn5&#x27;]",
+    "<b>#3 list (3)<\/b> [&#x27;dn2&#x27;, &#x27;dn4&#x27;, &#x27;dn6&#x27;]",
+    "<b>#4 list (3)<\/b> [&#x27;dn2&#x27;, &#x27;dn3&#x27;, &#x27;dn5&#x27;]"
+   ],
+   "newVar": "replicas"
+  },
+  {
+   "line": 3,
+   "phase": "Failure",
+   "note": "dn2 has just been declared dead. <code>dead<\/code> is created: &#x27;dn2&#x27;.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "target",
+       "3"
+      ],
+      [
+       "replicas",
+       "→ dict #1"
+      ],
+      [
+       "dead",
+       "'dn2'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;B1&#x27;: → list #2, &#x27;B2&#x27;: → list #3, &#x27;B3&#x27;: → list #4}",
+    "<b>#2 list (3)<\/b> [&#x27;dn1&#x27;, &#x27;dn4&#x27;, &#x27;dn5&#x27;]",
+    "<b>#3 list (3)<\/b> [&#x27;dn2&#x27;, &#x27;dn4&#x27;, &#x27;dn6&#x27;]",
+    "<b>#4 list (3)<\/b> [&#x27;dn2&#x27;, &#x27;dn3&#x27;, &#x27;dn5&#x27;]"
+   ],
+   "newVar": "dead"
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "<code>to_copy<\/code> is created: → dict #5. A new dict object (#5) is created: {}",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "target",
+       "3"
+      ],
+      [
+       "replicas",
+       "→ dict #1"
+      ],
+      [
+       "dead",
+       "'dn2'"
+      ],
+      [
+       "to_copy",
+       "→ dict #5"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;B1&#x27;: → list #2, &#x27;B2&#x27;: → list #3, &#x27;B3&#x27;: → list #4}",
+    "<b>#2 list (3)<\/b> [&#x27;dn1&#x27;, &#x27;dn4&#x27;, &#x27;dn5&#x27;]",
+    "<b>#3 list (3)<\/b> [&#x27;dn2&#x27;, &#x27;dn4&#x27;, &#x27;dn6&#x27;]",
+    "<b>#4 list (3)<\/b> [&#x27;dn2&#x27;, &#x27;dn3&#x27;, &#x27;dn5&#x27;]",
+    "<b>#5 dict (0)<\/b> {}"
+   ],
+   "newVar": "to_copy"
+  },
+  {
+   "line": 6,
+   "phase": "Python",
+   "note": "<code>block<\/code> is created: &#x27;B1&#x27;. <code>nodes<\/code> is created: → list #2.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "target",
+       "3"
+      ],
+      [
+       "replicas",
+       "→ dict #1"
+      ],
+      [
+       "dead",
+       "'dn2'"
+      ],
+      [
+       "to_copy",
+       "→ dict #5"
+      ],
+      [
+       "block",
+       "'B1'"
+      ],
+      [
+       "nodes",
+       "→ list #2"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;B1&#x27;: → list #2, &#x27;B2&#x27;: → list #3, &#x27;B3&#x27;: → list #4}",
+    "<b>#2 list (3)<\/b> [&#x27;dn1&#x27;, &#x27;dn4&#x27;, &#x27;dn5&#x27;]",
+    "<b>#3 list (3)<\/b> [&#x27;dn2&#x27;, &#x27;dn4&#x27;, &#x27;dn6&#x27;]",
+    "<b>#4 list (3)<\/b> [&#x27;dn2&#x27;, &#x27;dn3&#x27;, &#x27;dn5&#x27;]",
+    "<b>#5 dict (0)<\/b> {}"
+   ],
+   "newVar": "nodes"
+  },
+  {
+   "line": 7,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "target",
+       "3"
+      ],
+      [
+       "replicas",
+       "→ dict #1"
+      ],
+      [
+       "dead",
+       "'dn2'"
+      ],
+      [
+       "to_copy",
+       "→ dict #5"
+      ],
+      [
+       "block",
+       "'B1'"
+      ],
+      [
+       "nodes",
+       "→ list #2"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;B1&#x27;: → list #2, &#x27;B2&#x27;: → list #3, &#x27;B3&#x27;: → list #4}",
+    "<b>#2 list (3)<\/b> [&#x27;dn1&#x27;, &#x27;dn4&#x27;, &#x27;dn5&#x27;]",
+    "<b>#3 list (3)<\/b> [&#x27;dn2&#x27;, &#x27;dn4&#x27;, &#x27;dn6&#x27;]",
+    "<b>#4 list (3)<\/b> [&#x27;dn2&#x27;, &#x27;dn3&#x27;, &#x27;dn5&#x27;]",
+    "<b>#5 dict (0)<\/b> {}"
+   ]
+  },
+  {
+   "line": 7,
+   "phase": "B2",
+   "note": "One of its three replicas was on dn2.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "target",
+       "3"
+      ],
+      [
+       "replicas",
+       "→ dict #1"
+      ],
+      [
+       "dead",
+       "'dn2'"
+      ],
+      [
+       "to_copy",
+       "→ dict #5"
+      ],
+      [
+       "block",
+       "'B1'"
+      ],
+      [
+       "nodes",
+       "→ list #2"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;B1&#x27;: → list #2, &#x27;B2&#x27;: → list #3, &#x27;B3&#x27;: → list #4}",
+    "<b>#2 list (3)<\/b> [&#x27;dn1&#x27;, &#x27;dn4&#x27;, &#x27;dn5&#x27;]",
+    "<b>#3 list (3)<\/b> [&#x27;dn2&#x27;, &#x27;dn4&#x27;, &#x27;dn6&#x27;]",
+    "<b>#4 list (3)<\/b> [&#x27;dn2&#x27;, &#x27;dn3&#x27;, &#x27;dn5&#x27;]",
+    "<b>#5 dict (0)<\/b> {}"
+   ]
+  },
+  {
+   "line": 7,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "target",
+       "3"
+      ],
+      [
+       "replicas",
+       "→ dict #1"
+      ],
+      [
+       "dead",
+       "'dn2'"
+      ],
+      [
+       "to_copy",
+       "→ dict #5"
+      ],
+      [
+       "block",
+       "'B1'"
+      ],
+      [
+       "nodes",
+       "→ list #2"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;B1&#x27;: → list #2, &#x27;B2&#x27;: → list #3, &#x27;B3&#x27;: → list #4}",
+    "<b>#2 list (3)<\/b> [&#x27;dn1&#x27;, &#x27;dn4&#x27;, &#x27;dn5&#x27;]",
+    "<b>#3 list (3)<\/b> [&#x27;dn2&#x27;, &#x27;dn4&#x27;, &#x27;dn6&#x27;]",
+    "<b>#4 list (3)<\/b> [&#x27;dn2&#x27;, &#x27;dn3&#x27;, &#x27;dn5&#x27;]",
+    "<b>#5 dict (0)<\/b> {}"
+   ]
+  },
+  {
+   "line": 7,
+   "phase": "Python",
+   "note": "<code>alive<\/code> is created: → list #6. A new list object (#6) is created: [&#x27;dn1&#x27;, &#x27;dn4&#x27;, &#x27;dn5&#x27;]",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "target",
+       "3"
+      ],
+      [
+       "replicas",
+       "→ dict #1"
+      ],
+      [
+       "dead",
+       "'dn2'"
+      ],
+      [
+       "to_copy",
+       "→ dict #5"
+      ],
+      [
+       "block",
+       "'B1'"
+      ],
+      [
+       "nodes",
+       "→ list #2"
+      ],
+      [
+       "alive",
+       "→ list #6"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;B1&#x27;: → list #2, &#x27;B2&#x27;: → list #3, &#x27;B3&#x27;: → list #4}",
+    "<b>#2 list (3)<\/b> [&#x27;dn1&#x27;, &#x27;dn4&#x27;, &#x27;dn5&#x27;]",
+    "<b>#3 list (3)<\/b> [&#x27;dn2&#x27;, &#x27;dn4&#x27;, &#x27;dn6&#x27;]",
+    "<b>#4 list (3)<\/b> [&#x27;dn2&#x27;, &#x27;dn3&#x27;, &#x27;dn5&#x27;]",
+    "<b>#5 dict (0)<\/b> {}",
+    "<b>#6 list (3)<\/b> [&#x27;dn1&#x27;, &#x27;dn4&#x27;, &#x27;dn5&#x27;]"
+   ],
+   "newVar": "alive"
+  },
+  {
+   "line": 8,
+   "phase": "Python",
+   "note": "The condition is <b>False<\/b>, so the indented block is skipped.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "target",
+       "3"
+      ],
+      [
+       "replicas",
+       "→ dict #1"
+      ],
+      [
+       "dead",
+       "'dn2'"
+      ],
+      [
+       "to_copy",
+       "→ dict #5"
+      ],
+      [
+       "block",
+       "'B1'"
+      ],
+      [
+       "nodes",
+       "→ list #2"
+      ],
+      [
+       "alive",
+       "→ list #6"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;B1&#x27;: → list #2, &#x27;B2&#x27;: → list #3, &#x27;B3&#x27;: → list #4}",
+    "<b>#2 list (3)<\/b> [&#x27;dn1&#x27;, &#x27;dn4&#x27;, &#x27;dn5&#x27;]",
+    "<b>#3 list (3)<\/b> [&#x27;dn2&#x27;, &#x27;dn4&#x27;, &#x27;dn6&#x27;]",
+    "<b>#4 list (3)<\/b> [&#x27;dn2&#x27;, &#x27;dn3&#x27;, &#x27;dn5&#x27;]",
+    "<b>#5 dict (0)<\/b> {}",
+    "<b>#6 list (3)<\/b> [&#x27;dn1&#x27;, &#x27;dn4&#x27;, &#x27;dn5&#x27;]"
+   ]
+  },
+  {
+   "line": 6,
+   "phase": "Python",
+   "note": "<code>block<\/code> changes to &#x27;B2&#x27;. <code>nodes<\/code> changes to → list #3.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "target",
+       "3"
+      ],
+      [
+       "replicas",
+       "→ dict #1"
+      ],
+      [
+       "dead",
+       "'dn2'"
+      ],
+      [
+       "to_copy",
+       "→ dict #5"
+      ],
+      [
+       "block",
+       "'B2'"
+      ],
+      [
+       "nodes",
+       "→ list #3"
+      ],
+      [
+       "alive",
+       "→ list #6"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;B1&#x27;: → list #2, &#x27;B2&#x27;: → list #3, &#x27;B3&#x27;: → list #4}",
+    "<b>#2 list (3)<\/b> [&#x27;dn1&#x27;, &#x27;dn4&#x27;, &#x27;dn5&#x27;]",
+    "<b>#3 list (3)<\/b> [&#x27;dn2&#x27;, &#x27;dn4&#x27;, &#x27;dn6&#x27;]",
+    "<b>#4 list (3)<\/b> [&#x27;dn2&#x27;, &#x27;dn3&#x27;, &#x27;dn5&#x27;]",
+    "<b>#5 dict (0)<\/b> {}",
+    "<b>#6 list (3)<\/b> [&#x27;dn1&#x27;, &#x27;dn4&#x27;, &#x27;dn5&#x27;]"
+   ],
+   "newVar": "nodes"
+  },
+  {
+   "line": 7,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "target",
+       "3"
+      ],
+      [
+       "replicas",
+       "→ dict #1"
+      ],
+      [
+       "dead",
+       "'dn2'"
+      ],
+      [
+       "to_copy",
+       "→ dict #5"
+      ],
+      [
+       "block",
+       "'B2'"
+      ],
+      [
+       "nodes",
+       "→ list #3"
+      ],
+      [
+       "alive",
+       "→ list #6"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;B1&#x27;: → list #2, &#x27;B2&#x27;: → list #3, &#x27;B3&#x27;: → list #4}",
+    "<b>#2 list (3)<\/b> [&#x27;dn1&#x27;, &#x27;dn4&#x27;, &#x27;dn5&#x27;]",
+    "<b>#3 list (3)<\/b> [&#x27;dn2&#x27;, &#x27;dn4&#x27;, &#x27;dn6&#x27;]",
+    "<b>#4 list (3)<\/b> [&#x27;dn2&#x27;, &#x27;dn3&#x27;, &#x27;dn5&#x27;]",
+    "<b>#5 dict (0)<\/b> {}",
+    "<b>#6 list (3)<\/b> [&#x27;dn1&#x27;, &#x27;dn4&#x27;, &#x27;dn5&#x27;]"
+   ]
+  },
+  {
+   "line": 7,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "target",
+       "3"
+      ],
+      [
+       "replicas",
+       "→ dict #1"
+      ],
+      [
+       "dead",
+       "'dn2'"
+      ],
+      [
+       "to_copy",
+       "→ dict #5"
+      ],
+      [
+       "block",
+       "'B2'"
+      ],
+      [
+       "nodes",
+       "→ list #3"
+      ],
+      [
+       "alive",
+       "→ list #6"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;B1&#x27;: → list #2, &#x27;B2&#x27;: → list #3, &#x27;B3&#x27;: → list #4}",
+    "<b>#2 list (3)<\/b> [&#x27;dn1&#x27;, &#x27;dn4&#x27;, &#x27;dn5&#x27;]",
+    "<b>#3 list (3)<\/b> [&#x27;dn2&#x27;, &#x27;dn4&#x27;, &#x27;dn6&#x27;]",
+    "<b>#4 list (3)<\/b> [&#x27;dn2&#x27;, &#x27;dn3&#x27;, &#x27;dn5&#x27;]",
+    "<b>#5 dict (0)<\/b> {}",
+    "<b>#6 list (3)<\/b> [&#x27;dn1&#x27;, &#x27;dn4&#x27;, &#x27;dn5&#x27;]"
+   ]
+  },
+  {
+   "line": 7,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "target",
+       "3"
+      ],
+      [
+       "replicas",
+       "→ dict #1"
+      ],
+      [
+       "dead",
+       "'dn2'"
+      ],
+      [
+       "to_copy",
+       "→ dict #5"
+      ],
+      [
+       "block",
+       "'B2'"
+      ],
+      [
+       "nodes",
+       "→ list #3"
+      ],
+      [
+       "alive",
+       "→ list #6"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;B1&#x27;: → list #2, &#x27;B2&#x27;: → list #3, &#x27;B3&#x27;: → list #4}",
+    "<b>#2 list (3)<\/b> [&#x27;dn1&#x27;, &#x27;dn4&#x27;, &#x27;dn5&#x27;]",
+    "<b>#3 list (3)<\/b> [&#x27;dn2&#x27;, &#x27;dn4&#x27;, &#x27;dn6&#x27;]",
+    "<b>#4 list (3)<\/b> [&#x27;dn2&#x27;, &#x27;dn3&#x27;, &#x27;dn5&#x27;]",
+    "<b>#5 dict (0)<\/b> {}",
+    "<b>#6 list (3)<\/b> [&#x27;dn1&#x27;, &#x27;dn4&#x27;, &#x27;dn5&#x27;]"
+   ]
+  },
+  {
+   "line": 7,
+   "phase": "Python",
+   "note": "<code>alive<\/code> changes to → list #7. A new list object (#7) is created: [&#x27;dn4&#x27;, &#x27;dn6&#x27;]",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "target",
+       "3"
+      ],
+      [
+       "replicas",
+       "→ dict #1"
+      ],
+      [
+       "dead",
+       "'dn2'"
+      ],
+      [
+       "to_copy",
+       "→ dict #5"
+      ],
+      [
+       "block",
+       "'B2'"
+      ],
+      [
+       "nodes",
+       "→ list #3"
+      ],
+      [
+       "alive",
+       "→ list #7"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;B1&#x27;: → list #2, &#x27;B2&#x27;: → list #3, &#x27;B3&#x27;: → list #4}",
+    "<b>#2 list (3)<\/b> [&#x27;dn1&#x27;, &#x27;dn4&#x27;, &#x27;dn5&#x27;]",
+    "<b>#3 list (3)<\/b> [&#x27;dn2&#x27;, &#x27;dn4&#x27;, &#x27;dn6&#x27;]",
+    "<b>#4 list (3)<\/b> [&#x27;dn2&#x27;, &#x27;dn3&#x27;, &#x27;dn5&#x27;]",
+    "<b>#5 dict (0)<\/b> {}",
+    "<b>#7 list (2)<\/b> [&#x27;dn4&#x27;, &#x27;dn6&#x27;]"
+   ],
+   "newVar": "alive"
+  },
+  {
+   "line": 8,
+   "phase": "Python",
+   "note": "The condition is <b>True<\/b>, so the indented block runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "target",
+       "3"
+      ],
+      [
+       "replicas",
+       "→ dict #1"
+      ],
+      [
+       "dead",
+       "'dn2'"
+      ],
+      [
+       "to_copy",
+       "→ dict #5"
+      ],
+      [
+       "block",
+       "'B2'"
+      ],
+      [
+       "nodes",
+       "→ list #3"
+      ],
+      [
+       "alive",
+       "→ list #7"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;B1&#x27;: → list #2, &#x27;B2&#x27;: → list #3, &#x27;B3&#x27;: → list #4}",
+    "<b>#2 list (3)<\/b> [&#x27;dn1&#x27;, &#x27;dn4&#x27;, &#x27;dn5&#x27;]",
+    "<b>#3 list (3)<\/b> [&#x27;dn2&#x27;, &#x27;dn4&#x27;, &#x27;dn6&#x27;]",
+    "<b>#4 list (3)<\/b> [&#x27;dn2&#x27;, &#x27;dn3&#x27;, &#x27;dn5&#x27;]",
+    "<b>#5 dict (0)<\/b> {}",
+    "<b>#7 list (2)<\/b> [&#x27;dn4&#x27;, &#x27;dn6&#x27;]"
+   ]
+  },
+  {
+   "line": 9,
+   "phase": "Python",
+   "note": "Object #5 dict now holds {&#x27;B2&#x27;: 1}",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "target",
+       "3"
+      ],
+      [
+       "replicas",
+       "→ dict #1"
+      ],
+      [
+       "dead",
+       "'dn2'"
+      ],
+      [
+       "to_copy",
+       "→ dict #5"
+      ],
+      [
+       "block",
+       "'B2'"
+      ],
+      [
+       "nodes",
+       "→ list #3"
+      ],
+      [
+       "alive",
+       "→ list #7"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;B1&#x27;: → list #2, &#x27;B2&#x27;: → list #3, &#x27;B3&#x27;: → list #4}",
+    "<b>#2 list (3)<\/b> [&#x27;dn1&#x27;, &#x27;dn4&#x27;, &#x27;dn5&#x27;]",
+    "<b>#3 list (3)<\/b> [&#x27;dn2&#x27;, &#x27;dn4&#x27;, &#x27;dn6&#x27;]",
+    "<b>#4 list (3)<\/b> [&#x27;dn2&#x27;, &#x27;dn3&#x27;, &#x27;dn5&#x27;]",
+    "<b>#5 dict (1)<\/b> {&#x27;B2&#x27;: 1}",
+    "<b>#7 list (2)<\/b> [&#x27;dn4&#x27;, &#x27;dn6&#x27;]"
+   ]
+  },
+  {
+   "line": 6,
+   "phase": "Python",
+   "note": "<code>block<\/code> changes to &#x27;B3&#x27;. <code>nodes<\/code> changes to → list #4.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "target",
+       "3"
+      ],
+      [
+       "replicas",
+       "→ dict #1"
+      ],
+      [
+       "dead",
+       "'dn2'"
+      ],
+      [
+       "to_copy",
+       "→ dict #5"
+      ],
+      [
+       "block",
+       "'B3'"
+      ],
+      [
+       "nodes",
+       "→ list #4"
+      ],
+      [
+       "alive",
+       "→ list #7"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;B1&#x27;: → list #2, &#x27;B2&#x27;: → list #3, &#x27;B3&#x27;: → list #4}",
+    "<b>#2 list (3)<\/b> [&#x27;dn1&#x27;, &#x27;dn4&#x27;, &#x27;dn5&#x27;]",
+    "<b>#3 list (3)<\/b> [&#x27;dn2&#x27;, &#x27;dn4&#x27;, &#x27;dn6&#x27;]",
+    "<b>#4 list (3)<\/b> [&#x27;dn2&#x27;, &#x27;dn3&#x27;, &#x27;dn5&#x27;]",
+    "<b>#5 dict (1)<\/b> {&#x27;B2&#x27;: 1}",
+    "<b>#7 list (2)<\/b> [&#x27;dn4&#x27;, &#x27;dn6&#x27;]"
+   ],
+   "newVar": "nodes"
+  },
+  {
+   "line": 7,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "target",
+       "3"
+      ],
+      [
+       "replicas",
+       "→ dict #1"
+      ],
+      [
+       "dead",
+       "'dn2'"
+      ],
+      [
+       "to_copy",
+       "→ dict #5"
+      ],
+      [
+       "block",
+       "'B3'"
+      ],
+      [
+       "nodes",
+       "→ list #4"
+      ],
+      [
+       "alive",
+       "→ list #7"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;B1&#x27;: → list #2, &#x27;B2&#x27;: → list #3, &#x27;B3&#x27;: → list #4}",
+    "<b>#2 list (3)<\/b> [&#x27;dn1&#x27;, &#x27;dn4&#x27;, &#x27;dn5&#x27;]",
+    "<b>#3 list (3)<\/b> [&#x27;dn2&#x27;, &#x27;dn4&#x27;, &#x27;dn6&#x27;]",
+    "<b>#4 list (3)<\/b> [&#x27;dn2&#x27;, &#x27;dn3&#x27;, &#x27;dn5&#x27;]",
+    "<b>#5 dict (1)<\/b> {&#x27;B2&#x27;: 1}",
+    "<b>#7 list (2)<\/b> [&#x27;dn4&#x27;, &#x27;dn6&#x27;]"
+   ]
+  },
+  {
+   "line": 7,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "target",
+       "3"
+      ],
+      [
+       "replicas",
+       "→ dict #1"
+      ],
+      [
+       "dead",
+       "'dn2'"
+      ],
+      [
+       "to_copy",
+       "→ dict #5"
+      ],
+      [
+       "block",
+       "'B3'"
+      ],
+      [
+       "nodes",
+       "→ list #4"
+      ],
+      [
+       "alive",
+       "→ list #7"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;B1&#x27;: → list #2, &#x27;B2&#x27;: → list #3, &#x27;B3&#x27;: → list #4}",
+    "<b>#2 list (3)<\/b> [&#x27;dn1&#x27;, &#x27;dn4&#x27;, &#x27;dn5&#x27;]",
+    "<b>#3 list (3)<\/b> [&#x27;dn2&#x27;, &#x27;dn4&#x27;, &#x27;dn6&#x27;]",
+    "<b>#4 list (3)<\/b> [&#x27;dn2&#x27;, &#x27;dn3&#x27;, &#x27;dn5&#x27;]",
+    "<b>#5 dict (1)<\/b> {&#x27;B2&#x27;: 1}",
+    "<b>#7 list (2)<\/b> [&#x27;dn4&#x27;, &#x27;dn6&#x27;]"
+   ]
+  },
+  {
+   "line": 7,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "target",
+       "3"
+      ],
+      [
+       "replicas",
+       "→ dict #1"
+      ],
+      [
+       "dead",
+       "'dn2'"
+      ],
+      [
+       "to_copy",
+       "→ dict #5"
+      ],
+      [
+       "block",
+       "'B3'"
+      ],
+      [
+       "nodes",
+       "→ list #4"
+      ],
+      [
+       "alive",
+       "→ list #7"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;B1&#x27;: → list #2, &#x27;B2&#x27;: → list #3, &#x27;B3&#x27;: → list #4}",
+    "<b>#2 list (3)<\/b> [&#x27;dn1&#x27;, &#x27;dn4&#x27;, &#x27;dn5&#x27;]",
+    "<b>#3 list (3)<\/b> [&#x27;dn2&#x27;, &#x27;dn4&#x27;, &#x27;dn6&#x27;]",
+    "<b>#4 list (3)<\/b> [&#x27;dn2&#x27;, &#x27;dn3&#x27;, &#x27;dn5&#x27;]",
+    "<b>#5 dict (1)<\/b> {&#x27;B2&#x27;: 1}",
+    "<b>#7 list (2)<\/b> [&#x27;dn4&#x27;, &#x27;dn6&#x27;]"
+   ]
+  },
+  {
+   "line": 7,
+   "phase": "Python",
+   "note": "<code>alive<\/code> changes to → list #8. A new list object (#8) is created: [&#x27;dn3&#x27;, &#x27;dn5&#x27;]",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "target",
+       "3"
+      ],
+      [
+       "replicas",
+       "→ dict #1"
+      ],
+      [
+       "dead",
+       "'dn2'"
+      ],
+      [
+       "to_copy",
+       "→ dict #5"
+      ],
+      [
+       "block",
+       "'B3'"
+      ],
+      [
+       "nodes",
+       "→ list #4"
+      ],
+      [
+       "alive",
+       "→ list #8"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;B1&#x27;: → list #2, &#x27;B2&#x27;: → list #3, &#x27;B3&#x27;: → list #4}",
+    "<b>#2 list (3)<\/b> [&#x27;dn1&#x27;, &#x27;dn4&#x27;, &#x27;dn5&#x27;]",
+    "<b>#3 list (3)<\/b> [&#x27;dn2&#x27;, &#x27;dn4&#x27;, &#x27;dn6&#x27;]",
+    "<b>#4 list (3)<\/b> [&#x27;dn2&#x27;, &#x27;dn3&#x27;, &#x27;dn5&#x27;]",
+    "<b>#5 dict (1)<\/b> {&#x27;B2&#x27;: 1}",
+    "<b>#8 list (2)<\/b> [&#x27;dn3&#x27;, &#x27;dn5&#x27;]"
+   ],
+   "newVar": "alive"
+  },
+  {
+   "line": 8,
+   "phase": "Python",
+   "note": "The condition is <b>True<\/b>, so the indented block runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "target",
+       "3"
+      ],
+      [
+       "replicas",
+       "→ dict #1"
+      ],
+      [
+       "dead",
+       "'dn2'"
+      ],
+      [
+       "to_copy",
+       "→ dict #5"
+      ],
+      [
+       "block",
+       "'B3'"
+      ],
+      [
+       "nodes",
+       "→ list #4"
+      ],
+      [
+       "alive",
+       "→ list #8"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;B1&#x27;: → list #2, &#x27;B2&#x27;: → list #3, &#x27;B3&#x27;: → list #4}",
+    "<b>#2 list (3)<\/b> [&#x27;dn1&#x27;, &#x27;dn4&#x27;, &#x27;dn5&#x27;]",
+    "<b>#3 list (3)<\/b> [&#x27;dn2&#x27;, &#x27;dn4&#x27;, &#x27;dn6&#x27;]",
+    "<b>#4 list (3)<\/b> [&#x27;dn2&#x27;, &#x27;dn3&#x27;, &#x27;dn5&#x27;]",
+    "<b>#5 dict (1)<\/b> {&#x27;B2&#x27;: 1}",
+    "<b>#8 list (2)<\/b> [&#x27;dn3&#x27;, &#x27;dn5&#x27;]"
+   ]
+  },
+  {
+   "line": 9,
+   "phase": "Python",
+   "note": "Object #5 dict now holds {&#x27;B2&#x27;: 1, &#x27;B3&#x27;: 1}",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "target",
+       "3"
+      ],
+      [
+       "replicas",
+       "→ dict #1"
+      ],
+      [
+       "dead",
+       "'dn2'"
+      ],
+      [
+       "to_copy",
+       "→ dict #5"
+      ],
+      [
+       "block",
+       "'B3'"
+      ],
+      [
+       "nodes",
+       "→ list #4"
+      ],
+      [
+       "alive",
+       "→ list #8"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;B1&#x27;: → list #2, &#x27;B2&#x27;: → list #3, &#x27;B3&#x27;: → list #4}",
+    "<b>#2 list (3)<\/b> [&#x27;dn1&#x27;, &#x27;dn4&#x27;, &#x27;dn5&#x27;]",
+    "<b>#3 list (3)<\/b> [&#x27;dn2&#x27;, &#x27;dn4&#x27;, &#x27;dn6&#x27;]",
+    "<b>#4 list (3)<\/b> [&#x27;dn2&#x27;, &#x27;dn3&#x27;, &#x27;dn5&#x27;]",
+    "<b>#5 dict (2)<\/b> {&#x27;B2&#x27;: 1, &#x27;B3&#x27;: 1}",
+    "<b>#8 list (2)<\/b> [&#x27;dn3&#x27;, &#x27;dn5&#x27;]"
+   ]
+  },
+  {
+   "line": 6,
+   "phase": "Python",
+   "note": "Nothing is left to loop over, so the loop ends and Python moves on.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "target",
+       "3"
+      ],
+      [
+       "replicas",
+       "→ dict #1"
+      ],
+      [
+       "dead",
+       "'dn2'"
+      ],
+      [
+       "to_copy",
+       "→ dict #5"
+      ],
+      [
+       "block",
+       "'B3'"
+      ],
+      [
+       "nodes",
+       "→ list #4"
+      ],
+      [
+       "alive",
+       "→ list #8"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;B1&#x27;: → list #2, &#x27;B2&#x27;: → list #3, &#x27;B3&#x27;: → list #4}",
+    "<b>#2 list (3)<\/b> [&#x27;dn1&#x27;, &#x27;dn4&#x27;, &#x27;dn5&#x27;]",
+    "<b>#3 list (3)<\/b> [&#x27;dn2&#x27;, &#x27;dn4&#x27;, &#x27;dn6&#x27;]",
+    "<b>#4 list (3)<\/b> [&#x27;dn2&#x27;, &#x27;dn3&#x27;, &#x27;dn5&#x27;]",
+    "<b>#5 dict (2)<\/b> {&#x27;B2&#x27;: 1, &#x27;B3&#x27;: 1}",
+    "<b>#8 list (2)<\/b> [&#x27;dn3&#x27;, &#x27;dn5&#x27;]"
+   ]
+  },
+  {
+   "line": 10,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "target",
+       "3"
+      ],
+      [
+       "replicas",
+       "→ dict #1"
+      ],
+      [
+       "dead",
+       "'dn2'"
+      ],
+      [
+       "to_copy",
+       "→ dict #5"
+      ],
+      [
+       "block",
+       "'B3'"
+      ],
+      [
+       "nodes",
+       "→ list #4"
+      ],
+      [
+       "alive",
+       "→ list #8"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;B1&#x27;: → list #2, &#x27;B2&#x27;: → list #3, &#x27;B3&#x27;: → list #4}",
+    "<b>#2 list (3)<\/b> [&#x27;dn1&#x27;, &#x27;dn4&#x27;, &#x27;dn5&#x27;]",
+    "<b>#3 list (3)<\/b> [&#x27;dn2&#x27;, &#x27;dn4&#x27;, &#x27;dn6&#x27;]",
+    "<b>#4 list (3)<\/b> [&#x27;dn2&#x27;, &#x27;dn3&#x27;, &#x27;dn5&#x27;]",
+    "<b>#5 dict (2)<\/b> {&#x27;B2&#x27;: 1, &#x27;B3&#x27;: 1}",
+    "<b>#8 list (2)<\/b> [&#x27;dn3&#x27;, &#x27;dn5&#x27;]"
+   ],
+   "out": "New copies needed: {'B2': 1, 'B3': 1}\n"
+  }
+ ]
+}</script>
+  </div>
+
+<h3 id="worked">Worked examples: real problems, solved and traced in memory</h3>
+  <p class="wx-intro">Three questions a platform team answers about failures: how often, how long to recover, and whether the placement is safe. Each solution runs live and is traced in memory.</p>
+  <article class="wx">
+    <div class="wx__head"><span class="wx__num">Example 1</span><span class="lvl lvl--b">Beginner</span><span class="wx__tag">Operations · planning</span></div>
+    <h4>How many disk swaps per month?</h4>
+    <div class="wx__problem"><p class="wx__label">Problem statement</p><p>A cluster has <b>80 nodes</b> with <b>12 disks</b> each. About <b>1.5%</b> of disks fail per year. How many disk replacements should the ops team plan for each month, and how many spare disks should they keep for a quarter?</p></div>
+    <div class="prob__io"><div><small>Input</small><pre>80 × 12 disks · AFR 1.5%</pre></div><div><small>Expected output</small><pre>Disks: 960
+Failures per month: 1.2
+Spare disks for a quarter: 5</pre></div></div>
+    <div class="wx__approach"><p class="wx__label">Approach</p><ol><li>Total disks = nodes × disks per node.</li><li>Failures per year = disks × 0.015. Divide by 12 for a month.</li><li>Spares for a quarter = 3 months, rounded up, plus one for luck.</li></ol></div>
+    <p class="wx__label">Solution: run it live</p>
+    <div class="runner">
+    <script type="application/json">{
+ "lang": "python",
+ "file": "main.py",
+ "tasks": [
+  {
+   "label": "Solution",
+   "hint": "The disks are 5 years old and the failure rate has risen to 4%. How many spares now?",
+   "code": "import math\ndisks = 80 * 12\nper_year = disks * 0.015\nper_month = per_year / 12\nspares = math.ceil(per_month * 3) + 1\nprint(\"Disks:\", disks)\nprint(f\"Failures per month: {per_month:.1f}\")\nprint(\"Spare disks for a quarter:\", spares)\n"
+  }
+ ]
+}</script>
+    </div>
+    <p class="wx__label">What happens in memory, step by step</p>
+    <p class="wx__how">Recorded from a real Python run: press <b>Next</b> to execute one line at a time. Watch variables change in each frame, and lists and dictionaries (numbered #1, #2 …) fill up as objects.</p>
+    <div class="tracer">
+    <script type="application/json">{
+ "lang": "python",
+ "code": [
+  "import math",
+  "disks = 80 * 12",
+  "per_year = disks * 0.015",
+  "per_month = per_year / 12",
+  "spares = math.ceil(per_month * 3) + 1",
+  "print(\"Disks:\", disks)",
+  "print(f\"Failures per month: {per_month:.1f}\")",
+  "print(\"Spare disks for a quarter:\", spares)"
+ ],
+ "steps": [
+  {
+   "line": 1,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": []
+    }
+   ],
+   "heap": []
+  },
+  {
+   "line": 2,
+   "phase": "Python",
+   "note": "<code>disks<\/code> is created: 960.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "disks",
+       "960"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "disks"
+  },
+  {
+   "line": 3,
+   "phase": "Rate",
+   "note": "960 × 0.015 = 14.4 disk failures a year. <code>per_year<\/code> is created: 14.4.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "disks",
+       "960"
+      ],
+      [
+       "per_year",
+       "14.4"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "per_year"
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "<code>per_month<\/code> is created: 1.2.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "disks",
+       "960"
+      ],
+      [
+       "per_year",
+       "14.4"
+      ],
+      [
+       "per_month",
+       "1.2"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "per_month"
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "<code>spares<\/code> is created: 5.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "disks",
+       "960"
+      ],
+      [
+       "per_year",
+       "14.4"
+      ],
+      [
+       "per_month",
+       "1.2"
+      ],
+      [
+       "spares",
+       "5"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "spares"
+  },
+  {
+   "line": 6,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "disks",
+       "960"
+      ],
+      [
+       "per_year",
+       "14.4"
+      ],
+      [
+       "per_month",
+       "1.2"
+      ],
+      [
+       "spares",
+       "5"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "out": "Disks: 960\n"
+  },
+  {
+   "line": 7,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "disks",
+       "960"
+      ],
+      [
+       "per_year",
+       "14.4"
+      ],
+      [
+       "per_month",
+       "1.2"
+      ],
+      [
+       "spares",
+       "5"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "out": "Failures per month: 1.2\n"
+  },
+  {
+   "line": 8,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "disks",
+       "960"
+      ],
+      [
+       "per_year",
+       "14.4"
+      ],
+      [
+       "per_month",
+       "1.2"
+      ],
+      [
+       "spares",
+       "5"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "out": "Spare disks for a quarter: 5\n"
+  }
+ ]
+}</script>
+    </div>
+  </article>
+  <article class="wx">
+    <div class="wx__head"><span class="wx__num">Example 2</span><span class="lvl lvl--i">Intermediate</span><span class="wx__tag">Reliability · recovery time</span></div>
+    <h4>How long is the cluster “at risk” after a node dies?</h4>
+    <div class="wx__problem"><p class="wx__label">Problem statement</p><p>A node with <b>100 TB</b> of replicas dies. Re-replication can use <b>30 nodes</b> copying at <b>60 MB/s</b> each. Until it finishes, some blocks have only 2 copies. How many hours is that window, with and without waiting for the 10.5-minute timeout?</p></div>
+    <div class="prob__io"><div><small>Input</small><pre>100 TB · 30 nodes × 60 MB/s · timeout 630 s</pre></div><div><small>Expected output</small><pre>Copying       : 16.2 hours
+With detection: 16.4 hours</pre></div></div>
+    <div class="wx__approach"><p class="wx__label">Approach</p><ol><li>Copy time = data ÷ total copy speed.</li><li>Add the detection timeout before copying starts.</li><li>Print both in hours.</li></ol></div>
+    <p class="wx__label">Solution: run it live</p>
+    <div class="runner">
+    <script type="application/json">{
+ "lang": "python",
+ "file": "main.py",
+ "tasks": [
+  {
+   "label": "Solution",
+   "hint": "Double the nodes doing the copying. The window halves. This is one reason bigger clusters recover faster.",
+   "code": "tb, nodes, mb_s = 100, 30, 60\ntimeout_s = 630\n\ncopy_s = tb * 1024 * 1024 / (nodes * mb_s)\nprint(f\"Copying       : {copy_s / 3600:.1f} hours\")\nprint(f\"With detection: {(copy_s + timeout_s) / 3600:.1f} hours\")\n"
+  }
+ ]
+}</script>
+    </div>
+    <p class="wx__label">What happens in memory, step by step</p>
+    <p class="wx__how">Recorded from a real Python run: press <b>Next</b> to execute one line at a time. Watch variables change in each frame, and lists and dictionaries (numbered #1, #2 …) fill up as objects.</p>
+    <div class="tracer">
+    <script type="application/json">{
+ "lang": "python",
+ "code": [
+  "tb, nodes, mb_s = 100, 30, 60",
+  "timeout_s = 630",
+  "",
+  "copy_s = tb * 1024 * 1024 / (nodes * mb_s)",
+  "print(f\"Copying       : {copy_s / 3600:.1f} hours\")",
+  "print(f\"With detection: {(copy_s + timeout_s) / 3600:.1f} hours\")"
+ ],
+ "steps": [
+  {
+   "line": 1,
+   "phase": "Python",
+   "note": "<code>tb<\/code> is created: 100. <code>nodes<\/code> is created: 30. <code>mb_s<\/code> is created: 60.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "tb",
+       "100"
+      ],
+      [
+       "nodes",
+       "30"
+      ],
+      [
+       "mb_s",
+       "60"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "mb_s"
+  },
+  {
+   "line": 2,
+   "phase": "Python",
+   "note": "<code>timeout_s<\/code> is created: 630.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "tb",
+       "100"
+      ],
+      [
+       "nodes",
+       "30"
+      ],
+      [
+       "mb_s",
+       "60"
+      ],
+      [
+       "timeout_s",
+       "630"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "timeout_s"
+  },
+  {
+   "line": 4,
+   "phase": "Copy",
+   "note": "1,04,85,760 MB over 1,800 MB/s in total. <code>copy_s<\/code> is created: 58254.2222.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "tb",
+       "100"
+      ],
+      [
+       "nodes",
+       "30"
+      ],
+      [
+       "mb_s",
+       "60"
+      ],
+      [
+       "timeout_s",
+       "630"
+      ],
+      [
+       "copy_s",
+       "58254.2222"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "copy_s"
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "tb",
+       "100"
+      ],
+      [
+       "nodes",
+       "30"
+      ],
+      [
+       "mb_s",
+       "60"
+      ],
+      [
+       "timeout_s",
+       "630"
+      ],
+      [
+       "copy_s",
+       "58254.2222"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "out": "Copying       : 16.2 hours\n"
+  },
+  {
+   "line": 6,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "tb",
+       "100"
+      ],
+      [
+       "nodes",
+       "30"
+      ],
+      [
+       "mb_s",
+       "60"
+      ],
+      [
+       "timeout_s",
+       "630"
+      ],
+      [
+       "copy_s",
+       "58254.2222"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "out": "With detection: 16.4 hours\n"
+  }
+ ]
+}</script>
+    </div>
+  </article>
+  <article class="wx">
+    <div class="wx__head"><span class="wx__num">Example 3</span><span class="lvl lvl--a">Advanced</span><span class="wx__tag">Data safety · audit</span></div>
+    <h4>Which blocks would a rack failure destroy?</h4>
+    <div class="wx__problem"><p class="wx__label">Problem statement</p><p>An auditor wants to know: if any <b>one rack</b> fails, which blocks lose <b>every</b> copy? Check each rack in turn against the block placement and print the blocks at risk.</p></div>
+    <div class="prob__io"><div><small>Input</small><pre>racks r1 = {dn1, dn2, dn3}, r2 = {dn4, dn5} · B1 dn1 dn4 dn5 · B2 dn2 dn3 dn1 · B3 dn4 dn5 dn2</pre></div><div><small>Expected output</small><pre>If r1 fails, lost: [&#x27;B2&#x27;]
+If r2 fails, lost: []</pre></div></div>
+    <div class="wx__approach"><p class="wx__label">Approach</p><ol><li>For each rack, take the set of its nodes.</li><li>A block is lost with that rack if <b>all</b> of its nodes are in the rack (set subset).</li><li>Print the blocks at risk for each rack.</li></ol></div>
+    <p class="wx__label">Solution: run it live</p>
+    <div class="runner">
+    <script type="application/json">{
+ "lang": "python",
+ "file": "main.py",
+ "tasks": [
+  {
+   "label": "Solution",
+   "hint": "B2 is in danger. This is exactly what happens without a rack-topology script. Move one copy of B2 to dn4 and check again.",
+   "code": "racks = {\"r1\": {\"dn1\", \"dn2\", \"dn3\"}, \"r2\": {\"dn4\", \"dn5\"}}\nblocks = {\"B1\": {\"dn1\", \"dn4\", \"dn5\"}, \"B2\": {\"dn2\", \"dn3\", \"dn1\"}, \"B3\": {\"dn4\", \"dn5\", \"dn2\"}}\n\nfor rack, nodes in racks.items():\n    at_risk = [b for b, where in blocks.items() if where <= nodes]\n    print(\"If\", rack, \"fails, lost:\", at_risk)\n"
+  }
+ ]
+}</script>
+    </div>
+    <p class="wx__label">What happens in memory, step by step</p>
+    <p class="wx__how">Recorded from a real Python run: press <b>Next</b> to execute one line at a time. Watch variables change in each frame, and lists and dictionaries (numbered #1, #2 …) fill up as objects.</p>
+    <div class="tracer">
+    <script type="application/json">{
+ "lang": "python",
+ "code": [
+  "racks = {\"r1\": {\"dn1\", \"dn2\", \"dn3\"}, \"r2\": {\"dn4\", \"dn5\"}}",
+  "blocks = {\"B1\": {\"dn1\", \"dn4\", \"dn5\"}, \"B2\": {\"dn2\", \"dn3\", \"dn1\"}, \"B3\": {\"dn4\", \"dn5\", \"dn2\"}}",
+  "",
+  "for rack, nodes in racks.items():",
+  "    at_risk = [b for b, where in blocks.items() if where <= nodes]",
+  "    print(\"If\", rack, \"fails, lost:\", at_risk)"
+ ],
+ "steps": [
+  {
+   "line": 1,
+   "phase": "Python",
+   "note": "<code>racks<\/code> is created: → dict #1.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "racks",
+       "→ dict #1"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (2)<\/b> {&#x27;r1&#x27;: → set #2, &#x27;r2&#x27;: → set #3}",
+    "<b>#2 set (3)<\/b> {&#x27;dn1&#x27;, &#x27;dn2&#x27;, &#x27;dn3&#x27;}",
+    "<b>#3 set (2)<\/b> {&#x27;dn4&#x27;, &#x27;dn5&#x27;}"
+   ],
+   "newVar": "racks"
+  },
+  {
+   "line": 2,
+   "phase": "Python",
+   "note": "<code>blocks<\/code> is created: → dict #4. A new dict object (#4) is created: {&#x27;B1&#x27;: → set #5, &#x27;B2&#x27;: → set #6, &#x27;B3&#x27;: → set #7} A new set object (#5) is created: {&#x27;dn1&#x27;, &#x27;dn4&#x27;, &#x27;dn5&#x27;} A new set object (#6) is created: {&#x27;dn1&#x27;, &#x27;dn2&#x27;, &#x27;dn3&#x27;} A new set object (#7) is created: {&#x27;dn2&#x27;, &#x27;dn4&#x27;, &#x27;dn5&#x27;}",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "racks",
+       "→ dict #1"
+      ],
+      [
+       "blocks",
+       "→ dict #4"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (2)<\/b> {&#x27;r1&#x27;: → set #2, &#x27;r2&#x27;: → set #3}",
+    "<b>#2 set (3)<\/b> {&#x27;dn1&#x27;, &#x27;dn2&#x27;, &#x27;dn3&#x27;}",
+    "<b>#3 set (2)<\/b> {&#x27;dn4&#x27;, &#x27;dn5&#x27;}",
+    "<b>#4 dict (3)<\/b> {&#x27;B1&#x27;: → set #5, &#x27;B2&#x27;: → set #6, &#x27;B3&#x27;: → set #7}",
+    "<b>#5 set (3)<\/b> {&#x27;dn1&#x27;, &#x27;dn4&#x27;, &#x27;dn5&#x27;}",
+    "<b>#6 set (3)<\/b> {&#x27;dn1&#x27;, &#x27;dn2&#x27;, &#x27;dn3&#x27;}",
+    "<b>#7 set (3)<\/b> {&#x27;dn2&#x27;, &#x27;dn4&#x27;, &#x27;dn5&#x27;}"
+   ],
+   "newVar": "blocks"
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "<code>rack<\/code> is created: &#x27;r1&#x27;. <code>nodes<\/code> is created: → set #2.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "racks",
+       "→ dict #1"
+      ],
+      [
+       "blocks",
+       "→ dict #4"
+      ],
+      [
+       "rack",
+       "'r1'"
+      ],
+      [
+       "nodes",
+       "→ set #2"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (2)<\/b> {&#x27;r1&#x27;: → set #2, &#x27;r2&#x27;: → set #3}",
+    "<b>#2 set (3)<\/b> {&#x27;dn1&#x27;, &#x27;dn2&#x27;, &#x27;dn3&#x27;}",
+    "<b>#3 set (2)<\/b> {&#x27;dn4&#x27;, &#x27;dn5&#x27;}",
+    "<b>#4 dict (3)<\/b> {&#x27;B1&#x27;: → set #5, &#x27;B2&#x27;: → set #6, &#x27;B3&#x27;: → set #7}",
+    "<b>#5 set (3)<\/b> {&#x27;dn1&#x27;, &#x27;dn4&#x27;, &#x27;dn5&#x27;}",
+    "<b>#6 set (3)<\/b> {&#x27;dn1&#x27;, &#x27;dn2&#x27;, &#x27;dn3&#x27;}",
+    "<b>#7 set (3)<\/b> {&#x27;dn2&#x27;, &#x27;dn4&#x27;, &#x27;dn5&#x27;}"
+   ],
+   "newVar": "nodes"
+  },
+  {
+   "line": 5,
+   "phase": "Subset",
+   "note": "<code>where &lt;= nodes<\/code> is True when every copy is inside that rack.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "racks",
+       "→ dict #1"
+      ],
+      [
+       "blocks",
+       "→ dict #4"
+      ],
+      [
+       "rack",
+       "'r1'"
+      ],
+      [
+       "nodes",
+       "→ set #2"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (2)<\/b> {&#x27;r1&#x27;: → set #2, &#x27;r2&#x27;: → set #3}",
+    "<b>#2 set (3)<\/b> {&#x27;dn1&#x27;, &#x27;dn2&#x27;, &#x27;dn3&#x27;}",
+    "<b>#3 set (2)<\/b> {&#x27;dn4&#x27;, &#x27;dn5&#x27;}",
+    "<b>#4 dict (3)<\/b> {&#x27;B1&#x27;: → set #5, &#x27;B2&#x27;: → set #6, &#x27;B3&#x27;: → set #7}",
+    "<b>#5 set (3)<\/b> {&#x27;dn1&#x27;, &#x27;dn4&#x27;, &#x27;dn5&#x27;}",
+    "<b>#6 set (3)<\/b> {&#x27;dn1&#x27;, &#x27;dn2&#x27;, &#x27;dn3&#x27;}",
+    "<b>#7 set (3)<\/b> {&#x27;dn2&#x27;, &#x27;dn4&#x27;, &#x27;dn5&#x27;}"
+   ]
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "racks",
+       "→ dict #1"
+      ],
+      [
+       "blocks",
+       "→ dict #4"
+      ],
+      [
+       "rack",
+       "'r1'"
+      ],
+      [
+       "nodes",
+       "→ set #2"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (2)<\/b> {&#x27;r1&#x27;: → set #2, &#x27;r2&#x27;: → set #3}",
+    "<b>#2 set (3)<\/b> {&#x27;dn1&#x27;, &#x27;dn2&#x27;, &#x27;dn3&#x27;}",
+    "<b>#3 set (2)<\/b> {&#x27;dn4&#x27;, &#x27;dn5&#x27;}",
+    "<b>#4 dict (3)<\/b> {&#x27;B1&#x27;: → set #5, &#x27;B2&#x27;: → set #6, &#x27;B3&#x27;: → set #7}",
+    "<b>#5 set (3)<\/b> {&#x27;dn1&#x27;, &#x27;dn4&#x27;, &#x27;dn5&#x27;}",
+    "<b>#6 set (3)<\/b> {&#x27;dn1&#x27;, &#x27;dn2&#x27;, &#x27;dn3&#x27;}",
+    "<b>#7 set (3)<\/b> {&#x27;dn2&#x27;, &#x27;dn4&#x27;, &#x27;dn5&#x27;}"
+   ]
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "racks",
+       "→ dict #1"
+      ],
+      [
+       "blocks",
+       "→ dict #4"
+      ],
+      [
+       "rack",
+       "'r1'"
+      ],
+      [
+       "nodes",
+       "→ set #2"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (2)<\/b> {&#x27;r1&#x27;: → set #2, &#x27;r2&#x27;: → set #3}",
+    "<b>#2 set (3)<\/b> {&#x27;dn1&#x27;, &#x27;dn2&#x27;, &#x27;dn3&#x27;}",
+    "<b>#3 set (2)<\/b> {&#x27;dn4&#x27;, &#x27;dn5&#x27;}",
+    "<b>#4 dict (3)<\/b> {&#x27;B1&#x27;: → set #5, &#x27;B2&#x27;: → set #6, &#x27;B3&#x27;: → set #7}",
+    "<b>#5 set (3)<\/b> {&#x27;dn1&#x27;, &#x27;dn4&#x27;, &#x27;dn5&#x27;}",
+    "<b>#6 set (3)<\/b> {&#x27;dn1&#x27;, &#x27;dn2&#x27;, &#x27;dn3&#x27;}",
+    "<b>#7 set (3)<\/b> {&#x27;dn2&#x27;, &#x27;dn4&#x27;, &#x27;dn5&#x27;}"
+   ]
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "<code>at_risk<\/code> is created: → list #8. A new list object (#8) is created: [&#x27;B2&#x27;]",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "racks",
+       "→ dict #1"
+      ],
+      [
+       "blocks",
+       "→ dict #4"
+      ],
+      [
+       "rack",
+       "'r1'"
+      ],
+      [
+       "nodes",
+       "→ set #2"
+      ],
+      [
+       "at_risk",
+       "→ list #8"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (2)<\/b> {&#x27;r1&#x27;: → set #2, &#x27;r2&#x27;: → set #3}",
+    "<b>#2 set (3)<\/b> {&#x27;dn1&#x27;, &#x27;dn2&#x27;, &#x27;dn3&#x27;}",
+    "<b>#3 set (2)<\/b> {&#x27;dn4&#x27;, &#x27;dn5&#x27;}",
+    "<b>#4 dict (3)<\/b> {&#x27;B1&#x27;: → set #5, &#x27;B2&#x27;: → set #6, &#x27;B3&#x27;: → set #7}",
+    "<b>#5 set (3)<\/b> {&#x27;dn1&#x27;, &#x27;dn4&#x27;, &#x27;dn5&#x27;}",
+    "<b>#6 set (3)<\/b> {&#x27;dn1&#x27;, &#x27;dn2&#x27;, &#x27;dn3&#x27;}",
+    "<b>#7 set (3)<\/b> {&#x27;dn2&#x27;, &#x27;dn4&#x27;, &#x27;dn5&#x27;}",
+    "<b>#8 list (1)<\/b> [&#x27;B2&#x27;]"
+   ],
+   "newVar": "at_risk"
+  },
+  {
+   "line": 6,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "racks",
+       "→ dict #1"
+      ],
+      [
+       "blocks",
+       "→ dict #4"
+      ],
+      [
+       "rack",
+       "'r1'"
+      ],
+      [
+       "nodes",
+       "→ set #2"
+      ],
+      [
+       "at_risk",
+       "→ list #8"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (2)<\/b> {&#x27;r1&#x27;: → set #2, &#x27;r2&#x27;: → set #3}",
+    "<b>#2 set (3)<\/b> {&#x27;dn1&#x27;, &#x27;dn2&#x27;, &#x27;dn3&#x27;}",
+    "<b>#3 set (2)<\/b> {&#x27;dn4&#x27;, &#x27;dn5&#x27;}",
+    "<b>#4 dict (3)<\/b> {&#x27;B1&#x27;: → set #5, &#x27;B2&#x27;: → set #6, &#x27;B3&#x27;: → set #7}",
+    "<b>#5 set (3)<\/b> {&#x27;dn1&#x27;, &#x27;dn4&#x27;, &#x27;dn5&#x27;}",
+    "<b>#6 set (3)<\/b> {&#x27;dn1&#x27;, &#x27;dn2&#x27;, &#x27;dn3&#x27;}",
+    "<b>#7 set (3)<\/b> {&#x27;dn2&#x27;, &#x27;dn4&#x27;, &#x27;dn5&#x27;}",
+    "<b>#8 list (1)<\/b> [&#x27;B2&#x27;]"
+   ],
+   "out": "If r1 fails, lost: ['B2']\n"
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "<code>rack<\/code> changes to &#x27;r2&#x27;. <code>nodes<\/code> changes to → set #3.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "racks",
+       "→ dict #1"
+      ],
+      [
+       "blocks",
+       "→ dict #4"
+      ],
+      [
+       "rack",
+       "'r2'"
+      ],
+      [
+       "nodes",
+       "→ set #3"
+      ],
+      [
+       "at_risk",
+       "→ list #8"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (2)<\/b> {&#x27;r1&#x27;: → set #2, &#x27;r2&#x27;: → set #3}",
+    "<b>#2 set (3)<\/b> {&#x27;dn1&#x27;, &#x27;dn2&#x27;, &#x27;dn3&#x27;}",
+    "<b>#3 set (2)<\/b> {&#x27;dn4&#x27;, &#x27;dn5&#x27;}",
+    "<b>#4 dict (3)<\/b> {&#x27;B1&#x27;: → set #5, &#x27;B2&#x27;: → set #6, &#x27;B3&#x27;: → set #7}",
+    "<b>#5 set (3)<\/b> {&#x27;dn1&#x27;, &#x27;dn4&#x27;, &#x27;dn5&#x27;}",
+    "<b>#6 set (3)<\/b> {&#x27;dn1&#x27;, &#x27;dn2&#x27;, &#x27;dn3&#x27;}",
+    "<b>#7 set (3)<\/b> {&#x27;dn2&#x27;, &#x27;dn4&#x27;, &#x27;dn5&#x27;}",
+    "<b>#8 list (1)<\/b> [&#x27;B2&#x27;]"
+   ],
+   "newVar": "nodes"
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "racks",
+       "→ dict #1"
+      ],
+      [
+       "blocks",
+       "→ dict #4"
+      ],
+      [
+       "rack",
+       "'r2'"
+      ],
+      [
+       "nodes",
+       "→ set #3"
+      ],
+      [
+       "at_risk",
+       "→ list #8"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (2)<\/b> {&#x27;r1&#x27;: → set #2, &#x27;r2&#x27;: → set #3}",
+    "<b>#2 set (3)<\/b> {&#x27;dn1&#x27;, &#x27;dn2&#x27;, &#x27;dn3&#x27;}",
+    "<b>#3 set (2)<\/b> {&#x27;dn4&#x27;, &#x27;dn5&#x27;}",
+    "<b>#4 dict (3)<\/b> {&#x27;B1&#x27;: → set #5, &#x27;B2&#x27;: → set #6, &#x27;B3&#x27;: → set #7}",
+    "<b>#5 set (3)<\/b> {&#x27;dn1&#x27;, &#x27;dn4&#x27;, &#x27;dn5&#x27;}",
+    "<b>#6 set (3)<\/b> {&#x27;dn1&#x27;, &#x27;dn2&#x27;, &#x27;dn3&#x27;}",
+    "<b>#7 set (3)<\/b> {&#x27;dn2&#x27;, &#x27;dn4&#x27;, &#x27;dn5&#x27;}",
+    "<b>#8 list (1)<\/b> [&#x27;B2&#x27;]"
+   ]
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "racks",
+       "→ dict #1"
+      ],
+      [
+       "blocks",
+       "→ dict #4"
+      ],
+      [
+       "rack",
+       "'r2'"
+      ],
+      [
+       "nodes",
+       "→ set #3"
+      ],
+      [
+       "at_risk",
+       "→ list #8"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (2)<\/b> {&#x27;r1&#x27;: → set #2, &#x27;r2&#x27;: → set #3}",
+    "<b>#2 set (3)<\/b> {&#x27;dn1&#x27;, &#x27;dn2&#x27;, &#x27;dn3&#x27;}",
+    "<b>#3 set (2)<\/b> {&#x27;dn4&#x27;, &#x27;dn5&#x27;}",
+    "<b>#4 dict (3)<\/b> {&#x27;B1&#x27;: → set #5, &#x27;B2&#x27;: → set #6, &#x27;B3&#x27;: → set #7}",
+    "<b>#5 set (3)<\/b> {&#x27;dn1&#x27;, &#x27;dn4&#x27;, &#x27;dn5&#x27;}",
+    "<b>#6 set (3)<\/b> {&#x27;dn1&#x27;, &#x27;dn2&#x27;, &#x27;dn3&#x27;}",
+    "<b>#7 set (3)<\/b> {&#x27;dn2&#x27;, &#x27;dn4&#x27;, &#x27;dn5&#x27;}",
+    "<b>#8 list (1)<\/b> [&#x27;B2&#x27;]"
+   ]
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "racks",
+       "→ dict #1"
+      ],
+      [
+       "blocks",
+       "→ dict #4"
+      ],
+      [
+       "rack",
+       "'r2'"
+      ],
+      [
+       "nodes",
+       "→ set #3"
+      ],
+      [
+       "at_risk",
+       "→ list #8"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (2)<\/b> {&#x27;r1&#x27;: → set #2, &#x27;r2&#x27;: → set #3}",
+    "<b>#2 set (3)<\/b> {&#x27;dn1&#x27;, &#x27;dn2&#x27;, &#x27;dn3&#x27;}",
+    "<b>#3 set (2)<\/b> {&#x27;dn4&#x27;, &#x27;dn5&#x27;}",
+    "<b>#4 dict (3)<\/b> {&#x27;B1&#x27;: → set #5, &#x27;B2&#x27;: → set #6, &#x27;B3&#x27;: → set #7}",
+    "<b>#5 set (3)<\/b> {&#x27;dn1&#x27;, &#x27;dn4&#x27;, &#x27;dn5&#x27;}",
+    "<b>#6 set (3)<\/b> {&#x27;dn1&#x27;, &#x27;dn2&#x27;, &#x27;dn3&#x27;}",
+    "<b>#7 set (3)<\/b> {&#x27;dn2&#x27;, &#x27;dn4&#x27;, &#x27;dn5&#x27;}",
+    "<b>#8 list (1)<\/b> [&#x27;B2&#x27;]"
+   ]
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "<code>at_risk<\/code> changes to → list #9. A new list object (#9) is created: []",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "racks",
+       "→ dict #1"
+      ],
+      [
+       "blocks",
+       "→ dict #4"
+      ],
+      [
+       "rack",
+       "'r2'"
+      ],
+      [
+       "nodes",
+       "→ set #3"
+      ],
+      [
+       "at_risk",
+       "→ list #9"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (2)<\/b> {&#x27;r1&#x27;: → set #2, &#x27;r2&#x27;: → set #3}",
+    "<b>#2 set (3)<\/b> {&#x27;dn1&#x27;, &#x27;dn2&#x27;, &#x27;dn3&#x27;}",
+    "<b>#3 set (2)<\/b> {&#x27;dn4&#x27;, &#x27;dn5&#x27;}",
+    "<b>#4 dict (3)<\/b> {&#x27;B1&#x27;: → set #5, &#x27;B2&#x27;: → set #6, &#x27;B3&#x27;: → set #7}",
+    "<b>#5 set (3)<\/b> {&#x27;dn1&#x27;, &#x27;dn4&#x27;, &#x27;dn5&#x27;}",
+    "<b>#6 set (3)<\/b> {&#x27;dn1&#x27;, &#x27;dn2&#x27;, &#x27;dn3&#x27;}",
+    "<b>#7 set (3)<\/b> {&#x27;dn2&#x27;, &#x27;dn4&#x27;, &#x27;dn5&#x27;}",
+    "<b>#9 list (0)<\/b> []"
+   ],
+   "newVar": "at_risk"
+  },
+  {
+   "line": 6,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "racks",
+       "→ dict #1"
+      ],
+      [
+       "blocks",
+       "→ dict #4"
+      ],
+      [
+       "rack",
+       "'r2'"
+      ],
+      [
+       "nodes",
+       "→ set #3"
+      ],
+      [
+       "at_risk",
+       "→ list #9"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (2)<\/b> {&#x27;r1&#x27;: → set #2, &#x27;r2&#x27;: → set #3}",
+    "<b>#2 set (3)<\/b> {&#x27;dn1&#x27;, &#x27;dn2&#x27;, &#x27;dn3&#x27;}",
+    "<b>#3 set (2)<\/b> {&#x27;dn4&#x27;, &#x27;dn5&#x27;}",
+    "<b>#4 dict (3)<\/b> {&#x27;B1&#x27;: → set #5, &#x27;B2&#x27;: → set #6, &#x27;B3&#x27;: → set #7}",
+    "<b>#5 set (3)<\/b> {&#x27;dn1&#x27;, &#x27;dn4&#x27;, &#x27;dn5&#x27;}",
+    "<b>#6 set (3)<\/b> {&#x27;dn1&#x27;, &#x27;dn2&#x27;, &#x27;dn3&#x27;}",
+    "<b>#7 set (3)<\/b> {&#x27;dn2&#x27;, &#x27;dn4&#x27;, &#x27;dn5&#x27;}",
+    "<b>#9 list (0)<\/b> []"
+   ],
+   "out": "If r2 fails, lost: []\n"
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "Nothing is left to loop over, so the loop ends and Python moves on.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "racks",
+       "→ dict #1"
+      ],
+      [
+       "blocks",
+       "→ dict #4"
+      ],
+      [
+       "rack",
+       "'r2'"
+      ],
+      [
+       "nodes",
+       "→ set #3"
+      ],
+      [
+       "at_risk",
+       "→ list #9"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (2)<\/b> {&#x27;r1&#x27;: → set #2, &#x27;r2&#x27;: → set #3}",
+    "<b>#2 set (3)<\/b> {&#x27;dn1&#x27;, &#x27;dn2&#x27;, &#x27;dn3&#x27;}",
+    "<b>#3 set (2)<\/b> {&#x27;dn4&#x27;, &#x27;dn5&#x27;}",
+    "<b>#4 dict (3)<\/b> {&#x27;B1&#x27;: → set #5, &#x27;B2&#x27;: → set #6, &#x27;B3&#x27;: → set #7}",
+    "<b>#5 set (3)<\/b> {&#x27;dn1&#x27;, &#x27;dn4&#x27;, &#x27;dn5&#x27;}",
+    "<b>#6 set (3)<\/b> {&#x27;dn1&#x27;, &#x27;dn2&#x27;, &#x27;dn3&#x27;}",
+    "<b>#7 set (3)<\/b> {&#x27;dn2&#x27;, &#x27;dn4&#x27;, &#x27;dn5&#x27;}",
+    "<b>#9 list (0)<\/b> []"
+   ]
+  }
+ ]
+}</script>
+    </div>
+  </article>
+</section>
+
+<section class="part" id="quiz">
+  <span class="part-label"><b>9</b> Quiz and revision</span>
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <script type="application/json">[
+ {
+  "q": "A cluster has 2,000 disks with a 1.5% annual failure rate. About how many disk failures per year?",
+  "options": [
+   "About 3",
+   "About 15",
+   "About 30",
+   "About 300"
+  ],
+  "answer": 2,
+  "why": "2,000 × 0.015 = <b>30<\/b>, roughly one every 12 days."
+ },
+ {
+  "q": "Why does HDFS place replicas of a block on at least two racks?",
+  "options": [
+   "Racks are faster",
+   "A whole rack can fail together (power or switch), so copies must not all be in one rack",
+   "The NameNode requires it to start",
+   "To use more network"
+  ],
+  "answer": 1,
+  "why": "A rack is a <b>failure domain<\/b>. Spreading copies across racks means one rack failure never loses all copies."
+ },
+ {
+  "q": "How does HDFS detect silent data corruption on disk?",
+  "options": [
+   "By storing checksums (CRC32C) for every 512 bytes and checking them on read and in a background scanner",
+   "It doesn't; disks report all errors",
+   "By comparing file sizes",
+   "By asking the user"
+  ],
+  "answer": 0,
+  "why": "Checksums catch bytes that changed without an error. A corrupt replica is replaced from a good one."
+ },
+ {
+  "q": "A map task fails because its node ran out of memory. What does Hadoop do by default?",
+  "options": [
+   "Fails the whole job immediately",
+   "Ignores the task",
+   "Restarts the cluster",
+   "Retries the task, up to 4 attempts in total"
+  ],
+  "answer": 3,
+  "why": "Each task gets up to <b>4 attempts<\/b> by default (mapreduce.map.maxattempts / reduce.maxattempts), usually on other nodes."
+ },
+ {
+  "q": "An analyst accidentally deletes a folder. Does replication 3 protect the data?",
+  "options": [
+   "Yes, two copies remain",
+   "Yes, the NameNode refuses deletes",
+   "No: the delete applies to all replicas. Use trash, snapshots or backups.",
+   "Only on weekends"
+  ],
+  "answer": 2,
+  "why": "<b>Replication is not backup.<\/b> It protects against hardware failure, not against changes made by users or bugs."
+ },
+ {
+  "q": "What is a “straggler”?",
+  "options": [
+   "A node that is dead",
+   "A node or task that is alive but much slower than the others",
+   "A deleted block",
+   "A spare disk"
+  ],
+  "answer": 1,
+  "why": "Stragglers hold up jobs. Speculative execution starts a backup copy of the slow task elsewhere."
+ },
+ {
+  "q": "After a dead DataNode returns, some blocks have 4 copies. What happens?",
+  "options": [
+   "The NameNode deletes the surplus replicas to get back to the replication factor",
+   "Nothing; more is better",
+   "The file is corrupted",
+   "The node is formatted"
+  ],
+  "answer": 0,
+  "why": "Over-replicated blocks waste space, so the NameNode removes extra copies, choosing which ones to keep good rack spread."
+ },
+ {
+  "q": "Why are big clusters built from ordinary (commodity) hardware rather than very reliable servers?",
+  "options": [
+   "Ordinary servers never fail",
+   "Reliable servers are illegal",
+   "Hadoop cannot run on good hardware",
+   "Software handles failures with copies and retries, which is cheaper than making every machine nearly perfect"
+  ],
+  "answer": 3,
+  "why": "At scale, failures happen anyway. It is cheaper to tolerate them in software than to pay a high premium for every machine."
+ }
+]</script>
+  </div>
+
+  <h3>Quick revision</h3>
+  <div class="revision">
+    <h3>Lesson 1.4 in one screen</h3>
+    <ul><li>At scale, <b>failure is the norm</b>: expected failures = devices × annual failure rate.</li><li>Chance of ≥1 failure among n devices: 1 − (1 − p)<sup>n</sup>. Grows fast with n.</li><li>HDFS: <b>3 replicas</b>, on at least <b>2 racks</b>. Lose a node → read another copy.</li><li>Dead node (≈10.5 min) → <b>re-replication</b> from surviving copies, most endangered blocks first.</li><li>Returned node → surplus replicas deleted.</li><li><b>Checksums</b> (CRC32C per 512 bytes) + background <b>block scanner</b> catch corruption.</li><li>Tasks retried up to <b>4</b> times; <b>speculative execution</b> for stragglers.</li><li><b>NameNode HA</b> for master failure; a <b>DR cluster</b> for a whole site.</li><li><b>Replication is not backup</b>: use trash, snapshots and copies elsewhere.</li></ul>
+  </div>
+
+  <h3>Interview and viva questions</h3>
+  <div class="faq">
+    <details><summary>Why is “failure is the norm” in big data systems?</summary><p>Because a cluster has thousands of disks, nodes, cables and switches. Even if each part rarely fails, the chance that some part fails on a given day is high: 3,000 disks at 1.5% a year is about 45 disk failures a year. Systems like HDFS are therefore designed to expect failures and recover automatically.</p></details>
+    <details><summary>How does HDFS achieve fault tolerance?</summary><p>It splits files into blocks and stores each block on several DataNodes (3 by default) across at least two racks. DataNodes send heartbeats and block reports; when a node or disk is lost, the NameNode re-replicates under-replicated blocks from surviving copies. Checksums detect corrupt replicas. Clients reading data simply switch to another replica if one fails. The NameNode itself is protected by High Availability.</p></details>
+    <details><summary>What is the difference between replication and backup?</summary><p>Replication keeps live copies of the current data to survive hardware failure. Every change, including a mistaken delete, is applied to all replicas. A backup is a separate, point-in-time copy (or a snapshot) that lets you go back to an earlier state after user errors, bugs or ransomware.</p></details>
+    <details><summary>How does MapReduce handle a failed task?</summary><p>The ApplicationMaster notices the failure (error, lost container, or no progress within the timeout) and reschedules the task attempt, preferably on another node. By default a task is tried up to 4 times; if all attempts fail the job fails. Completed map outputs on a lost node are re-run because they were stored on that node's local disk.</p></details>
+    <details><summary>What is speculative execution?</summary><p>When a task runs much slower than other tasks of the same job, the framework may launch a duplicate attempt on another node. Whichever attempt finishes first is used and the other is killed. It helps with stragglers caused by slow hardware, not with tasks that are slow because they have more data (skew).</p></details>
+    
+  </div>
+
+  <h3 id="practice">Practice problems</h3>
+  <p class="prob-intro">Reliability calculations and checks, from simple counts to the audits real platform teams run.</p>
+  <div class="probs">
+    <article class="prob"><div class="prob__head"><span class="prob__num">P1</span><span class="prob__tag prob__tag--easy">Easy</span><h4>Failures per week</h4></div>
+      <p>A cluster has 5,000 disks with an annual failure rate of 2%. How many disk failures per week?</p>
+      <div class="prob__io"><div><small>Input</small><pre>5000 disks · 2%</pre></div><div><small>Expected output</small><pre>1.9 per week</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>print(round(5000 * 0.02 / 52, 1), &quot;per week&quot;)</code></pre><div class="output">1.9 per week</div></div>
+        <p><b>How it works:</b> 100 failures a year ÷ 52 weeks ≈ 1.9 a week.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P2</span><span class="prob__tag prob__tag--easy">Easy</span><h4>MTBF across the cluster</h4></div>
+      <p>Each node fails on average once every 25 years (MTBF). With 500 nodes, how many days between node failures, on average?</p>
+      <div class="prob__io"><div><small>Input</small><pre>MTBF 25 years · 500 nodes</pre></div><div><small>Expected output</small><pre>18.2 days</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>print(round(25 * 365 / 500, 1), &quot;days&quot;)</code></pre><div class="output">18.2 days</div></div>
+        <p><b>How it works:</b> 500 nodes × (1/25) = 20 failures a year, one every 18.25 days.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P3</span><span class="prob__tag prob__tag--easy">Easy</span><h4>Copies left</h4></div>
+      <p>A block has replicas on dn1, dn4, dn7. dn4 and dn7 die. How many copies are left, and is the block under-replicated?</p>
+      <div class="prob__io"><div><small>Input</small><pre>[dn1, dn4, dn7] · dead {dn4, dn7}</pre></div><div><small>Expected output</small><pre>Left: [&#x27;dn1&#x27;] | under-replicated: True</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>replicas = [&quot;dn1&quot;, &quot;dn4&quot;, &quot;dn7&quot;]
+dead = {&quot;dn4&quot;, &quot;dn7&quot;}
+left = [n for n in replicas if n not in dead]
+print(&quot;Left:&quot;, left, &quot;| under-replicated:&quot;, len(left) &lt; 3)</code></pre><div class="output">Left: [&#x27;dn1&#x27;] | under-replicated: True</div></div>
+        <p><b>How it works:</b> One copy left: the block is very endangered and goes to the front of the re-replication queue.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P4</span><span class="prob__tag prob__tag--medium">Medium</span><h4>Find missing and under-replicated blocks</h4></div>
+      <p>Given block placements and the dead nodes, print each block's status: OK, UNDER (1–2 live copies) or MISSING (0).</p>
+      <div class="prob__io"><div><small>Input</small><pre>B1 [1,2,3] · B2 [2,4,5] · B3 [4,5,6] · dead {4, 5, 6}</pre></div><div><small>Expected output</small><pre>B1 3 OK
+B2 1 UNDER
+B3 0 MISSING</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>blocks = {&quot;B1&quot;: [1, 2, 3], &quot;B2&quot;: [2, 4, 5], &quot;B3&quot;: [4, 5, 6]}
+dead = {4, 5, 6}
+for b, nodes in blocks.items():
+    live = len([n for n in nodes if n not in dead])
+    status = &quot;OK&quot; if live == 3 else &quot;MISSING&quot; if live == 0 else &quot;UNDER&quot;
+    print(b, live, status)</code></pre><div class="output">B1 3 OK
+B2 1 UNDER
+B3 0 MISSING</div></div>
+        <p><b>How it works:</b> This is what <code>hdfs fsck</code> reports. B3 is missing: all its copies were on the three dead nodes, probably the same rack.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P5</span><span class="prob__tag prob__tag--medium">Medium</span><h4>Retry success rate</h4></div>
+      <p>A flaky network makes 20% of task attempts fail. With up to 4 attempts, what share of tasks finally succeed?</p>
+      <div class="prob__io"><div><small>Input</small><pre>20% fail per attempt · 4 attempts</pre></div><div><small>Expected output</small><pre>Succeed: 99.84%</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>p = 0.20
+print(f&quot;Succeed: {1 - p ** 4:.2%}&quot;)</code></pre><div class="output">Succeed: 99.84%</div></div>
+        <p><b>How it works:</b> Fails only if all 4 attempts fail: 0.2⁴ = 0.16%. Retries turn an unreliable network into a reliable job.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P6</span><span class="prob__tag prob__tag--medium">Medium</span><h4>Checksum check</h4></div>
+      <p>Use Python's <code>zlib.crc32</code> to compute a checksum of a data chunk, flip one character, and show that the checksum changes.</p>
+      <div class="prob__io"><div><small>Input</small><pre>b&quot;order,city,amount&quot;</pre></div><div><small>Expected output</small><pre>3993753734 581031960 False</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>import zlib
+good = b&quot;order,city,amount&quot;
+bad = b&quot;order,citx,amount&quot;
+print(zlib.crc32(good), zlib.crc32(bad), zlib.crc32(good) == zlib.crc32(bad))</code></pre><div class="output">3993753734 581031960 False</div></div>
+        <p><b>How it works:</b> HDFS uses CRC32C (a close relative) for every 512 bytes. One changed byte gives a different checksum, so corruption is caught.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P7</span><span class="prob__tag prob__tag--business">Business problem</span><h4>Cost of not having rack awareness</h4></div>
+      <p>Without rack awareness, about 2% of blocks end up with all copies in one rack. A rack fails twice a year and holds 1/8 of the cluster. The cluster has 50 lakh blocks. How many blocks are expected to become unavailable each year?</p>
+      <div class="prob__io"><div><small>Input</small><pre>50,00,000 blocks · 2% single-rack · 1/8 per rack · 2 rack failures/year</pre></div><div><small>Expected output</small><pre>Blocks unavailable per year: 25000</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>blocks = 50_00_000
+single_rack = blocks * 0.02
+per_rack = single_rack / 8
+print(&quot;Blocks unavailable per year:&quot;, int(per_rack * 2))</code></pre><div class="output">Blocks unavailable per year: 25000</div></div>
+        <p><b>How it works:</b> About 25,000 blocks a year become unreadable until the rack is fixed, each one possibly breaking a job or a dashboard. A topology script fixes this for free.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P8</span><span class="prob__tag prob__tag--business">Business problem</span><h4>How much extra disk does safety cost?</h4></div>
+      <p>The business stores 400 TB. Compare the raw disk needed with replication 2 and 3, and the extra cost at Rs 2,000 per TB of raw disk.</p>
+      <div class="prob__io"><div><small>Input</small><pre>400 TB · repl 2 vs 3 · Rs 2,000/TB</pre></div><div><small>Expected output</small><pre>replication 2: 800 TB raw, Rs 16 lakh
+replication 3: 1200 TB raw, Rs 24 lakh
+Extra for the 3rd copy: Rs 8 lakh</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>data, price = 400, 2000
+for r in [2, 3]:
+    print(f&quot;replication {r}: {data * r} TB raw, Rs {data * r * price / 1e5:.0f} lakh&quot;)
+print(f&quot;Extra for the 3rd copy: Rs {data * price / 1e5:.0f} lakh&quot;)</code></pre><div class="output">replication 2: 800 TB raw, Rs 16 lakh
+replication 3: 1200 TB raw, Rs 24 lakh
+Extra for the 3rd copy: Rs 8 lakh</div></div>
+        <p><b>How it works:</b> The third copy costs Rs 8 lakh here (illustrative price), but it is what makes data loss practically impossible. Erasure coding (Module 7) cuts this for cold data.</p>
+      </details>
+    </article>
+  </div>
+
+  <h3 id="scenarios">Real-world scenario questions (asked in company interviews)</h3>
+  <p class="scn-intro">Failure situations interviewers love, because they reveal whether you understand how Hadoop actually behaves.</p>
+  <div class="scenarios">
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Platform team · incident</span><span class="scn__tag scn__tag--level">Fresher</span></div>
+      <h4>A DataNode died. Should we restart everything?</h4>
+      <p class="scn__situation">At 11 pm the monitoring shows one DataNode down out of 60. A junior admin wants to restart the whole cluster “to be safe”. You are on call. What do you do?</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> do you trust and understand HDFS's self-healing, and avoid making things worse?</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ol>
+          <li><b>Don't restart the cluster.</b> That would stop all jobs and put the NameNode in safe mode while it waits for block reports.</li>
+          <li>Check <code>hdfs dfsadmin -report</code> and <code>hdfs fsck /</code>: expect under-replicated blocks but 0 missing.</li>
+          <li>After the timeout, HDFS re-replicates automatically. Watch the under-replicated count fall.</li>
+          <li>Find out why the node died (logs, hardware alerts), and fix or replace it during working hours.</li>
+        </ol>
+        <p class="scn__avoid"><b>Avoid:</b> panicking, or manually copying blocks around.</p>
+      </div></details>
+    </article>
+
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Banking · data safety</span><span class="scn__tag scn__tag--level">1–3 years</span></div>
+      <h4>“We have 3 replicas, so we don't need backups”</h4>
+      <p class="scn__situation">In a design review for a bank's reporting cluster, a manager says backups are unnecessary because HDFS already stores everything three times.</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> do you know what replication protects against, and what it doesn't?</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>Replication protects against <b>hardware</b> failures: disks, nodes, a rack.</li>
+          <li>It does <b>not</b> protect against a user deleting data, a buggy job overwriting it, ransomware, or losing the whole data centre: every change reaches all replicas.</li>
+          <li>Use HDFS <b>trash</b> (deleted files kept for a while), <b>snapshots</b> of important directories, and regular copies to a <b>second cluster</b> or cloud storage (DistCp). Regulated industries usually require a DR site anyway.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> agreeing that replication equals backup.</p>
+      </div></details>
+    </article>
+
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">E-commerce · incident</span><span class="scn__tag scn__tag--level">1–3 years</span></div>
+      <h4>fsck says “CORRUPT”: 12 missing blocks</h4>
+      <p class="scn__situation">After a power problem in one row of racks, <code>hdfs fsck /</code> reports 12 missing blocks in yesterday's sales folder. Five nodes are still down.</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> can you investigate missing blocks calmly, and do you know they may come back?</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ol>
+          <li>Missing usually means “no live replica right now”, not “destroyed”. Bring the five nodes back: when they send block reports, the blocks often reappear.</li>
+          <li>Use <code>hdfs fsck / -list-corruptfileblocks</code> and <code>-files -blocks -locations</code> to see which files and nodes are involved.</li>
+          <li>If nodes are truly lost, restore the affected files from the source system, a snapshot or the DR copy, then delete the broken files.</li>
+          <li>Afterwards, ask why all copies were in the failed racks: is rack awareness configured correctly?</li>
+        </ol>
+        <p class="scn__avoid"><b>Avoid:</b> running <code>fsck -delete</code> straight away. It removes the files before you know whether the blocks can come back.</p>
+      </div></details>
+    </article>
+
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Any company · concepts</span><span class="scn__tag scn__tag--level">Fresher</span></div>
+      <h4>“Why not just buy servers that never fail?”</h4>
+      <p class="scn__situation">The interviewer asks: “Wouldn't it be simpler to buy top-quality servers with RAID and dual everything, so failures don't happen?”</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> do you understand the economics behind Hadoop's design?</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>No hardware never fails. With thousands of machines, even very reliable ones fail regularly.</li>
+          <li>Highly reliable servers cost much more per TB and per core, and you still need a plan for when they fail.</li>
+          <li>Hadoop's idea: use affordable commodity servers and make failures harmless in software (replicas, retries, re-replication). Adding capacity stays cheap.</li>
+          <li>Spend extra on the few components that matter most: master nodes, network core, power.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> saying commodity hardware is “bad hardware”. It is ordinary, well-supported hardware without a premium for extra reliability.</p>
+      </div></details>
+    </article>
+  </div>
+</section>
+
+<nav class="lesson-nav" id="lesson-nav" aria-label="Lesson navigation"></nav>
+<div class="ad-slot" data-slot="bottom"></div>
+</article>
+
+<aside class="lesson-side">
+  <nav class="toc" aria-label="In this lesson">
+    <h4>In this lesson</h4>
+    <ol>
+      <li><a href="#story">The story</a></li>
+      <li><a href="#definition">Definition</a></li><li><a href="#levels">Beginner → Advanced</a></li>
+      <li><a href="#types">Types and ways to use it</a></li>
+      <li><a href="#steps">Step by step</a></li>
+      <li><a href="#animation">See it happen</a></li>
+      <li><a href="#real-world">Real-world use</a></li>
+      <li><a href="#run">Run the code</a></li><li><a href="#pc">Run on your PC</a></li>
+      <li><a href="#tracer">Line by line</a></li>
+      <li><a href="#worked">Worked examples</a></li>
+      <li><a href="#quiz">Quiz and revision</a></li>
+      <li><a href="#practice">Practice problems</a></li>
+      <li><a href="#scenarios">Industry scenarios</a></li>
+    </ol>
+  </nav>
+  <div class="ad-slot" data-slot="side"></div>
+  <div class="outline" id="outline"></div>
+</aside>
+</div>
+</main>
+
+<footer class="site-footer">
+  <div class="wrap">
+    <div><h4>MyPhatshala</h4><p>Free programming and IT lessons that show what happens behind the screen.</p></div>
+    <div><h4>Learn</h4><a href="../../../../#tracks">All courses</a><a href="../../">Apache Hadoop syllabus</a></div>
+    <div><h4>Site</h4><a href="../../../../about.html">About</a><a href="../../../../contact.html">Contact</a><a href="../../../../privacy.html">Privacy policy</a><a href="../../../../disclaimer.html">Disclaimer</a></div>
+    <div class="copyright">© MyPhatshala. All lesson content, diagrams and animations are original. Please do not copy without permission.</div>
+  </div>
+</footer>
+
+<script src="../../../../data/courses/hadoop.js"></script>
+<script src="../../../../assets/js/lesson.js"></script>
+<script src="../../../../assets/js/cluster-sim.js"></script>
+<script src="../../../../assets/js/ads.js"></script>
+<script src="../../../../assets/js/site.js"></script>
+</body>
+</html>

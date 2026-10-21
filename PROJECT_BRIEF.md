@@ -123,3 +123,12 @@ Scripts at end: `data/courses/<course-id>.js`, `lesson.js`, `ads.js`, `site.js` 
 1. Get Anuj's approval/changes on Lesson 1.1.
 2. Write Core Java Module 1: 1.2 History and features, 1.3 JDK vs JRE vs JVM, 1.4 How Java code runs, 1.5 Installing Java and first program, 1.6 Structure of a Java program. Then continue module by module.
 3. Owner to-dos: copy `.github/workflows/build-manifest.yml` into the folder; fill About page + contact email; buy a domain and set `siteUrl` in `config.js` and `robots.txt`; push to GitHub + Cloudflare Pages; apply for AdSense after ~15–20 live lessons, then add the publisher ID to `config.js` and `ads.txt`.
+
+## Big Data track: Python lesson pipeline (added 19 Oct 2026)
+- Big Data lessons use **Python simulations** in the browser runner plus **"Run on your PC"** panels (`.pcrun`, real commands with output recorded from a real run).
+- Source per lesson: `tools/authoring/src/<course>/<module>/<lesson>/` with `body.html` (parts 1–6; lines starting `A>`, `R>`, `EXAM>`, `TIP>`, `WARN>` are macros) and `spec.py` (runner tasks, PC panels, trace, worked examples, quiz, revision, FAQ, practice, scenarios). Shared course settings: `src/<course>/course.py`.
+- Build: `python3 tools/authoring/pylesson.py tools/authoring/src/<course>/<module>/<lesson>` — every program is really run; expected outputs and line-by-line traces (sys.settrace) are generated, never typed by hand. Then `node tools/build-manifest.js`.
+- Visual check: `python3 tools/authoring/svgprev.py <page.html> tools/authoring/_preview/<name>` renders every SVG/animation frame to PNG (folder is git-ignored).
+- ✅ Big Data Fundamentals Module 1 (lessons 1.1–1.3) live.
+- ✅ Big Data Fundamentals Module 2 (lessons 2.1–2.4) live, in the richer format: a Beginner/Intermediate/Advanced tab block (`LEVELS>` macro in body.html, reuses the `.modlab` tabs), 1 two-view + 3 real-time scenario animations per lesson, examples tagged with `level` ('b'/'i'/'a'), practice level `advanced`, and a recurring character Kabir (`K>` macro). New CSS: `.levels`, `.lvl--b/i/a`, `.live`, `--violet`/`.s-violet`/`.s-soft-violet`.
+- ✅ Big Data Fundamentals Module 3 (lesson 3.1 careers) live → the whole Big Data Fundamentals course (8 lessons) is complete. Salary table in 3.1 uses indicative 2026 India ranges from published salary guides; refresh yearly.

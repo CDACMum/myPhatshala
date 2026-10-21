@@ -1,0 +1,408 @@
+<!-- ======================= PART 1: THE STORY ======================= -->
+<section class="part" id="story">
+  <span class="part-label"><b>1</b> The story</span>
+  <h2>Two numbers for the same sale</h2>
+  <div class="story">
+    <p class="narration">TiffinGo runs its biggest-ever <b>Diwali dinner sale</b>. The CEO wants a live revenue counter on the office TV all evening. Kabir builds it on the streaming path, and at midnight it proudly shows <b>₹2.31 crore</b>. Next morning, the finance team's batch report says <b>₹2.24 crore</b>. The CEO asks one question: <i>“Which number is true?”</i></p>
+
+    <div class="scene">
+      <svg viewBox="0 0 640 170" role="img" aria-label="Sale events go into a log and split into a fast path that shows an approximate live total and a slow path that computes the accurate total later; a serving layer combines both.">
+        <g font-size="10">
+          <rect x="10" y="56" width="92" height="50" rx="8" class="s-soft-acc" style="stroke:var(--track);stroke-width:1.5"/>
+          <text x="56" y="76" text-anchor="middle" font-weight="700" class="s-acc">Order events</text>
+          <text x="56" y="92" text-anchor="middle" font-size="8.4" class="s-ink2">sales, refunds</text>
+          <path d="M104 81h24" class="s-line"/><path d="M124 77l6 4-6 4" class="s-line"/>
+          <rect x="134" y="56" width="74" height="50" rx="8" class="s-card2"/>
+          <text x="171" y="76" text-anchor="middle" font-weight="700" class="s-ink">Kafka log</text>
+          <text x="171" y="92" text-anchor="middle" font-size="8.4" class="s-ink2">append-only</text>
+          <path d="M210 70Q240 40 268 34" class="s-line"/><path d="M262 30l7 4-6 5" class="s-line"/>
+          <path d="M210 92Q240 122 268 128" class="s-line"/><path d="M262 124l7 4-6 5" class="s-line"/>
+          <rect x="274" y="10" width="170" height="52" rx="10" class="s-soft-green" style="stroke:var(--green);stroke-width:1.5"/>
+          <text x="359" y="30" text-anchor="middle" font-weight="700" class="s-green">Speed layer (stream)</text>
+          <text x="359" y="46" text-anchor="middle" font-size="8.6" class="s-ink">seconds old · approximate</text>
+          <text x="359" y="57" text-anchor="middle" font-size="8.4" class="s-ink2">₹2.31 cr at midnight</text>
+          <rect x="274" y="100" width="170" height="52" rx="10" class="s-soft-blue" style="stroke:var(--blue);stroke-width:1.5"/>
+          <text x="359" y="120" text-anchor="middle" font-weight="700" class="s-blue">Batch layer (recompute)</text>
+          <text x="359" y="136" text-anchor="middle" font-size="8.6" class="s-ink">hours old · accurate</text>
+          <text x="359" y="147" text-anchor="middle" font-size="8.4" class="s-ink2">₹2.24 cr next morning</text>
+          <path d="M446 36Q480 50 494 70" class="s-line"/><path d="M446 126Q480 112 494 92" class="s-line"/>
+          <rect x="498" y="56" width="134" height="50" rx="10" class="s-soft-violet" style="stroke:var(--violet);stroke-width:1.5"/>
+          <text x="565" y="76" text-anchor="middle" font-weight="700" class="s-violet">Serving layer</text>
+          <text x="565" y="92" text-anchor="middle" font-size="8.4" class="s-ink">batch view + speed view</text>
+        </g>
+        <text x="320" y="166" text-anchor="middle" font-size="10" class="s-ink2">Lambda: run both paths and merge. Kappa: keep only the stream, and replay the log to fix anything.</text>
+      </svg>
+    </div>
+
+K> Sir, my live counter didn't subtract refunds properly, and some orders came twice when phones retried. But it was live! Finance took six hours.
+A> Both numbers are useful, Kabir. The live one answers “how is the sale going <i>right now</i>?” The batch one answers “what exactly did we earn?” In 2011, an engineer called Nathan Marz proposed running <b>both paths together</b> and merging them. He called it the <b>Lambda architecture</b>.
+R> Then everyone is happy. What's the catch?
+A> You now maintain the same business logic twice: once in the stream code, once in the batch code. Fix the refund rule in one and forget the other, and the numbers disagree forever.
+K> Can't we just have one path?
+A> That's the <b>Kappa architecture</b>, proposed in 2014 by Jay Kreps, one of Kafka's creators: only the streaming path, and when the logic changes, replay the saved event log through the new code. Today you'll build both in Python and decide which one TiffinGo should use.
+  </div>
+</section>
+
+<!-- ======================= PART 2: DEFINITION ======================= -->
+<section class="part" id="definition">
+  <span class="part-label"><b>2</b> Definition</span>
+  <h2>What are the Lambda and Kappa architectures?</h2>
+  <div class="def">
+    <div class="def__formal"><small>Formal definition (write this in exams)</small>
+      <p>The <b>Lambda architecture</b> processes data through two parallel paths: a <b>batch layer</b> that stores the complete, immutable master dataset and periodically recomputes accurate <b>batch views</b>, and a <b>speed layer</b> that processes only recent data in real time to produce low-latency <b>real-time views</b>. A <b>serving layer</b> answers queries by merging both views. The <b>Kappa architecture</b> removes the batch layer: all data is treated as a stream stored in a replayable, append-only <b>log</b>, a single stream-processing code path produces the views, and reprocessing is done by replaying the log through a new version of the job.</p></div>
+    <div class="def__simple"><small>In simple words</small>
+      <p><b>Lambda:</b> a fast, rough answer from the stream, plus a slow, exact answer from batch; show both combined. <b>Kappa:</b> one stream-only path; if you need to fix or recompute something, rewind the saved event log and run it again.</p></div>
+  </div>
+
+  <h3>Words you'll meet in this lesson</h3>
+  <div class="terms">
+    <div class="term"><b>Master dataset</b><span>The complete, raw, never-edited record of all events, usually in the lake.</span></div>
+    <div class="term"><b>Batch view</b><span>A result precomputed from all data up to the last batch run: accurate but hours old.</span></div>
+    <div class="term"><b>Real-time view</b><span>A result computed by the speed layer from events since the last batch run.</span></div>
+    <div class="term"><b>Serving layer</b><span>The store that answers queries by combining batch and real-time views.</span></div>
+    <div class="term"><b>Immutable</b><span>Never changed after being written: you append corrections, you don't overwrite.</span></div>
+    <div class="term"><b>Offset</b><span>An event's position number in a Kafka partition. Consumers can start reading from any offset.</span></div>
+    <div class="term"><b>Retention</b><span>How long the log keeps events: hours, days, or forever with tiered storage.</span></div>
+    <div class="term"><b>Replay / reprocess</b><span>Read old events again from an earlier offset, usually with fixed or new logic.</span></div>
+  </div>
+
+  <h3>The two architectures at a glance</h3>
+  <table class="facts">
+    <tr><th>Lambda</th><td>Batch layer (Spark/Hadoop on the lake) + speed layer (Flink/Spark Streaming) + serving layer · accurate and fresh · <b>two codebases</b></td></tr>
+    <tr><th>Kappa</th><td>Kafka log (long retention) + one stream processor + serving store · <b>one codebase</b> · reprocess by replaying the log</td></tr>
+  </table>
+
+LEVELS> Lambda and Kappa at three levels
+L1> Two cooks, or one cook with a recipe book
+      <ul>
+        <li><b>Lambda</b> is a kitchen with two cooks. The <b>fast cook</b> sends a quick tasting plate the moment an order arrives. The <b>head chef</b> cooks the full, perfect meal more slowly. The <b>waiter</b> serves the perfect meal when it's ready and the tasting plate until then.</li>
+        <li><b>Kappa</b> is one very good cook who keeps every ingredient delivery and every recipe. If a recipe was wrong, the cook simply re-cooks from the saved ingredients with the corrected recipe.</li>
+        <li>Lambda gives you two opinions to reconcile. Kappa gives you one opinion that can be redone.</li>
+      </ul>
+L2> Layers, merging and replay
+      <ul>
+        <li><b>Batch layer:</b> appends every event to an immutable master dataset in the lake and recomputes views from scratch (for example nightly with Spark). Recomputing from raw data corrects any earlier mistakes.</li>
+        <li><b>Speed layer:</b> processes only events that arrived after the last batch run, with a stream processor. Its results are temporary: they are discarded once the next batch view covers that period.</li>
+        <li><b>Serving layer:</b> stores views (Cassandra, HBase, Druid, a warehouse) and answers <code>query = batch view + real-time view</code>.</li>
+        <li><b>Kappa:</b> Kafka keeps events long enough to replay. To change logic, start job v2 from offset 0 writing to a new table, wait until it catches up with the live stream, switch readers to the new table, then stop v1.</li>
+      </ul>
+L3> Trade-offs in real systems
+      <ul>
+        <li><b>Lambda's cost</b> is duplicated logic: two implementations of every metric, two test suites, and subtle drift between them. Its strength is that batch recomputation from the lake is simple, robust and can use any batch tool.</li>
+        <li><b>Kappa's cost</b> is in the stream: long log retention (tiered storage helps), replays that may take hours for large state, careful exactly-once and idempotent sinks, and schema evolution across years of events.</li>
+        <li><b>Unified engines</b> (Apache Flink, Spark Structured Streaming, Apache Beam) let one codebase run in batch and streaming modes, removing much of Lambda's duplication.</li>
+        <li><b>Lakehouse streaming tables</b> (Delta, Iceberg, Hudi) can be both a streaming sink and a batch source, so many modern platforms use a pragmatic mix: a stream for live views plus scheduled recomputation from the same tables and the same code.</li>
+        <li><b>Choose by need:</b> how often must you recompute history, how complex is the logic, how long can the log be kept, and how strong is the team in stream processing?</li>
+      </ul>
+/LEVELS
+EXAM> Draw Lambda with its <b>three layers</b> (batch, speed, serving) and arrows from one data source to both batch and speed. Draw Kappa as <b>log → stream processor → serving</b>, with a “replay” arrow. Then give <b>two advantages and two disadvantages</b> of each.
+</section>
+
+<!-- ======================= PART 3: TYPES AND WAYS TO USE IT ======================= -->
+<section class="part" id="types">
+  <span class="part-label"><b>3</b> Types and ways to use it</span>
+  <h2>Lambda vs Kappa side by side</h2>
+  <div class="table-wrap">
+  <table class="compare" style="min-width:600px">
+    <thead><tr><th></th><th>Lambda</th><th>Kappa</th></tr></thead>
+    <tbody>
+      <tr><td><b>Processing paths</b></td><td>Two: batch + speed</td><td>One: stream only</td></tr>
+      <tr><td><b>Source of truth</b></td><td>Immutable master dataset in the lake</td><td>Replayable event log (Kafka with long retention)</td></tr>
+      <tr><td><b>Codebases</b></td><td>Two, must stay consistent</td><td>One</td></tr>
+      <tr><td><b>Fixing a bug / new metric</b></td><td>Change both; the next batch run recomputes history</td><td>Deploy a new job version and replay the log</td></tr>
+      <tr><td><b>Accuracy</b></td><td>Batch view is exact; speed view approximate until replaced</td><td>Exact if the stream job is exactly-once</td></tr>
+      <tr><td><b>Complexity</b></td><td>Operational: two systems to run</td><td>Technical: stateful streaming, replays, retention</td></tr>
+      <tr><td><b>Good fit</b></td><td>Heavy historical recomputation, ML training, very complex batch logic</td><td>Event-driven businesses, logic expressible as stream jobs, frequent small changes</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <h3>Typical tools in each layer</h3>
+  <div class="cards">
+    <div class="card"><h4>Batch layer</h4><p>HDFS or S3 for the master dataset; Spark (earlier Hadoop MapReduce) to recompute views; Airflow to schedule.</p><span class="tag">Accurate</span></div>
+    <div class="card"><h4>Speed layer</h4><p>Kafka in front; Flink, Spark Structured Streaming or Kafka Streams (earlier Apache Storm) to keep real-time views.</p><span class="tag">Fresh</span></div>
+    <div class="card"><h4>Serving layer</h4><p>Cassandra, HBase, Apache Druid, Apache Pinot or a warehouse, holding views that dashboards and APIs query.</p><span class="tag">Answers</span></div>
+  </div>
+TIP> <b>The “lambda” name</b> comes from the shape of the diagram (data splitting into two branches), not from Python's <code>lambda</code> functions or AWS Lambda. Don't mix them up in interviews.
+</section>
+
+<!-- ======================= PART 4: STEP BY STEP ======================= -->
+<section class="part" id="steps">
+  <span class="part-label"><b>4</b> Step by step</span>
+  <h2>A query during the sale, the Lambda way</h2>
+  <ol class="stepper">
+    <li><h4>Every event is appended, twice over</h4>
+      <div class="code" data-lang="python" data-file="event"><pre><code>{"offset": 50213, "order": "O90017", "amount": 499, "type": "sale", "ts": "19:42:05"}</code></pre></div>
+      <span class="behind">The event goes into Kafka. From there, one consumer writes it to the <b>master dataset</b> in the lake (batch layer), and another feeds the <b>speed layer</b>.</span></li>
+    <li><h4>The batch view from last night</h4>
+      <div class="code" data-lang="python" data-file="batch view"><pre><code>batch_view = {"revenue_till_yesterday": 18_40_00_000}   # computed at 02:00 by Spark</code></pre></div>
+      <span class="behind">A nightly Spark job recomputed revenue from <b>all</b> raw events up to midnight: duplicates removed, refunds subtracted, late events included. Exact, but it knows nothing about today.</span></li>
+    <li><h4>The speed layer covers today</h4>
+      <div class="code" data-lang="python" data-file="real-time view"><pre><code>speed_view = {"revenue_today": 0}
+for e in todays_events:                      # updated within seconds of each event
+    speed_view["revenue_today"] += e["amount"] if e["type"] == "sale" else -e["amount"]</code></pre></div>
+      <span class="behind">The stream processor keeps a running total for events after midnight only. Quick, but approximate: a duplicate or a late refund may slip through until tomorrow's batch.</span></li>
+    <li><h4>The serving layer merges</h4>
+      <div class="code" data-lang="python" data-file="query.py"><pre><code>batch_view = 18_40_00_000
+speed_view = 2_31_00_000
+print("Revenue (this season):", batch_view + speed_view)</code></pre><div class="output">Revenue (this season): 207100000</div></div>
+      <span class="behind">The dashboard asks the serving layer; it adds the exact past to the fresh present. The CEO sees a number that is both complete and up to the minute.</span></li>
+    <li><h4>Next night, batch catches up</h4>
+      <p>At 02:00 the batch job recomputes everything including the sale day: ₹2.24 crore for the day, not ₹2.31 crore.</p>
+      <span class="behind">The new batch view replaces the speed layer's estimate for that day, and the speed layer starts again from zero for the new day. Errors in the fast path never last longer than one batch cycle. That is Lambda's safety net.</span></li>
+  </ol>
+</section>
+
+<!-- ======================= PART 5: SEE IT HAPPEN ======================= -->
+<section class="part" id="animation">
+  <span class="part-label"><b>5</b> See it happen</span>
+  <h2>Sale night, the morning after, and the week Kabir switched to Kappa</h2>
+  <p>Step through six frames. Left: what the CEO and finance see. Right: which layer is doing the work.</p>
+  <div class="anim" data-frames="6">
+    <div class="anim__title">From Lambda to Kappa <span>6 steps</span></div>
+    <div class="anim__views">
+      <div class="view view--see">
+        <span class="view__tag">What you see</span>
+        <svg viewBox="0 0 360 250" role="img" aria-label="Live revenue screen and finance report">
+          <g data-on="1-3">
+            <rect x="14" y="14" width="332" height="150" rx="10" class="s-board"/>
+            <text x="28" y="36" font-size="9.4" font-weight="700" style="fill:#F5C77E">DIWALI DINNER SALE · LIVE</text>
+          </g>
+          <g data-on="1"><text x="180" y="96" text-anchor="middle" font-size="26" font-weight="700" class="mono" style="fill:#9FD3B8">₹0</text><text x="180" y="130" text-anchor="middle" font-size="9.4" style="fill:#7F8C86">18:00 · sale begins</text></g>
+          <g data-on="2"><text x="180" y="96" text-anchor="middle" font-size="26" font-weight="700" class="mono" style="fill:#9FD3B8">₹1.12 cr</text><text x="180" y="130" text-anchor="middle" font-size="9.4" style="fill:#7F8C86">20:30 · updated 2 seconds ago</text></g>
+          <g data-on="3"><text x="180" y="86" text-anchor="middle" font-size="26" font-weight="700" class="mono" style="fill:#9FD3B8">₹20.71 cr</text><text x="180" y="110" text-anchor="middle" font-size="9" style="fill:#7F8C86">season total = till yesterday + today</text><text x="180" y="130" text-anchor="middle" font-size="9" style="fill:#7F8C86">18.40 cr (exact) + 2.31 cr (live)</text></g>
+          <g data-on="1-3"><text x="180" y="190" text-anchor="middle" font-size="9.4" class="s-ink2">The office TV during the sale</text></g>
+          <g data-on="4">
+            <rect x="14" y="14" width="332" height="150" rx="10" class="s-card2"/>
+            <text x="28" y="36" font-size="9.4" font-weight="700" class="s-ink">Finance report · morning after</text>
+            <text x="28" y="62" font-size="9" class="s-ink">Live counter at midnight</text><text x="330" y="62" text-anchor="end" font-size="9" class="s-ink">₹2.31 cr</text>
+            <text x="28" y="82" font-size="9" class="s-red">− duplicate orders (retries)</text><text x="330" y="82" text-anchor="end" font-size="9" class="s-red">₹0.04 cr</text>
+            <text x="28" y="102" font-size="9" class="s-red">− refunds processed late</text><text x="330" y="102" text-anchor="end" font-size="9" class="s-red">₹0.05 cr</text>
+            <text x="28" y="122" font-size="9" class="s-green">+ orders that arrived late</text><text x="330" y="122" text-anchor="end" font-size="9" class="s-green">₹0.02 cr</text>
+            <path d="M28 130h302" class="s-line"/>
+            <text x="28" y="150" font-size="9.4" font-weight="700" class="s-ink">Exact sale revenue</text><text x="330" y="150" text-anchor="end" font-size="9.4" font-weight="700" class="s-ink">₹2.24 cr</text>
+          </g>
+          <g data-on="5">
+            <rect x="14" y="14" width="332" height="150" rx="10" class="s-soft-acc" style="stroke:#D64545"/>
+            <text x="28" y="36" font-size="9.4" font-weight="700" class="s-red">A week later: the numbers disagree again</text>
+            <text x="28" y="62" font-size="9" class="s-ink">Finance changed the rule: “cancelled within</text>
+            <text x="28" y="78" font-size="9" class="s-ink">5 minutes is not a sale.”</text>
+            <text x="28" y="102" font-size="9" class="s-ink">The batch code was updated. The stream code</text>
+            <text x="28" y="118" font-size="9" class="s-ink">was not. Live and morning numbers now drift</text>
+            <text x="28" y="134" font-size="9" class="s-ink">apart every day.</text>
+          </g>
+          <g data-on="6">
+            <rect x="14" y="14" width="332" height="150" rx="10" class="s-soft-green" style="stroke:var(--green)"/>
+            <text x="28" y="36" font-size="9.4" font-weight="700" class="s-green">After moving to Kappa</text>
+            <text x="28" y="62" font-size="9" class="s-ink">✓ one job computes both live and final numbers</text>
+            <text x="28" y="82" font-size="9" class="s-ink">✓ rule changes: deploy v2, replay 30 days of log</text>
+            <text x="28" y="102" font-size="9" class="s-ink">✓ live counter and finance agree</text>
+            <text x="28" y="122" font-size="9" class="s-ink">✗ needs long log retention and careful</text>
+            <text x="28" y="138" font-size="9" class="s-ink">   exactly-once processing</text>
+          </g>
+          <text x="352" y="244" text-anchor="end" class="s-wm">myphatshala.in</text>
+        </svg>
+        <ol class="caps" hidden>
+          <li><b>18:00:</b> the sale begins. The live counter starts at zero.</li>
+          <li><b>20:30:</b> ₹1.12 crore, updated seconds after each order.</li>
+          <li>The season total shown is yesterday's exact figure plus today's live figure.</li>
+          <li><b>Morning after:</b> finance explains the difference: duplicates and late refunds removed, late orders added. Exact: ₹2.24 crore.</li>
+          <li><b>A week later:</b> a business rule changed in the batch code only. The two paths now disagree every day.</li>
+          <li>After moving to <b>Kappa</b>, one job produces both numbers, and rule changes are applied by replaying the log.</li>
+        </ol>
+      </div>
+
+      <div class="view view--behind">
+        <span class="view__tag">Behind the screen</span>
+        <svg viewBox="0 0 360 250" role="img" aria-label="Lambda layers and the Kappa log">
+          <g data-on="1-5">
+            <rect x="10" y="98" width="70" height="44" rx="6" class="s-card2"/><text x="45" y="118" text-anchor="middle" font-size="8.6" font-weight="700" class="s-ink">Kafka</text><text x="45" y="132" text-anchor="middle" font-size="7.6" class="s-ink2">events</text>
+            <rect x="110" y="20" width="130" height="58" rx="8" class="s-soft-green" style="stroke:var(--green)"/><text x="175" y="38" text-anchor="middle" font-size="8.6" font-weight="700" class="s-green">Speed layer</text>
+            <rect x="110" y="160" width="130" height="58" rx="8" class="s-soft-blue" style="stroke:var(--blue)"/><text x="175" y="178" text-anchor="middle" font-size="8.6" font-weight="700" class="s-blue">Batch layer</text>
+            <rect x="272" y="98" width="80" height="44" rx="6" class="s-soft-violet" style="stroke:var(--violet)"/><text x="312" y="118" text-anchor="middle" font-size="8.4" font-weight="700" class="s-violet">Serving</text><text x="312" y="132" text-anchor="middle" font-size="7.6" class="s-ink2">batch + speed</text>
+            <path d="M80 110L110 60M80 130L110 180M240 50L272 108M240 190L272 132" class="s-line"/>
+          </g>
+          <g data-on="1"><text x="175" y="56" text-anchor="middle" font-size="8" class="s-ink">today: ₹0</text><text x="175" y="196" text-anchor="middle" font-size="8" class="s-ink">master dataset in lake</text><text x="175" y="208" text-anchor="middle" font-size="8" class="s-ink">view till yesterday: 18.40 cr</text>
+            <text x="180" y="233" text-anchor="middle" font-size="9" class="s-ink2">Each event goes to BOTH paths.</text></g>
+          <g data-on="2"><rect x="110" y="20" width="130" height="58" rx="8" style="fill:none;stroke:var(--green);stroke-width:3"/><text x="175" y="56" text-anchor="middle" font-size="8" class="s-ink">+499 +250 −120 …</text><text x="175" y="68" text-anchor="middle" font-size="8" font-weight="700" class="s-green">today: 1.12 cr</text><text x="175" y="196" text-anchor="middle" font-size="8" class="s-ink">only appending raw</text><text x="175" y="208" text-anchor="middle" font-size="8" class="s-ink">events, no recompute yet</text>
+            <text x="180" y="233" text-anchor="middle" font-size="9" class="s-ink2">The speed layer updates a running total per event.</text></g>
+          <g data-on="3"><rect x="272" y="98" width="80" height="44" rx="6" style="fill:none;stroke:var(--violet);stroke-width:3"/><text x="175" y="62" text-anchor="middle" font-size="8" class="s-ink">real-time view: 2.31 cr</text><text x="175" y="202" text-anchor="middle" font-size="8" class="s-ink">batch view: 18.40 cr</text>
+            <text x="180" y="233" text-anchor="middle" font-size="9" class="s-ink2">Query = batch view + real-time view.</text></g>
+          <g data-on="4"><rect x="110" y="160" width="130" height="58" rx="8" style="fill:none;stroke:var(--blue);stroke-width:3"/><text x="175" y="196" text-anchor="middle" font-size="8" class="s-ink">02:00 recompute ALL raw</text><text x="175" y="208" text-anchor="middle" font-size="8" font-weight="700" class="s-blue">sale day exact: 2.24 cr</text><text x="175" y="56" text-anchor="middle" font-size="8" class="s-ink">estimate for that day</text><text x="175" y="68" text-anchor="middle" font-size="8" font-weight="700" class="s-red">discarded, reset to 0</text>
+            <text x="180" y="233" text-anchor="middle" font-size="9" class="s-ink2">Batch replaces the speed layer's estimate.</text></g>
+          <g data-on="5"><text x="175" y="56" text-anchor="middle" font-size="8" class="s-ink">stream code: OLD rule</text><text x="175" y="68" text-anchor="middle" font-size="8" font-weight="700" class="s-red">v1 (Flink job)</text><text x="175" y="196" text-anchor="middle" font-size="8" class="s-ink">batch code: NEW rule</text><text x="175" y="208" text-anchor="middle" font-size="8" font-weight="700" class="s-red">v2 (Spark job)</text>
+            <text x="180" y="233" text-anchor="middle" font-size="9" class="s-red">Same metric, two implementations, drifting apart.</text></g>
+          <g data-on="6">
+            <text x="10" y="24" font-size="8.6" font-weight="700" class="s-ink">Kafka log · 30-day retention</text>
+            <g><rect x="10" y="32" width="340" height="22" rx="4" class="s-card2"/><rect x="10" y="32" width="340" height="22" rx="4" style="fill:var(--track);opacity:.25"/></g>
+            <text x="14" y="47" font-size="7.6" class="s-ink mono">offset 0</text><text x="346" y="47" text-anchor="end" font-size="7.6" class="s-ink mono">now</text>
+            <rect x="60" y="80" width="110" height="40" rx="6" class="s-card2"/><text x="115" y="98" text-anchor="middle" font-size="8.4" font-weight="700" class="s-ink3">job v1 (old rule)</text><text x="115" y="111" text-anchor="middle" font-size="7.6" class="s-ink3">stopped after switch</text>
+            <rect x="190" y="80" width="110" height="40" rx="6" class="s-soft-green" style="stroke:var(--green);stroke-width:2"/><text x="245" y="98" text-anchor="middle" font-size="8.4" font-weight="700" class="s-green">job v2 (new rule)</text><text x="245" y="111" text-anchor="middle" font-size="7.6" class="s-ink">replayed from offset 0</text>
+            <path d="M245 54v26" style="stroke:var(--green);stroke-width:2"/>
+            <rect x="120" y="150" width="120" height="40" rx="6" class="s-soft-violet" style="stroke:var(--violet)"/><text x="180" y="168" text-anchor="middle" font-size="8.4" font-weight="700" class="s-violet">serving table v2</text><text x="180" y="181" text-anchor="middle" font-size="7.6" class="s-ink">live + historical</text>
+            <path d="M245 120L200 150" class="s-line"/>
+            <text x="180" y="226" text-anchor="middle" font-size="9" class="s-ink2">Kappa: one code path; replay the log to recompute.</text>
+          </g>
+          <text x="352" y="248" text-anchor="end" class="s-wm">myphatshala.in</text>
+        </svg>
+        <ol class="caps" hidden>
+          <li>Every order event goes from Kafka into <b>both</b> the speed layer and the batch layer's master dataset.</li>
+          <li>The <b>speed layer</b> keeps today's running total, updated per event. The batch layer only stores raw events for now.</li>
+          <li>The <b>serving layer</b> answers the dashboard with batch view (till yesterday, exact) + real-time view (today, live).</li>
+          <li>At 02:00 the <b>batch layer</b> recomputes from all raw events. Its exact figure replaces the speed layer's estimate, which resets to zero.</li>
+          <li>The weakness: the same metric exists in two codebases. One was updated, the other wasn't.</li>
+          <li><b>Kappa:</b> a single stream job. For a rule change, job v2 replays the retained log from offset 0 into a new serving table; once it catches up, readers switch and v1 stops.</li>
+        </ol>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ======================= PART 6: REAL-WORLD USE ======================= -->
+<section class="part" id="real-world">
+  <span class="part-label"><b>6</b> Real-world use</span>
+  <h2>Real-time scenarios with both architectures</h2>
+  <p>Watch the live estimate and the batch correction on one chart, replay a Kafka log after a bug, and (advanced) walk the decision an architect makes when choosing.</p>
+  <!--ANIM2-->
+  <span class="live">Real-time scenario 1</span>
+  <h3 id="animated-example">Sale night on one chart: speed layer vs batch correction</h3>
+  <p class="anim-intro">Revenue per hour during the sale. The green line is what the speed layer showed live; the blue line is what the batch layer computed afterwards from complete data.</p>
+  <div class="anim anim--one" data-frames="5" data-delay="4800">
+    <div class="anim__title">Live estimate, exact correction <span>5 steps</span></div>
+    <div class="anim__views">
+      <div class="view view--story">
+        <span class="view__tag">Animated example</span>
+        <svg viewBox="0 0 360 226" role="img" aria-label="Hourly revenue: live estimate and batch-corrected values">
+          <path d="M40 150h310M40 150V20" class="s-line"/>
+          <g font-size="8" class="s-ink3" text-anchor="middle"><text x="70" y="164">18h</text><text x="120" y="164">19h</text><text x="170" y="164">20h</text><text x="220" y="164">21h</text><text x="270" y="164">22h</text><text x="320" y="164">23h</text></g>
+          <text x="36" y="24" text-anchor="end" font-size="8" class="s-ink3">₹ lakh</text>
+          <g data-on="1-"><path d="M70 120L120 96" style="fill:none;stroke:var(--green);stroke-width:3"/><circle cx="120" cy="96" r="3" class="s-green"/></g>
+          <g data-on="2-"><path d="M120 96L170 60L220 40" style="fill:none;stroke:var(--green);stroke-width:3"/><circle cx="220" cy="40" r="3" class="s-green"/></g>
+          <g data-on="3-"><path d="M220 40L270 52L320 88" style="fill:none;stroke:var(--green);stroke-width:3"/><circle cx="320" cy="88" r="3" class="s-green"/></g>
+          <g data-on="4-"><path d="M70 122L120 99L170 64L220 46L270 58L320 94" style="fill:none;stroke:var(--blue);stroke-width:3;stroke-dasharray:6 4"/></g>
+          <g font-size="8.4" font-weight="700"><text data-on="1-" x="250" y="132" class="s-green">— speed layer (live)</text><text data-on="4-" x="250" y="144" class="s-blue">- - batch (corrected)</text></g>
+          <text data-on="1" x="180" y="190" text-anchor="middle" font-size="9" class="s-ink">18:00–19:00 · speed layer updates every few seconds.</text>
+          <text data-on="2" x="180" y="190" text-anchor="middle" font-size="9" class="s-ink">20:00–21:00 · peak dinner hour, still live and fresh.</text>
+          <text data-on="3" x="180" y="190" text-anchor="middle" font-size="9" class="s-ink">23:00 · sale ends. Live total ₹2.31 crore.</text>
+          <g data-on="4"><text x="180" y="186" text-anchor="middle" font-size="9" class="s-ink">02:00 · batch recomputes every hour from raw events.</text><text x="180" y="200" text-anchor="middle" font-size="8.6" class="s-ink2">each hour slightly lower: duplicates and late refunds</text></g>
+          <g data-on="5"><rect x="10" y="174" width="340" height="34" rx="6" class="s-soft-green" style="stroke:var(--green)"/><text x="180" y="188" text-anchor="middle" font-size="9" font-weight="700" class="s-green">Gap ≈ 3%: small, but finance needs the exact line</text><text x="180" y="201" text-anchor="middle" font-size="8.4" class="s-ink">live for decisions tonight, batch for the books tomorrow</text></g>
+          <text x="354" y="221" text-anchor="end" class="s-wm">myphatshala.in</text>
+        </svg>
+        <ol class="caps" hidden>
+          <li><b>18:00–19:00:</b> the green line is drawn live by the speed layer as orders arrive.</li>
+          <li><b>Peak hour:</b> managers use the live line to add riders in busy areas, a decision that can't wait until tomorrow.</li>
+          <li><b>23:00:</b> the sale ends. The live total is ₹2.31 crore.</li>
+          <li><b>02:00:</b> the batch layer recomputes every hour from all raw events. The blue line is slightly lower each hour.</li>
+          <li>The difference is about 3%. Lambda shows both: the live line during the night, the exact line from the morning. (Numbers illustrative.)</li>
+        </ol>
+      </div>
+    </div>
+  </div>
+  <!--/ANIM2-->
+
+  <span class="live">Real-time scenario 2</span>
+  <h3>Kappa in action: replaying a month after a bug</h3>
+  <p class="anim-intro">TiffinGo moved to Kappa. On 19 October, a bug is found in how coupons were applied since 20 September. The log keeps 30 days. Watch the team fix a month of numbers without any batch system.</p>
+  <div class="anim anim--one" data-frames="5" data-delay="4800">
+    <div class="anim__title">Replay, catch up, switch <span>5 steps</span></div>
+    <div class="anim__views">
+      <div class="view view--story">
+        <span class="view__tag">Animated example</span>
+        <svg viewBox="0 0 360 226" role="img" aria-label="Two stream job versions reading a Kafka log">
+          <text x="10" y="20" font-size="8.6" font-weight="700" class="s-ink">topic: orders (retention 30 days)</text>
+          <rect x="10" y="28" width="340" height="24" rx="4" class="s-card2"/>
+          <g fill-opacity=".5"><rect x="10" y="28" width="340" height="24" rx="4" style="fill:var(--track);opacity:.2"/></g>
+          <g font-size="7.6" class="s-ink3"><text x="12" y="66">20 Sep (offset 0)</text><text x="338" y="66" text-anchor="end">now: 19 Oct</text></g>
+          <g data-on="1-4"><path d="M346 52v22" style="stroke:var(--ink-3);stroke-width:2"/><rect x="290" y="76" width="60" height="30" rx="5" class="s-card2"/><text x="320" y="95" text-anchor="middle" font-size="8" font-weight="700" class="s-ink">job v1</text></g>
+          <g data-on="2"><path d="M14 52v22" style="stroke:var(--green);stroke-width:2.5"/><rect x="10" y="76" width="64" height="30" rx="5" class="s-soft-green" style="stroke:var(--green)"/><text x="42" y="95" text-anchor="middle" font-size="8" font-weight="700" class="s-green">job v2</text></g>
+          <g data-on="3"><path d="M190 52v22" style="stroke:var(--green);stroke-width:2.5"/><rect x="158" y="76" width="64" height="30" rx="5" class="s-soft-green" style="stroke:var(--green)"/><text x="190" y="95" text-anchor="middle" font-size="8" font-weight="700" class="s-green">job v2</text><rect x="10" y="28" width="180" height="24" rx="4" style="fill:var(--green);opacity:.25"/></g>
+          <g data-on="4-"><path d="M340 52v22" style="stroke:var(--green);stroke-width:2.5"/><rect x="214" y="76" width="64" height="30" rx="5" class="s-soft-green" style="stroke:var(--green)"/><text x="246" y="95" text-anchor="middle" font-size="8" font-weight="700" class="s-green">job v2</text><rect x="10" y="28" width="336" height="24" rx="4" style="fill:var(--green);opacity:.25"/></g>
+          <g data-on="5"><rect x="290" y="76" width="60" height="30" rx="5" class="s-card2" style="opacity:.4"/><text x="320" y="95" text-anchor="middle" font-size="8" class="s-ink3">v1 stopped</text></g>
+          <g data-on="1"><rect x="10" y="124" width="340" height="54" rx="8" class="s-soft-acc" style="stroke:#D64545"/><text x="180" y="142" text-anchor="middle" font-size="9" font-weight="700" class="s-red">19 Oct · bug found: coupons applied twice since 20 Sep</text><text x="180" y="158" text-anchor="middle" font-size="8.6" class="s-ink">job v1 keeps running live, so dashboards stay up</text><text x="180" y="171" text-anchor="middle" font-size="8.4" class="s-ink2">but a month of revenue numbers is wrong</text></g>
+          <g data-on="2"><rect x="10" y="124" width="340" height="54" rx="8" class="s-soft-green" style="stroke:var(--green)"/><text x="180" y="142" text-anchor="middle" font-size="9" font-weight="700" class="s-green">11:00 · start job v2 (fixed code) from offset 0</text><text x="180" y="158" text-anchor="middle" font-size="8.6" class="s-ink">writing to a NEW table: revenue_v2</text><text x="180" y="171" text-anchor="middle" font-size="8.4" class="s-ink2">replay runs much faster than real time</text></g>
+          <g data-on="3"><rect x="10" y="124" width="340" height="54" rx="8" class="s-soft-blue" style="stroke:var(--blue)"/><text x="180" y="142" text-anchor="middle" font-size="9" font-weight="700" class="s-blue">13:30 · halfway through the month</text><text x="180" y="158" text-anchor="middle" font-size="8.6" class="s-ink">lag shrinking: v2 reads old events at 50× live speed</text><text x="180" y="171" text-anchor="middle" font-size="8.4" class="s-ink2">two jobs running side by side for a while</text></g>
+          <g data-on="4"><rect x="10" y="124" width="340" height="54" rx="8" class="s-soft-violet" style="stroke:var(--violet)"/><text x="180" y="142" text-anchor="middle" font-size="9" font-weight="700" class="s-violet">16:10 · v2 caught up with the live stream</text><text x="180" y="158" text-anchor="middle" font-size="8.6" class="s-ink">compare v1 and v2 outputs, then point dashboards</text><text x="180" y="171" text-anchor="middle" font-size="8.4" class="s-ink2">to revenue_v2 (blue-green switch)</text></g>
+          <g data-on="5"><rect x="10" y="124" width="340" height="54" rx="8" class="s-soft-green" style="stroke:var(--green)"/><text x="180" y="142" text-anchor="middle" font-size="9" font-weight="700" class="s-green">16:20 · switched. v1 stopped, old table dropped later</text><text x="180" y="158" text-anchor="middle" font-size="8.6" class="s-ink">one month corrected with one codebase, no batch system</text><text x="180" y="171" text-anchor="middle" font-size="8.4" class="s-ink2">only possible because the log kept 30 days of events</text></g>
+          <text x="354" y="221" text-anchor="end" class="s-wm">myphatshala.in</text>
+        </svg>
+        <ol class="caps" hidden>
+          <li><b>The bug:</b> coupons were applied twice for a month. Job v1 keeps the live dashboards running meanwhile.</li>
+          <li><b>11:00:</b> the fixed job v2 starts reading from offset 0 (20 September), writing to a new table.</li>
+          <li><b>13:30:</b> v2 replays historical events many times faster than real time, so its lag shrinks quickly.</li>
+          <li><b>16:10:</b> v2 has caught up with the live end of the log. The team compares outputs and points dashboards to the new table.</li>
+          <li><b>16:20:</b> v1 is stopped. A month of history was corrected with the same single codebase. (Times illustrative.)</li>
+        </ol>
+      </div>
+    </div>
+  </div>
+
+  <span class="live">Real-time scenario 3 · Advanced</span>
+  <h3>The architect's decision: Lambda, Kappa or a unified engine?</h3>
+  <p class="anim-intro">Three teams at TiffinGo ask for real-time plus historical data. Watch the architect walk each one through the same questions and reach different answers.</p>
+  <div class="anim anim--one" data-frames="5" data-delay="5000">
+    <div class="anim__title">Choosing an architecture <span>5 steps</span></div>
+    <div class="anim__views">
+      <div class="view view--story">
+        <span class="view__tag">Animated example</span>
+        <svg viewBox="0 0 360 226" role="img" aria-label="Decision questions leading to Lambda, Kappa or unified processing">
+          <g font-size="8.4">
+            <rect x="10" y="12" width="340" height="26" rx="6" class="s-card2"/><text x="20" y="29" font-weight="700" class="s-ink">Q1 · Real-time answer needed?</text>
+            <rect x="10" y="46" width="340" height="26" rx="6" class="s-card2"/><text x="20" y="63" font-weight="700" class="s-ink">Q2 · All logic fits a stream job?</text>
+            <rect x="10" y="80" width="340" height="26" rx="6" class="s-card2"/><text x="20" y="97" font-weight="700" class="s-ink">Q3 · Log keeps enough history?</text>
+            <rect x="10" y="114" width="340" height="26" rx="6" class="s-card2"/><text x="20" y="131" font-weight="700" class="s-ink">Q4 · One engine for batch + stream?</text>
+          </g>
+          <g data-on="1"><rect x="10" y="12" width="340" height="26" rx="6" style="fill:none;stroke:var(--blue);stroke-width:2.5"/><text x="340" y="29" text-anchor="end" font-size="8.4" font-weight="700" class="s-blue">Payroll: NO → plain batch</text>
+            <text x="180" y="170" text-anchor="middle" font-size="9" class="s-ink">Monthly payroll doesn't need live numbers.</text><text x="180" y="186" text-anchor="middle" font-size="8.6" class="s-ink2">Neither Lambda nor Kappa: a nightly batch job is enough.</text></g>
+          <g data-on="2"><rect x="10" y="46" width="340" height="26" rx="6" style="fill:none;stroke:var(--track);stroke-width:2.5"/><text x="340" y="63" text-anchor="end" font-size="8.4" font-weight="700" class="s-acc">ML training: NO → Lambda</text>
+            <text x="180" y="170" text-anchor="middle" font-size="9" class="s-ink">Retraining the ETA model needs months of joins</text><text x="180" y="186" text-anchor="middle" font-size="8.6" class="s-ink2">and heavy batch work; live scoring uses a stream. Two paths.</text></g>
+          <g data-on="3"><rect x="10" y="80" width="340" height="26" rx="6" style="fill:none;stroke:var(--green);stroke-width:2.5"/><text x="340" y="97" text-anchor="end" font-size="8.4" font-weight="700" class="s-green">Order metrics: YES → Kappa</text>
+            <text x="180" y="170" text-anchor="middle" font-size="9" class="s-ink">Revenue and order counts are simple stream logic;</text><text x="180" y="186" text-anchor="middle" font-size="8.6" class="s-ink2">Kafka with tiered storage keeps 90 days for replay.</text></g>
+          <g data-on="4"><rect x="10" y="114" width="340" height="26" rx="6" style="fill:none;stroke:var(--violet);stroke-width:2.5"/><text x="340" y="131" text-anchor="end" font-size="8.4" font-weight="700" class="s-violet">YES → unified</text>
+            <text x="180" y="170" text-anchor="middle" font-size="9" class="s-ink">With Flink, Spark Structured Streaming or Beam,</text><text x="180" y="186" text-anchor="middle" font-size="8.6" class="s-ink2">one codebase runs live AND recomputes history.</text></g>
+          <g data-on="5"><rect x="10" y="152" width="340" height="50" rx="8" class="s-soft-green" style="stroke:var(--green)"/><text x="180" y="170" text-anchor="middle" font-size="9" font-weight="700" class="s-green">No single winner: match the architecture to the need.</text><text x="180" y="186" text-anchor="middle" font-size="8.6" class="s-ink">Most modern platforms mix: stream for live, scheduled</text><text x="180" y="198" text-anchor="middle" font-size="8.6" class="s-ink">recompute from the same tables and the same code.</text></g>
+          <text x="354" y="221" text-anchor="end" class="s-wm">myphatshala.in</text>
+        </svg>
+        <ol class="caps" hidden>
+          <li><b>Q1:</b> payroll needs no real-time answer, so it stays a simple batch job. Don't build Lambda or Kappa without a real-time need.</li>
+          <li><b>Q2:</b> retraining the delivery-time model needs heavy historical joins best done in batch, while live predictions use a stream: a Lambda-style design.</li>
+          <li><b>Q3:</b> order metrics are simple stream logic, and the log can keep enough history to replay: Kappa fits.</li>
+          <li><b>Q4:</b> if the engine can run the same code in batch and streaming modes, much of Lambda's duplicate-code problem disappears.</li>
+          <li>There is no universal winner. Architects choose per use case, and modern platforms often blend both ideas.</li>
+        </ol>
+      </div>
+    </div>
+  </div>
+
+  <h3>Where these patterns appear</h3>
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="16" y="20" width="40" height="48" rx="4" class="s-soft-acc" style="stroke:var(--track)"/><rect x="64" y="20" width="40" height="48" rx="4" class="s-soft-blue" style="stroke:var(--blue)"/><text x="36" y="48" text-anchor="middle" font-size="8" class="s-acc">live</text><text x="84" y="48" text-anchor="middle" font-size="8" class="s-blue">bill</text></svg></div>
+    <div><h4>1. Online advertising: Lambda-style billing</h4>
+      <p>Ad clicks are counted in real time to stop campaigns that hit their budget, while invoices are produced by batch jobs that remove fraudulent and duplicate clicks from the complete data.</p>
+      <div class="uc-flow"><span>Clicks</span><i>→</i><span class="java">Speed: budget cap · Batch: invoices</span><i>→</i><span>Serving: ads dashboard</span></div></div>
+  </div>
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><path d="M10 60h100" class="s-line"/><g style="fill:var(--track)"><rect x="14" y="40" width="10" height="20"/><rect x="28" y="40" width="10" height="20"/><rect x="42" y="40" width="10" height="20"/><rect x="56" y="40" width="10" height="20"/><rect x="70" y="40" width="10" height="20"/></g><path d="M96 34v30" style="stroke:var(--green);stroke-width:3"/></svg></div>
+    <div><h4>2. Banking ledgers: event logs as the source of truth</h4>
+      <p>Many modern banking and wallet systems record every transaction as an immutable event and derive balances and statements from the log. Replaying events to rebuild state is close to the Kappa idea.</p>
+      <div class="uc-flow"><span>Transactions</span><i>→</i><span class="java">Append-only log · replay to rebuild</span><i>→</i><span>Balances, statements</span></div></div>
+  </div>
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><circle cx="40" cy="45" r="18" class="s-soft-green" style="stroke:var(--green)"/><circle cx="80" cy="45" r="18" class="s-soft-blue" style="stroke:var(--blue)"/></svg></div>
+    <div><h4>3. Machine learning features: batch + streaming</h4>
+      <p>Recommendation systems combine long-term features computed in batch (a user's favourite cuisine over months) with fresh streaming features (what they clicked a minute ago) when scoring.</p>
+      <div class="uc-flow"><span>History + live clicks</span><i>→</i><span class="java">Batch features + stream features</span><i>→</i><span>Recommendations</span></div></div>
+  </div>
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="20" y="24" width="80" height="44" rx="6" class="s-board"/><path d="M30 56l14-14 12 8 14-18 16 12" style="fill:none;stroke:#9FD3B8;stroke-width:2.5"/></svg></div>
+    <div><h4>4. Live dashboards with nightly correction</h4>
+      <p>Sales, delivery and operations dashboards often show stream numbers during the day and switch to batch-verified numbers for previous days: a simple, practical Lambda.</p>
+      <div class="uc-flow"><span>Orders</span><i>→</i><span class="java">Today: stream · past days: batch</span><i>→</i><span>One dashboard</span></div></div>
+  </div>
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="16" y="22" width="88" height="46" rx="6" class="s-card2"/><circle cx="34" cy="45" r="7" style="fill:#E0A100"/><circle cx="60" cy="45" r="7" class="s-green"/><circle cx="86" cy="45" r="7" style="fill:#D64545"/></svg></div>
+    <div><h4>5. IoT fleets: unified stream and batch</h4>
+      <p>Vehicle and machine telemetry is processed live for alerts, and the same pipeline code is re-run over stored history to test new alert rules before switching them on.</p>
+      <div class="uc-flow"><span>Telemetry</span><i>→</i><span class="java">One engine, live + historical runs</span><i>→</i><span>Alerts, rule testing</span></div></div>
+  </div>
+  <p class="muted">Simplified patterns; real systems often blend Lambda and Kappa ideas.</p>
+</section>

@@ -1,0 +1,262 @@
+<!-- ======================= PART 1: THE STORY ======================= -->
+<section class="part" id="story">
+  <span class="part-label"><b>1</b> The story</span>
+  <h2>“Don't log in to the NameNode!”</h2>
+  <div class="story">
+    <p class="narration">On his third day, Kabir needs to run a quick script on the cluster. He finds the host name of the biggest, most powerful server, the NameNode, logs in to it, and starts a Python job that reads a large file into memory. Five minutes later the whole team's chat lights up: “HDFS is slow!”, “NameNode GC pauses!”, “Who is on nn1?” His lead calls him over, calm but firm.</p>
+
+    <div class="scene">
+      <svg viewBox="0 0 640 190" role="img" aria-label="Users connect only to edge nodes. Edge nodes talk to master nodes and worker nodes. Masters coordinate; workers store and compute; utility nodes run supporting services.">
+        <g font-size="10">
+          <rect x="10" y="68" width="110" height="64" rx="8" class="s-soft-blue" style="stroke:var(--blue)"/><text x="65" y="92" text-anchor="middle" font-weight="700" class="s-blue">Users</text><text x="65" y="110" text-anchor="middle" font-size="8.6" class="s-ink">laptops, BI tools,</text><text x="65" y="122" text-anchor="middle" font-size="8.6" class="s-ink">schedulers</text>
+          <path d="M120 100h26" class="s-line"/><path d="M142 96l6 4-6 4" class="s-line"/>
+          <rect x="152" y="60" width="110" height="80" rx="8" class="s-soft-acc" style="stroke:var(--track);stroke-width:1.5"/><text x="207" y="84" text-anchor="middle" font-weight="700" class="s-acc">Edge nodes</text><text x="207" y="102" text-anchor="middle" font-size="8.6" class="s-ink">the front door:</text><text x="207" y="116" text-anchor="middle" font-size="8.6" class="s-ink">clients, configs,</text><text x="207" y="128" text-anchor="middle" font-size="8.6" class="s-ink">user logins</text>
+          <path d="M262 100h26" class="s-line"/><path d="M284 96l6 4-6 4" class="s-line"/>
+          <rect x="296" y="12" width="160" height="56" rx="8" class="s-board"/><text x="376" y="34" text-anchor="middle" font-weight="700" class="s-chalk">Master nodes</text><text x="376" y="52" text-anchor="middle" font-size="8.6" style="fill:#9FD3B8">NameNode · ResourceManager · …</text>
+          <rect x="296" y="76" width="160" height="48" rx="8" class="s-card2"/><text x="376" y="96" text-anchor="middle" font-weight="700" class="s-ink">Utility nodes</text><text x="376" y="112" text-anchor="middle" font-size="8.6" class="s-ink2">ZooKeeper · Metastore · managers</text>
+          <rect x="296" y="132" width="160" height="40" rx="8" class="s-soft-green" style="stroke:var(--green)"/><text x="376" y="157" text-anchor="middle" font-weight="700" class="s-green">Worker nodes ×40</text>
+          <rect x="476" y="40" width="154" height="110" rx="8" class="s-soft-acc" style="stroke:#D64545"/>
+          <text x="553" y="62" text-anchor="middle" font-weight="700" class="s-red">Never for users</text>
+          <text x="553" y="84" text-anchor="middle" font-size="8.6" class="s-ink">masters: protect them</text>
+          <text x="553" y="100" text-anchor="middle" font-size="8.6" class="s-ink">workers: YARN owns them</text>
+          <text x="553" y="122" text-anchor="middle" font-size="8.6" class="s-ink">users: edge nodes only</text>
+        </g>
+        <text x="320" y="186" text-anchor="middle" font-size="10" class="s-ink2">Every machine in a cluster has a <tspan font-weight="700" class="s-acc">role</tspan>. Respecting roles keeps the cluster healthy.</text>
+        <text x="632" y="186" text-anchor="end" class="s-wm">myphatshala.in</text>
+      </svg>
+    </div>
+
+A> Kabir, which machine did you use?
+K> The one with the most RAM… nn1. I thought it would be fastest.
+A> It is the most important machine in the cluster. The NameNode keeps all of HDFS's metadata in its memory. Your script took memory and CPU from it, so it paused, and every user's reads and writes waited.
+R> So where should he have run it?
+A> On an <b>edge node</b>, the machine built for people. Every cluster has roles: <b>masters</b> that coordinate and must be protected, <b>workers</b> that store and compute and are managed by YARN, <b>utility</b> nodes for supporting services, and <b>edge</b> nodes where users and tools connect. Today you'll learn each role, what runs on it, and how companies lay them out for small and large clusters.
+K> And I'll never touch nn1 again.
+  </div>
+</section>
+
+<!-- ======================= PART 2: DEFINITION ======================= -->
+<section class="part" id="definition">
+  <span class="part-label"><b>2</b> Definition</span>
+  <h2>Node roles in a Hadoop cluster</h2>
+  <div class="def">
+    <div class="def__formal"><small>Formal definition (write this in exams)</small>
+      <p>Nodes in a Hadoop cluster are assigned <b>roles</b> according to the services they run. <b>Master nodes</b> host the coordinating daemons (NameNode and its standby, ResourceManager, JobHistory Server, and in HA setups JournalNodes and ZKFCs) and are provisioned for reliability. <b>Worker nodes</b> (historically “slave” nodes) host DataNodes and NodeManagers and provide the cluster's storage and compute capacity. <b>Edge nodes</b> (also called <b>gateway</b> or client nodes) host client libraries, configuration and tools, and are the controlled entry point for users and applications; they run no core daemons. <b>Utility</b> (management) nodes host supporting services such as ZooKeeper, the Hive Metastore and its database, HiveServer2, Oozie, security and cluster-management servers.</p></div>
+    <div class="def__simple"><small>In simple words</small>
+      <p>Masters are the managers: few, important, protected. Workers are the staff: many, doing the storage and processing. Edge nodes are the reception desk where people come in to submit work. Utility nodes run the helper services everyone else depends on. Users only ever log in at reception.</p></div>
+  </div>
+
+  <h3>Words you'll meet in this lesson</h3>
+  <div class="terms">
+    <div class="term"><b>Master node</b><span>Runs coordinating daemons (NameNode, ResourceManager…). Few, reliable, protected.</span></div>
+    <div class="term"><b>Worker node</b><span>Runs DataNode + NodeManager. Many, identical, replaceable.</span></div>
+    <div class="term"><b>Edge / gateway node</b><span>Has Hadoop client tools and configuration but no core daemons. Where users log in and jobs are submitted.</span></div>
+    <div class="term"><b>Utility node</b><span>Runs supporting services: ZooKeeper, Hive Metastore, HiveServer2, Oozie, Ranger, cluster manager.</span></div>
+    <div class="term"><b>Role</b><span>A service assigned to a host. Cluster managers show a cluster as hosts × roles.</span></div>
+    <div class="term"><b>Hive Metastore</b><span>Service (plus a relational database) storing table definitions for Hive and Spark SQL.</span></div>
+    <div class="term"><b>Quorum</b><span>A majority. ZooKeeper and JournalNodes run on an odd number of nodes (3 or 5) so a majority can always decide.</span></div>
+    <div class="term"><b>Client configuration</b><span>The cluster's <code>*-site.xml</code> files copied to an edge node so tools know where the masters are.</span></div>
+  </div>
+
+  <h3>Typical hardware by role (2026, approximate)</h3>
+  <table class="facts">
+    <tr><th>Master</th><td>64–512 GB RAM (NameNode heap grows with files), mirrored (RAID 1) disks for OS and metadata, dual power supplies, 25 Gbps network</td></tr>
+    <tr><th>Worker</th><td>32–64 cores, 128–512 GB RAM, 8–24 plain data disks (JBOD), 10–25 Gbps network</td></tr>
+    <tr><th>Edge</th><td>Moderate CPU/RAM, space for user home directories and tools, connected to both the cluster network and the corporate network</td></tr>
+    <tr><th>Utility</th><td>Moderate; reliable disks for ZooKeeper and the metastore database</td></tr>
+    <tr><th>Counts</th><td>Masters: 2–5 · Utility: 1–3 · Edge: 1 per few dozen users · Workers: everything else</td></tr>
+  </table>
+
+LEVELS> Roles at three levels
+L1> A hospital again
+      <ul>
+        <li><b>Masters</b> = the records office and the bed manager. If they stop, everyone stops, so nobody else is allowed to use their desks.</li>
+        <li><b>Workers</b> = the wards, where the actual work happens. There are many, and one can close for repairs.</li>
+        <li><b>Edge node</b> = reception. Visitors come here, not into the records office or the operating theatre.</li>
+        <li><b>Utility</b> = the pharmacy and the IT room: support services the whole hospital relies on.</li>
+      </ul>
+L2> What runs where in a typical medium cluster
+      <ul>
+        <li><b>master1:</b> active NameNode, ZKFC, JournalNode, ZooKeeper.</li>
+        <li><b>master2:</b> standby NameNode, ZKFC, JournalNode, ZooKeeper, ResourceManager.</li>
+        <li><b>master3 / utility:</b> JournalNode, ZooKeeper, standby ResourceManager, JobHistory Server, Hive Metastore + database, HiveServer2.</li>
+        <li><b>edge1–2:</b> HDFS/YARN/Hive/Spark clients, Hue or Jupyter, scheduler workers; user logins.</li>
+        <li><b>worker1–N:</b> DataNode + NodeManager (and, for HBase, a RegionServer).</li>
+        <li>The three JournalNodes and three ZooKeeper servers sit on three different machines so the cluster survives losing any one of them.</li>
+      </ul>
+L3> Why roles are kept separate
+      <ul>
+        <li><b>Blast radius:</b> a user's runaway process on a master can pause the NameNode (long Java garbage-collection pauses) and stall the whole cluster.</li>
+        <li><b>Resource accounting:</b> work on workers must go through YARN so it is counted, queued and limited. A script started by hand on a worker steals memory YARN thinks is free, and containers get killed.</li>
+        <li><b>Security:</b> only edge nodes are reachable from the corporate network; masters and workers sit on a private cluster network. Users get Kerberos tickets on the edge node.</li>
+        <li><b>Upgrades and failures:</b> workers are replaced like identical parts; masters are changed carefully, one at a time, with failover.</li>
+        <li><b>Cloud versions:</b> managed services keep the same roles: Amazon EMR has a primary node, core nodes (HDFS + YARN) and task nodes (YARN only); Google Dataproc has master and worker nodes plus optional secondary workers.</li>
+      </ul>
+/LEVELS
+EXAM> For “Explain the types of nodes in a Hadoop cluster”, list <b>master, worker (slave), edge/gateway</b> and <b>utility</b>, the daemons on each, and one reason each is separated (masters protected, workers managed by YARN, edge as the controlled entry point). A small layout diagram earns full marks.
+</section>
+
+<!-- ======================= PART 3: TYPES AND WAYS TO USE IT ======================= -->
+<section class="part" id="types">
+  <span class="part-label"><b>3</b> Types and ways to use it</span>
+  <h2>The roles, side by side</h2>
+  <div class="table-wrap">
+  <table class="compare" style="min-width:640px">
+    <thead><tr><th></th><th>Master</th><th>Worker</th><th>Edge / gateway</th><th>Utility</th></tr></thead>
+    <tbody>
+      <tr><td><b>Runs</b></td><td>NameNode(s), ResourceManager(s), JobHistory, JournalNodes, ZKFC</td><td>DataNode, NodeManager</td><td>Client tools and configs, notebooks, schedulers</td><td>ZooKeeper, Hive Metastore + DB, HiveServer2, Oozie, Ranger, manager</td></tr>
+      <tr><td><b>How many</b></td><td>2–5</td><td>Most of the cluster</td><td>1–several</td><td>1–3</td></tr>
+      <tr><td><b>Users log in?</b></td><td>No (admins only)</td><td>No</td><td><b>Yes</b></td><td>No (admins only)</td></tr>
+      <tr><td><b>If one fails</b></td><td>Failover to standby; serious</td><td>Re-replicate, re-run tasks; routine</td><td>Users move to another edge node</td><td>Depends on the service; usually HA</td></tr>
+      <tr><td><b>Hardware focus</b></td><td>RAM, reliability</td><td>Disks, cores</td><td>Network, user space</td><td>Reliability</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <h3>Example layouts by cluster size</h3>
+  <div class="cards">
+    <div class="card"><h4>Learning / test (1 machine)</h4><p>Pseudo-distributed: every daemon on one machine. Fine for practice, never for production. You'll build this in Module 4.</p><span class="tag">1 node</span></div>
+    <div class="card"><h4>Small (5–20 nodes)</h4><p>1 master (NameNode, RM, JobHistory), 1 edge node, workers. Optional second master for HA.</p><span class="tag">Start-up, department</span></div>
+    <div class="card"><h4>Medium (20–200 nodes)</h4><p>3 masters (HA NameNodes and RMs, 3 JournalNodes, 3 ZooKeepers), 1–2 utility, 2+ edge nodes, workers.</p><span class="tag">Most enterprises</span></div>
+    <div class="card"><h4>Large (200+ nodes)</h4><p>Dedicated machines per master service, 5 ZooKeepers, federated NameNodes, many edge nodes behind a load balancer.</p><span class="tag">Banks, telecoms, web</span></div>
+  </div>
+TIP> When someone gives you access to a cluster, first ask: “Which host is the edge node?” Run every command, notebook and script there. If you ever need to look at a master or worker, it should be an admin task with a clear reason.
+</section>
+
+<!-- ======================= PART 4: STEP BY STEP ======================= -->
+<section class="part" id="steps">
+  <span class="part-label"><b>4</b> Step by step</span>
+  <h2>Designing the roles for a 30-node cluster</h2>
+  <ol class="stepper">
+    <li><h4>Decide what must be highly available</h4>
+      <p>TiffinGo's dashboards depend on HDFS all day, so they want NameNode and ResourceManager HA.</p>
+      <span class="behind">HA means two NameNodes, two ResourceManagers, three JournalNodes and three ZooKeeper servers, spread over three machines so any one can fail.</span></li>
+    <li><h4>Place the masters</h4>
+      <div class="code" data-lang="python" data-file="masters.py"><pre><code>masters = {
+    "m1": ["NameNode (active)", "ZKFC", "JournalNode", "ZooKeeper"],
+    "m2": ["NameNode (standby)", "ZKFC", "JournalNode", "ZooKeeper", "ResourceManager"],
+    "m3": ["JournalNode", "ZooKeeper", "ResourceManager (standby)", "JobHistoryServer"],
+}
+print(sum(1 for roles in masters.values() if "JournalNode" in roles), "JournalNodes")</code></pre><div class="output">3 JournalNodes</div></div>
+      <span class="behind">Put m1, m2 and m3 on different racks and power feeds. The active NameNode gets the lightest load of other services.</span></li>
+    <li><h4>Add utility services</h4>
+      <p>Hive Metastore with its database and HiveServer2 go on a utility node (or on m3 in a small cluster).</p>
+      <span class="behind">The metastore database holds every table definition: back it up and give it a standby, or every Hive and Spark SQL query stops.</span></li>
+    <li><h4>Add edge nodes</h4>
+      <p>Two edge nodes with the client configuration, Hive Beeline, spark-submit, Jupyter and the Airflow workers.</p>
+      <span class="behind">Two, so users can keep working while one is patched. Only these two are reachable from the office network.</span></li>
+    <li><h4>Everything else is a worker</h4>
+      <div class="code" data-lang="python" data-file="workers.py"><pre><code>total, masters, utility, edge = 30, 3, 1, 2
+print(total - masters - utility - edge, "workers (DataNode + NodeManager)")</code></pre><div class="output">24 workers (DataNode + NodeManager)</div></div>
+      <span class="behind">The workers provide all storage and compute, so capacity planning (Lesson 1.3) is done on these 24, not on all 30.</span></li>
+  </ol>
+</section>
+
+<!-- ======================= PART 5: SEE IT HAPPEN ======================= -->
+<section class="part" id="animation">
+  <span class="part-label"><b>5</b> See it happen</span>
+  <h2>One Hive query: what Riya does on the edge node, and which role does what</h2>
+  <p>Riya runs a SQL query from the edge node. Left: her screen. Right: the request travelling through each kind of node.</p>
+  <div class="anim" data-frames="6">
+    <div class="anim__title">A query through every role <span>6 steps</span></div>
+    <div class="anim__views">
+      <div class="view view--see">
+        <span class="view__tag">What you see</span>
+        <svg viewBox="0 0 360 250" role="img" aria-label="Riya's terminal on the edge node">
+          <rect x="14" y="14" width="332" height="206" rx="8" class="s-board"/>
+          <text x="26" y="32" font-size="9" class="mono" style="fill:#7F8C86">riya@edge1 : ~  (illustrative)</text>
+          <g data-on="1-"><text x="26" y="54" font-size="9" class="mono" style="fill:#7F8C86">$ beeline -u jdbc:hive2://util1:10000</text></g>
+          <g data-on="2-"><text x="26" y="72" font-size="9" class="mono" style="fill:#9FD3B8">0: jdbc:hive2://util1:10000&gt;</text><text x="26" y="88" font-size="9" class="mono" style="fill:#F5C77E">SELECT item, SUM(amount)</text><text x="26" y="102" font-size="9" class="mono" style="fill:#F5C77E">FROM orders GROUP BY item;</text></g>
+          <g data-on="3-4"><text x="26" y="124" font-size="9" class="mono" style="fill:#9FD3B8">Query running…</text></g>
+          <g data-on="4"><text x="26" y="140" font-size="9" class="mono" style="fill:#9FD3B8">Map 1: 12/12  Reducer 2: 1/2</text></g>
+          <g data-on="5-"><text x="26" y="124" font-size="9" class="mono" style="fill:#9FD3B8">+-----------+-------+</text><text x="26" y="138" font-size="9" class="mono" style="fill:#9FD3B8">| item      | total |</text><text x="26" y="152" font-size="9" class="mono" style="fill:#9FD3B8">| chai      | 41250 |</text><text x="26" y="166" font-size="9" class="mono" style="fill:#9FD3B8">| vada pav  | 38820 |</text></g>
+          <g data-on="6"><text x="180" y="200" text-anchor="middle" font-size="10" class="s-chalk">Riya only ever touched the edge node.</text></g>
+          <text x="352" y="244" text-anchor="end" class="s-wm">myphatshala.in</text>
+        </svg>
+        <ol class="caps" hidden>
+          <li>Riya logs in to <b>edge1</b> and connects Beeline (the Hive client) to HiveServer2.</li>
+          <li>She types a GROUP BY query on the <code>orders</code> table.</li>
+          <li>The query is running. She sees only a progress message.</li>
+          <li>Progress shows map and reduce tasks. They run somewhere on the cluster, not on her machine.</li>
+          <li>The result table appears.</li>
+          <li>From start to finish, Riya used only the edge node. Every other role worked on her behalf.</li>
+        </ol>
+      </div>
+
+      <div class="view view--behind">
+        <span class="view__tag">Behind the screen</span>
+        <svg viewBox="0 0 360 250" role="img" aria-label="Edge, utility, master and worker nodes handling the query">
+          <rect x="10" y="14" width="80" height="44" rx="6" class="s-soft-acc" style="stroke:var(--track)"/><text x="50" y="34" text-anchor="middle" font-size="8.6" font-weight="700" class="s-acc">edge1</text><text x="50" y="48" text-anchor="middle" font-size="7.6" class="s-ink">beeline</text>
+          <rect x="110" y="14" width="110" height="44" rx="6" class="s-card2"/><text x="165" y="30" text-anchor="middle" font-size="8.6" font-weight="700" class="s-ink">util1</text><text x="165" y="42" text-anchor="middle" font-size="7.6" class="s-ink2">HiveServer2</text><text x="165" y="52" text-anchor="middle" font-size="7.6" class="s-ink2">Metastore + DB</text>
+          <rect x="240" y="14" width="110" height="44" rx="6" class="s-board"/><text x="295" y="30" text-anchor="middle" font-size="8.6" font-weight="700" class="s-chalk">masters</text><text x="295" y="42" text-anchor="middle" font-size="7.6" style="fill:#9FD3B8">NameNode</text><text x="295" y="52" text-anchor="middle" font-size="7.6" style="fill:#9FD3B8">ResourceManager</text>
+          <g><rect x="10" y="130" width="104" height="70" rx="6" class="s-soft-green" style="stroke:var(--green)"/><rect x="128" y="130" width="104" height="70" rx="6" class="s-soft-green" style="stroke:var(--green)"/><rect x="246" y="130" width="104" height="70" rx="6" class="s-soft-green" style="stroke:var(--green)"/>
+            <text x="62" y="146" text-anchor="middle" font-size="8.6" font-weight="700" class="s-green">worker1</text><text x="180" y="146" text-anchor="middle" font-size="8.6" font-weight="700" class="s-green">worker2</text><text x="298" y="146" text-anchor="middle" font-size="8.6" font-weight="700" class="s-green">worker3</text>
+            <text x="62" y="160" text-anchor="middle" font-size="7.6" class="s-ink2">DN + NM</text><text x="180" y="160" text-anchor="middle" font-size="7.6" class="s-ink2">DN + NM</text><text x="298" y="160" text-anchor="middle" font-size="7.6" class="s-ink2">DN + NM</text></g>
+          <g data-on="1"><path d="M90 36h18" style="stroke:var(--track);stroke-width:3"/><text x="180" y="96" text-anchor="middle" font-size="9" font-weight="700" class="s-acc">edge → HiveServer2 (JDBC, port 10000)</text></g>
+          <g data-on="2"><text x="180" y="88" text-anchor="middle" font-size="9" font-weight="700" class="s-ink">HiveServer2 asks the Metastore:</text><text x="180" y="102" text-anchor="middle" font-size="9" class="s-ink">“orders” = which HDFS folder, which columns?</text></g>
+          <g data-on="3"><path d="M220 36h18" style="stroke:var(--blue);stroke-width:3"/><text x="180" y="88" text-anchor="middle" font-size="9" font-weight="700" class="s-blue">NameNode: block locations of /warehouse/orders</text><text x="180" y="102" text-anchor="middle" font-size="9" font-weight="700" class="s-acc">ResourceManager: start the query's AM</text></g>
+          <g data-on="4"><path d="M295 58v68M295 92H62v38M180 92v38" style="fill:none;stroke:var(--green);stroke-width:2;stroke-dasharray:4 3"/>
+            <rect x="22" y="168" width="38" height="14" rx="3" class="s-green"/><rect x="64" y="168" width="38" height="14" rx="3" class="s-green"/><rect x="140" y="168" width="38" height="14" rx="3" class="s-green"/><rect x="182" y="168" width="38" height="14" rx="3" style="fill:#8B5CF6"/><rect x="258" y="168" width="38" height="14" rx="3" class="s-green"/><rect x="300" y="168" width="38" height="14" rx="3" style="fill:#8B5CF6"/>
+            <text x="180" y="222" text-anchor="middle" font-size="9" font-weight="700" class="s-green">tasks run in containers on the workers, next to the data</text></g>
+          <g data-on="5"><path d="M165 58v24M165 82H62" style="fill:none;stroke:#8B5CF6;stroke-width:2"/><text x="180" y="222" text-anchor="middle" font-size="9" font-weight="700" style="fill:#8B5CF6">results → HiveServer2 → edge1</text></g>
+          <g data-on="6"><text x="180" y="96" text-anchor="middle" font-size="9" class="s-ink">edge: entry · utility: SQL + table catalogue</text><text x="180" y="110" text-anchor="middle" font-size="9" class="s-ink">masters: metadata + resources · workers: the work</text></g>
+          <text x="352" y="246" text-anchor="end" class="s-wm">myphatshala.in</text>
+        </svg>
+        <ol class="caps" hidden>
+          <li>The <b>edge node</b> runs only the client (Beeline). It sends the query to <b>HiveServer2</b> on the utility node over JDBC (port 10000 by default).</li>
+          <li>HiveServer2 asks the <b>Hive Metastore</b> (also on the utility node, backed by a database) where the <code>orders</code> table lives in HDFS and what its columns are.</li>
+          <li>It then talks to the <b>masters</b>: the NameNode for the files' block locations, the ResourceManager to start an ApplicationMaster for the query.</li>
+          <li>Map and reduce tasks run in containers on the <b>workers</b>, mostly on the nodes holding the table's blocks.</li>
+          <li>Results flow back through HiveServer2 to Riya's Beeline session on the edge node.</li>
+          <li>Every role did one job. None of the work ran on the edge node or on a master.</li>
+        </ol>
+      </div>
+    </div>
+  </div>
+
+  <h3 id="playground">Try it yourself: roles in the playground</h3>
+  <p>The playground's <b>Client</b> box is the edge node, the dark boxes are masters, and every DataNode box is a worker. Use it to see why each role matters.</p>
+  {{PLAYGROUND}}
+</section>
+
+<!-- ======================= PART 6: REAL-WORLD USE ======================= -->
+<section class="part" id="real-world">
+  <span class="part-label"><b>6</b> Real-world use</span>
+  <h2>Roles in real platforms</h2>
+
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="16" y="20" width="88" height="50" rx="6" class="s-soft-blue" style="stroke:var(--blue)"/><text x="60" y="42" text-anchor="middle" font-size="8.6" font-weight="700" class="s-blue">hosts × roles</text><text x="60" y="58" text-anchor="middle" font-size="8.6" class="s-ink">assign · start · watch</text></svg></div>
+    <div><h4>1. Cluster managers assign roles</h4>
+      <p>In Cloudera Manager or Apache Ambari, an admin builds a cluster by assigning roles to hosts (“NameNode on m1”, “DataNode on all workers”, “Gateway on edge1”). The tool installs, configures and monitors each role.</p>
+      <div class="uc-flow"><span>Host list</span><i>→</i><span class="java">Role assignment</span><i>→</i><span>Running cluster</span></div></div>
+  </div>
+
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="20" y="16" width="34" height="58" rx="5" class="s-board"/><rect x="66" y="16" width="34" height="26" rx="5" class="s-soft-green" style="stroke:var(--green)"/><rect x="66" y="48" width="34" height="26" rx="5" class="s-soft-acc" style="stroke:var(--track)"/><text x="37" y="50" text-anchor="middle" font-size="7.6" style="fill:#fff" font-weight="700">primary</text><text x="83" y="33" text-anchor="middle" font-size="7.6" class="s-green" font-weight="700">core</text><text x="83" y="65" text-anchor="middle" font-size="7.6" class="s-acc" font-weight="700">task</text></svg></div>
+    <div><h4>2. Cloud clusters keep the same roles</h4>
+      <p>Amazon EMR has a <b>primary</b> node (masters), <b>core</b> nodes (HDFS + YARN) and <b>task</b> nodes (YARN only, safe to remove). Google Dataproc has master and worker nodes, with optional secondary (preemptible) workers that add compute only.</p>
+      <div class="uc-flow"><span>Primary</span><i>→</i><span class="java">Core (data + compute)</span><i>→</i><span>Task (compute only)</span></div></div>
+  </div>
+
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="18" y="22" width="84" height="46" rx="6" class="s-soft-acc" style="stroke:var(--track)"/><text x="60" y="44" text-anchor="middle" font-size="9" font-weight="700" class="s-acc">edge1 · edge2</text><text x="60" y="58" text-anchor="middle" font-size="8.6" class="s-ink">Jupyter · Airflow</text></svg></div>
+    <div><h4>3. Data science on edge nodes</h4>
+      <p>Analysts open Jupyter or Hue on an edge node and submit Spark or Hive work to YARN. Their notebooks never run heavy processing on the edge itself; the cluster does it.</p>
+      <div class="uc-flow"><span>Notebook on edge</span><i>→</i><span class="java">spark-submit / Hive</span><i>→</i><span>Workers compute</span></div></div>
+  </div>
+
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="22" y="18" width="76" height="54" rx="6" class="s-board"/><path d="M40 52l12-14 10 8 16-18" style="fill:none;stroke:#FF8A80;stroke-width:3"/><text x="60" y="66" text-anchor="middle" font-size="7.6" style="fill:#9FD3B8">GC pause!</text></svg></div>
+    <div><h4>4. Incident reviews</h4>
+      <p>A common root cause in incident reports: “a user ran a script on a master” or “a manual process on workers exhausted memory, so YARN killed containers”. The fix is usually access control: logins only on edge nodes.</p>
+      <div class="uc-flow"><span>Outage</span><i>→</i><span class="java">Root cause: wrong role</span><i>→</i><span>Restrict logins</span></div></div>
+  </div>
+
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="16" y="28" width="26" height="34" rx="4" class="s-card2"/><rect x="47" y="28" width="26" height="34" rx="4" class="s-card2"/><rect x="78" y="28" width="26" height="34" rx="4" class="s-card2"/><text x="60" y="80" text-anchor="middle" font-size="8.6" class="s-ink">ZooKeeper ×3</text></svg></div>
+    <div><h4>5. Quorum services on separate machines</h4>
+      <p>ZooKeeper and JournalNodes are always placed on three (or five) different machines and racks, so the majority survives a failure. Putting all three on one host is a classic design-review mistake.</p>
+      <div class="uc-flow"><span>3 hosts</span><i>→</i><span class="java">Majority of 2</span><i>→</i><span>Survives 1 failure</span></div></div>
+  </div>
+  <p class="muted">Simplified. Exact role layouts differ by distribution and company.</p>
+</section>

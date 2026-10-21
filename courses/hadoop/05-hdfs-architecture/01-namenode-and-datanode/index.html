@@ -1,0 +1,2673 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NameNode and DataNode | MyPhatshala</title>
+<meta name="description" content="The master–worker design of HDFS: what the NameNode keeps (namespace, fsimage, edit log, in-memory block map) and what DataNodes keep (block files with .meta checksums), shown on a real Hadoop 3.5.0 cluster with 4 DataNodes in 2 racks: dfsadmin -report, fsck block locations, the NameNode and DataNode folders, reading a block file directly. NameNode memory sizing, playground, Python, quiz and interview scenarios.">
+<meta name="mp:minutes" content="28">
+<link rel="canonical" href="https://myphatshala.in/courses/hadoop/05-hdfs-architecture/01-namenode-and-datanode/">
+<meta property="og:title" content="NameNode and DataNode · MyPhatshala">
+<meta property="og:description" content="The NameNode keeps the map, DataNodes keep the bytes. Open both on a real cluster and find your file&#x27;s blocks on disk.">
+<link rel="icon" href="../../../../assets/img/logo.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Fraunces:ital,opsz,wght@0,9..144,600;0,9..144,700;1,9..144,600&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../../../../assets/css/style.css">
+<link rel="stylesheet" href="../../../../assets/css/lesson.css">
+<link rel="stylesheet" href="../../../../assets/css/cluster-sim.css">
+<script src="../../../../assets/js/config.js"></script>
+<script>try { const t = localStorage.getItem("mp-theme"); if (t) document.documentElement.dataset.theme = t; } catch (e) {}</script>
+<script type="application/ld+json">{"@context": "https://schema.org", "@type": "LearningResource", "name": "NameNode and DataNode", "learningResourceType": "Lesson", "educationalLevel": "Beginner → Intermediate", "isAccessibleForFree": true, "inLanguage": "en", "isPartOf": {"@type": "Course", "name": "Apache Hadoop", "provider": {"@type": "Organization", "name": "MyPhatshala"}}}</script>
+</head>
+<body style="--track:#B45309" data-lesson="05-hdfs-architecture/01-namenode-and-datanode" data-course-root="../../">
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="site-header">
+  <div class="wrap">
+    <a class="brand" href="../../../../" aria-label="MyPhatshala home"><img src="../../../../assets/img/logo.svg" width="34" height="34" alt=""><span>My<b>Phatshala</b></span></a>
+    <nav class="nav" aria-label="Main">
+      <a href="../../../../#tracks">All courses</a>
+      <a href="../../">Apache Hadoop syllabus</a>
+      <button class="theme-btn" id="theme-btn" aria-label="Toggle dark mode"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg></button>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+<section class="lesson-hero">
+  <div class="wrap">
+    <nav class="crumbs" aria-label="Breadcrumb"><a href="../../../../">Home</a><span>›</span><a href="../../../../#track-big-data">Big Data Engineering</a><span>›</span><a href="../../">Apache Hadoop</a><span>›</span><b>Lesson 5.1</b></nav>
+    <h1>NameNode and DataNode</h1>
+    <p class="lead">HDFS splits work between one master and many workers. The NameNode knows every file, folder and block and where each block lives; DataNodes store the blocks as ordinary files and serve them. In this lesson you open both on a real four-DataNode cluster, follow one file from its path to the actual block files on disk, and learn what each daemon must have to stay healthy.</p>
+    <div class="lesson-meta"><span>Module 5 · HDFS architecture</span><span>⏱ 28 min</span><span>Beginner → Intermediate</span><span>Real 4-DataNode cluster</span><span>Cluster Playground</span><span>Runs in your browser (Python)</span><span>8 practice problems</span></div>
+  </div>
+</section>
+
+<div class="wrap lesson-layout">
+<article class="lesson-main">
+<!-- ======================= PART 1: THE STORY ======================= -->
+<section class="part" id="story">
+  <span class="part-label"><b>1</b> The story</span>
+  <h2>“Where is my file, really?”</h2>
+  <div class="story">
+    <p class="narration">Riya uploaded <code>canteen_orders.csv</code> to HDFS yesterday. Today she asks a simple question nobody in the lab can answer: on which disk, of which machine, are those bytes? Kabir opens a shell on one DataNode, digs through folders, and finds a file called <code>blk_1073741825</code>. He runs <code>head</code> on it. Out come <code>order_id,item,amount</code> and Riya's orders, as plain text.</p>
+
+    <div class="scene">
+      <svg viewBox="0 0 640 190" role="img" aria-label="The NameNode holds the map: file name to blocks to DataNodes. The DataNodes hold the actual block files on their disks.">
+        <g font-size="10">
+          <rect x="20" y="20" width="250" height="140" rx="10" class="s-board"/>
+          <text x="145" y="42" text-anchor="middle" font-weight="700" class="s-chalk">NameNode: the map</text>
+          <g font-size="8.6" class="s-chalk"><text x="36" y="66">/user/hadoop/data/canteen_orders.csv</text><text x="36" y="84">  owner hadoop · replication 3</text><text x="36" y="102">  block blk_1073741825 (4.5 MB)</text><text x="36" y="120">  → datanode-1, datanode-2, datanode-4</text></g>
+          <text x="145" y="148" text-anchor="middle" font-size="8.6" style="fill:#F5C77E">no file contents here</text>
+          <g>
+            <rect x="330" y="20" width="90" height="62" rx="8" class="s-soft-green" style="stroke:var(--green)"/><text x="375" y="40" text-anchor="middle" font-size="8.6" font-weight="700" class="s-green">datanode-1</text><text x="375" y="58" text-anchor="middle" font-size="7.6" class="mono s-ink">blk_…825</text>
+            <rect x="430" y="20" width="90" height="62" rx="8" class="s-soft-green" style="stroke:var(--green)"/><text x="475" y="40" text-anchor="middle" font-size="8.6" font-weight="700" class="s-green">datanode-2</text><text x="475" y="58" text-anchor="middle" font-size="7.6" class="mono s-ink">blk_…825</text>
+            <rect x="530" y="20" width="90" height="62" rx="8" class="s-card2"/><text x="575" y="40" text-anchor="middle" font-size="8.6" font-weight="700" class="s-ink">datanode-3</text><text x="575" y="58" text-anchor="middle" font-size="7.6" class="s-ink2">(other blocks)</text>
+            <rect x="430" y="96" width="90" height="62" rx="8" class="s-soft-green" style="stroke:var(--green)"/><text x="475" y="116" text-anchor="middle" font-size="8.6" font-weight="700" class="s-green">datanode-4</text><text x="475" y="134" text-anchor="middle" font-size="7.6" class="mono s-ink">blk_…825</text>
+          </g>
+          <path d="M270 90h50" class="s-line"/><text x="295" y="84" text-anchor="middle" font-size="8" class="s-ink2">points to</text>
+        </g>
+        <text x="320" y="182" text-anchor="middle" font-size="10" class="s-ink2">One master knows where everything is. Many workers hold the bytes.</text>
+        <text x="632" y="182" text-anchor="end" class="s-wm">myphatshala.in</text>
+      </svg>
+    </div>
+
+    <div class="panel"><div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#FCE6D6"/><path d="M14 64c2-12 9-18 18-18s16 6 18 18z" fill="#2E5AAC"/><circle cx="32" cy="29" r="12" fill="#C68B5E"/><path d="M19 29c0-10 6-15 13-15s13 5 13 15c-3-5-7-8-13-8s-10 3-13 8z" fill="#2A1B14"/><path d="M43 27c3 6 3 14 0 20" stroke="#2A1B14" stroke-width="4" fill="none" stroke-linecap="round"/><circle cx="27.5" cy="30" r="1.5" fill="#2A1B14"/><circle cx="36.5" cy="30" r="1.5" fill="#2A1B14"/><path d="M28 35q4 3 8 0" stroke="#2A1B14" stroke-width="1.6" fill="none" stroke-linecap="round"/><circle cx="32" cy="24" r="1.2" fill="#D64545"/></svg></div><div class="bubble"><b class="who">Riya</b><p>So HDFS is just… files on ordinary Linux disks?</p></div></div>
+    <div class="panel panel--right"><div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#DDEFE6"/><path d="M12 64c2-12 10-18 20-18s18 6 20 18z" fill="#F4F1EA"/><path d="M28 46l4 8 4-8" fill="#2F7D5B"/><circle cx="32" cy="28" r="12" fill="#B57A50"/><path d="M20 26c0-8 5-13 12-13s12 5 12 13c-2-3-6-5-12-5s-10 2-12 5z" fill="#5A5A5A"/><path d="M22 32c1 8 5 11 10 11s9-3 10-11c-2 3-6 4-10 4s-8-1-10-4z" fill="#5A5A5A"/><circle cx="27" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><circle cx="37" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><path d="M30.4 29h3.2" stroke="#1B2433" stroke-width="1.4"/><circle cx="27" cy="29" r="1.1" fill="#1B2433"/><circle cx="37" cy="29" r="1.1" fill="#1B2433"/></svg></div><div class="bubble"><b class="who">Arjun Sir</b><p>Exactly. A DataNode stores each block as an ordinary file in its own folders. What makes it a <i>distributed file system</i> is the <b>NameNode</b>: it keeps the whole directory tree, who owns what, and which blocks make up each file. And it knows, from the DataNodes' own reports, which machines hold each block.</p></div></div>
+    <div class="panel"><div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#E1E9F7"/><path d="M12 64c2-12 10-18 20-18s18 6 20 18z" fill="#B45309"/><circle cx="32" cy="29" r="12" fill="#A9714A"/><path d="M19 27c0-9 6-14 13-14s13 5 13 14c-2-4-5-6-8-6-3 3-9 4-13 3-2 1-4 2-5 3z" fill="#1E1A17"/><circle cx="27.5" cy="30" r="1.5" fill="#1E1A17"/><circle cx="36.5" cy="30" r="1.5" fill="#1E1A17"/><path d="M27 35.5q5 3.5 10 0" stroke="#1E1A17" stroke-width="1.6" fill="none" stroke-linecap="round"/><rect x="41" y="40" width="10" height="7" rx="1.5" fill="#2E5AAC"/></svg></div><div class="bubble"><b class="who">Kabir</b><p>And if I lose the NameNode?</p></div></div>
+    <div class="panel panel--right"><div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#DDEFE6"/><path d="M12 64c2-12 10-18 20-18s18 6 20 18z" fill="#F4F1EA"/><path d="M28 46l4 8 4-8" fill="#2F7D5B"/><circle cx="32" cy="28" r="12" fill="#B57A50"/><path d="M20 26c0-8 5-13 12-13s12 5 12 13c-2-3-6-5-12-5s-10 2-12 5z" fill="#5A5A5A"/><path d="M22 32c1 8 5 11 10 11s9-3 10-11c-2 3-6 4-10 4s-8-1-10-4z" fill="#5A5A5A"/><circle cx="27" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><circle cx="37" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><path d="M30.4 29h3.2" stroke="#1B2433" stroke-width="1.4"/><circle cx="27" cy="29" r="1.1" fill="#1B2433"/><circle cx="37" cy="29" r="1.1" fill="#1B2433"/></svg></div><div class="bubble"><b class="who">Arjun Sir</b><p>The bytes are still on the disks, but nobody knows which <code>blk_</code> file belongs to which file. That's why the NameNode's metadata is protected so carefully, and why HA exists. Today we open both: the NameNode's metadata folder and a DataNode's block folder, on a real cluster with four DataNodes in two racks.</p></div></div>
+  </div>
+</section>
+
+<!-- ======================= PART 2: DEFINITION ======================= -->
+<section class="part" id="definition">
+  <span class="part-label"><b>2</b> Definition</span>
+  <h2>NameNode and DataNode</h2>
+  <div class="def">
+    <div class="def__formal"><small>Formal definition (write this in exams)</small>
+      <p>HDFS has a <b>master–worker architecture</b>. The <b>NameNode</b> manages the file system <b>namespace</b> (the tree of directories and files with their permissions, owners, replication factor and the ordered list of blocks of each file) and regulates client access. It persists the namespace in the <b>fsimage</b> and <b>edit log</b>, and keeps it in memory together with the <b>block map</b> (block → DataNodes holding a replica), which it rebuilds from DataNode <b>block reports</b>. <b>DataNodes</b>, usually one per worker machine, store blocks as files on their local disks (each with a <code>.meta</code> checksum file), serve read and write requests from clients directly, create, delete and copy replicas when the NameNode instructs, and send <b>heartbeats</b> and block reports to the NameNode. File data never passes through the NameNode.</p></div>
+    <div class="def__simple"><small>In simple words</small>
+      <p>The NameNode is the index of a huge library: it knows every book's title and on which shelves its pages are. DataNodes are the shelves that hold the pages. Readers ask the index where to go, then fetch pages straight from the shelves.</p></div>
+  </div>
+
+  <h3>Words you'll meet in this lesson</h3>
+  <div class="terms">
+    <div class="term"><b>Namespace</b><span>The directory tree: paths, owners, permissions, replication, and each file's list of blocks.</span></div>
+    <div class="term"><b>Block map</b><span>Which DataNodes hold each block. Kept in NameNode memory only, rebuilt from block reports.</span></div>
+    <div class="term"><b>blk_ file</b><span>A block replica on a DataNode's disk, e.g. <code>blk_1073741825</code>. Plain bytes of your file.</span></div>
+    <div class="term"><b>.meta file</b><span>Checksums for the block: 4 bytes for every 512 bytes of data.</span></div>
+    <div class="term"><b>Block pool</b><span>The set of blocks belonging to one namespace, e.g. <code>BP-1507681208-…</code>. A folder on each DataNode.</span></div>
+    <div class="term"><b>Cluster ID</b><span>Created when the NameNode is formatted; every DataNode stores it and must match.</span></div>
+    <div class="term"><b>dfsadmin -report</b><span>Capacity and status of the whole cluster and of each DataNode.</span></div>
+    <div class="term"><b>fsck</b><span>Checks files and lists their blocks and replica locations.</span></div>
+  </div>
+
+  <h3>Who keeps what (checked on Hadoop 3.5.0)</h3>
+  <table class="facts" style="table-layout:fixed;overflow-wrap:anywhere">
+    <tr><th>NameNode on disk</th><td><code>dfs.namenode.name.dir</code>: <code>fsimage_*</code>, <code>edits_*</code>, <code>seen_txid</code>, <code>VERSION</code></td></tr>
+    <tr><th>NameNode in memory</th><td>Whole namespace plus block map; a common rule of thumb is about 150 bytes per file, directory or block</td></tr>
+    <tr><th>DataNode on disk</th><td><code>dfs.datanode.data.dir</code>/current/BP-…/current/finalized/…/<code>blk_N</code> + <code>blk_N_genstamp.meta</code></td></tr>
+    <tr><th>Checksums</th><td><code>dfs.bytes-per-checksum</code> = 512; CRC, 4 bytes each</td></tr>
+    <tr><th>Ports</th><td>NameNode RPC 8020, web 9870 · DataNode data 9866, IPC 9867, web 9864</td></tr>
+    <tr><th>Per cluster</th><td>One active NameNode per namespace (Lesson 7.1 adds a standby); many DataNodes</td></tr>
+  </table>
+
+  <h3 id="levels">NameNode and DataNode at three levels</h3>
+  <div class="modlab levels"><div class="modlab__bar"><b>Pick your level. New to this? Start at Beginner and climb.</b><button type="button" data-mod="b">Beginner</button><button type="button" data-mod="i">Intermediate</button><button type="button" data-mod="a">Advanced</button></div>
+    <div class="modlab__panel" data-mod="b"><h4><span class="lvl lvl--b">Beginner</span> The library and its index</h4>
+      <ul>
+        <li>A big book is torn into chapters (blocks) and each chapter is photocopied three times onto different shelves (DataNodes).</li>
+        <li>The <b>index card</b> (NameNode) says: “Canteen orders: chapter 1 on shelves 1, 2 and 4.”</li>
+        <li>A reader reads the card, then walks to the shelf. The librarian at the index never carries pages.</li>
+      </ul>
+
+    </div>
+    <div class="modlab__panel" data-mod="i"><h4><span class="lvl lvl--i">Intermediate</span> What each daemon does</h4>
+      <ul>
+        <li><b>NameNode</b>: create/delete/rename files and folders, check permissions, choose DataNodes for new blocks, track replicas, order re-replication when one is lost.</li>
+        <li><b>DataNode</b>: store and checksum blocks, stream data to and from clients, forward blocks in the write pipeline, delete or copy blocks on command.</li>
+        <li><b>Client</b> (your <code>hdfs dfs</code>, Spark, Hive): asks the NameNode for metadata, then talks to DataNodes for data.</li>
+      </ul>
+
+    </div>
+    <div class="modlab__panel" data-mod="a"><h4><span class="lvl lvl--a">Advanced</span> Details that matter in production</h4>
+      <ul>
+        <li>The block map is <b>not</b> saved in the fsimage. After a restart the NameNode waits for block reports (safe mode, Lesson 5.6).</li>
+        <li>NameNode heap grows with the number of <b>objects</b>, not bytes: 10 crore tiny files hurt far more than 1 PB in big files (the small-files problem, Lesson 7.5).</li>
+        <li>DataNodes spread blocks over all disks listed in <code>dfs.datanode.data.dir</code>; a failed disk can be tolerated (<code>dfs.datanode.failed.volumes.tolerated</code>).</li>
+        <li>Clusters with very large namespaces split it across several NameNodes with <b>federation</b>; each namespace gets its own block pool on the same DataNodes.</li>
+      </ul>
+
+    </div>
+  </div>
+  <div class="callout callout--exam"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19V5a2 2 0 0 1 2-2h12v18H6a2 2 0 0 1-2-2zm0 0a2 2 0 0 1 2-2h12"/></svg><p><b>Exam tip:</b> “Explain the roles of NameNode and DataNode”: NameNode = master, <b>namespace + metadata</b> (fsimage, edit log, block map), handles client metadata requests, directs replication; DataNode = worker, <b>stores blocks</b>, serves reads/writes, sends <b>heartbeats</b> (every 3 s) and <b>block reports</b>. Add: data flows client ↔ DataNode, never through the NameNode.</p></div>
+</section>
+
+<!-- ======================= PART 3: TYPES AND WAYS TO USE IT ======================= -->
+<section class="part" id="types">
+  <span class="part-label"><b>3</b> Types and ways to use it</span>
+  <h2>NameNode vs DataNode, side by side</h2>
+  <div class="table-wrap">
+  <table class="compare" style="min-width:600px">
+    <thead><tr><th></th><th>NameNode</th><th>DataNode</th></tr></thead>
+    <tbody>
+      <tr><td><b>Role</b></td><td>Master: metadata</td><td>Worker: data</td></tr>
+      <tr><td><b>How many</b></td><td>1 active per namespace (+ standby in HA)</td><td>Tens to thousands</td></tr>
+      <tr><td><b>Stores</b></td><td>Namespace in memory; fsimage + edits on disk</td><td>Block files + checksums on local disks</td></tr>
+      <tr><td><b>Hardware</b></td><td>Lots of RAM, reliable disks (often RAID), redundant power</td><td>Many large disks (JBOD), moderate RAM</td></tr>
+      <tr><td><b>If it fails</b></td><td>Whole file system unavailable (without HA)</td><td>Routine: replicas elsewhere, re-replication</td></tr>
+      <tr><td><b>Talks to</b></td><td>Clients (metadata), DataNodes (commands)</td><td>Clients (data), NameNode (heartbeats, reports), other DataNodes (pipeline)</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <h3>Other HDFS daemons you'll see</h3>
+  <div class="cards">
+    <div class="card"><h4>SecondaryNameNode</h4><p>Merges the edit log into a new fsimage (checkpoint). Not a backup NameNode. Lesson 5.4.</p><span class="tag">Checkpoint</span></div>
+    <div class="card"><h4>Standby NameNode</h4><p>A hot spare in HA that takes over automatically. Lesson 7.1.</p><span class="tag">High availability</span></div>
+    <div class="card"><h4>JournalNodes</h4><p>Store the shared edit log for HA NameNodes (usually 3 or 5).</p><span class="tag">HA</span></div>
+    <div class="card"><h4>Router (RBF)</h4><p>Router-based federation: one view over several namespaces.</p><span class="tag">Federation</span></div>
+  </div>
+  <div class="callout callout--tip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18h6M10 22h4M12 2a7 7 0 0 0-4 12.7V17h8v-2.3A7 7 0 0 0 12 2z"/></svg><p>When something is wrong with HDFS, ask two questions first: is it a <b>metadata</b> problem (NameNode: permissions, safe mode, quota, heap) or a <b>data</b> problem (DataNodes: dead nodes, full disks, missing blocks)?</p></div>
+</section>
+
+<!-- ======================= PART 4: STEP BY STEP ======================= -->
+<section class="part" id="steps">
+  <span class="part-label"><b>4</b> Step by step</span>
+  <h2>Open the NameNode and a DataNode on a real cluster</h2>
+  <p>Module 5 uses a slightly bigger practice cluster than Lesson 4.3: <b>4 DataNodes in 2 racks</b> plus a SecondaryNameNode. Every output on this page and in the rest of Module 5 comes from this cluster.</p>
+  <ol class="stepper">
+    <li><h4>Start the Module 5 lab cluster</h4>
+      <div class="code" data-lang="yaml" data-file="hdfs-lab/docker-compose.yaml"><pre><code>services:
+  namenode:
+    image: apache/hadoop:3.5.0
+    hostname: namenode
+    command: ["hdfs", "namenode"]
+    ports:
+      - 9870:9870
+    env_file:
+      - ./config
+    environment:
+      ENSURE_NAMENODE_DIR: "/tmp/hadoop-hadoop/dfs/name"
+    volumes:
+      - ./topology.sh:/opt/topology.sh:ro
+  secondarynamenode:
+    image: apache/hadoop:3.5.0
+    hostname: secondarynamenode
+    command: ["hdfs", "secondarynamenode"]
+    env_file:
+      - ./config
+  datanode:
+    image: apache/hadoop:3.5.0
+    command: ["hdfs", "datanode"]
+    env_file:
+      - ./config</code></pre></div>
+      <div class="code" data-lang="bash" data-file="hdfs-lab/config"><pre><code>CORE-SITE.XML_fs.defaultFS=hdfs://namenode
+CORE-SITE.XML_net.topology.script.file.name=/opt/topology.sh
+HDFS-SITE.XML_dfs.namenode.rpc-address=namenode:8020
+HDFS-SITE.XML_dfs.replication=3
+HDFS-SITE.XML_dfs.namenode.secondary.http-address=secondarynamenode:9868
+HDFS-SITE.XML_dfs.namenode.checkpoint.period=120
+HDFS-SITE.XML_dfs.namenode.heartbeat.recheck-interval=15000</code></pre></div>
+      <div class="code" data-lang="bash" data-file="hdfs-lab/topology.sh"><pre><code>#!/bin/bash
+# Rack topology script: Hadoop passes IP addresses, we print one rack per argument.
+for host in "$@"; do
+  name=$(getent hosts "$host" | awk '{print $2}')
+  n=$(echo "$name" | grep -o 'datanode-[0-9]*' | grep -o '[0-9]*$')
+  if [ -z "$n" ]; then echo "/default-rack"
+  elif [ "$n" -le 2 ]; then echo "/rack1"
+  else echo "/rack2"; fi
+done</code></pre></div>
+      <div class="code" data-lang="bash" data-file="Terminal (in hdfs-lab)"><pre><code>chmod +x topology.sh
+docker compose up -d --scale datanode=4
+docker compose exec namenode hdfs dfsadmin -printTopology</code></pre><div class="output">Rack: /rack1
+   172.19.0.4:9866 (lab5-datanode-2.lab5_default) In Service
+   172.19.0.5:9866 (lab5-datanode-1.lab5_default) In Service
+
+Rack: /rack2
+   172.19.0.7:9866 (lab5-datanode-4.lab5_default) In Service
+   172.19.0.6:9866 (lab5-datanode-3.lab5_default) In Service</div></div>
+      <span class="behind">Two settings are deliberately shortened so you can watch things happen: checkpoints every <b>2 minutes</b> (default 1 hour, Lesson 5.4) and the dead-node check every <b>15 s</b> (default 5 minutes, Lesson 5.5). Stop the Lesson 4.3 cluster first; both use port 9870.</span></li>
+    <li><h4>Store a file twice: normal blocks and 1 MB blocks</h4>
+      <div class="code" data-lang="bash" data-file="Terminal"><pre><code>docker compose cp canteen_orders.csv namenode:/tmp/canteen_orders.csv
+docker compose exec namenode hdfs dfs -mkdir -p /user/hadoop/data
+docker compose exec namenode hdfs dfs -put /tmp/canteen_orders.csv data/
+docker compose exec namenode hdfs dfs -D dfs.blocksize=1048576 -put /tmp/canteen_orders.csv data/canteen_1mb.csv
+docker compose exec namenode hdfs dfs -ls data</code></pre><div class="output">Found 2 items
+-rw-r--r--   3 hadoop supergroup    4692009 2026-10-21 06:49 data/canteen_1mb.csv
+-rw-r--r--   3 hadoop supergroup    4692009 2026-10-21 06:49 data/canteen_orders.csv</div></div>
+      <span class="behind">Same 4.5 MB file (from <code>make_canteen.py</code>, Lesson 4.3), stored as 1 block and as 5 blocks. The <code>3</code> in the listing is the replication factor.</span></li>
+    <li><h4>Ask the NameNode about the cluster</h4>
+      <div class="code" data-lang="bash" data-file="Terminal"><pre><code>docker compose exec namenode hdfs dfsadmin -report</code></pre><div class="output">Configured Capacity: 1082212696064 (1007.89 GB)
+Present Capacity: 86452563116 (80.52 GB)
+DFS Remaining: 86424092672 (80.49 GB)
+DFS Used: 28470444 (27.15 MB)
+DFS Used%: 0.03%
+Replicated Blocks:
+	Under replicated blocks: 0
+	Blocks with corrupt replicas: 0
+	Missing blocks: 0
+…
+Live datanodes (4):
+
+Name: 172.19.0.5:9866 (lab5-datanode-1.lab5_default)
+Hostname: ab3b1bedf98a
+Rack: /rack1
+Decommission Status : Normal
+Configured Capacity: 270553174016 (251.97 GB)
+DFS Used: 9481956 (9.04 MB)
+Non DFS Used: 24661946652 (22.97 GB)
+DFS Remaining: 21606023168 (20.12 GB)
+…
+Last contact: Wed Oct 21 06:49:41 UTC 2026
+Last Block Report: Wed Oct 21 06:49:03 UTC 2026
+Num of Blocks: 6</div></div>
+      <span class="behind">The NameNode knows every DataNode's rack, capacity, last heartbeat (“Last contact”) and how many blocks it holds. All four containers share one physical disk here, so “capacity” is counted four times; on real servers each DataNode reports its own disks.</span></li>
+    <li><h4>Ask where a file's blocks are</h4>
+      <div class="code" data-lang="bash" data-file="Terminal"><pre><code>docker compose exec namenode hdfs fsck /user/hadoop/data/canteen_1mb.csv -files -blocks -locations -racks</code></pre><div class="output">/user/hadoop/data/canteen_1mb.csv 4692009 bytes, replicated: replication=3, 5 block(s):  OK
+0. BP-1507681208-172.19.0.3-1792565333483:blk_1073741826_1002 len=1048576 Live_repl=3  [/rack1/172.19.0.5:9866, /rack2/172.19.0.6:9866, /rack2/172.19.0.7:9866]
+1. BP-1507681208-172.19.0.3-1792565333483:blk_1073741827_1003 len=1048576 Live_repl=3  [/rack1/172.19.0.5:9866, /rack1/172.19.0.4:9866, /rack2/172.19.0.7:9866]
+2. BP-1507681208-172.19.0.3-1792565333483:blk_1073741828_1004 len=1048576 Live_repl=3  [/rack2/172.19.0.6:9866, /rack2/172.19.0.7:9866, /rack1/172.19.0.5:9866]
+3. BP-1507681208-172.19.0.3-1792565333483:blk_1073741829_1005 len=1048576 Live_repl=3  [/rack2/172.19.0.6:9866, /rack2/172.19.0.7:9866, /rack1/172.19.0.5:9866]
+4. BP-1507681208-172.19.0.3-1792565333483:blk_1073741830_1006 len=497705 Live_repl=3  [/rack1/172.19.0.5:9866, /rack1/172.19.0.4:9866, /rack2/172.19.0.6:9866]
+
+Status: HEALTHY
+ Number of data-nodes:	4
+ Number of racks:		2</div></div>
+      <span class="behind">This is the NameNode's map for one file: block ID, length, and the three DataNodes (with racks) holding each replica. <code>BP-…</code> is the block pool, <code>_1002</code> the generation stamp.</span></li>
+    <li><h4>Look inside the NameNode's folder</h4>
+      <div class="code" data-lang="bash" data-file="Terminal"><pre><code>docker compose exec namenode ls -l /tmp/hadoop-hadoop/dfs/name/current
+docker compose exec namenode cat /tmp/hadoop-hadoop/dfs/name/current/VERSION</code></pre><div class="output">-rw-r--r-- 1 hadoop users 1048576 Oct 21 06:49 edits_inprogress_0000000000000000001
+-rw-r--r-- 1 hadoop users     401 Oct 21 06:48 fsimage_0000000000000000000
+-rw-r--r-- 1 hadoop users      62 Oct 21 06:48 fsimage_0000000000000000000.md5
+-rw-r--r-- 1 hadoop users       2 Oct 21 06:49 seen_txid
+-rw-r--r-- 1 hadoop users     215 Oct 21 06:48 VERSION
+#Wed Oct 21 06:48:53 UTC 2026
+namespaceID=1092532876
+blockpoolID=BP-1507681208-172.19.0.3-1792565333483
+storageType=NAME_NODE
+cTime=1792565333485
+clusterID=CID-570b3f1b-005e-4977-a8e0-3476c40d28cc
+layoutVersion=-67</div></div>
+      <span class="behind">No file contents at all: a 401-byte empty fsimage from the format, and the edit log recording every change since (Lesson 5.4). The metadata of all our files fits in a few kilobytes.</span></li>
+    <li><h4>Look inside a DataNode's folder</h4>
+      <div class="code" data-lang="bash" data-file="Terminal"><pre><code>docker compose exec --index 1 datanode bash -c 'find /tmp/hadoop-hadoop/dfs/data -name "blk_*" | sort | xargs ls -l'
+docker compose exec --index 1 datanode cat /tmp/hadoop-hadoop/dfs/data/current/VERSION</code></pre><div class="output">-rw-r--r-- 1 hadoop users 4692009 … /current/BP-1507681208-172.19.0.3-1792565333483/current/finalized/subdir0/subdir0/blk_1073741825
+-rw-r--r-- 1 hadoop users   36667 … /subdir0/subdir0/blk_1073741825_1001.meta
+-rw-r--r-- 1 hadoop users 1048576 … /subdir0/subdir0/blk_1073741826
+-rw-r--r-- 1 hadoop users    8199 … /subdir0/subdir0/blk_1073741826_1002.meta
+…
+-rw-r--r-- 1 hadoop users  497705 … /subdir0/subdir0/blk_1073741830
+-rw-r--r-- 1 hadoop users    3899 … /subdir0/subdir0/blk_1073741830_1006.meta
+#Wed Oct 21 06:49:01 UTC 2026
+datanodeUuid=8c5d6579-638f-40fd-b59a-17ed6563d848
+storageType=DATA_NODE
+cTime=0
+clusterID=CID-570b3f1b-005e-4977-a8e0-3476c40d28cc
+layoutVersion=-57
+storageID=DS-291fa99b-6a48-43ad-9769-bad688411060</div></div>
+      <span class="behind">Each replica is two ordinary files: the data and its checksums. Same <code>clusterID</code> as the NameNode, or the DataNode would refuse to start (Lesson 4.3). Paths shortened with “…”.</span></li>
+    <li><h4>Read a block file directly</h4>
+      <div class="code" data-lang="bash" data-file="Terminal (on datanode-1)"><pre><code>head -3 blk_1073741826</code></pre><div class="output">order_id,item,amount
+1001,samosa,18
+1002,vada pav,20</div></div>
+      <span class="behind">The first block of the 1 MB-block copy starts with the CSV header. HDFS doesn't encode or compress your data: a block is a slice of your file's bytes.</span></li>
+  </ol>
+  <div class="callout callout--warn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3 2 21h20L12 3z"/><path d="M12 10v5M12 18v.5"/></svg><p>Never edit, move or delete files inside DataNode or NameNode folders by hand. Use HDFS commands; otherwise checksums, the block map and the metadata disagree, and HDFS reports corrupt or missing blocks.</p></div>
+</section>
+
+<!-- ======================= PART 5: SEE IT HAPPEN ======================= -->
+<section class="part" id="animation">
+  <span class="part-label"><b>5</b> See it happen</span>
+  <h2>Following one file from its name to the disk</h2>
+  <p>On the left, the commands from Part 4. On the right, which daemon answers and what it holds.</p>
+  <div class="anim" data-frames="6">
+    <div class="anim__title">From path to bytes <span>6 steps</span></div>
+    <div class="anim__views">
+      <div class="view view--see">
+        <span class="view__tag">What you see</span>
+        <svg viewBox="0 0 360 250" role="img" aria-label="Terminal commands">
+          <rect x="14" y="14" width="332" height="206" rx="8" class="s-board"/>
+          <text x="26" y="32" font-size="9" class="mono" style="fill:#7F8C86">riya@edge : ~</text>
+          <g data-on="1"><text x="26" y="56" font-size="8.6" class="mono" style="fill:#7F8C86">$ hdfs dfs -ls data</text><text x="26" y="72" font-size="8.6" class="mono" style="fill:#9FD3B8">-rw-r--r-- 3 hadoop supergroup 4692009</text><text x="26" y="86" font-size="8.6" class="mono" style="fill:#9FD3B8">    … data/canteen_orders.csv</text></g>
+          <g data-on="2"><text x="26" y="56" font-size="8.6" class="mono" style="fill:#7F8C86">$ hdfs fsck …/canteen_orders.csv \</text><text x="26" y="70" font-size="8.6" class="mono" style="fill:#7F8C86">    -files -blocks -locations</text><text x="26" y="88" font-size="8.6" class="mono" style="fill:#9FD3B8">blk_1073741825_1001 len=4692009</text><text x="26" y="102" font-size="8.6" class="mono" style="fill:#9FD3B8">Live_repl=3 [dn-1, dn-2, dn-4]</text></g>
+          <g data-on="3"><text x="26" y="56" font-size="8.6" class="mono" style="fill:#7F8C86">$ ls name/current   (on the NameNode)</text><text x="26" y="72" font-size="8.6" class="mono" style="fill:#9FD3B8">edits_inprogress_…001</text><text x="26" y="86" font-size="8.6" class="mono" style="fill:#9FD3B8">fsimage_…000   seen_txid   VERSION</text><text x="180" y="190" text-anchor="middle" font-size="10" class="s-chalk">Metadata only, a few KB.</text></g>
+          <g data-on="4"><text x="26" y="56" font-size="8.6" class="mono" style="fill:#7F8C86">$ find data -name "blk_*"   (on dn-1)</text><text x="26" y="72" font-size="8.6" class="mono" style="fill:#9FD3B8">4692009  blk_1073741825</text><text x="26" y="86" font-size="8.6" class="mono" style="fill:#9FD3B8">  36667  blk_1073741825_1001.meta</text></g>
+          <g data-on="5"><text x="26" y="56" font-size="8.6" class="mono" style="fill:#7F8C86">$ head -3 blk_1073741826</text><text x="26" y="72" font-size="8.6" class="mono" style="fill:#9FD3B8">order_id,item,amount</text><text x="26" y="86" font-size="8.6" class="mono" style="fill:#9FD3B8">1001,samosa,18</text><text x="26" y="100" font-size="8.6" class="mono" style="fill:#9FD3B8">1002,vada pav,20</text></g>
+          <g data-on="6"><text x="26" y="56" font-size="8.6" class="mono" style="fill:#7F8C86">$ hdfs dfsadmin -report</text><text x="26" y="72" font-size="8.6" class="mono" style="fill:#9FD3B8">Live datanodes (4):</text><text x="26" y="86" font-size="8.6" class="mono" style="fill:#9FD3B8">Rack: /rack1 … Num of Blocks: 6</text><text x="26" y="100" font-size="8.6" class="mono" style="fill:#9FD3B8">Last contact: … 06:49:41</text></g>
+          <text x="352" y="244" text-anchor="end" class="s-wm">myphatshala.in</text>
+        </svg>
+        <ol class="caps" hidden>
+          <li><code>-ls</code> shows a normal-looking file: owner, size, replication 3. This answer comes only from the NameNode.</li>
+          <li><code>fsck</code> asks the NameNode for the file's blocks and where each replica is.</li>
+          <li>On the NameNode's disk there is no data: just the fsimage, the edit log and identity files.</li>
+          <li>On a DataNode's disk: the block as a plain file, plus its checksum file.</li>
+          <li>The block's bytes are literally the CSV text Riya uploaded.</li>
+          <li>The NameNode also tracks every DataNode: rack, capacity, last heartbeat and number of blocks.</li>
+        </ol>
+      </div>
+
+      <div class="view view--behind">
+        <span class="view__tag">Behind the screen</span>
+        <svg viewBox="0 0 360 250" role="img" aria-label="NameNode memory and DataNode disks">
+          <rect x="16" y="16" width="160" height="110" rx="8" class="s-board"/><text x="96" y="34" text-anchor="middle" font-size="9" font-weight="700" class="s-chalk">NameNode (memory)</text>
+          <g data-on="1-"><text x="26" y="54" font-size="8" class="s-chalk">namespace:</text><text x="26" y="68" font-size="8" class="mono" style="fill:#F5C77E">…/canteen_orders.csv r3</text></g>
+          <g data-on="2-"><text x="26" y="86" font-size="8" class="s-chalk">blocks: blk_…825</text><text x="26" y="100" font-size="8" class="s-chalk">block map: …825 → 1, 2, 4</text></g>
+          <g data-on="3-"><rect x="16" y="136" width="160" height="40" rx="6" class="s-soft-blue" style="stroke:var(--blue)"/><text x="96" y="152" text-anchor="middle" font-size="8" font-weight="700" class="s-blue">disk: fsimage + edits</text><text x="96" y="166" text-anchor="middle" font-size="7.6" class="s-ink">namespace saved, block map NOT saved</text></g>
+          <rect x="196" y="16" width="148" height="44" rx="6" class="s-soft-green" style="stroke:var(--green)"/><text x="270" y="34" text-anchor="middle" font-size="8.6" font-weight="700" class="s-green">datanode-1</text>
+          <rect x="196" y="68" width="148" height="44" rx="6" class="s-soft-green" style="stroke:var(--green)"/><text x="270" y="86" text-anchor="middle" font-size="8.6" font-weight="700" class="s-green">datanode-2</text>
+          <rect x="196" y="120" width="148" height="44" rx="6" class="s-card2"/><text x="270" y="138" text-anchor="middle" font-size="8.6" font-weight="700" class="s-ink">datanode-3</text>
+          <rect x="196" y="172" width="148" height="44" rx="6" class="s-soft-green" style="stroke:var(--green)"/><text x="270" y="190" text-anchor="middle" font-size="8.6" font-weight="700" class="s-green">datanode-4</text>
+          <g data-on="2-"><g font-size="7.6" class="mono s-ink"><text x="270" y="50" text-anchor="middle">blk_…825</text><text x="270" y="102" text-anchor="middle">blk_…825</text><text x="270" y="206" text-anchor="middle">blk_…825</text></g></g>
+          <g data-on="4"><rect x="200" y="40" width="140" height="16" rx="3" style="fill:none;stroke:var(--track);stroke-width:2"/><text x="96" y="200" text-anchor="middle" font-size="8.6" class="s-ink2">replica = data file + .meta</text></g>
+          <g data-on="5"><text x="96" y="200" text-anchor="middle" font-size="8.6" class="s-ink2">bytes go client ↔ DataNode</text><text x="96" y="214" text-anchor="middle" font-size="8.6" class="s-ink2">never through the NameNode</text></g>
+          <g data-on="6"><path d="M196 38h-20M196 90h-20M196 142h-20M196 194h-20" style="stroke:var(--green);stroke-width:1.6;stroke-dasharray:3 3"/><text x="96" y="200" text-anchor="middle" font-size="8.6" font-weight="700" class="s-green">heartbeats every 3 s</text><text x="96" y="214" text-anchor="middle" font-size="8.6" class="s-ink2">+ block reports fill the block map</text></g>
+          <text x="352" y="246" text-anchor="end" class="s-wm">myphatshala.in</text>
+        </svg>
+        <ol class="caps" hidden>
+          <li>The NameNode answers from its in-memory namespace: path, owner, size, replication.</li>
+          <li>It also knows the file's blocks and, from the block map, which DataNodes hold each replica.</li>
+          <li>Only the namespace is saved to disk (fsimage + edit log). The block map lives in memory only.</li>
+          <li>On each chosen DataNode, the replica is a data file and a checksum file.</li>
+          <li>When you read, the client gets locations from the NameNode and the bytes straight from a DataNode.</li>
+          <li>DataNodes keep the NameNode up to date with heartbeats and block reports, which is how the block map is (re)built.</li>
+        </ol>
+      </div>
+    </div>
+  </div>
+
+  <h3 id="playground">Try it yourself: the NameNode's view</h3>
+  <p>Open the <b>NameNode metadata</b> tab under the cluster: it is the playground's version of <code>fsck -files -blocks -locations</code>.</p>
+  <div class="csim"><script type="application/json">{"title": "Metadata here, data there", "intro": "<p>The dark <b>NameNode<\/b> box holds only metadata. Each DataNode box shows the block replicas stored on it. Use the tabs below the cluster to see the NameNode's map.<\/p>", "racks": 2, "nodes": 2, "features": ["upload", "fail", "fsck"], "preload": [{"name": "canteen_orders.csv", "sizeMB": 500}], "try": [{"text": "Upload a 1 GB file. Watch the NameNode choose DataNodes for each block in the Event log.", "on": "upload-done"}, {"text": "Click a DataNode to stop it. The data is still listed in the NameNode metadata: the map survives, one location is gone.", "on": "node-stop"}, {"text": "Run <b>hdfs fsck /<\/b> and read which blocks are under-replicated.", "on": "fsck"}]}</script></div>
+</section>
+
+<!-- ======================= PART 6: REAL-WORLD USE ======================= -->
+<section class="part" id="real-world">
+  <span class="part-label"><b>6</b> Real-world use</span>
+  <h2>NameNodes and DataNodes in production</h2>
+
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="20" y="16" width="80" height="58" rx="6" class="s-board"/><text x="60" y="38" text-anchor="middle" font-size="8.6" class="mono" style="fill:#F5C77E">heap 128 GB</text><text x="60" y="56" text-anchor="middle" font-size="8.6" class="mono" style="fill:#9FD3B8">50 cr objects</text></svg></div>
+    <div><h4>1. NameNode sizing is about objects</h4>
+      <p>Large companies size NameNode memory by the number of files, directories and blocks, not by petabytes. Teams that create millions of tiny files are asked to compact them because they cost NameNode heap.</p>
+      <div class="uc-flow"><span>Objects</span><i>→</i><span class="java">Heap needed</span><i>→</i><span>Server size</span></div></div>
+  </div>
+
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="16" y="20" width="88" height="50" rx="6" class="s-soft-green" style="stroke:var(--green)"/><text x="60" y="42" text-anchor="middle" font-size="8.6" font-weight="700" class="s-green">12 × 16 TB</text><text x="60" y="58" text-anchor="middle" font-size="8.6" class="s-ink">per worker</text></svg></div>
+    <div><h4>2. Workers packed with disks</h4>
+      <p>DataNode servers commonly hold 12 or more large disks, each listed in <code>dfs.datanode.data.dir</code>. A dead disk is swapped while the node keeps serving from the others.</p>
+      <div class="uc-flow"><span>Disk fails</span><i>→</i><span class="java">Node keeps running</span><i>→</i><span>Hot-swap</span></div></div>
+  </div>
+
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="20" y="20" width="80" height="50" rx="6" class="s-soft-blue" style="stroke:var(--blue)"/><text x="60" y="42" text-anchor="middle" font-size="8.6" font-weight="700" class="s-blue">metadata</text><text x="60" y="58" text-anchor="middle" font-size="8.6" class="s-ink">2+ disks + backup</text></svg></div>
+    <div><h4>3. Protecting the metadata</h4>
+      <p>Admins write the NameNode metadata to more than one disk (a comma-separated <code>dfs.namenode.name.dir</code>), run HA, and back up the fsimage regularly. Losing it means losing the meaning of every block.</p>
+      <div class="uc-flow"><span>fsimage + edits</span><i>→</i><span class="java">Several copies</span><i>→</i><span>Backups</span></div></div>
+  </div>
+
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="20" y="20" width="80" height="50" rx="6" class="s-card2"/><text x="60" y="42" text-anchor="middle" font-size="8.6" font-weight="700" class="s-ink">dfsadmin</text><text x="60" y="58" text-anchor="middle" font-size="8.6" class="s-ink2">-report daily</text></svg></div>
+    <div><h4>4. Daily health checks</h4>
+      <p>On-call engineers start the day with the NameNode UI or <code>hdfs dfsadmin -report</code>: live and dead DataNodes, remaining capacity, missing and under-replicated blocks.</p>
+      <div class="uc-flow"><span>Report</span><i>→</i><span class="java">Spot problems</span><i>→</i><span>Act before users notice</span></div></div>
+  </div>
+  <p class="muted">Simplified; organisations differ in tools and policies.</p>
+</section>
+
+
+<div class="ad-slot" data-slot="mid"></div>
+
+<section class="part" id="run">
+  <span class="part-label"><b>7</b> Run the code</span>
+  <h2>A tiny NameNode in Python</h2>
+  <p>This program keeps the two NameNode structures from Part 2: the <b>namespace</b> (path → blocks) and the <b>block map</b> (block → DataNodes). Then it answers the question <code>fsck</code> answers: where are this file's blocks?</p>
+  <div class="code" data-lang="python" data-file="main.py"><pre><code>namespace = {
+    &quot;/user/hadoop/data/canteen_orders.csv&quot;: {&quot;owner&quot;: &quot;hadoop&quot;, &quot;repl&quot;: 3,
+                                             &quot;blocks&quot;: [&quot;blk_1073741825&quot;]},
+    &quot;/user/hadoop/data/canteen_1mb.csv&quot;: {&quot;owner&quot;: &quot;hadoop&quot;, &quot;repl&quot;: 3,
+                                          &quot;blocks&quot;: [&quot;blk_1073741826&quot;, &quot;blk_1073741827&quot;]},
+}
+block_map = {
+    &quot;blk_1073741825&quot;: [&quot;datanode-1&quot;, &quot;datanode-2&quot;, &quot;datanode-4&quot;],
+    &quot;blk_1073741826&quot;: [&quot;datanode-1&quot;, &quot;datanode-3&quot;, &quot;datanode-4&quot;],
+    &quot;blk_1073741827&quot;: [&quot;datanode-1&quot;, &quot;datanode-2&quot;, &quot;datanode-4&quot;],
+}
+
+def locate(path):
+    meta = namespace[path]
+    print(path, &quot;owner&quot;, meta[&quot;owner&quot;], &quot;replication&quot;, meta[&quot;repl&quot;])
+    for blk in meta[&quot;blocks&quot;]:
+        print(&quot;  &quot;, blk, &quot;-&gt;&quot;, &quot;, &quot;.join(block_map.get(blk, [])) or &quot;MISSING&quot;)
+
+locate(&quot;/user/hadoop/data/canteen_1mb.csv&quot;)</code></pre><div class="output">/user/hadoop/data/canteen_1mb.csv owner hadoop replication 3
+   blk_1073741826 -&gt; datanode-1, datanode-3, datanode-4
+   blk_1073741827 -&gt; datanode-1, datanode-2, datanode-4</div></div>
+  <ul class="anno"><li><code>namespace = {</code><span>Saved in the fsimage and edit log: survives a restart.</span></li><li><code>block_map = {</code><span>Kept only in memory and rebuilt from DataNode block reports after a restart.</span></li><li><code>print(&quot;  &quot;, blk, &quot;-&gt;&quot;, &quot;, &quot;.join(block_map.get(blk, [])) or &quot;MISSING&quot;)</code><span>If no DataNode has reported a block, its location list is empty: a missing block.</span></li></ul>
+  <div class="runner">
+    <script type="application/json">{
+ "lang": "python",
+ "file": "main.py",
+ "tasks": [
+  {
+   "label": "1 · Locate a file",
+   "hint": "Press <b>Run<\/b>. Then call <code>locate<\/code> for <code>canteen_orders.csv<\/code>.",
+   "code": "namespace = {\n    \"/user/hadoop/data/canteen_orders.csv\": {\"owner\": \"hadoop\", \"repl\": 3,\n                                             \"blocks\": [\"blk_1073741825\"]},\n    \"/user/hadoop/data/canteen_1mb.csv\": {\"owner\": \"hadoop\", \"repl\": 3,\n                                          \"blocks\": [\"blk_1073741826\", \"blk_1073741827\"]},\n}\nblock_map = {\n    \"blk_1073741825\": [\"datanode-1\", \"datanode-2\", \"datanode-4\"],\n    \"blk_1073741826\": [\"datanode-1\", \"datanode-3\", \"datanode-4\"],\n    \"blk_1073741827\": [\"datanode-1\", \"datanode-2\", \"datanode-4\"],\n}\n\ndef locate(path):\n    meta = namespace[path]\n    print(path, \"owner\", meta[\"owner\"], \"replication\", meta[\"repl\"])\n    for blk in meta[\"blocks\"]:\n        print(\"  \", blk, \"->\", \", \".join(block_map.get(blk, [])) or \"MISSING\")\n\nlocate(\"/user/hadoop/data/canteen_1mb.csv\")\n"
+  },
+  {
+   "label": "2 · A DataNode dies",
+   "hint": "<b>Predict first:<\/b> remove <code>datanode-1<\/code> from every list. Which blocks still have 2 copies, and would any be missing?",
+   "code": "block_map = {\"blk_1\": [\"datanode-1\", \"datanode-2\", \"datanode-4\"],\n             \"blk_2\": [\"datanode-1\", \"datanode-3\", \"datanode-4\"],\n             \"blk_3\": [\"datanode-1\"]}\ndead = \"datanode-1\"\nfor blk, nodes in block_map.items():\n    left = [n for n in nodes if n != dead]\n    print(blk, \"->\", left, \"MISSING\" if not left else f\"{len(left)} copies left\")\n"
+  },
+  {
+   "label": "3 · NameNode memory",
+   "hint": "Rule of thumb: about 150 bytes of heap per file, directory and block. Estimate the heap for 1 crore files of 1 block each in 1 lakh directories.",
+   "code": "files, dirs, blocks_per_file = 1_00_00_000, 1_00_000, 1\nobjects = files + dirs + files * blocks_per_file\nprint(f\"{objects:,} objects -> about {objects * 150 / 2**30:.1f} GB of heap\")\n"
+  },
+  {
+   "label": "4 · Blocks per DataNode",
+   "hint": "The real <code>dfsadmin -report<\/code> showed 3, 6, 5 and 4 blocks on the four DataNodes. Check that the total matches 6 blocks × 3 replicas.",
+   "code": "per_node = {\"datanode-2\": 3, \"datanode-1\": 6, \"datanode-3\": 5, \"datanode-4\": 4}\nprint(\"replicas on disks:\", sum(per_node.values()))\nprint(\"expected:\", 6 * 3)\n"
+  },
+  {
+   "label": "5 · Spot the error",
+   "hint": "This lookup crashes for a block that no DataNode has reported yet. Make it print “MISSING” instead.",
+   "code": "block_map = {\"blk_1\": [\"datanode-1\"]}\nfor blk in [\"blk_1\", \"blk_2\"]:\n    print(blk, \"->\", block_map[blk])\n"
+  }
+ ]
+}</script>
+  </div>
+  <h3 id="pc">Run it on your PC: find the real block files of an HDFS file</h3>
+  <p>This script asks the NameNode (via <code>fsck</code>) where each block of a file is, finds the matching Docker container for each DataNode IP, and checks the block file on that container's disk. Save it as <code>where_is_my_file.sh</code> in the <code>hdfs-lab</code> folder.</p>
+  <div class="pcrun"><h4>From an HDFS path to block files on DataNode disks</h4>
+  <div class="code" data-lang="bash" data-file="where_is_my_file.sh"><pre><code>#!/usr/bin/env bash
+# where_is_my_file.sh: show the real block files behind one HDFS file
+# usage: bash where_is_my_file.sh /user/hadoop/data/canteen_orders.csv
+file=$1
+docker compose exec -T namenode hdfs fsck &quot;$file&quot; -files -blocks -locations 2&gt;/dev/null |
+  grep -o &#x27;blk_[0-9]*_[0-9]* len=[0-9]*\|[0-9.]*:9866&#x27; | while read -r item; do
+    case &quot;$item&quot; in
+      blk_*) blk=$(echo &quot;$item&quot; | cut -d_ -f1-2); echo &quot;$item&quot;;;
+      *) ip=${item%:9866}
+         c=$(docker ps --format &#x27;{{.Names}}&#x27; | while read n; do
+               docker inspect -f &quot;{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}} $n&quot; &quot;$n&quot;; done |
+             awk -v ip=&quot;$ip&quot; &#x27;$1==ip {print $2}&#x27;)
+         path=$(docker exec &quot;$c&quot; find /tmp/hadoop-hadoop/dfs/data -name &quot;$blk&quot; 2&gt;/dev/null)
+         size=$(docker exec &quot;$c&quot; stat -c %s &quot;$path&quot;)
+         echo &quot;   on $c  ($ip)  file size $size bytes&quot;;;
+    esac
+  done
+
+# In the hdfs-lab folder:
+#   bash where_is_my_file.sh /user/hadoop/data/canteen_orders.csv</code></pre><div class="output">blk_1073741825_1001 len=4692009
+   on lab5-datanode-1  (172.19.0.4)  file size 4692009 bytes
+   on lab5-datanode-2  (172.19.0.5)  file size 4692009 bytes
+   on lab5-datanode-4  (172.19.0.7)  file size 4692009 bytes</div></div>
+  <p class="muted">Real output from the lab cluster. Three DataNodes, three identical 4,692,009-byte files: the replicas. The IPs on your machine will differ. On a real cluster you would use <code>ssh</code> to each host instead of <code>docker exec</code>.</p></div>
+</section>
+
+<section class="part" id="tracer">
+  <span class="part-label"><b>8</b> Line by line</span>
+  <h2>A read request, as the NameNode sees it</h2>
+  <p>Follow a client asking for one file. Watch how the NameNode combines the namespace and the block map, and notice it never touches the data.</p>
+  <div class="tracer">
+    <script type="application/json">{
+ "lang": "python",
+ "code": [
+  "namespace = {\"/data/orders.csv\": [\"blk_1\", \"blk_2\"]}",
+  "block_map = {\"blk_1\": [\"dn1\", \"dn3\"], \"blk_2\": [\"dn2\", \"dn4\"]}",
+  "path = \"/data/orders.csv\"",
+  "blocks = namespace[path]",
+  "answer = []",
+  "for b in blocks:",
+  "    answer.append((b, block_map[b][0]))",
+  "print(answer)"
+ ],
+ "steps": [
+  {
+   "line": 1,
+   "phase": "Python",
+   "note": "<code>namespace<\/code> is created: → dict #1.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "namespace",
+       "→ dict #1"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (1)<\/b> {&#x27;/data/orders.csv&#x27;: → list #2}",
+    "<b>#2 list (2)<\/b> [&#x27;blk_1&#x27;, &#x27;blk_2&#x27;]"
+   ],
+   "newVar": "namespace"
+  },
+  {
+   "line": 2,
+   "phase": "Python",
+   "note": "<code>block_map<\/code> is created: → dict #3. A new dict object (#3) is created: {&#x27;blk_1&#x27;: → list #4, &#x27;blk_2&#x27;: → list #5} A new list object (#4) is created: [&#x27;dn1&#x27;, &#x27;dn3&#x27;] A new list object (#5) is created: [&#x27;dn2&#x27;, &#x27;dn4&#x27;]",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "namespace",
+       "→ dict #1"
+      ],
+      [
+       "block_map",
+       "→ dict #3"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (1)<\/b> {&#x27;/data/orders.csv&#x27;: → list #2}",
+    "<b>#2 list (2)<\/b> [&#x27;blk_1&#x27;, &#x27;blk_2&#x27;]",
+    "<b>#3 dict (2)<\/b> {&#x27;blk_1&#x27;: → list #4, &#x27;blk_2&#x27;: → list #5}",
+    "<b>#4 list (2)<\/b> [&#x27;dn1&#x27;, &#x27;dn3&#x27;]",
+    "<b>#5 list (2)<\/b> [&#x27;dn2&#x27;, &#x27;dn4&#x27;]"
+   ],
+   "newVar": "block_map"
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "<code>path<\/code> is created: &#x27;/data/orders.csv&#x27;.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "namespace",
+       "→ dict #1"
+      ],
+      [
+       "block_map",
+       "→ dict #3"
+      ],
+      [
+       "path",
+       "'/data/orders.csv'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (1)<\/b> {&#x27;/data/orders.csv&#x27;: → list #2}",
+    "<b>#2 list (2)<\/b> [&#x27;blk_1&#x27;, &#x27;blk_2&#x27;]",
+    "<b>#3 dict (2)<\/b> {&#x27;blk_1&#x27;: → list #4, &#x27;blk_2&#x27;: → list #5}",
+    "<b>#4 list (2)<\/b> [&#x27;dn1&#x27;, &#x27;dn3&#x27;]",
+    "<b>#5 list (2)<\/b> [&#x27;dn2&#x27;, &#x27;dn4&#x27;]"
+   ],
+   "newVar": "path"
+  },
+  {
+   "line": 4,
+   "phase": "Namespace",
+   "note": "Path → ordered list of blocks. <code>blocks<\/code> is created: → list #2.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "namespace",
+       "→ dict #1"
+      ],
+      [
+       "block_map",
+       "→ dict #3"
+      ],
+      [
+       "path",
+       "'/data/orders.csv'"
+      ],
+      [
+       "blocks",
+       "→ list #2"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (1)<\/b> {&#x27;/data/orders.csv&#x27;: → list #2}",
+    "<b>#2 list (2)<\/b> [&#x27;blk_1&#x27;, &#x27;blk_2&#x27;]",
+    "<b>#3 dict (2)<\/b> {&#x27;blk_1&#x27;: → list #4, &#x27;blk_2&#x27;: → list #5}",
+    "<b>#4 list (2)<\/b> [&#x27;dn1&#x27;, &#x27;dn3&#x27;]",
+    "<b>#5 list (2)<\/b> [&#x27;dn2&#x27;, &#x27;dn4&#x27;]"
+   ],
+   "newVar": "blocks"
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "<code>answer<\/code> is created: → list #6. A new list object (#6) is created: []",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "namespace",
+       "→ dict #1"
+      ],
+      [
+       "block_map",
+       "→ dict #3"
+      ],
+      [
+       "path",
+       "'/data/orders.csv'"
+      ],
+      [
+       "blocks",
+       "→ list #2"
+      ],
+      [
+       "answer",
+       "→ list #6"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (1)<\/b> {&#x27;/data/orders.csv&#x27;: → list #2}",
+    "<b>#2 list (2)<\/b> [&#x27;blk_1&#x27;, &#x27;blk_2&#x27;]",
+    "<b>#3 dict (2)<\/b> {&#x27;blk_1&#x27;: → list #4, &#x27;blk_2&#x27;: → list #5}",
+    "<b>#4 list (2)<\/b> [&#x27;dn1&#x27;, &#x27;dn3&#x27;]",
+    "<b>#5 list (2)<\/b> [&#x27;dn2&#x27;, &#x27;dn4&#x27;]",
+    "<b>#6 list (0)<\/b> []"
+   ],
+   "newVar": "answer"
+  },
+  {
+   "line": 6,
+   "phase": "Python",
+   "note": "<code>b<\/code> is created: &#x27;blk_1&#x27;.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "namespace",
+       "→ dict #1"
+      ],
+      [
+       "block_map",
+       "→ dict #3"
+      ],
+      [
+       "path",
+       "'/data/orders.csv'"
+      ],
+      [
+       "blocks",
+       "→ list #2"
+      ],
+      [
+       "answer",
+       "→ list #6"
+      ],
+      [
+       "b",
+       "'blk_1'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (1)<\/b> {&#x27;/data/orders.csv&#x27;: → list #2}",
+    "<b>#2 list (2)<\/b> [&#x27;blk_1&#x27;, &#x27;blk_2&#x27;]",
+    "<b>#3 dict (2)<\/b> {&#x27;blk_1&#x27;: → list #4, &#x27;blk_2&#x27;: → list #5}",
+    "<b>#4 list (2)<\/b> [&#x27;dn1&#x27;, &#x27;dn3&#x27;]",
+    "<b>#5 list (2)<\/b> [&#x27;dn2&#x27;, &#x27;dn4&#x27;]",
+    "<b>#6 list (0)<\/b> []"
+   ],
+   "newVar": "b"
+  },
+  {
+   "line": 7,
+   "phase": "Block map",
+   "note": "For each block, pick a DataNode (real HDFS sorts them by distance to the client). Object #6 list now holds [→ tuple #7] A new tuple object (#7) is created: (&#x27;blk_1&#x27;, &#x27;dn1&#x27;)",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "namespace",
+       "→ dict #1"
+      ],
+      [
+       "block_map",
+       "→ dict #3"
+      ],
+      [
+       "path",
+       "'/data/orders.csv'"
+      ],
+      [
+       "blocks",
+       "→ list #2"
+      ],
+      [
+       "answer",
+       "→ list #6"
+      ],
+      [
+       "b",
+       "'blk_1'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (1)<\/b> {&#x27;/data/orders.csv&#x27;: → list #2}",
+    "<b>#2 list (2)<\/b> [&#x27;blk_1&#x27;, &#x27;blk_2&#x27;]",
+    "<b>#3 dict (2)<\/b> {&#x27;blk_1&#x27;: → list #4, &#x27;blk_2&#x27;: → list #5}",
+    "<b>#4 list (2)<\/b> [&#x27;dn1&#x27;, &#x27;dn3&#x27;]",
+    "<b>#5 list (2)<\/b> [&#x27;dn2&#x27;, &#x27;dn4&#x27;]",
+    "<b>#6 list (1)<\/b> [→ tuple #7]",
+    "<b>#7 tuple (2)<\/b> (&#x27;blk_1&#x27;, &#x27;dn1&#x27;)"
+   ]
+  },
+  {
+   "line": 6,
+   "phase": "Python",
+   "note": "<code>b<\/code> changes to &#x27;blk_2&#x27;.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "namespace",
+       "→ dict #1"
+      ],
+      [
+       "block_map",
+       "→ dict #3"
+      ],
+      [
+       "path",
+       "'/data/orders.csv'"
+      ],
+      [
+       "blocks",
+       "→ list #2"
+      ],
+      [
+       "answer",
+       "→ list #6"
+      ],
+      [
+       "b",
+       "'blk_2'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (1)<\/b> {&#x27;/data/orders.csv&#x27;: → list #2}",
+    "<b>#2 list (2)<\/b> [&#x27;blk_1&#x27;, &#x27;blk_2&#x27;]",
+    "<b>#3 dict (2)<\/b> {&#x27;blk_1&#x27;: → list #4, &#x27;blk_2&#x27;: → list #5}",
+    "<b>#4 list (2)<\/b> [&#x27;dn1&#x27;, &#x27;dn3&#x27;]",
+    "<b>#5 list (2)<\/b> [&#x27;dn2&#x27;, &#x27;dn4&#x27;]",
+    "<b>#6 list (1)<\/b> [→ tuple #7]",
+    "<b>#7 tuple (2)<\/b> (&#x27;blk_1&#x27;, &#x27;dn1&#x27;)"
+   ],
+   "newVar": "b"
+  },
+  {
+   "line": 7,
+   "phase": "Python",
+   "note": "Object #6 list now holds [→ tuple #7, → tuple #8] A new tuple object (#8) is created: (&#x27;blk_2&#x27;, &#x27;dn2&#x27;)",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "namespace",
+       "→ dict #1"
+      ],
+      [
+       "block_map",
+       "→ dict #3"
+      ],
+      [
+       "path",
+       "'/data/orders.csv'"
+      ],
+      [
+       "blocks",
+       "→ list #2"
+      ],
+      [
+       "answer",
+       "→ list #6"
+      ],
+      [
+       "b",
+       "'blk_2'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (1)<\/b> {&#x27;/data/orders.csv&#x27;: → list #2}",
+    "<b>#2 list (2)<\/b> [&#x27;blk_1&#x27;, &#x27;blk_2&#x27;]",
+    "<b>#3 dict (2)<\/b> {&#x27;blk_1&#x27;: → list #4, &#x27;blk_2&#x27;: → list #5}",
+    "<b>#4 list (2)<\/b> [&#x27;dn1&#x27;, &#x27;dn3&#x27;]",
+    "<b>#5 list (2)<\/b> [&#x27;dn2&#x27;, &#x27;dn4&#x27;]",
+    "<b>#6 list (2)<\/b> [→ tuple #7, → tuple #8]",
+    "<b>#7 tuple (2)<\/b> (&#x27;blk_1&#x27;, &#x27;dn1&#x27;)",
+    "<b>#8 tuple (2)<\/b> (&#x27;blk_2&#x27;, &#x27;dn2&#x27;)"
+   ]
+  },
+  {
+   "line": 6,
+   "phase": "Python",
+   "note": "Nothing is left to loop over, so the loop ends and Python moves on.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "namespace",
+       "→ dict #1"
+      ],
+      [
+       "block_map",
+       "→ dict #3"
+      ],
+      [
+       "path",
+       "'/data/orders.csv'"
+      ],
+      [
+       "blocks",
+       "→ list #2"
+      ],
+      [
+       "answer",
+       "→ list #6"
+      ],
+      [
+       "b",
+       "'blk_2'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (1)<\/b> {&#x27;/data/orders.csv&#x27;: → list #2}",
+    "<b>#2 list (2)<\/b> [&#x27;blk_1&#x27;, &#x27;blk_2&#x27;]",
+    "<b>#3 dict (2)<\/b> {&#x27;blk_1&#x27;: → list #4, &#x27;blk_2&#x27;: → list #5}",
+    "<b>#4 list (2)<\/b> [&#x27;dn1&#x27;, &#x27;dn3&#x27;]",
+    "<b>#5 list (2)<\/b> [&#x27;dn2&#x27;, &#x27;dn4&#x27;]",
+    "<b>#6 list (2)<\/b> [→ tuple #7, → tuple #8]",
+    "<b>#7 tuple (2)<\/b> (&#x27;blk_1&#x27;, &#x27;dn1&#x27;)",
+    "<b>#8 tuple (2)<\/b> (&#x27;blk_2&#x27;, &#x27;dn2&#x27;)"
+   ]
+  },
+  {
+   "line": 8,
+   "phase": "Reply",
+   "note": "Only locations go back; the client then reads from the DataNodes itself. The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "namespace",
+       "→ dict #1"
+      ],
+      [
+       "block_map",
+       "→ dict #3"
+      ],
+      [
+       "path",
+       "'/data/orders.csv'"
+      ],
+      [
+       "blocks",
+       "→ list #2"
+      ],
+      [
+       "answer",
+       "→ list #6"
+      ],
+      [
+       "b",
+       "'blk_2'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (1)<\/b> {&#x27;/data/orders.csv&#x27;: → list #2}",
+    "<b>#2 list (2)<\/b> [&#x27;blk_1&#x27;, &#x27;blk_2&#x27;]",
+    "<b>#3 dict (2)<\/b> {&#x27;blk_1&#x27;: → list #4, &#x27;blk_2&#x27;: → list #5}",
+    "<b>#4 list (2)<\/b> [&#x27;dn1&#x27;, &#x27;dn3&#x27;]",
+    "<b>#5 list (2)<\/b> [&#x27;dn2&#x27;, &#x27;dn4&#x27;]",
+    "<b>#6 list (2)<\/b> [→ tuple #7, → tuple #8]",
+    "<b>#7 tuple (2)<\/b> (&#x27;blk_1&#x27;, &#x27;dn1&#x27;)",
+    "<b>#8 tuple (2)<\/b> (&#x27;blk_2&#x27;, &#x27;dn2&#x27;)"
+   ],
+   "out": "[('blk_1', 'dn1'), ('blk_2', 'dn2')]\n"
+  }
+ ]
+}</script>
+  </div>
+
+<h3 id="worked">Worked examples: real problems, solved and traced in memory</h3>
+  <p class="wx-intro">Three calculations platform teams really make for HDFS masters and workers: NameNode heap, how many DataNodes a data set needs, and how evenly blocks are spread. Each runs live and is traced in memory.</p>
+  <article class="wx">
+    <div class="wx__head"><span class="wx__num">Example 1</span><span class="lvl lvl--b">Beginner</span><span class="wx__tag">Capacity · NameNode</span></div>
+    <h4>How much heap for the NameNode?</h4>
+    <div class="wx__problem"><p class="wx__label">Problem statement</p><p>An insurance company stores 40 lakh files averaging 300 MB each (128 MB blocks) in 50,000 directories. Using the rule of thumb of 150 bytes per object, estimate NameNode heap. Then double it for safety and growth.</p></div>
+    <div class="prob__io"><div><small>Input</small><pre>40,00,000 files · 300 MB each · 128 MB blocks · 50,000 dirs · 150 B per object</pre></div><div><small>Expected output</small><pre>objects 16,050,000  heap ~2.2 GB  with headroom ~4.5 GB</pre></div></div>
+    <div class="wx__approach"><p class="wx__label">Approach</p><ol><li>Blocks per file = ceil(300 / 128) = 3.</li><li>Objects = files + directories + blocks.</li><li>Heap = objects × 150 bytes, then × 2 for headroom.</li></ol></div>
+    <p class="wx__label">Solution: run it live</p>
+    <div class="runner">
+    <script type="application/json">{
+ "lang": "python",
+ "file": "main.py",
+ "tasks": [
+  {
+   "label": "Solution",
+   "hint": "Store the same 1.2 PB as 10 KB files instead. How many objects now? This is why small files are a NameNode problem, not a disk problem.",
+   "code": "import math\nfiles, dirs = 40_00_000, 50_000\nblocks = files * math.ceil(300 / 128)\nobjects = files + dirs + blocks\nheap_gb = objects * 150 / 2**30\nprint(f\"objects {objects:,}  heap ~{heap_gb:.1f} GB  with headroom ~{heap_gb * 2:.1f} GB\")\n"
+  }
+ ]
+}</script>
+    </div>
+    <p class="wx__label">What happens in memory, step by step</p>
+    <p class="wx__how">Recorded from a real Python run: press <b>Next</b> to execute one line at a time. Watch variables change in each frame, and lists and dictionaries (numbered #1, #2 …) fill up as objects.</p>
+    <div class="tracer">
+    <script type="application/json">{
+ "lang": "python",
+ "code": [
+  "import math",
+  "files, dirs = 40_00_000, 50_000",
+  "blocks = files * math.ceil(300 / 128)",
+  "objects = files + dirs + blocks",
+  "heap_gb = objects * 150 / 2**30",
+  "print(f\"objects {objects:,}  heap ~{heap_gb:.1f} GB  with headroom ~{heap_gb * 2:.1f} GB\")"
+ ],
+ "steps": [
+  {
+   "line": 1,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": []
+    }
+   ],
+   "heap": []
+  },
+  {
+   "line": 2,
+   "phase": "Python",
+   "note": "<code>files<\/code> is created: 4000000. <code>dirs<\/code> is created: 50000.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "files",
+       "4000000"
+      ],
+      [
+       "dirs",
+       "50000"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "dirs"
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "<code>blocks<\/code> is created: 12000000.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "files",
+       "4000000"
+      ],
+      [
+       "dirs",
+       "50000"
+      ],
+      [
+       "blocks",
+       "12000000"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "blocks"
+  },
+  {
+   "line": 4,
+   "phase": "Objects",
+   "note": "Files, folders and blocks each cost NameNode memory. <code>objects<\/code> is created: 16050000.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "files",
+       "4000000"
+      ],
+      [
+       "dirs",
+       "50000"
+      ],
+      [
+       "blocks",
+       "12000000"
+      ],
+      [
+       "objects",
+       "16050000"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "objects"
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "<code>heap_gb<\/code> is created: 2.2422.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "files",
+       "4000000"
+      ],
+      [
+       "dirs",
+       "50000"
+      ],
+      [
+       "blocks",
+       "12000000"
+      ],
+      [
+       "objects",
+       "16050000"
+      ],
+      [
+       "heap_gb",
+       "2.2422"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "heap_gb"
+  },
+  {
+   "line": 6,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "files",
+       "4000000"
+      ],
+      [
+       "dirs",
+       "50000"
+      ],
+      [
+       "blocks",
+       "12000000"
+      ],
+      [
+       "objects",
+       "16050000"
+      ],
+      [
+       "heap_gb",
+       "2.2422"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "out": "objects 16,050,000  heap ~2.2 GB  with headroom ~4.5 GB\n"
+  }
+ ]
+}</script>
+    </div>
+  </article>
+  <article class="wx">
+    <div class="wx__head"><span class="wx__num">Example 2</span><span class="lvl lvl--i">Intermediate</span><span class="wx__tag">Capacity · DataNodes</span></div>
+    <h4>How many DataNodes for 500 TB?</h4>
+    <div class="wx__problem"><p class="wx__label">Problem statement</p><p>A team expects 500 TB of data with replication 3. Each worker has 12 disks of 16 TB. Keep 25% free for growth and temporary data. How many DataNodes are needed?</p></div>
+    <div class="prob__io"><div><small>Input</small><pre>500 TB · replication 3 · 12 × 16 TB per node · 25% free</pre></div><div><small>Expected output</small><pre>raw 1500 TB, 144 TB usable per node -&gt; 11 DataNodes</pre></div></div>
+    <div class="wx__approach"><p class="wx__label">Approach</p><ol><li>Raw space = data × replication.</li><li>Usable per node = disks × size × 0.75.</li><li>Nodes = ceil(raw / usable per node).</li></ol></div>
+    <p class="wx__label">Solution: run it live</p>
+    <div class="runner">
+    <script type="application/json">{
+ "lang": "python",
+ "file": "main.py",
+ "tasks": [
+  {
+   "label": "Solution",
+   "hint": "Add one more node for failure headroom (losing a node must not fill the others). Real plans also add compute needs, not just storage.",
+   "code": "import math\nraw_tb = 500 * 3\nper_node_tb = 12 * 16 * 0.75\nnodes = math.ceil(raw_tb / per_node_tb)\nprint(f\"raw {raw_tb} TB, {per_node_tb:.0f} TB usable per node -> {nodes} DataNodes\")\n"
+  }
+ ]
+}</script>
+    </div>
+    <p class="wx__label">What happens in memory, step by step</p>
+    <p class="wx__how">Recorded from a real Python run: press <b>Next</b> to execute one line at a time. Watch variables change in each frame, and lists and dictionaries (numbered #1, #2 …) fill up as objects.</p>
+    <div class="tracer">
+    <script type="application/json">{
+ "lang": "python",
+ "code": [
+  "import math",
+  "raw_tb = 500 * 3",
+  "per_node_tb = 12 * 16 * 0.75",
+  "nodes = math.ceil(raw_tb / per_node_tb)",
+  "print(f\"raw {raw_tb} TB, {per_node_tb:.0f} TB usable per node -> {nodes} DataNodes\")"
+ ],
+ "steps": [
+  {
+   "line": 1,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": []
+    }
+   ],
+   "heap": []
+  },
+  {
+   "line": 2,
+   "phase": "Python",
+   "note": "<code>raw_tb<\/code> is created: 1500.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "raw_tb",
+       "1500"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "raw_tb"
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "<code>per_node_tb<\/code> is created: 144.0.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "raw_tb",
+       "1500"
+      ],
+      [
+       "per_node_tb",
+       "144.0"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "per_node_tb"
+  },
+  {
+   "line": 4,
+   "phase": "Round up",
+   "note": "You can't buy 10.4 servers. <code>nodes<\/code> is created: 11.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "raw_tb",
+       "1500"
+      ],
+      [
+       "per_node_tb",
+       "144.0"
+      ],
+      [
+       "nodes",
+       "11"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "nodes"
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "raw_tb",
+       "1500"
+      ],
+      [
+       "per_node_tb",
+       "144.0"
+      ],
+      [
+       "nodes",
+       "11"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "out": "raw 1500 TB, 144 TB usable per node -> 11 DataNodes\n"
+  }
+ ]
+}</script>
+    </div>
+  </article>
+  <article class="wx">
+    <div class="wx__head"><span class="wx__num">Example 3</span><span class="lvl lvl--a">Advanced</span><span class="wx__tag">Operations · balance</span></div>
+    <h4>Is data spread evenly over DataNodes?</h4>
+    <div class="wx__problem"><p class="wx__label">Problem statement</p><p>From <code>dfsadmin -report</code> you have DFS Used per DataNode. Flag any node more than 10 percentage points above or below the cluster average utilisation (the same idea the HDFS balancer uses).</p></div>
+    <div class="prob__io"><div><small>Input</small><pre>capacity 100 TB each · used: dn1 62, dn2 58, dn3 81, dn4 35, dn5 60 TB</pre></div><div><small>Expected output</small><pre>cluster average 59.2%
+dn1: 62% ok
+dn2: 58% ok
+dn3: 81% OVER
+dn4: 35% UNDER
+dn5: 60% ok</pre></div></div>
+    <div class="wx__approach"><p class="wx__label">Approach</p><ol><li>Utilisation = used / capacity per node.</li><li>Average = total used / total capacity.</li><li>Flag nodes outside average ± 10 points.</li></ol></div>
+    <p class="wx__label">Solution: run it live</p>
+    <div class="runner">
+    <script type="application/json">{
+ "lang": "python",
+ "file": "main.py",
+ "tasks": [
+  {
+   "label": "Solution",
+   "hint": "dn4 is probably a newly added node. Running <code>hdfs balancer -threshold 10<\/code> moves blocks until every node is within 10 points (Lesson 6.4).",
+   "code": "used = {\"dn1\": 62, \"dn2\": 58, \"dn3\": 81, \"dn4\": 35, \"dn5\": 60}\ncap = 100\navg = sum(used.values()) / (cap * len(used)) * 100\nprint(f\"cluster average {avg:.1f}%\")\nfor n, u in used.items():\n    pct = u / cap * 100\n    flag = \"OVER\" if pct > avg + 10 else \"UNDER\" if pct < avg - 10 else \"ok\"\n    print(f\"{n}: {pct:.0f}% {flag}\")\n"
+  }
+ ]
+}</script>
+    </div>
+    <p class="wx__label">What happens in memory, step by step</p>
+    <p class="wx__how">Recorded from a real Python run: press <b>Next</b> to execute one line at a time. Watch variables change in each frame, and lists and dictionaries (numbered #1, #2 …) fill up as objects.</p>
+    <div class="tracer">
+    <script type="application/json">{
+ "lang": "python",
+ "code": [
+  "used = {\"dn1\": 62, \"dn2\": 58, \"dn3\": 81, \"dn4\": 35, \"dn5\": 60}",
+  "cap = 100",
+  "avg = sum(used.values()) / (cap * len(used)) * 100",
+  "print(f\"cluster average {avg:.1f}%\")",
+  "for n, u in used.items():",
+  "    pct = u / cap * 100",
+  "    flag = \"OVER\" if pct > avg + 10 else \"UNDER\" if pct < avg - 10 else \"ok\"",
+  "    print(f\"{n}: {pct:.0f}% {flag}\")"
+ ],
+ "steps": [
+  {
+   "line": 1,
+   "phase": "Python",
+   "note": "<code>used<\/code> is created: → dict #1.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "used",
+       "→ dict #1"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (5)<\/b> {&#x27;dn1&#x27;: 62, &#x27;dn2&#x27;: 58, &#x27;dn3&#x27;: 81, &#x27;dn4&#x27;: 35, &#x27;dn5&#x27;: 60}"
+   ],
+   "newVar": "used"
+  },
+  {
+   "line": 2,
+   "phase": "Python",
+   "note": "<code>cap<\/code> is created: 100.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "used",
+       "→ dict #1"
+      ],
+      [
+       "cap",
+       "100"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (5)<\/b> {&#x27;dn1&#x27;: 62, &#x27;dn2&#x27;: 58, &#x27;dn3&#x27;: 81, &#x27;dn4&#x27;: 35, &#x27;dn5&#x27;: 60}"
+   ],
+   "newVar": "cap"
+  },
+  {
+   "line": 3,
+   "phase": "Average",
+   "note": "Weighted by capacity, as the balancer computes it. <code>avg<\/code> is created: 59.2.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "used",
+       "→ dict #1"
+      ],
+      [
+       "cap",
+       "100"
+      ],
+      [
+       "avg",
+       "59.2"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (5)<\/b> {&#x27;dn1&#x27;: 62, &#x27;dn2&#x27;: 58, &#x27;dn3&#x27;: 81, &#x27;dn4&#x27;: 35, &#x27;dn5&#x27;: 60}"
+   ],
+   "newVar": "avg"
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "used",
+       "→ dict #1"
+      ],
+      [
+       "cap",
+       "100"
+      ],
+      [
+       "avg",
+       "59.2"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (5)<\/b> {&#x27;dn1&#x27;: 62, &#x27;dn2&#x27;: 58, &#x27;dn3&#x27;: 81, &#x27;dn4&#x27;: 35, &#x27;dn5&#x27;: 60}"
+   ],
+   "out": "cluster average 59.2%\n"
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "<code>n<\/code> is created: &#x27;dn1&#x27;. <code>u<\/code> is created: 62.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "used",
+       "→ dict #1"
+      ],
+      [
+       "cap",
+       "100"
+      ],
+      [
+       "avg",
+       "59.2"
+      ],
+      [
+       "n",
+       "'dn1'"
+      ],
+      [
+       "u",
+       "62"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (5)<\/b> {&#x27;dn1&#x27;: 62, &#x27;dn2&#x27;: 58, &#x27;dn3&#x27;: 81, &#x27;dn4&#x27;: 35, &#x27;dn5&#x27;: 60}"
+   ],
+   "newVar": "u"
+  },
+  {
+   "line": 6,
+   "phase": "Python",
+   "note": "<code>pct<\/code> is created: 62.0.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "used",
+       "→ dict #1"
+      ],
+      [
+       "cap",
+       "100"
+      ],
+      [
+       "avg",
+       "59.2"
+      ],
+      [
+       "n",
+       "'dn1'"
+      ],
+      [
+       "u",
+       "62"
+      ],
+      [
+       "pct",
+       "62.0"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (5)<\/b> {&#x27;dn1&#x27;: 62, &#x27;dn2&#x27;: 58, &#x27;dn3&#x27;: 81, &#x27;dn4&#x27;: 35, &#x27;dn5&#x27;: 60}"
+   ],
+   "newVar": "pct"
+  },
+  {
+   "line": 7,
+   "phase": "Python",
+   "note": "<code>flag<\/code> is created: &#x27;ok&#x27;.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "used",
+       "→ dict #1"
+      ],
+      [
+       "cap",
+       "100"
+      ],
+      [
+       "avg",
+       "59.2"
+      ],
+      [
+       "n",
+       "'dn1'"
+      ],
+      [
+       "u",
+       "62"
+      ],
+      [
+       "pct",
+       "62.0"
+      ],
+      [
+       "flag",
+       "'ok'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (5)<\/b> {&#x27;dn1&#x27;: 62, &#x27;dn2&#x27;: 58, &#x27;dn3&#x27;: 81, &#x27;dn4&#x27;: 35, &#x27;dn5&#x27;: 60}"
+   ],
+   "newVar": "flag"
+  },
+  {
+   "line": 8,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "used",
+       "→ dict #1"
+      ],
+      [
+       "cap",
+       "100"
+      ],
+      [
+       "avg",
+       "59.2"
+      ],
+      [
+       "n",
+       "'dn1'"
+      ],
+      [
+       "u",
+       "62"
+      ],
+      [
+       "pct",
+       "62.0"
+      ],
+      [
+       "flag",
+       "'ok'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (5)<\/b> {&#x27;dn1&#x27;: 62, &#x27;dn2&#x27;: 58, &#x27;dn3&#x27;: 81, &#x27;dn4&#x27;: 35, &#x27;dn5&#x27;: 60}"
+   ],
+   "out": "dn1: 62% ok\n"
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "<code>n<\/code> changes to &#x27;dn2&#x27;. <code>u<\/code> changes to 58.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "used",
+       "→ dict #1"
+      ],
+      [
+       "cap",
+       "100"
+      ],
+      [
+       "avg",
+       "59.2"
+      ],
+      [
+       "n",
+       "'dn2'"
+      ],
+      [
+       "u",
+       "58"
+      ],
+      [
+       "pct",
+       "62.0"
+      ],
+      [
+       "flag",
+       "'ok'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (5)<\/b> {&#x27;dn1&#x27;: 62, &#x27;dn2&#x27;: 58, &#x27;dn3&#x27;: 81, &#x27;dn4&#x27;: 35, &#x27;dn5&#x27;: 60}"
+   ],
+   "newVar": "u"
+  },
+  {
+   "line": 6,
+   "phase": "Python",
+   "note": "<code>pct<\/code> changes to 58.0.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "used",
+       "→ dict #1"
+      ],
+      [
+       "cap",
+       "100"
+      ],
+      [
+       "avg",
+       "59.2"
+      ],
+      [
+       "n",
+       "'dn2'"
+      ],
+      [
+       "u",
+       "58"
+      ],
+      [
+       "pct",
+       "58.0"
+      ],
+      [
+       "flag",
+       "'ok'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (5)<\/b> {&#x27;dn1&#x27;: 62, &#x27;dn2&#x27;: 58, &#x27;dn3&#x27;: 81, &#x27;dn4&#x27;: 35, &#x27;dn5&#x27;: 60}"
+   ],
+   "newVar": "pct"
+  },
+  {
+   "line": 7,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "used",
+       "→ dict #1"
+      ],
+      [
+       "cap",
+       "100"
+      ],
+      [
+       "avg",
+       "59.2"
+      ],
+      [
+       "n",
+       "'dn2'"
+      ],
+      [
+       "u",
+       "58"
+      ],
+      [
+       "pct",
+       "58.0"
+      ],
+      [
+       "flag",
+       "'ok'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (5)<\/b> {&#x27;dn1&#x27;: 62, &#x27;dn2&#x27;: 58, &#x27;dn3&#x27;: 81, &#x27;dn4&#x27;: 35, &#x27;dn5&#x27;: 60}"
+   ]
+  },
+  {
+   "line": 8,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "used",
+       "→ dict #1"
+      ],
+      [
+       "cap",
+       "100"
+      ],
+      [
+       "avg",
+       "59.2"
+      ],
+      [
+       "n",
+       "'dn2'"
+      ],
+      [
+       "u",
+       "58"
+      ],
+      [
+       "pct",
+       "58.0"
+      ],
+      [
+       "flag",
+       "'ok'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (5)<\/b> {&#x27;dn1&#x27;: 62, &#x27;dn2&#x27;: 58, &#x27;dn3&#x27;: 81, &#x27;dn4&#x27;: 35, &#x27;dn5&#x27;: 60}"
+   ],
+   "out": "dn2: 58% ok\n"
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "<code>n<\/code> changes to &#x27;dn3&#x27;. <code>u<\/code> changes to 81.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "used",
+       "→ dict #1"
+      ],
+      [
+       "cap",
+       "100"
+      ],
+      [
+       "avg",
+       "59.2"
+      ],
+      [
+       "n",
+       "'dn3'"
+      ],
+      [
+       "u",
+       "81"
+      ],
+      [
+       "pct",
+       "58.0"
+      ],
+      [
+       "flag",
+       "'ok'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (5)<\/b> {&#x27;dn1&#x27;: 62, &#x27;dn2&#x27;: 58, &#x27;dn3&#x27;: 81, &#x27;dn4&#x27;: 35, &#x27;dn5&#x27;: 60}"
+   ],
+   "newVar": "u"
+  },
+  {
+   "line": 6,
+   "phase": "Python",
+   "note": "<code>pct<\/code> changes to 81.0.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "used",
+       "→ dict #1"
+      ],
+      [
+       "cap",
+       "100"
+      ],
+      [
+       "avg",
+       "59.2"
+      ],
+      [
+       "n",
+       "'dn3'"
+      ],
+      [
+       "u",
+       "81"
+      ],
+      [
+       "pct",
+       "81.0"
+      ],
+      [
+       "flag",
+       "'ok'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (5)<\/b> {&#x27;dn1&#x27;: 62, &#x27;dn2&#x27;: 58, &#x27;dn3&#x27;: 81, &#x27;dn4&#x27;: 35, &#x27;dn5&#x27;: 60}"
+   ],
+   "newVar": "pct"
+  },
+  {
+   "line": 7,
+   "phase": "Python",
+   "note": "<code>flag<\/code> changes to &#x27;OVER&#x27;.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "used",
+       "→ dict #1"
+      ],
+      [
+       "cap",
+       "100"
+      ],
+      [
+       "avg",
+       "59.2"
+      ],
+      [
+       "n",
+       "'dn3'"
+      ],
+      [
+       "u",
+       "81"
+      ],
+      [
+       "pct",
+       "81.0"
+      ],
+      [
+       "flag",
+       "'OVER'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (5)<\/b> {&#x27;dn1&#x27;: 62, &#x27;dn2&#x27;: 58, &#x27;dn3&#x27;: 81, &#x27;dn4&#x27;: 35, &#x27;dn5&#x27;: 60}"
+   ],
+   "newVar": "flag"
+  },
+  {
+   "line": 8,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "used",
+       "→ dict #1"
+      ],
+      [
+       "cap",
+       "100"
+      ],
+      [
+       "avg",
+       "59.2"
+      ],
+      [
+       "n",
+       "'dn3'"
+      ],
+      [
+       "u",
+       "81"
+      ],
+      [
+       "pct",
+       "81.0"
+      ],
+      [
+       "flag",
+       "'OVER'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (5)<\/b> {&#x27;dn1&#x27;: 62, &#x27;dn2&#x27;: 58, &#x27;dn3&#x27;: 81, &#x27;dn4&#x27;: 35, &#x27;dn5&#x27;: 60}"
+   ],
+   "out": "dn3: 81% OVER\n"
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "<code>n<\/code> changes to &#x27;dn4&#x27;. <code>u<\/code> changes to 35.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "used",
+       "→ dict #1"
+      ],
+      [
+       "cap",
+       "100"
+      ],
+      [
+       "avg",
+       "59.2"
+      ],
+      [
+       "n",
+       "'dn4'"
+      ],
+      [
+       "u",
+       "35"
+      ],
+      [
+       "pct",
+       "81.0"
+      ],
+      [
+       "flag",
+       "'OVER'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (5)<\/b> {&#x27;dn1&#x27;: 62, &#x27;dn2&#x27;: 58, &#x27;dn3&#x27;: 81, &#x27;dn4&#x27;: 35, &#x27;dn5&#x27;: 60}"
+   ],
+   "newVar": "u"
+  },
+  {
+   "line": 6,
+   "phase": "Python",
+   "note": "<code>pct<\/code> changes to 35.0.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "used",
+       "→ dict #1"
+      ],
+      [
+       "cap",
+       "100"
+      ],
+      [
+       "avg",
+       "59.2"
+      ],
+      [
+       "n",
+       "'dn4'"
+      ],
+      [
+       "u",
+       "35"
+      ],
+      [
+       "pct",
+       "35.0"
+      ],
+      [
+       "flag",
+       "'OVER'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (5)<\/b> {&#x27;dn1&#x27;: 62, &#x27;dn2&#x27;: 58, &#x27;dn3&#x27;: 81, &#x27;dn4&#x27;: 35, &#x27;dn5&#x27;: 60}"
+   ],
+   "newVar": "pct"
+  },
+  {
+   "line": 7,
+   "phase": "Python",
+   "note": "<code>flag<\/code> changes to &#x27;UNDER&#x27;.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "used",
+       "→ dict #1"
+      ],
+      [
+       "cap",
+       "100"
+      ],
+      [
+       "avg",
+       "59.2"
+      ],
+      [
+       "n",
+       "'dn4'"
+      ],
+      [
+       "u",
+       "35"
+      ],
+      [
+       "pct",
+       "35.0"
+      ],
+      [
+       "flag",
+       "'UNDER'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (5)<\/b> {&#x27;dn1&#x27;: 62, &#x27;dn2&#x27;: 58, &#x27;dn3&#x27;: 81, &#x27;dn4&#x27;: 35, &#x27;dn5&#x27;: 60}"
+   ],
+   "newVar": "flag"
+  },
+  {
+   "line": 8,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "used",
+       "→ dict #1"
+      ],
+      [
+       "cap",
+       "100"
+      ],
+      [
+       "avg",
+       "59.2"
+      ],
+      [
+       "n",
+       "'dn4'"
+      ],
+      [
+       "u",
+       "35"
+      ],
+      [
+       "pct",
+       "35.0"
+      ],
+      [
+       "flag",
+       "'UNDER'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (5)<\/b> {&#x27;dn1&#x27;: 62, &#x27;dn2&#x27;: 58, &#x27;dn3&#x27;: 81, &#x27;dn4&#x27;: 35, &#x27;dn5&#x27;: 60}"
+   ],
+   "out": "dn4: 35% UNDER\n"
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "<code>n<\/code> changes to &#x27;dn5&#x27;. <code>u<\/code> changes to 60.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "used",
+       "→ dict #1"
+      ],
+      [
+       "cap",
+       "100"
+      ],
+      [
+       "avg",
+       "59.2"
+      ],
+      [
+       "n",
+       "'dn5'"
+      ],
+      [
+       "u",
+       "60"
+      ],
+      [
+       "pct",
+       "35.0"
+      ],
+      [
+       "flag",
+       "'UNDER'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (5)<\/b> {&#x27;dn1&#x27;: 62, &#x27;dn2&#x27;: 58, &#x27;dn3&#x27;: 81, &#x27;dn4&#x27;: 35, &#x27;dn5&#x27;: 60}"
+   ],
+   "newVar": "u"
+  },
+  {
+   "line": 6,
+   "phase": "Python",
+   "note": "<code>pct<\/code> changes to 60.0.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "used",
+       "→ dict #1"
+      ],
+      [
+       "cap",
+       "100"
+      ],
+      [
+       "avg",
+       "59.2"
+      ],
+      [
+       "n",
+       "'dn5'"
+      ],
+      [
+       "u",
+       "60"
+      ],
+      [
+       "pct",
+       "60.0"
+      ],
+      [
+       "flag",
+       "'UNDER'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (5)<\/b> {&#x27;dn1&#x27;: 62, &#x27;dn2&#x27;: 58, &#x27;dn3&#x27;: 81, &#x27;dn4&#x27;: 35, &#x27;dn5&#x27;: 60}"
+   ],
+   "newVar": "pct"
+  },
+  {
+   "line": 7,
+   "phase": "Python",
+   "note": "<code>flag<\/code> changes to &#x27;ok&#x27;.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "used",
+       "→ dict #1"
+      ],
+      [
+       "cap",
+       "100"
+      ],
+      [
+       "avg",
+       "59.2"
+      ],
+      [
+       "n",
+       "'dn5'"
+      ],
+      [
+       "u",
+       "60"
+      ],
+      [
+       "pct",
+       "60.0"
+      ],
+      [
+       "flag",
+       "'ok'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (5)<\/b> {&#x27;dn1&#x27;: 62, &#x27;dn2&#x27;: 58, &#x27;dn3&#x27;: 81, &#x27;dn4&#x27;: 35, &#x27;dn5&#x27;: 60}"
+   ],
+   "newVar": "flag"
+  },
+  {
+   "line": 8,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "used",
+       "→ dict #1"
+      ],
+      [
+       "cap",
+       "100"
+      ],
+      [
+       "avg",
+       "59.2"
+      ],
+      [
+       "n",
+       "'dn5'"
+      ],
+      [
+       "u",
+       "60"
+      ],
+      [
+       "pct",
+       "60.0"
+      ],
+      [
+       "flag",
+       "'ok'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (5)<\/b> {&#x27;dn1&#x27;: 62, &#x27;dn2&#x27;: 58, &#x27;dn3&#x27;: 81, &#x27;dn4&#x27;: 35, &#x27;dn5&#x27;: 60}"
+   ],
+   "out": "dn5: 60% ok\n"
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "Nothing is left to loop over, so the loop ends and Python moves on.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "used",
+       "→ dict #1"
+      ],
+      [
+       "cap",
+       "100"
+      ],
+      [
+       "avg",
+       "59.2"
+      ],
+      [
+       "n",
+       "'dn5'"
+      ],
+      [
+       "u",
+       "60"
+      ],
+      [
+       "pct",
+       "60.0"
+      ],
+      [
+       "flag",
+       "'ok'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (5)<\/b> {&#x27;dn1&#x27;: 62, &#x27;dn2&#x27;: 58, &#x27;dn3&#x27;: 81, &#x27;dn4&#x27;: 35, &#x27;dn5&#x27;: 60}"
+   ]
+  }
+ ]
+}</script>
+    </div>
+  </article>
+</section>
+
+<section class="part" id="quiz">
+  <span class="part-label"><b>9</b> Quiz and revision</span>
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <script type="application/json">[
+ {
+  "q": "What does the NameNode store?",
+  "options": [
+   "The contents of every file",
+   "Only log files",
+   "The namespace and metadata: files, directories, permissions, blocks and their locations",
+   "Only the list of users"
+  ],
+  "answer": 2,
+  "why": "The NameNode holds metadata only. File bytes live on DataNodes."
+ },
+ {
+  "q": "How is a block replica stored on a DataNode?",
+  "options": [
+   "In a database table",
+   "As an ordinary local file (blk_N) plus a .meta checksum file",
+   "Inside the NameNode's fsimage",
+   "Compressed in a ZIP archive"
+  ],
+  "answer": 1,
+  "why": "We saw blk_1073741825 and blk_1073741825_1001.meta on the DataNode's disk."
+ },
+ {
+  "q": "Which piece of NameNode information is NOT saved in the fsimage?",
+  "options": [
+   "Which DataNodes hold each block",
+   "The directory tree",
+   "File permissions",
+   "Each file's list of blocks"
+  ],
+  "answer": 0,
+  "why": "Block locations are rebuilt from DataNode block reports after every restart."
+ },
+ {
+  "q": "When a client reads a file, the data flows:",
+  "options": [
+   "Through the NameNode",
+   "Through the SecondaryNameNode",
+   "Through the ResourceManager",
+   "Directly from DataNodes to the client"
+  ],
+  "answer": 3,
+  "why": "The NameNode gives locations; bytes come straight from DataNodes."
+ },
+ {
+  "q": "Which command lists every DataNode with its rack, capacity and last contact?",
+  "options": [
+   "hdfs dfs -ls",
+   "yarn node -list",
+   "hdfs dfsadmin -report",
+   "jps"
+  ],
+  "answer": 2,
+  "why": "dfsadmin -report is the NameNode's view of all DataNodes."
+ },
+ {
+  "q": "NameNode memory mainly grows with:",
+  "options": [
+   "Total bytes stored",
+   "Number of files, directories and blocks",
+   "Number of users",
+   "Network speed"
+  ],
+  "answer": 1,
+  "why": "Each object costs roughly 150 bytes of heap, whatever its size."
+ },
+ {
+  "q": "What happens to HDFS if a single DataNode fails?",
+  "options": [
+   "Reads continue from other replicas and the NameNode re-replicates",
+   "All data is lost",
+   "The NameNode shuts down",
+   "The cluster must be formatted"
+  ],
+  "answer": 0,
+  "why": "With replication 3, losing one worker is routine."
+ },
+ {
+  "q": "The 36,667-byte .meta file next to a 4,692,009-byte block holds:",
+  "options": [
+   "A copy of the block",
+   "The file name",
+   "Encryption keys",
+   "Checksums, 4 bytes per 512 bytes of data"
+  ],
+  "answer": 3,
+  "why": "4,692,009 / 512 rounds up to 9,165 checksums × 4 bytes = 36,660, plus a 7-byte header."
+ }
+]</script>
+  </div>
+
+  <h3>Quick revision</h3>
+  <div class="revision">
+    <h3>Lesson 5.1 in one screen</h3>
+    <ul><li>HDFS = <b>one NameNode</b> (master, metadata) + <b>many DataNodes</b> (workers, data).</li><li>NameNode: namespace (tree, owners, permissions, replication, file → blocks) + <b>block map</b> (block → DataNodes).</li><li>Saved on disk: <b>fsimage + edit log</b>. Not saved: block map (rebuilt from block reports).</li><li>DataNode: each replica = <code>blk_N</code> + <code>blk_N_genstamp.meta</code> (checksums, 4 B per 512 B).</li><li>Data flows client ↔ DataNode, <b>never through the NameNode</b>.</li><li>NameNode heap ≈ 150 B per file/dir/block (rule of thumb): object count matters, not bytes.</li><li>Commands: <code>hdfs dfsadmin -report</code>, <code>hdfs fsck PATH -files -blocks -locations</code>.</li><li>Ports: NN 8020 / 9870 · DN 9866 / 9867 / 9864.</li></ul>
+  </div>
+
+  <h3>Interview and viva questions</h3>
+  <div class="faq">
+    <details><summary>What is the difference between NameNode and DataNode?</summary><p>The NameNode is the master that stores metadata: the directory tree, permissions, which blocks make up each file and where they are. DataNodes are workers that store the actual blocks on local disks, serve reads and writes, and report to the NameNode with heartbeats and block reports.</p></details>
+    <details><summary>Does the NameNode store data?</summary><p>No. It stores only metadata. File contents are stored as blocks on DataNodes, and clients read and write those blocks directly from and to DataNodes.</p></details>
+    <details><summary>Where does a DataNode store blocks?</summary><p>In the folders listed in dfs.datanode.data.dir, under current/&lt;block pool ID&gt;/current/finalized/, as files named blk_&lt;id&gt; with a matching blk_&lt;id&gt;_&lt;generation stamp&gt;.meta checksum file.</p></details>
+    <details><summary>What happens if the NameNode fails?</summary><p>Without high availability, the whole file system becomes unavailable until the NameNode is restarted (the data stays on DataNodes but cannot be located). With HA, a standby NameNode takes over automatically.</p></details>
+    <details><summary>How does the NameNode know where blocks are?</summary><p>From block reports: each DataNode reports all its blocks when it starts and periodically afterwards (every 6 hours by default), plus incremental reports when blocks are added or removed.</p></details>
+    <details><summary>How much memory does a NameNode need?</summary><p>It depends on the number of files, directories and blocks. A common rule of thumb is about 150 bytes per object, so 10 crore objects need roughly 14 GB of heap, plus headroom.</p></details>
+    <details><summary>Can there be more than one NameNode?</summary><p>Yes: in HA there is one active and one or more standby NameNodes for the same namespace, and with federation several independent NameNodes each manage part of the namespace on the same DataNodes.</p></details>
+    
+  </div>
+
+  <h3 id="practice">Practice problems</h3>
+  <p class="prob-intro">Exercises on metadata, block files and DataNode reports, using numbers from the real cluster.</p>
+  <div class="probs">
+    <article class="prob"><div class="prob__head"><span class="prob__num">P1</span><span class="prob__tag prob__tag--easy">Easy</span><h4>Checksum file size</h4></div>
+      <p>A block has 1,048,576 bytes. With 4 bytes of checksum per 512 bytes and a 7-byte header, how big is its .meta file?</p>
+      <div class="prob__io"><div><small>Input</small><pre>1,048,576 bytes · 512 B per checksum · 4 B · 7 B header</pre></div><div><small>Expected output</small><pre>8199 bytes</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>import math
+print(math.ceil(1048576 / 512) * 4 + 7, &quot;bytes&quot;)</code></pre><div class="output">8199 bytes</div></div>
+        <p><b>How it works:</b> 8,199 bytes, exactly the size of blk_1073741826_1002.meta on the DataNode.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P2</span><span class="prob__tag prob__tag--easy">Easy</span><h4>Replicas on disk</h4></div>
+      <p>6 blocks with replication 3 are spread over 4 DataNodes. How many block files exist in total, and how many on average per node?</p>
+      <div class="prob__io"><div><small>Input</small><pre>6 blocks · replication 3 · 4 DataNodes</pre></div><div><small>Expected output</small><pre>18 replicas, 4.5 per node on average</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>total = 6 * 3
+print(total, &quot;replicas,&quot;, total / 4, &quot;per node on average&quot;)</code></pre><div class="output">18 replicas, 4.5 per node on average</div></div>
+        <p><b>How it works:</b> 18 replicas, 4.5 per node on average (the real report showed 3, 6, 5 and 4).</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P3</span><span class="prob__tag prob__tag--easy">Easy</span><h4>Parse a report line</h4></div>
+      <p>From "Num of Blocks: 6" and "DFS Used: 9481956 (9.04 MB)", print the number of blocks and MB used.</p>
+      <div class="prob__io"><div><small>Input</small><pre>Num of Blocks: 6 · DFS Used: 9481956 (9.04 MB)</pre></div><div><small>Expected output</small><pre>6 blocks, 9.04 MB</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>a = &quot;Num of Blocks: 6&quot;
+b = &quot;DFS Used: 9481956 (9.04 MB)&quot;
+blocks = int(a.split(&quot;:&quot;)[1])
+used = int(b.split(&quot;:&quot;)[1].split()[0])
+print(blocks, &quot;blocks,&quot;, round(used / 2**20, 2), &quot;MB&quot;)</code></pre><div class="output">6 blocks, 9.04 MB</div></div>
+        <p><b>How it works:</b> 6 blocks and 9.04 MB, as in the report for datanode-1.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P4</span><span class="prob__tag prob__tag--medium">Medium</span><h4>Heap for small files</h4></div>
+      <p>The same 10 TB is stored as 1 GB files or as 100 KB files (one block per file). Estimate NameNode heap for each at 150 bytes per object (file + block).</p>
+      <div class="prob__io"><div><small>Input</small><pre>10 TB · 1 GB vs 100 KB files</pre></div><div><small>Expected output</small><pre>  1 GB files: 10,240 files -&gt; 2.9 MB heap
+100 KB files: 107,374,182 files -&gt; 30,720.0 MB heap</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>tb = 10 * 2**40
+for size, label in [(2**30, &quot;1 GB&quot;), (100 * 2**10, &quot;100 KB&quot;)]:
+    files = tb // size
+    print(f&quot;{label:&gt;6} files: {files:,} files -&gt; {files * 2 * 150 / 2**20:,.1f} MB heap&quot;)</code></pre><div class="output">  1 GB files: 10,240 files -&gt; 2.9 MB heap
+100 KB files: 107,374,182 files -&gt; 30,720.0 MB heap</div></div>
+        <p><b>How it works:</b> About 3 MB of heap for 1 GB files versus about 31 GB for 100 KB files: same data, ten thousand times more metadata.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P5</span><span class="prob__tag prob__tag--medium">Medium</span><h4>Missing blocks after failures</h4></div>
+      <p>Given each block's DataNodes and a set of dead nodes, list blocks with no live replica.</p>
+      <div class="prob__io"><div><small>Input</small><pre>dead: dn2, dn5</pre></div><div><small>Expected output</small><pre>[&#x27;b2&#x27;]</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>blocks = {&quot;b1&quot;: [&quot;dn1&quot;, &quot;dn2&quot;, &quot;dn3&quot;], &quot;b2&quot;: [&quot;dn2&quot;, &quot;dn5&quot;], &quot;b3&quot;: [&quot;dn4&quot;, &quot;dn5&quot;, &quot;dn6&quot;]}
+dead = {&quot;dn2&quot;, &quot;dn5&quot;}
+print([b for b, nodes in blocks.items() if not set(nodes) - dead])</code></pre><div class="output">[&#x27;b2&#x27;]</div></div>
+        <p><b>How it works:</b> Only b2 is missing: both of its replicas were on dead nodes (it had replication 2).</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P6</span><span class="prob__tag prob__tag--medium">Medium</span><h4>Which nodes hold a file?</h4></div>
+      <p>Using the real fsck output of canteen_1mb.csv, count how many replicas each DataNode IP holds.</p>
+      <div class="prob__io"><div><small>Input</small><pre>5 blocks × 3 locations (from Part 4)</pre></div><div><small>Expected output</small><pre>Counter({&#x27;172.19.0.5&#x27;: 5, &#x27;172.19.0.6&#x27;: 4, &#x27;172.19.0.7&#x27;: 4, &#x27;172.19.0.4&#x27;: 2})</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>from collections import Counter
+locs = [[&quot;5&quot;, &quot;6&quot;, &quot;7&quot;], [&quot;5&quot;, &quot;4&quot;, &quot;7&quot;], [&quot;6&quot;, &quot;7&quot;, &quot;5&quot;], [&quot;6&quot;, &quot;7&quot;, &quot;5&quot;], [&quot;5&quot;, &quot;4&quot;, &quot;6&quot;]]
+print(Counter(&quot;172.19.0.&quot; + ip for block in locs for ip in block))</code></pre><div class="output">Counter({&#x27;172.19.0.5&#x27;: 5, &#x27;172.19.0.6&#x27;: 4, &#x27;172.19.0.7&#x27;: 4, &#x27;172.19.0.4&#x27;: 2})</div></div>
+        <p><b>How it works:</b> 172.19.0.5 holds all 5 blocks, .7 and .6 hold 4 each, .4 holds 2: 15 replicas in total.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P7</span><span class="prob__tag prob__tag--business">Business problem</span><h4>NameNode server budget</h4></div>
+      <p>Heap needed is 96 GB. Servers come with 128, 256 or 512 GB RAM; keep at least 32 GB for the OS and other processes. Which is the smallest that fits?</p>
+      <div class="prob__io"><div><small>Input</small><pre>96 GB heap · 32 GB other · 128/256/512</pre></div><div><small>Expected output</small><pre>128 GB server</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>need = 96 + 32
+print(next(r for r in [128, 256, 512] if r &gt;= need), &quot;GB server&quot;)</code></pre><div class="output">128 GB server</div></div>
+        <p><b>How it works:</b> 128 GB is exactly enough today, but with no room to grow. Most teams would choose 256 GB for a NameNode.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P8</span><span class="prob__tag prob__tag--advanced">Advanced</span><h4>Rebuild the block map</h4></div>
+      <p>After a restart the NameNode only has the namespace. Build the block map from three block reports and print each block's replica count.</p>
+      <div class="prob__io"><div><small>Input</small><pre>dn1: b1,b2 · dn2: b1,b3 · dn3: b2,b3,b1</pre></div><div><small>Expected output</small><pre>b1 [&#x27;dn1&#x27;, &#x27;dn2&#x27;, &#x27;dn3&#x27;] 3 replicas
+b2 [&#x27;dn1&#x27;, &#x27;dn3&#x27;] 2 replicas
+b3 [&#x27;dn2&#x27;, &#x27;dn3&#x27;] 2 replicas</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>reports = {&quot;dn1&quot;: [&quot;b1&quot;, &quot;b2&quot;], &quot;dn2&quot;: [&quot;b1&quot;, &quot;b3&quot;], &quot;dn3&quot;: [&quot;b2&quot;, &quot;b3&quot;, &quot;b1&quot;]}
+block_map = {}
+for dn, blocks in reports.items():
+    for b in blocks:
+        block_map.setdefault(b, []).append(dn)
+for b in sorted(block_map):
+    print(b, block_map[b], len(block_map[b]), &quot;replicas&quot;)</code></pre><div class="output">b1 [&#x27;dn1&#x27;, &#x27;dn2&#x27;, &#x27;dn3&#x27;] 3 replicas
+b2 [&#x27;dn1&#x27;, &#x27;dn3&#x27;] 2 replicas
+b3 [&#x27;dn2&#x27;, &#x27;dn3&#x27;] 2 replicas</div></div>
+        <p><b>How it works:</b> b1 has 3 replicas, b2 and b3 have 2 each. This is exactly how the block map is rebuilt at start-up (Lessons 5.5 and 5.6).</p>
+      </details>
+    </article>
+  </div>
+
+  <h3 id="scenarios">Real-world scenario questions (asked in company interviews)</h3>
+  <p class="scn-intro">Interviewers use NameNode and DataNode questions to see whether you understand where metadata ends and data begins.</p>
+  <div class="scenarios">
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">HDFS · concepts</span><span class="scn__tag scn__tag--level">Fresher</span></div>
+      <h4>“Does a 1 TB file pass through the NameNode when I upload it?”</h4>
+      <p class="scn__situation">A classic first-round question.</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> the split between the metadata path and the data path.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>No. The client asks the NameNode to create the file and allocate blocks; the NameNode returns DataNode addresses.</li>
+          <li>The client streams bytes to the first DataNode, which forwards them along a pipeline to the others.</li>
+          <li>The NameNode only records metadata (and later learns of finished replicas). That is why one NameNode can serve thousands of DataNodes.</li>
+        </ul>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Admin · memory</span><span class="scn__tag scn__tag--level">Experienced</span></div>
+      <h4>NameNode heap keeps climbing, but the cluster is only 30% full</h4>
+      <p class="scn__situation">Disk usage is low, yet the NameNode needs more and more heap and garbage collection pauses are getting longer.</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> do you know heap depends on object count?</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>Check files and blocks (NameNode UI, <code>FilesTotal</code>/<code>BlocksTotal</code> in <code>/jmx</code>) and find directories with millions of small files (<code>hdfs dfs -count</code>).</li>
+          <li>Compact small files (merge into larger Parquet/ORC files, use HAR or larger batches in ingestion).</li>
+          <li>Short term: increase heap and tune GC; long term: fix the sources of small files, add quotas, or federate the namespace.</li>
+        </ul>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Troubleshooting · disk</span><span class="scn__tag scn__tag--level">Experienced</span></div>
+      <h4>“Someone deleted blk_ files on a DataNode to free space”</h4>
+      <p class="scn__situation">A junior admin removed some old-looking <code>blk_</code> files from a full DataNode disk.</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> what HDFS does when replicas vanish behind its back.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>Those were live replicas. The DataNode will report them missing (block scanner or next block report), and the NameNode will re-replicate from other copies if any exist.</li>
+          <li>Run <code>hdfs fsck / -list-corruptfileblocks</code> and check for missing blocks; files whose every replica was deleted are lost.</li>
+          <li>Prevent it: free space with HDFS commands (delete data, lower replication of cold data, add disks, run the balancer), never inside the DataNode folders.</li>
+        </ul>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Design · hardware</span><span class="scn__tag scn__tag--level">Fresher</span></div>
+      <h4>Choose hardware for master and worker nodes</h4>
+      <p class="scn__situation">You have budget for 1 master and 10 workers. What do you prioritise for each?</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> that you match hardware to each role.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>NameNode: plenty of RAM for the heap, reliable disks (RAID) for metadata, redundant power and network; disk capacity is not important.</li>
+          <li>DataNodes: many large disks (JBOD, no RAID), enough RAM and cores for YARN tasks, good network.</li>
+          <li>Plan for a standby NameNode (HA) as soon as the cluster matters.</li>
+        </ul>
+      </div></details>
+    </article>
+
+  </div>
+</section>
+
+<nav class="lesson-nav" id="lesson-nav" aria-label="Lesson navigation"></nav>
+<div class="ad-slot" data-slot="bottom"></div>
+</article>
+
+<aside class="lesson-side">
+  <nav class="toc" aria-label="In this lesson">
+    <h4>In this lesson</h4>
+    <ol>
+      <li><a href="#story">The story</a></li>
+      <li><a href="#definition">Definition</a></li><li><a href="#levels">Beginner → Advanced</a></li>
+      <li><a href="#types">Types and ways to use it</a></li>
+      <li><a href="#steps">Step by step</a></li>
+      <li><a href="#animation">See it happen</a></li>
+      <li><a href="#real-world">Real-world use</a></li>
+      <li><a href="#run">Run the code</a></li><li><a href="#pc">Run on your PC</a></li>
+      <li><a href="#tracer">Line by line</a></li>
+      <li><a href="#worked">Worked examples</a></li>
+      <li><a href="#quiz">Quiz and revision</a></li>
+      <li><a href="#practice">Practice problems</a></li>
+      <li><a href="#scenarios">Industry scenarios</a></li>
+    </ol>
+  </nav>
+  <div class="ad-slot" data-slot="side"></div>
+  <div class="outline" id="outline"></div>
+</aside>
+</div>
+</main>
+
+<footer class="site-footer">
+  <div class="wrap">
+    <div><h4>MyPhatshala</h4><p>Free programming and IT lessons that show what happens behind the screen.</p></div>
+    <div><h4>Learn</h4><a href="../../../../#tracks">All courses</a><a href="../../">Apache Hadoop syllabus</a></div>
+    <div><h4>Site</h4><a href="../../../../about.html">About</a><a href="../../../../contact.html">Contact</a><a href="../../../../privacy.html">Privacy policy</a><a href="../../../../disclaimer.html">Disclaimer</a></div>
+    <div class="copyright">© MyPhatshala. All lesson content, diagrams and animations are original. Please do not copy without permission.</div>
+  </div>
+</footer>
+
+<script src="../../../../data/courses/hadoop.js"></script>
+<script src="../../../../assets/js/lesson.js"></script>
+<script src="../../../../assets/js/cluster-sim.js"></script>
+<script src="../../../../assets/js/ads.js"></script>
+<script src="../../../../assets/js/site.js"></script>
+</body>
+</html>

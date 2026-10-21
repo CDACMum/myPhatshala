@@ -1,0 +1,317 @@
+<!-- ======================= PART 1: THE STORY ======================= -->
+<section class="part" id="story">
+  <span class="part-label"><b>1</b> The story</span>
+  <h2>Linux commands, with a twist</h2>
+  <div class="story">
+    <p class="narration">Riya's first day on the data team. Her task: put two days of canteen orders into HDFS, check them, merge them into one local file for the accounts team, and clean up. She guesses <code>hdfs dfs -ls</code>, <code>-mkdir</code>, <code>-cat</code>, <code>-rm</code>, and they all work like Linux. Then two surprises. Copying a 403 MB file takes 5.6 seconds, but moving it takes 1.9 seconds, the same as deleting it. And when she deletes a file by mistake, it's simply gone: no trash.</p>
+
+    <div class="scene">
+      <svg viewBox="0 0 640 180" role="img" aria-label="Some HDFS shell commands only change metadata on the NameNode (ls, mkdir, mv, rm, chmod), others move data through DataNodes (put, get, cat, cp).">
+        <g font-size="10">
+          <rect x="20" y="20" width="290" height="120" rx="10" class="s-board"/>
+          <text x="165" y="42" text-anchor="middle" font-weight="700" class="s-chalk">NameNode only (metadata)</text>
+          <g font-size="9" class="mono" style="fill:#9FD3B8"><text x="40" y="66">-ls  -mkdir  -mv  -rm</text><text x="40" y="84">-chmod  -chown  -count</text><text x="40" y="102">-du  -stat  -test  -setrep*</text></g>
+          <text x="165" y="128" text-anchor="middle" font-size="8.6" style="fill:#F5C77E">fast, whatever the file size</text>
+          <rect x="330" y="20" width="290" height="120" rx="10" class="s-soft-green" style="stroke:var(--green)"/>
+          <text x="475" y="42" text-anchor="middle" font-weight="700" class="s-green">NameNode + DataNodes (data)</text>
+          <g font-size="9" class="mono s-ink"><text x="350" y="66">-put  -get  -cat  -tail</text><text x="350" y="84">-cp  -getmerge  -appendToFile</text><text x="350" y="102">-text  -checksum</text></g>
+          <text x="475" y="128" text-anchor="middle" font-size="8.6" class="s-ink2">time grows with the data size</text>
+        </g>
+        <text x="320" y="164" text-anchor="middle" font-size="10" class="s-ink2">* setrep changes metadata at once; the DataNodes copy or delete replicas afterwards.</text>
+        <text x="632" y="176" text-anchor="end" class="s-wm">myphatshala.in</text>
+      </svg>
+    </div>
+
+A> <code>hdfs dfs</code> deliberately looks like Linux, so you'll feel at home in a day. But think about <i>where</i> each command works. <code>mv</code> only changes a name in the NameNode's memory, so moving a 403 MB file, or a 4 TB folder, takes the same time: most of those 1.9 seconds were just Java starting up. <code>cp</code> has to read every byte and write it again through a pipeline.
+R> And the trash?
+A> HDFS has a trash, but <code>fs.trash.interval</code> is 0 by default, so it's off unless the admins switch it on. On our lab it's off. With it on, <code>-rm</code> moves files to <code>.Trash</code> and you can get them back. Today: the commands you'll use every day, with real outputs, and which ones to be careful with.
+  </div>
+</section>
+
+<!-- ======================= PART 2: DEFINITION ======================= -->
+<section class="part" id="definition">
+  <span class="part-label"><b>2</b> Definition</span>
+  <h2>The HDFS shell</h2>
+  <div class="def">
+    <div class="def__formal"><small>Formal definition (write this in exams)</small>
+      <p>The <b>HDFS shell</b> is the command-line client for Hadoop file systems, invoked as <code>hdfs dfs &lt;command&gt;</code> (equivalent to <code>hadoop fs</code> for HDFS paths). Its commands mirror POSIX tools: listing and inspecting (<code>-ls</code>, <code>-du</code>, <code>-df</code>, <code>-count</code>, <code>-stat</code>, <code>-test</code>, <code>-find</code>, <code>-checksum</code>), reading (<code>-cat</code>, <code>-head</code>, <code>-tail</code>, <code>-text</code>), transferring between local and HDFS (<code>-put</code>/<code>-copyFromLocal</code>, <code>-get</code>/<code>-copyToLocal</code>, <code>-getmerge</code>, <code>-moveFromLocal</code>), changing the namespace (<code>-mkdir</code>, <code>-mv</code>, <code>-cp</code>, <code>-rm</code>, <code>-appendToFile</code>, <code>-touchz</code>) and managing attributes (<code>-chmod</code>, <code>-chown</code>, <code>-chgrp</code>, <code>-setrep</code>). Paths may be absolute (<code>/user/…</code>), relative to the user's home <code>/user/&lt;name&gt;</code>, or full URIs (<code>hdfs://namenode/…</code>, <code>file:///…</code>). Generic options such as <code>-D property=value</code> come before the command.</p></div>
+    <div class="def__simple"><small>In simple words</small>
+      <p><code>hdfs dfs -something</code> is Linux file handling for HDFS: list, copy in, copy out, read, move, delete, change permissions. Commands that only rename or list are instant; commands that move data take time.</p></div>
+  </div>
+
+  <h3>Words you'll meet in this lesson</h3>
+  <div class="terms">
+    <div class="term"><b>hdfs dfs vs hadoop fs</b><span>Same shell; <code>hadoop fs</code> works with any Hadoop file system (S3, local…), <code>hdfs dfs</code> is the usual name for HDFS.</span></div>
+    <div class="term"><b>Home directory</b><span><code>/user/&lt;username&gt;</code>; relative paths start there.</span></div>
+    <div class="term"><b>-put / -get</b><span>Copy local → HDFS / HDFS → local.</span></div>
+    <div class="term"><b>-getmerge</b><span>Concatenate all files of an HDFS folder into one local file.</span></div>
+    <div class="term"><b>Trash</b><span><code>.Trash/Current</code> in your home; used by <code>-rm</code> only if <code>fs.trash.interval</code> &gt; 0.</span></div>
+    <div class="term"><b>-skipTrash</b><span>Delete immediately even if trash is on.</span></div>
+    <div class="term"><b>-du first column</b><span>Logical size; second column: raw space including replicas.</span></div>
+    <div class="term"><b>Exit code</b><span>0 = success; <code>-test</code> returns 0/1, used in scripts.</span></div>
+  </div>
+
+  <h3>Defaults that surprise people (Hadoop 3.5.0)</h3>
+  <table class="facts" style="table-layout:fixed;overflow-wrap:anywhere">
+    <tr><th>fs.trash.interval</th><td>0: trash is <b>off</b>; set minutes (e.g. 1440 = 1 day) in core-site.xml to enable</td></tr>
+    <tr><th>-put on an existing file</th><td>Fails with “File exists”; use <code>-f</code> to overwrite</td></tr>
+    <tr><th>-mkdir on an existing folder</th><td>Fails; <code>-p</code> creates parents and ignores existing folders</td></tr>
+    <tr><th>JVM start-up</th><td>About 1.8 s per command in the lab: script many operations in one call where possible</td></tr>
+    <tr><th>-du columns</th><td>4.5 M, 13.4 M: data size and space used with 3 replicas</td></tr>
+  </table>
+
+LEVELS> The shell at three levels
+L1> Like a phone's file manager
+      <ul>
+        <li>Folders, files, copy, move, delete: the same ideas.</li>
+        <li>Upload (<code>-put</code>) is like sending a photo to the cloud; download (<code>-get</code>) brings it back.</li>
+        <li>Renaming is instant; copying a big video takes time. HDFS behaves the same way.</li>
+      </ul>
+L2> Everyday patterns
+      <ul>
+        <li>Load data: <code>-mkdir -p</code>, then <code>-put</code> (or <code>-put -f</code> to replace).</li>
+        <li>Check: <code>-ls</code>, <code>-du -s -h</code>, <code>-count</code>, <code>-head</code> / <code>-tail</code>.</li>
+        <li>Publish results: jobs write to a temporary folder, then one <code>-mv</code> makes them visible atomically.</li>
+        <li>Export: <code>-getmerge</code> a result folder into one local file for business users.</li>
+        <li>Script checks: <code>hdfs dfs -test -e path &amp;&amp; …</code>.</li>
+      </ul>
+L3> Things to know before you script
+      <ul>
+        <li>Each call starts a JVM. For thousands of small operations use the Java API, WebHDFS, or one job, not a loop of shell calls.</li>
+        <li><code>-cp</code> copies through the client (it reads and writes every byte); for big copies use <code>distcp</code>, which runs as a parallel job.</li>
+        <li><code>-rm -r</code> on a big folder is fast for you but creates lots of block deletions for DataNodes, done in the background.</li>
+        <li>Trash is per user and client-side policy plus server setting; never rely on it for important data.</li>
+        <li>Globs (<code>*</code>, <code>?</code>) are expanded by HDFS: quote them so your local shell doesn't expand them first.</li>
+      </ul>
+/LEVELS
+EXAM> For “List any ten HDFS shell commands with syntax”, group them: <b>list</b> (<code>-ls</code>, <code>-du</code>, <code>-count</code>), <b>read</b> (<code>-cat</code>, <code>-tail</code>), <b>transfer</b> (<code>-put</code>, <code>-get</code>, <code>-getmerge</code>), <b>change</b> (<code>-mkdir</code>, <code>-mv</code>, <code>-cp</code>, <code>-rm</code>), <b>attributes</b> (<code>-chmod</code>, <code>-chown</code>, <code>-setrep</code>). Give the syntax <code>hdfs dfs -command [options] path</code> and one example each.
+</section>
+
+<!-- ======================= PART 3: TYPES AND WAYS TO USE IT ======================= -->
+<section class="part" id="types">
+  <span class="part-label"><b>3</b> Types and ways to use it</span>
+  <h2>Command reference by task</h2>
+  <div class="table-wrap">
+  <table class="compare" style="min-width:640px">
+    <thead><tr><th>Task</th><th>Command</th><th>Example</th><th>Touches DataNodes?</th></tr></thead>
+    <tbody>
+      <tr><td>List</td><td><code>-ls [-R] [-h]</code></td><td><code>hdfs dfs -ls -h /user/hadoop/data</code></td><td>No</td></tr>
+      <tr><td>Make folder</td><td><code>-mkdir [-p]</code></td><td><code>hdfs dfs -mkdir -p raw/2026/10</code></td><td>No</td></tr>
+      <tr><td>Upload</td><td><code>-put [-f]</code></td><td><code>hdfs dfs -put day1.csv raw/</code></td><td>Yes (write pipeline)</td></tr>
+      <tr><td>Download</td><td><code>-get</code>, <code>-getmerge</code></td><td><code>hdfs dfs -getmerge out/ result.csv</code></td><td>Yes (reads)</td></tr>
+      <tr><td>Read</td><td><code>-cat</code>, <code>-head</code>, <code>-tail</code>, <code>-text</code></td><td><code>hdfs dfs -tail logs/app.log</code></td><td>Yes</td></tr>
+      <tr><td>Size</td><td><code>-du [-s] [-h]</code>, <code>-df -h</code>, <code>-count</code></td><td><code>hdfs dfs -du -s -h data</code></td><td>No</td></tr>
+      <tr><td>Move / rename</td><td><code>-mv</code></td><td><code>hdfs dfs -mv tmp/out final/</code></td><td>No</td></tr>
+      <tr><td>Copy</td><td><code>-cp</code> (small), <code>hadoop distcp</code> (big)</td><td><code>hdfs dfs -cp a.csv b.csv</code></td><td>Yes (read + write)</td></tr>
+      <tr><td>Delete</td><td><code>-rm [-r] [-skipTrash]</code></td><td><code>hdfs dfs -rm -r old/</code></td><td>Later (block deletion)</td></tr>
+      <tr><td>Permissions</td><td><code>-chmod</code>, <code>-chown</code>, <code>-chgrp</code></td><td><code>hdfs dfs -chmod 640 raw/day1.csv</code></td><td>No</td></tr>
+      <tr><td>Replication</td><td><code>-setrep [-w] N</code></td><td><code>hdfs dfs -setrep -w 2 archive/</code></td><td>Later (copies/deletes)</td></tr>
+      <tr><td>Inspect</td><td><code>-stat</code>, <code>-test</code>, <code>-find</code>, <code>-checksum</code></td><td><code>hdfs dfs -stat "%r %o" f</code></td><td>No (checksum: yes)</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <h3>Same shell, other file systems</h3>
+  <div class="cards">
+    <div class="card"><h4>hdfs://</h4><p>The default here (<code>fs.defaultFS</code>).</p><span class="tag">HDFS</span></div>
+    <div class="card"><h4>file://</h4><p><code>hadoop fs -ls file:///tmp</code> lists the local disk.</p><span class="tag">Local</span></div>
+    <div class="card"><h4>s3a://, abfs://, gs://</h4><p>With the right connector and credentials, the same commands work on cloud storage.</p><span class="tag">Cloud</span></div>
+    <div class="card"><h4>webhdfs://</h4><p>HDFS over HTTP, e.g. through firewalls or from other clusters.</p><span class="tag">HTTP</span></div>
+  </div>
+TIP> Run <code>hdfs dfs -help &lt;command&gt;</code> (without the dash) for the exact options of your Hadoop version; we used it below for <code>setrep</code>.
+</section>
+
+<!-- ======================= PART 4: STEP BY STEP ======================= -->
+<section class="part" id="steps">
+  <span class="part-label"><b>4</b> Step by step</span>
+  <h2>A morning of real commands</h2>
+  <p>All run as user <code>hadoop</code> inside the namenode container of the lab cluster.</p>
+  <ol class="stepper">
+    <li><h4>Create a folder and upload</h4>
+      <div class="code" data-lang="bash" data-file="Terminal"><pre><code>printf 'order_id,item,amount\n2001,chai,15\n2002,dosa,45\n' &gt; day1.csv
+printf 'order_id,item,amount\n2003,poha,25\n' &gt; day2.csv
+hdfs dfs -mkdir -p /user/hadoop/canteen/raw
+hdfs dfs -put day1.csv day2.csv /user/hadoop/canteen/raw/
+hdfs dfs -ls /user/hadoop/canteen/raw</code></pre><div class="output">Found 2 items
+-rw-r--r--   3 hadoop supergroup         47 2026-10-21 09:38 /user/hadoop/canteen/raw/day1.csv
+-rw-r--r--   3 hadoop supergroup         34 2026-10-21 09:38 /user/hadoop/canteen/raw/day2.csv</div></div>
+      <span class="behind">Columns: permissions, replication, owner, group, size in bytes, modification time, path. Folders show <code>-</code> instead of a replication factor.</span></li>
+    <li><h4>Read and check sizes</h4>
+      <div class="code" data-lang="bash" data-file="Terminal"><pre><code>hdfs dfs -cat /user/hadoop/canteen/raw/day1.csv
+hdfs dfs -du -h /user/hadoop/data
+hdfs dfs -du -s -h /user/hadoop/data
+hdfs dfs -df -h /
+hdfs dfs -count -v -h /user/hadoop</code></pre><div class="output">order_id,item,amount
+2001,chai,15
+2002,dosa,45
+4.5 M    13.4 M   /user/hadoop/data/canteen_1mb.csv
+4.5 M    13.4 M   /user/hadoop/data/canteen_orders.csv
+134.2 M  402.7 M  /user/hadoop/data/orders_x30.csv
+402.7 M  1.2 G    /user/hadoop/data/orders_x90.csv
+402.7 M  1.2 G    /user/hadoop/data/orders_x90b.csv
+948.6 M  2.8 G  /user/hadoop/data
+Filesystem           Size   Used  Available  Use%
+hdfs://namenode  1007.9 G  2.8 G     66.8 G    0%
+   DIR_COUNT   FILE_COUNT       CONTENT_SIZE PATHNAME
+          13           11            958.1 M /user/hadoop</div></div>
+      <span class="behind"><code>-du</code>: the first column is the data size, the second the raw disk used with 3 replicas (4.5 M × 3 = 13.4 M). <code>-df</code> is the whole file system. <code>-count -v</code> adds a header.</span></li>
+    <li><h4>Copy, rename, append, merge</h4>
+      <div class="code" data-lang="bash" data-file="Terminal"><pre><code>hdfs dfs -cp /user/hadoop/canteen/raw/day1.csv /user/hadoop/canteen/day1_copy.csv
+hdfs dfs -mv /user/hadoop/canteen/day1_copy.csv /user/hadoop/canteen/day1_backup.csv
+hdfs dfs -appendToFile day2.csv /user/hadoop/canteen/day1_backup.csv
+hdfs dfs -cat /user/hadoop/canteen/day1_backup.csv
+hdfs dfs -getmerge /user/hadoop/canteen/raw merged.csv &amp;&amp; cat merged.csv</code></pre><div class="output">order_id,item,amount
+2001,chai,15
+2002,dosa,45
+order_id,item,amount
+2003,poha,25
+order_id,item,amount
+2001,chai,15
+2002,dosa,45
+order_id,item,amount
+2003,poha,25</div></div>
+      <span class="behind">Both append and getmerge simply concatenate bytes, so the header line appears twice. HDFS knows nothing about CSV headers; that is your program's job.</span></li>
+    <li><h4>Permissions, tests and search</h4>
+      <div class="code" data-lang="bash" data-file="Terminal"><pre><code>hdfs dfs -chmod 640 /user/hadoop/canteen/raw/day1.csv
+hdfs dfs -ls /user/hadoop/canteen/raw
+hdfs dfs -test -e /user/hadoop/canteen/raw/day1.csv; echo "exists: $?"
+hdfs dfs -test -e /user/hadoop/canteen/raw/day9.csv; echo "exists: $?"
+hdfs dfs -find /user/hadoop -name "*.csv"
+hdfs dfs -stat "%n %b bytes, replication %r, block %o, modified %y" /user/hadoop/canteen/raw/day1.csv</code></pre><div class="output">-rw-r-----   3 hadoop supergroup         47 2026-10-21 09:38 /user/hadoop/canteen/raw/day1.csv
+-rw-r--r--   3 hadoop supergroup         34 2026-10-21 09:38 /user/hadoop/canteen/raw/day2.csv
+exists: 0
+exists: 1
+/user/hadoop/canteen/day1_backup.csv
+/user/hadoop/canteen/raw/day1.csv
+/user/hadoop/canteen/raw/day2.csv
+/user/hadoop/data/canteen_1mb.csv
+/user/hadoop/data/canteen_orders.csv
+/user/hadoop/data/orders_x30.csv
+/user/hadoop/data/orders_x90.csv
+/user/hadoop/data/orders_x90b.csv
+day1.csv 47 bytes, replication 3, block 134217728, modified 2026-10-21 09:38:04</div></div>
+      <span class="behind"><code>-test</code> prints nothing; its exit code (0 = true) is what scripts use. Quote <code>"*.csv"</code> so the pattern reaches HDFS.</span></li>
+    <li><h4>Delete: trash off, then on</h4>
+      <div class="code" data-lang="bash" data-file="Terminal"><pre><code>hdfs getconf -confKey fs.trash.interval
+hdfs dfs -rm /user/hadoop/canteen/day1_backup.csv
+hdfs dfs -ls /user/hadoop/.Trash/Current/user/hadoop/canteen
+hdfs dfs -D fs.trash.interval=1440 -rm /user/hadoop/canteen/raw/day2.csv
+hdfs dfs -mv /user/hadoop/.Trash/Current/user/hadoop/canteen/raw/day2.csv /user/hadoop/canteen/raw/</code></pre><div class="output">0
+Deleted /user/hadoop/canteen/day1_backup.csv
+ls: `/user/hadoop/.Trash/Current/user/hadoop/canteen': No such file or directory
+INFO  TrashPolicyDefault:196 - Moved: 'hdfs://namenode/user/hadoop/canteen/raw/day2.csv' to trash at: hdfs://namenode/user/hadoop/.Trash/Current/user/hadoop/canteen/raw/day2.csv</div></div>
+      <span class="behind">With trash off (0), “Deleted” means gone. With trash on, the file moves to <code>.Trash/Current</code> under the same path, and a <code>-mv</code> restores it. Real clusters usually set <code>fs.trash.interval</code> in core-site.xml.</span></li>
+    <li><h4>cp vs mv on a 403 MB file</h4>
+      <div class="code" data-lang="bash" data-file="Terminal"><pre><code>time hdfs dfs -cp data/orders_x90.csv data/orders_x90_copy.csv
+time hdfs dfs -mv data/orders_x90_copy.csv data/orders_x90_moved.csv
+time hdfs dfs -rm -skipTrash data/orders_x90_moved.csv</code></pre><div class="output">real	0m5.615s
+real	0m1.863s
+Deleted /user/hadoop/data/orders_x90_moved.csv
+real	0m1.830s</div></div>
+      <span class="behind"><code>cp</code> read and rewrote 403 MB (×3 replicas on disk). <code>mv</code> and <code>rm</code> are metadata changes; their time is mostly the JVM starting, and would be the same for 4 TB.</span></li>
+    <li><h4>Errors you will meet</h4>
+      <div class="code" data-lang="bash" data-file="Terminal"><pre><code>hdfs dfs -ls /user/hadoop/canteen/raw/day9.csv
+hdfs dfs -mkdir /user/hadoop/canteen/raw
+hdfs dfs -put day1.csv /user/hadoop/canteen/raw/</code></pre><div class="output">ls: `/user/hadoop/canteen/raw/day9.csv': No such file or directory
+mkdir: `/user/hadoop/canteen/raw': File exists
+put: `/user/hadoop/canteen/raw/day1.csv': File exists</div></div>
+      <span class="behind">Fixes: check the path; use <code>-mkdir -p</code>; use <code>-put -f</code> to overwrite on purpose.</span></li>
+  </ol>
+WARN> <code>hdfs dfs -rm -r -skipTrash /some/path</code> cannot be undone. Many teams protect important folders with snapshots (Lesson 7.4) and require trash to be enabled on the cluster.
+</section>
+
+<!-- ======================= PART 5: SEE IT HAPPEN ======================= -->
+<section class="part" id="animation">
+  <span class="part-label"><b>5</b> See it happen</span>
+  <h2>Which daemons does each command wake up?</h2>
+  <p>Six commands from Part 4, and the daemons each one involves.</p>
+  <div class="anim" data-frames="6">
+    <div class="anim__title">Metadata commands vs data commands <span>6 steps</span></div>
+    <div class="anim__views">
+      <div class="view view--see">
+        <span class="view__tag">What you see</span>
+        <svg viewBox="0 0 360 250" role="img" aria-label="Commands and outputs">
+          <rect x="14" y="14" width="332" height="206" rx="8" class="s-board"/>
+          <text x="26" y="32" font-size="9" class="mono" style="fill:#7F8C86">hadoop@namenode : /tmp</text>
+          <g data-on="1"><text x="26" y="56" font-size="8.6" class="mono" style="fill:#7F8C86">$ hdfs dfs -ls …/canteen/raw</text><text x="26" y="72" font-size="8.6" class="mono" style="fill:#9FD3B8">-rw-r--r-- 3 hadoop … 47 … day1.csv</text><text x="26" y="86" font-size="8.6" class="mono" style="fill:#9FD3B8">-rw-r--r-- 3 hadoop … 34 … day2.csv</text></g>
+          <g data-on="2"><text x="26" y="56" font-size="8.6" class="mono" style="fill:#7F8C86">$ hdfs dfs -put day1.csv day2.csv …/raw/</text><text x="180" y="190" text-anchor="middle" font-size="10" class="s-chalk">(no output = success)</text></g>
+          <g data-on="3"><text x="26" y="56" font-size="8.6" class="mono" style="fill:#7F8C86">$ hdfs dfs -cat …/raw/day1.csv</text><text x="26" y="72" font-size="8.6" class="mono" style="fill:#9FD3B8">order_id,item,amount</text><text x="26" y="86" font-size="8.6" class="mono" style="fill:#9FD3B8">2001,chai,15</text><text x="26" y="100" font-size="8.6" class="mono" style="fill:#9FD3B8">2002,dosa,45</text></g>
+          <g data-on="4"><text x="26" y="56" font-size="8.6" class="mono" style="fill:#7F8C86">$ time hdfs dfs -mv …x90_copy.csv …x90_moved.csv</text><text x="26" y="72" font-size="8.6" class="mono" style="fill:#9FD3B8">real 0m1.863s</text></g>
+          <g data-on="5"><text x="26" y="56" font-size="8.6" class="mono" style="fill:#7F8C86">$ time hdfs dfs -cp …x90.csv …x90_copy.csv</text><text x="26" y="72" font-size="8.6" class="mono" style="fill:#F5C77E">real 0m5.615s</text></g>
+          <g data-on="6"><text x="26" y="56" font-size="8.6" class="mono" style="fill:#7F8C86">$ hdfs dfs -rm …/day1_backup.csv</text><text x="26" y="72" font-size="8.6" class="mono" style="fill:#9FD3B8">Deleted …/day1_backup.csv</text><text x="180" y="190" text-anchor="middle" font-size="10" class="s-chalk">Trash is off: it is gone.</text></g>
+          <text x="352" y="244" text-anchor="end" class="s-wm">myphatshala.in</text>
+        </svg>
+        <ol class="caps" hidden>
+          <li><code>-ls</code>: a listing with permissions, replication, owner, size and time.</li>
+          <li><code>-put</code>: uploads two files; silence means success.</li>
+          <li><code>-cat</code>: prints the file contents.</li>
+          <li><code>-mv</code> of a 403 MB file: under 2 seconds, mostly Java start-up.</li>
+          <li><code>-cp</code> of the same file: 5.6 seconds, three times longer.</li>
+          <li><code>-rm</code> with trash off: deleted immediately.</li>
+        </ol>
+      </div>
+
+      <div class="view view--behind">
+        <span class="view__tag">Behind the screen</span>
+        <svg viewBox="0 0 360 250" role="img" aria-label="Client, NameNode and DataNodes">
+          <rect x="130" y="16" width="100" height="40" rx="6" class="s-board"/><text x="180" y="40" text-anchor="middle" font-size="9" font-weight="700" class="s-chalk">NameNode</text>
+          <rect x="14" y="100" width="80" height="44" rx="6" class="s-soft-acc" style="stroke:var(--track)"/><text x="54" y="126" text-anchor="middle" font-size="8.6" font-weight="700" class="s-acc">client</text>
+          <rect x="140" y="110" width="60" height="40" rx="6" class="s-soft-green" style="stroke:var(--green)"/><text x="170" y="134" text-anchor="middle" font-size="8.6" class="s-green">dn</text>
+          <rect x="210" y="110" width="60" height="40" rx="6" class="s-soft-green" style="stroke:var(--green)"/><text x="240" y="134" text-anchor="middle" font-size="8.6" class="s-green">dn</text>
+          <rect x="280" y="110" width="60" height="40" rx="6" class="s-soft-green" style="stroke:var(--green)"/><text x="310" y="134" text-anchor="middle" font-size="8.6" class="s-green">dn</text>
+          <g data-on="1,4"><path d="M54 100V36h76" style="fill:none;stroke:var(--track);stroke-width:2.4"/></g>
+          <g data-on="1"><text x="180" y="190" text-anchor="middle" font-size="9" class="s-ink2">metadata only: answered from NameNode memory</text></g>
+          <g data-on="2"><path d="M54 100V36h76" style="fill:none;stroke:var(--track);stroke-width:2"/><path d="M94 130h46M200 130h10M270 130h10" style="stroke:var(--blue);stroke-width:3"/><text x="180" y="190" text-anchor="middle" font-size="9" class="s-ink2">create + addBlock, then the write pipeline</text></g>
+          <g data-on="3"><path d="M54 100V36h76" style="fill:none;stroke:var(--track);stroke-width:2"/><path d="M140 136H94" style="stroke:var(--blue);stroke-width:3"/><text x="180" y="190" text-anchor="middle" font-size="9" class="s-ink2">block locations, then bytes from one DataNode</text></g>
+          <g data-on="4"><text x="180" y="190" text-anchor="middle" font-size="9" class="s-ink2">rename in the namespace: no block moves</text><text x="180" y="206" text-anchor="middle" font-size="8.6" class="s-ink2">same speed for 4 KB or 4 TB</text></g>
+          <g data-on="5"><path d="M54 100V36h76" style="fill:none;stroke:var(--track);stroke-width:2"/><path d="M140 140H94M94 124h46M200 124h10M270 124h10" style="stroke:var(--blue);stroke-width:3"/><text x="180" y="190" text-anchor="middle" font-size="9" class="s-ink2">read every byte, write it again (3 replicas)</text></g>
+          <g data-on="6"><path d="M54 100V36h76" style="fill:none;stroke:var(--track);stroke-width:2.4"/><path d="M180 56v54M200 50l40 60M220 46l90 64" style="fill:none;stroke:var(--red);stroke-width:1.4;stroke-dasharray:3 3"/><text x="180" y="190" text-anchor="middle" font-size="9" class="s-ink2">namespace entry removed now;</text><text x="180" y="206" text-anchor="middle" font-size="8.6" class="s-ink2">blocks deleted later via heartbeat replies</text></g>
+          <text x="352" y="246" text-anchor="end" class="s-wm">myphatshala.in</text>
+        </svg>
+        <ol class="caps" hidden>
+          <li><code>-ls</code> talks only to the NameNode.</li>
+          <li><code>-put</code> uses the full write pipeline (Lesson 6.1).</li>
+          <li><code>-cat</code> uses the read path (Lesson 6.2).</li>
+          <li><code>-mv</code> changes one entry in the namespace: no DataNode is involved.</li>
+          <li><code>-cp</code> is a read plus a write of the whole file through the client.</li>
+          <li><code>-rm</code> removes the entry at once; DataNodes delete the block files later, when the NameNode tells them in heartbeat replies.</li>
+        </ol>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ======================= PART 6: REAL-WORLD USE ======================= -->
+<section class="part" id="real-world">
+  <span class="part-label"><b>6</b> Real-world use</span>
+  <h2>The shell at work</h2>
+
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="20" y="20" width="80" height="50" rx="6" class="s-soft-acc" style="stroke:var(--track)"/><text x="60" y="42" text-anchor="middle" font-size="8.6" font-weight="700" class="s-acc">_tmp → final</text><text x="60" y="58" text-anchor="middle" font-size="8.6" class="s-ink">one -mv</text></svg></div>
+    <div><h4>1. Atomic publishing with mv</h4>
+      <p>Pipelines write today's results into <code>out/_tmp_2026-10-21</code> and only then <code>-mv</code> it to <code>out/2026-10-21</code>. Readers never see half-written data, because a rename is instant and all-or-nothing.</p>
+      <div class="uc-flow"><span>Write to tmp</span><i>→</i><span class="java">-mv</span><i>→</i><span>Visible at once</span></div></div>
+  </div>
+
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="20" y="20" width="80" height="50" rx="6" class="s-board"/><text x="60" y="42" text-anchor="middle" font-size="8.6" class="mono" style="fill:#9FD3B8">-test -e</text><text x="60" y="58" text-anchor="middle" font-size="8.6" class="mono" style="fill:#F5C77E">_SUCCESS?</text></svg></div>
+    <div><h4>2. Shell checks in schedulers</h4>
+      <p>Airflow or cron jobs start the next step only if <code>hdfs dfs -test -e input/_SUCCESS</code> returns 0, and alert if <code>-du -s</code> shows an unusually small input.</p>
+      <div class="uc-flow"><span>-test</span><i>→</i><span class="java">Exit code</span><i>→</i><span>Run or alert</span></div></div>
+  </div>
+
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="20" y="20" width="80" height="50" rx="6" class="s-soft-blue" style="stroke:var(--blue)"/><text x="60" y="42" text-anchor="middle" font-size="8.6" font-weight="700" class="s-blue">getmerge</text><text x="60" y="58" text-anchor="middle" font-size="8.6" class="s-ink">one file for Excel</text></svg></div>
+    <div><h4>3. Handing results to business users</h4>
+      <p>A job writes <code>part-00000 … part-00099</code>; an analyst runs <code>-getmerge</code> to get one CSV for a spreadsheet (and removes repeated headers first, as we saw).</p>
+      <div class="uc-flow"><span>part files</span><i>→</i><span class="java">getmerge</span><i>→</i><span>One CSV</span></div></div>
+  </div>
+
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="20" y="20" width="80" height="50" rx="6" class="s-card2"/><text x="60" y="42" text-anchor="middle" font-size="8.6" font-weight="700" class="s-ink">trash 1 day</text><text x="60" y="58" text-anchor="middle" font-size="8.6" class="s-ink2">undo mistakes</text></svg></div>
+    <div><h4>4. Trash as a safety net</h4>
+      <p>Most production clusters set <code>fs.trash.interval</code> to a day or more. Support teams regularly restore files from <code>.Trash</code> after accidental deletes, something impossible with the default of 0.</p>
+      <div class="uc-flow"><span>Wrong -rm</span><i>→</i><span class="java">.Trash</span><i>→</i><span>-mv back</span></div></div>
+  </div>
+  <p class="muted">Simplified; organisations differ in tools and policies.</p>
+</section>

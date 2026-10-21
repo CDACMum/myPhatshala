@@ -1,0 +1,261 @@
+<!-- ======================= PART 1: THE STORY ======================= -->
+<section class="part" id="story">
+  <span class="part-label"><b>1</b> The story</span>
+  <h2>Nearest copy first, and never trust a damaged one</h2>
+  <div class="story">
+    <p class="narration">Kabir reads the 5-block canteen file twice: once from the namenode container, once from datanode-2. From the namenode container the blocks come from datanode-2, then datanode-3 three times, then datanode-1. From datanode-2, every single block comes from datanode-2 itself. Then Riya does something wicked: she overwrites one byte of a block file on datanode-2's disk with an <code>X</code>, and reads again from datanode-2. A warning appears: <code>Found Checksum error … at 499712</code>. Yet the file that comes out is byte-for-byte identical to the original.</p>
+
+    <div class="scene">
+      <svg viewBox="0 0 640 190" role="img" aria-label="The client asks the NameNode for block locations sorted by distance, then reads each block directly from the nearest DataNode, verifying checksums and switching to another replica on errors.">
+        <g font-size="10">
+          <rect x="250" y="12" width="140" height="44" rx="10" class="s-board"/><text x="320" y="32" text-anchor="middle" font-weight="700" class="s-chalk">NameNode</text><text x="320" y="47" text-anchor="middle" font-size="8.6" class="s-chalk">block → DataNodes, nearest first</text>
+          <rect x="20" y="100" width="130" height="56" rx="10" class="s-soft-acc" style="stroke:var(--track)"/><text x="85" y="124" text-anchor="middle" font-weight="700" class="s-acc">Client</text><text x="85" y="140" text-anchor="middle" font-size="8.6" class="s-ink">on datanode-2</text>
+          <rect x="200" y="100" width="120" height="56" rx="10" class="s-soft-green" style="stroke:var(--green)"/><text x="260" y="124" text-anchor="middle" font-weight="700" class="s-green">datanode-2</text><text x="260" y="140" text-anchor="middle" font-size="8.6" class="s-ink">same machine</text>
+          <rect x="350" y="100" width="120" height="56" rx="10" class="s-card2"/><text x="410" y="124" text-anchor="middle" font-weight="700" class="s-ink">datanode-1</text><text x="410" y="140" text-anchor="middle" font-size="8.6" class="s-ink2">same rack</text>
+          <rect x="500" y="100" width="120" height="56" rx="10" class="s-card2"/><text x="560" y="124" text-anchor="middle" font-weight="700" class="s-ink">datanode-3</text><text x="560" y="140" text-anchor="middle" font-size="8.6" class="s-ink2">other rack</text>
+          <path d="M85 100V34h165" style="fill:none;stroke:var(--track);stroke-width:1.6;stroke-dasharray:4 3"/><text x="160" y="28" font-size="8.6" class="s-acc">1. where are the blocks?</text>
+          <path d="M150 128h50" style="stroke:var(--blue);stroke-width:3"/><text x="175" y="120" text-anchor="middle" font-size="8.6" class="s-blue">2. read</text>
+        </g>
+        <text x="320" y="180" text-anchor="middle" font-size="10" class="s-ink2">Distance order: same node &lt; same rack &lt; other rack. Bad checksum? Try the next replica.</text>
+        <text x="632" y="182" text-anchor="end" class="s-wm">myphatshala.in</text>
+      </svg>
+    </div>
+
+A> A read has two parts. First the client asks the NameNode “where are the blocks of this file?”. The NameNode answers with every block's replica locations, <b>sorted by distance</b> from the client. Then the client reads each block directly from the first DataNode in that list.
+K> And from the namenode container there was no “nearest”?
+A> Right: it isn't a DataNode, and all three replicas were equally far, so the order was shuffled to spread the load. From datanode-2, its own disk is always closest. And the corrupted byte? Every 512 bytes of a block has a checksum. The client verified it, saw a mismatch, quietly fetched that part from another replica, and told the NameNode the copy on datanode-2 was bad. A few seconds later the NameNode had made a fresh copy elsewhere and deleted the bad one.
+  </div>
+</section>
+
+<!-- ======================= PART 2: DEFINITION ======================= -->
+<section class="part" id="definition">
+  <span class="part-label"><b>2</b> Definition</span>
+  <h2>The HDFS read path</h2>
+  <div class="def">
+    <div class="def__formal"><small>Formal definition (write this in exams)</small>
+      <p>To read a file, the client calls <b>open</b>; the <code>DFSInputStream</code> asks the NameNode (<b>getBlockLocations</b>) for the locations of the file's blocks, in batches. For each block the NameNode returns the DataNodes holding a replica, <b>sorted by network distance</b> from the client (local node, then same rack, then other racks; equal distances are shuffled). The client connects to the closest DataNode and streams the block directly; at a block boundary it moves to the best DataNode for the next block. Data is <b>verified with checksums</b> (one per 512 bytes) as it is read. On a checksum error or a DataNode failure, the client reads from the next replica, remembers the bad DataNode for that stream, and reports corrupt replicas to the NameNode (<b>reportBadBlocks</b>), which schedules re-replication from a good replica and deletes the corrupt one. The NameNode serves only metadata; data never passes through it.</p></div>
+    <div class="def__simple"><small>In simple words</small>
+      <p>Ask the NameNode where the pieces are, then fetch each piece from the nearest machine that has it, checking every 512 bytes. If a piece is broken or a machine doesn't answer, use another copy and tell the NameNode.</p></div>
+  </div>
+
+  <h3>Words you'll meet in this lesson</h3>
+  <div class="terms">
+    <div class="term"><b>getBlockLocations</b><span>NameNode call returning blocks and their replica locations for a byte range of a file.</span></div>
+    <div class="term"><b>LocatedBlocks</b><span>The reply: file length and a list of blocks, each with sorted locations.</span></div>
+    <div class="term"><b>Network distance</b><span>0 same node, 2 same rack, 4 different rack (in the default topology).</span></div>
+    <div class="term"><b>DFSInputStream</b><span>The client-side stream that picks DataNodes, reads, verifies and retries.</span></div>
+    <div class="term"><b>ChecksumException</b><span>Raised when data doesn't match its stored checksum.</span></div>
+    <div class="term"><b>reportBadBlocks</b><span>Client or DataNode tells the NameNode a replica is corrupt.</span></div>
+    <div class="term"><b>Short-circuit read</b><span>Optional: a client on the same machine reads the block file directly, bypassing the DataNode process.</span></div>
+    <div class="term"><b>Positional read (pread)</b><span>Read bytes at an offset without moving the stream position; used by Parquet/ORC readers.</span></div>
+  </div>
+
+  <h3>Read facts (Hadoop 3.5.0, seen in the lab)</h3>
+  <table class="facts" style="table-layout:fixed;overflow-wrap:anywhere">
+    <tr><th>Checksum unit</th><td>512 bytes (<code>dfs.bytes-per-checksum</code>); error reported at offset 499,712 = 976 × 512, the chunk containing the changed byte 500,000</td></tr>
+    <tr><th>Client on a DataNode</th><td>All 5 blocks read from its own DataNode</td></tr>
+    <tr><th>Client off the DataNodes</th><td>Replicas at equal distance are shuffled: we saw dn-2, dn-3, dn-3, dn-3, dn-1</td></tr>
+    <tr><th>Short-circuit reads</th><td><code>dfs.client.read.shortcircuit</code> = false by default (needs a domain socket path)</td></tr>
+    <tr><th>Corrupt replica handling</th><td>reportBadBlocks at 09:37:30, new replica on another DataNode 6 s later, bad file removed</td></tr>
+  </table>
+
+LEVELS> The read path at three levels
+L1> A library with photocopies
+      <ul>
+        <li>You ask the index desk: “Where is chapter 1?” The librarian lists shelves holding copies, the nearest first.</li>
+        <li>You walk to the nearest shelf and read it there. The librarian never fetches pages.</li>
+        <li>If a page is smudged, you take another copy and tell the librarian, who replaces the smudged one.</li>
+      </ul>
+L2> Step by step
+      <ul>
+        <li><b>open()</b>: client asks the NameNode for block locations of the first part of the file.</li>
+        <li><b>read()</b>: connect to the first (closest) DataNode for block 0 and stream it, verifying checksums.</li>
+        <li>At the end of block 0, pick the best DataNode for block 1 (maybe a different one), and so on.</li>
+        <li>For long files, ask the NameNode for more locations as needed.</li>
+        <li><b>close()</b>: release connections.</li>
+      </ul>
+L3> Robustness and performance
+      <ul>
+        <li>Failures: a DataNode that doesn't respond is added to the stream's dead-node list and the next replica is used.</li>
+        <li>Corruption: detected end-to-end by the client (checksums were created by the writer), so disk, network and memory errors are all caught.</li>
+        <li>DataNodes also run a background <b>block scanner</b> that finds corrupt replicas nobody has read for weeks.</li>
+        <li>Data locality in MapReduce and Spark is the same idea: put the task where the closest replica is distance 0.</li>
+        <li>Hedged reads (optional) start a second read from another replica if the first is slow.</li>
+      </ul>
+/LEVELS
+EXAM> “Explain the anatomy of a file read in HDFS”: client <code>open()</code> → NameNode returns block locations <b>sorted by proximity</b> → client reads each block <b>directly from the nearest DataNode</b>, verifying <b>checksums</b> → moves to the next block → on error, tries another replica and reports the bad block → <code>close()</code>. Stress that the NameNode never sends data.
+</section>
+
+<!-- ======================= PART 3: TYPES AND WAYS TO USE IT ======================= -->
+<section class="part" id="types">
+  <span class="part-label"><b>3</b> Types and ways to use it</span>
+  <h2>Kinds of reads</h2>
+  <div class="table-wrap">
+  <table class="compare" style="min-width:600px">
+    <thead><tr><th>Read</th><th>Where the client is</th><th>How data travels</th><th>Typical user</th></tr></thead>
+    <tbody>
+      <tr><td><b>Local</b></td><td>On a DataNode holding the block</td><td>From the local DataNode (over a local socket)</td><td>MapReduce/Spark task with data locality</td></tr>
+      <tr><td><b>Short-circuit local</b></td><td>Same, with short-circuit enabled</td><td>Reads the block file directly from disk</td><td>Impala, HBase, tuned Spark clusters</td></tr>
+      <tr><td><b>Rack-local</b></td><td>Same rack as a replica</td><td>Through the rack switch</td><td>Tasks that missed node locality</td></tr>
+      <tr><td><b>Remote</b></td><td>Other rack or outside the cluster</td><td>Through the core network</td><td>Edge-node users, BI tools, <code>hdfs dfs -get</code></td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <h3>Read-side protections</h3>
+  <div class="cards">
+    <div class="card"><h4>Checksums</h4><p>CRC per 512 bytes, checked by the reading client. Catches disk and network corruption.</p><span class="tag">Integrity</span></div>
+    <div class="card"><h4>Replica failover</h4><p>Dead or slow DataNode → next replica in the sorted list.</p><span class="tag">Availability</span></div>
+    <div class="card"><h4>Block scanner</h4><p>Each DataNode re-verifies its blocks in the background (default every 3 weeks).</p><span class="tag">Background</span></div>
+    <div class="card"><h4>reportBadBlocks</h4><p>Corrupt replicas are replaced from good ones automatically.</p><span class="tag">Self-healing</span></div>
+  </div>
+TIP> <code>hdfs dfs -checksum path</code> prints a file-level checksum built from block checksums. Compare it between two clusters (with the same block size) to check that a copy is identical without reading the data yourself.
+</section>
+
+<!-- ======================= PART 4: STEP BY STEP ======================= -->
+<section class="part" id="steps">
+  <span class="part-label"><b>4</b> Step by step</span>
+  <h2>Watch reads on the real cluster</h2>
+  <p>IP addresses at the time: datanode-1 = 172.19.0.4, datanode-2 = .3, datanode-3 = .6, datanode-4 = .7. Debug logging is switched on for the client only (configuration in <code>read_trace.py</code>, Part 4b).</p>
+  <ol class="stepper">
+    <li><h4>What the NameNode tells the client</h4>
+      <div class="code" data-lang="bash" data-file="Terminal (in the namenode container)"><pre><code>HADOOP_CLIENT_OPTS="-Dlog4j.configuration=file:/tmp/dbg2.properties" \
+  hdfs dfs -cat /user/hadoop/data/canteen_1mb.csv 2&gt;/tmp/rd.log &gt;/dev/null
+grep -o "LocatedBlocks{.*" /tmp/rd.log | cut -c1-420</code></pre><div class="output">LocatedBlocks{;  fileLength=4692009;  underConstruction=false;  blocks=[LocatedBlock{BP-1507681208-172.19.0.3-1792565333483:blk_1073741826_1002; getBlockSize()=1048576; corrupt=false; offset=0; locs=[DatanodeInfoWithStorage[172.19.0.3:9866,…], DatanodeInfoWithStorage[172.19.0.4:9866,…], DatanodeInfoWithStorage[172.19.0.6:9866,…]]; cachedLocs=[]}, LocatedBlock{…:blk_1073741827_1003; getBlockSize()=1048576; corrupt=false; offset=1048576…</div></div>
+      <span class="behind">One answer describes the whole file: its length, and for each block the ID, size, offset in the file and the replica locations. That's all the client needs; it never asks about data again.</span></li>
+    <li><h4>Read from outside the DataNodes</h4>
+      <div class="code" data-lang="bash" data-file="Terminal (in the namenode container)"><pre><code>grep "Connecting to datanode" /tmp/rd.log</code></pre><div class="output">09:36:54,867 DEBUG DFSClient - Connecting to datanode 172.19.0.6:9866
+09:36:55,119 DEBUG DFSClient - Connecting to datanode 172.19.0.6:9866
+09:36:55,135 DEBUG DFSClient - Connecting to datanode 172.19.0.4:9866
+09:36:55,149 DEBUG DFSClient - Connecting to datanode 172.19.0.6:9866
+09:36:55,161 DEBUG DFSClient - Connecting to datanode 172.19.0.3:9866</div></div>
+      <span class="behind">The namenode container holds no replicas and isn't in either rack, so every replica is equally far. The order is shuffled per block, spreading readers across DataNodes.</span></li>
+    <li><h4>Read from a DataNode that holds the blocks</h4>
+      <div class="code" data-lang="bash" data-file="Terminal (in datanode-2)"><pre><code>HADOOP_CLIENT_OPTS="-Dlog4j.configuration=file:/tmp/dbg2.properties" \
+  hdfs dfs -cat /user/hadoop/data/canteen_1mb.csv 2&gt;&amp;1 &gt;/dev/null | grep "Connecting to datanode"</code></pre><div class="output">09:36:57,823 DEBUG DFSClient - Connecting to datanode 172.19.0.3:9866
+09:36:57,924 DEBUG DFSClient - Connecting to datanode 172.19.0.3:9866
+09:36:57,942 DEBUG DFSClient - Connecting to datanode 172.19.0.3:9866
+09:36:57,961 DEBUG DFSClient - Connecting to datanode 172.19.0.3:9866
+09:36:57,970 DEBUG DFSClient - Connecting to datanode 172.19.0.3:9866</div></div>
+      <span class="behind">Every block from 172.19.0.3, datanode-2 itself: distance 0. This is exactly what a map task with data locality gets.</span></li>
+    <li><h4>Damage one replica</h4>
+      <div class="code" data-lang="bash" data-file="Terminal (in datanode-2)"><pre><code>f=$(find /tmp/hadoop-hadoop/dfs/data -name blk_1073741827)
+printf 'X' | dd of=$f bs=1 seek=500000 conv=notrunc</code></pre></div>
+      <span class="behind">One byte in the middle of a 1 MB block replica on datanode-2 is overwritten. The file size doesn't change and HDFS isn't told. (Never do this on a real cluster: it's a demonstration of corruption.)</span></li>
+    <li><h4>Read again from datanode-2</h4>
+      <div class="code" data-lang="bash" data-file="Terminal (in datanode-2)"><pre><code>hdfs dfs -cat /user/hadoop/data/canteen_1mb.csv &gt; /tmp/out.csv
+md5sum /tmp/out.csv
+md5sum canteen_orders.csv          # the original, on your PC</code></pre><div class="output">09:37:30 WARN  DFSClient - Found Checksum error for BP-1507681208-…:blk_1073741827_1003 from DatanodeInfoWithStorage[172.19.0.3:9866,…] at 499712
+6cba714b557a8b2d1e01eb091ff42ca2  /tmp/out.csv
+6cba714b557a8b2d1e01eb091ff42ca2  canteen_orders.csv</div></div>
+      <span class="behind">The client noticed that the 512-byte chunk starting at 499,712 didn't match its checksum, read that block from another replica, and produced a file identical to the original (same MD5).</span></li>
+    <li><h4>The NameNode heals the block</h4>
+      <div class="code" data-lang="bash" data-file="Terminal"><pre><code>docker compose logs namenode | grep blk_1073741827 | tail -2
+docker compose exec namenode hdfs fsck /user/hadoop/data/canteen_1mb.csv -files -blocks -locations | grep blk_1073741827
+docker exec lab5-datanode-2 bash -c 'find /tmp/hadoop-hadoop/dfs/data -name "blk_1073741827*" | wc -l'</code></pre><div class="output">09:37:30 INFO  StateChange:6023 - *DIR* reportBadBlocks for block: …:blk_1073741827_1003 on datanode: 172.19.0.3:9866
+09:37:36 INFO  BlockStateChange:3806 - BLOCK* addStoredBlock: 172.19.0.7:9866 is added to blk_1073741827_1003 (size=1048576)
+1. …:blk_1073741827_1003 len=1048576 Live_repl=3  [172.19.0.4, 172.19.0.7, 172.19.0.6]
+0</div></div>
+      <span class="behind">The client reported the bad replica; six seconds later a good copy existed on datanode-4 (.7), and the corrupt files on datanode-2 were deleted (0 left). Three healthy replicas again, without anyone running a command.</span></li>
+  </ol>
+WARN> If <i>every</i> replica of a block is corrupt or unavailable, the read fails with a <code>BlockMissingException</code> and fsck marks the file CORRUPT. Replication protects against independent failures, not against writing bad data in the first place.
+</section>
+
+<!-- ======================= PART 5: SEE IT HAPPEN ======================= -->
+<section class="part" id="animation">
+  <span class="part-label"><b>5</b> See it happen</span>
+  <h2>A read that survives a corrupt replica</h2>
+  <p>Steps 3 to 6 from the lab, frame by frame.</p>
+  <div class="anim" data-frames="6">
+    <div class="anim__title">Reading canteen_1mb.csv from datanode-2 <span>6 steps</span></div>
+    <div class="anim__views">
+      <div class="view view--see">
+        <span class="view__tag">What you see</span>
+        <svg viewBox="0 0 360 250" role="img" aria-label="Terminal on datanode-2">
+          <rect x="14" y="14" width="332" height="206" rx="8" class="s-board"/>
+          <text x="26" y="32" font-size="9" class="mono" style="fill:#7F8C86">hadoop@datanode-2 : /tmp</text>
+          <g data-on="1"><text x="26" y="56" font-size="8.6" class="mono" style="fill:#7F8C86">$ hdfs dfs -cat …/canteen_1mb.csv</text><text x="26" y="72" font-size="8.6" class="mono" style="fill:#9FD3B8">Connecting to datanode 172.19.0.3 (×5)</text></g>
+          <g data-on="2"><text x="26" y="56" font-size="8.6" class="mono" style="fill:#7F8C86">$ printf 'X' | dd of=…/blk_1073741827 \</text><text x="26" y="70" font-size="8.6" class="mono" style="fill:#7F8C86">    bs=1 seek=500000 conv=notrunc</text><text x="180" y="190" text-anchor="middle" font-size="10" class="s-chalk">One byte changed on disk.</text></g>
+          <g data-on="3"><text x="26" y="56" font-size="8.6" class="mono" style="fill:#7F8C86">$ hdfs dfs -cat … &gt; /tmp/out.csv</text><text x="26" y="72" font-size="8.6" class="mono" style="fill:#F5C77E">WARN Found Checksum error for</text><text x="26" y="86" font-size="8.6" class="mono" style="fill:#F5C77E">  …blk_1073741827_1003 from …172.19.0.3</text><text x="26" y="100" font-size="8.6" class="mono" style="fill:#F5C77E">  at 499712</text></g>
+          <g data-on="4"><text x="26" y="56" font-size="8.6" class="mono" style="fill:#7F8C86">$ md5sum /tmp/out.csv canteen_orders.csv</text><text x="26" y="72" font-size="8.6" class="mono" style="fill:#9FD3B8">6cba714b…ca2  /tmp/out.csv</text><text x="26" y="86" font-size="8.6" class="mono" style="fill:#9FD3B8">6cba714b…ca2  canteen_orders.csv</text></g>
+          <g data-on="5"><text x="26" y="56" font-size="8.6" class="mono" style="fill:#9FD3B8">reportBadBlocks for block: …827</text><text x="26" y="70" font-size="8.6" class="mono" style="fill:#9FD3B8">  on datanode: 172.19.0.3:9866</text><text x="26" y="88" font-size="8.6" class="mono" style="fill:#9FD3B8">addStoredBlock: 172.19.0.7 is added</text><text x="26" y="102" font-size="8.6" class="mono" style="fill:#9FD3B8">  to blk_1073741827_1003</text></g>
+          <g data-on="6"><text x="26" y="56" font-size="8.6" class="mono" style="fill:#9FD3B8">Live_repl=3 [.4, .7, .6]</text><text x="26" y="72" font-size="8.6" class="mono" style="fill:#7F8C86">$ find … -name "blk_1073741827*" | wc -l</text><text x="26" y="88" font-size="8.6" class="mono" style="fill:#9FD3B8">0</text></g>
+          <text x="352" y="244" text-anchor="end" class="s-wm">myphatshala.in</text>
+        </svg>
+        <ol class="caps" hidden>
+          <li>Normally a client on datanode-2 reads every block from datanode-2 itself.</li>
+          <li>We damage one byte of one replica on datanode-2's disk.</li>
+          <li>The next read detects the damage: the 512-byte chunk at offset 499,712 fails its checksum.</li>
+          <li>Still, the output is identical to the original file: the client read that block from another replica.</li>
+          <li>The client reported the bad replica; the NameNode copied a good one to datanode-4.</li>
+          <li>Three healthy replicas, none on datanode-2: the corrupt copy was deleted.</li>
+        </ol>
+      </div>
+
+      <div class="view view--behind">
+        <span class="view__tag">Behind the screen</span>
+        <svg viewBox="0 0 360 250" role="img" aria-label="Replicas and the client">
+          <rect x="120" y="12" width="120" height="30" rx="6" class="s-board"/><text x="180" y="31" text-anchor="middle" font-size="9" font-weight="700" class="s-chalk">NameNode</text>
+          <rect x="14" y="80" width="78" height="56" rx="6" class="s-soft-acc" style="stroke:var(--track)"/><text x="53" y="102" text-anchor="middle" font-size="8.6" font-weight="700" class="s-acc">client</text><text x="53" y="118" text-anchor="middle" font-size="7.6" class="s-ink">on dn-2</text>
+          <rect x="110" y="80" width="56" height="56" rx="6" class="s-soft-green" style="stroke:var(--green)"/><text x="138" y="100" text-anchor="middle" font-size="8.6" font-weight="700" class="s-green">dn-2</text>
+          <rect x="176" y="80" width="56" height="56" rx="6" class="s-soft-green" style="stroke:var(--green)"/><text x="204" y="100" text-anchor="middle" font-size="8.6" font-weight="700" class="s-green">dn-1</text>
+          <rect x="242" y="80" width="56" height="56" rx="6" class="s-soft-green" style="stroke:var(--green)"/><text x="270" y="100" text-anchor="middle" font-size="8.6" font-weight="700" class="s-green">dn-3</text>
+          <rect x="304" y="80" width="46" height="56" rx="6" class="s-card2"/><text x="327" y="100" text-anchor="middle" font-size="8.6" font-weight="700" class="s-ink">dn-4</text>
+          <g data-on="1-4"><rect x="118" y="108" width="40" height="16" rx="3" class="s-soft-blue" style="stroke:var(--blue)"/><text x="138" y="119" text-anchor="middle" font-size="7.6" class="s-blue">…827</text></g>
+          <rect x="184" y="108" width="40" height="16" rx="3" class="s-soft-blue" style="stroke:var(--blue)"/><text x="204" y="119" text-anchor="middle" font-size="7.6" class="s-blue">…827</text>
+          <rect x="250" y="108" width="40" height="16" rx="3" class="s-soft-blue" style="stroke:var(--blue)"/><text x="270" y="119" text-anchor="middle" font-size="7.6" class="s-blue">…827</text>
+          <g data-on="1"><path d="M92 116h18" style="stroke:var(--blue);stroke-width:3"/><text x="180" y="180" text-anchor="middle" font-size="9" class="s-ink2">distance 0: its own DataNode first</text></g>
+          <g data-on="2-4"><rect x="118" y="108" width="40" height="16" rx="3" style="fill:none;stroke:var(--red);stroke-width:2"/><text x="138" y="150" text-anchor="middle" font-size="8" font-weight="700" class="s-red">1 byte bad</text></g>
+          <g data-on="3"><path d="M92 116h18" style="stroke:var(--red);stroke-width:3"/><text x="180" y="180" text-anchor="middle" font-size="9" class="s-red">chunk 976 (offset 499,712): CRC mismatch</text></g>
+          <g data-on="4"><path d="M92 128c40 30 100 30 112 -4" style="fill:none;stroke:var(--blue);stroke-width:3"/><text x="180" y="190" text-anchor="middle" font-size="9" class="s-ink2">same block read from dn-1 instead: correct data</text></g>
+          <g data-on="5"><path d="M53 80V27h67" style="fill:none;stroke:var(--track);stroke-width:2"/><text x="96" y="58" font-size="7.6" class="s-acc">reportBadBlocks</text><path d="M270 124c20 40 50 40 57 0" style="fill:none;stroke:var(--green);stroke-width:2"/><rect x="307" y="108" width="40" height="16" rx="3" class="s-soft-blue" style="stroke:var(--blue)"/><text x="327" y="119" text-anchor="middle" font-size="7.6" class="s-blue">…827</text><text x="180" y="190" text-anchor="middle" font-size="9" class="s-ink2">NameNode orders a fresh copy from a good replica</text></g>
+          <g data-on="6"><rect x="307" y="108" width="40" height="16" rx="3" class="s-soft-blue" style="stroke:var(--blue)"/><text x="327" y="119" text-anchor="middle" font-size="7.6" class="s-blue">…827</text><text x="180" y="190" text-anchor="middle" font-size="9" font-weight="700" class="s-green">bad replica deleted; 3 good replicas</text></g>
+          <text x="352" y="246" text-anchor="end" class="s-wm">myphatshala.in</text>
+        </svg>
+        <ol class="caps" hidden>
+          <li>The NameNode sorted dn-2 first for this client, so it reads from its own machine.</li>
+          <li>The replica on dn-2 now has one wrong byte; its stored checksums still describe the original data.</li>
+          <li>The client recomputes the checksum of each 512-byte chunk as it reads; chunk 976 doesn't match.</li>
+          <li>It discards that data and reads the block from the next replica in the list.</li>
+          <li>It reports the corrupt replica; the NameNode schedules a copy from a good replica to dn-4.</li>
+          <li>The corrupt replica on dn-2 is invalidated (deleted). The block is fully protected again.</li>
+        </ol>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ======================= PART 6: REAL-WORLD USE ======================= -->
+<section class="part" id="real-world">
+  <span class="part-label"><b>6</b> Real-world use</span>
+  <h2>The read path at work</h2>
+
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="20" y="20" width="80" height="50" rx="6" class="s-soft-green" style="stroke:var(--green)"/><text x="60" y="42" text-anchor="middle" font-size="8.6" font-weight="700" class="s-green">locality</text><text x="60" y="58" text-anchor="middle" font-size="8.6" class="s-ink">task on dn-2</text></svg></div>
+    <div><h4>1. Data-local tasks</h4>
+      <p>Schedulers place map and Spark tasks on nodes holding a replica, so most reads are distance 0, like step 3. Job counters such as “Data-local map tasks” show how well this worked.</p>
+      <div class="uc-flow"><span>Block on dn-2</span><i>→</i><span class="java">Task on dn-2</span><i>→</i><span>Local read</span></div></div>
+  </div>
+
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="20" y="20" width="80" height="50" rx="6" class="s-soft-blue" style="stroke:var(--blue)"/><text x="60" y="42" text-anchor="middle" font-size="8.6" font-weight="700" class="s-blue">short-circuit</text><text x="60" y="58" text-anchor="middle" font-size="8.6" class="s-ink">disk → query</text></svg></div>
+    <div><h4>2. Short-circuit reads for fast engines</h4>
+      <p>Interactive SQL engines and HBase enable short-circuit local reads so they read block files straight from disk, skipping the DataNode's network stack and cutting latency.</p>
+      <div class="uc-flow"><span>Local block</span><i>→</i><span class="java">Read file directly</span><i>→</i><span>Lower latency</span></div></div>
+  </div>
+
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="20" y="20" width="80" height="50" rx="6" class="s-board"/><text x="60" y="42" text-anchor="middle" font-size="8.6" class="mono" style="fill:#F5C77E">Checksum error</text><text x="60" y="58" text-anchor="middle" font-size="8.6" class="mono" style="fill:#9FD3B8">auto-healed</text></svg></div>
+    <div><h4>3. Silent disk errors caught</h4>
+      <p>On thousands of disks, bit rot and bad sectors happen. Checksum errors show up as WARN lines and DataNode metrics; the data is healed automatically, and repeated errors on one disk tell admins to replace it.</p>
+      <div class="uc-flow"><span>Bad sector</span><i>→</i><span class="java">Checksum error</span><i>→</i><span>Replace replica, then disk</span></div></div>
+  </div>
+
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="20" y="20" width="80" height="50" rx="6" class="s-card2"/><text x="60" y="42" text-anchor="middle" font-size="8.6" font-weight="700" class="s-ink">-checksum</text><text x="60" y="58" text-anchor="middle" font-size="8.6" class="s-ink2">verify copies</text></svg></div>
+    <div><h4>4. Verifying copies between clusters</h4>
+      <p>After copying data to a DR cluster, teams compare <code>hdfs dfs -checksum</code> (or let DistCp do it) instead of reading terabytes back to compare.</p>
+      <div class="uc-flow"><span>Copy</span><i>→</i><span class="java">Compare checksums</span><i>→</i><span>Proven identical</span></div></div>
+  </div>
+  <p class="muted">Simplified; organisations differ in tools and policies.</p>
+</section>

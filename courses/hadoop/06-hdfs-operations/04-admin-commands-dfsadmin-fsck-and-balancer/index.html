@@ -1,0 +1,2414 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Admin commands: dfsadmin, fsck and balancer | MyPhatshala</title>
+<meta name="description" content="Run an HDFS cluster like an admin, with real Hadoop 3.5.0 outputs: dfsadmin -report, fsck with blocks and racks, decommissioning a DataNode with dfs.hosts.exclude and refreshNodes (Decommissioned in 52 s), recommissioning, adding a new DataNode and watching the balancer move 914.72 MB in 8 blocks, and why it gave up after 5 idle iterations. Python balancer simulator, quiz and interview scenarios.">
+<meta name="mp:minutes" content="28">
+<link rel="canonical" href="https://myphatshala.in/courses/hadoop/06-hdfs-operations/04-admin-commands-dfsadmin-fsck-and-balancer/">
+<meta property="og:title" content="Admin commands: dfsadmin, fsck and balancer · MyPhatshala">
+<meta property="og:description" content="Retire a server without losing a block, and fill a new one: decommission and balancer on a real cluster.">
+<link rel="icon" href="../../../../assets/img/logo.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Fraunces:ital,opsz,wght@0,9..144,600;0,9..144,700;1,9..144,600&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../../../../assets/css/style.css">
+<link rel="stylesheet" href="../../../../assets/css/lesson.css">
+<script src="../../../../assets/js/config.js"></script>
+<script>try { const t = localStorage.getItem("mp-theme"); if (t) document.documentElement.dataset.theme = t; } catch (e) {}</script>
+<script type="application/ld+json">{"@context": "https://schema.org", "@type": "LearningResource", "name": "Admin commands: dfsadmin, fsck and balancer", "learningResourceType": "Lesson", "educationalLevel": "Intermediate", "isAccessibleForFree": true, "inLanguage": "en", "isPartOf": {"@type": "Course", "name": "Apache Hadoop", "provider": {"@type": "Organization", "name": "MyPhatshala"}}}</script>
+</head>
+<body style="--track:#B45309" data-lesson="06-hdfs-operations/04-admin-commands-dfsadmin-fsck-and-balancer" data-course-root="../../">
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="site-header">
+  <div class="wrap">
+    <a class="brand" href="../../../../" aria-label="MyPhatshala home"><img src="../../../../assets/img/logo.svg" width="34" height="34" alt=""><span>My<b>Phatshala</b></span></a>
+    <nav class="nav" aria-label="Main">
+      <a href="../../../../#tracks">All courses</a>
+      <a href="../../">Apache Hadoop syllabus</a>
+      <button class="theme-btn" id="theme-btn" aria-label="Toggle dark mode"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg></button>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+<section class="lesson-hero">
+  <div class="wrap">
+    <nav class="crumbs" aria-label="Breadcrumb"><a href="../../../../">Home</a><span>›</span><a href="../../../../#track-big-data">Big Data Engineering</a><span>›</span><a href="../../">Apache Hadoop</a><span>›</span><b>Lesson 6.4</b></nav>
+    <h1>Admin commands: dfsadmin, fsck and balancer</h1>
+    <p class="lead">Servers come and go: disks fail, new machines arrive. This lesson shows the tools that keep HDFS healthy through all of it, on a real 5-node cluster: dfsadmin to see and control the cluster, fsck to prove every block is safe, decommissioning to retire a DataNode without risk, and the balancer to spread data onto a new node.</p>
+    <div class="lesson-meta"><span>Module 6 · HDFS operations</span><span>⏱ 28 min</span><span>Intermediate</span><span>Real decommission and balancer runs</span><span>Balancer simulator</span><span>Runs in your browser (Python)</span><span>8 practice problems</span></div>
+  </div>
+</section>
+
+<div class="wrap lesson-layout">
+<article class="lesson-main">
+<!-- ======================= PART 1: THE STORY ======================= -->
+<section class="part" id="story">
+  <span class="part-label"><b>1</b> The story</span>
+  <h2>Retire one server, welcome another</h2>
+  <div class="story">
+    <p class="narration">Monday at the canteen-analytics team. Datanode-4's disk is throwing errors and must go back to the vendor, and a new server has arrived. Riya's first idea: switch datanode-4 off and plug the new one in. Her lead, Arjun, stops her. Switching a node off makes HDFS panic-copy its blocks only after 10 minutes, and until then some blocks have one copy fewer. The new server would sit almost empty while the old ones stay full. There are proper tools for both jobs, and a third one to prove that nothing was lost.</p>
+
+    <div class="scene">
+      <svg viewBox="0 0 640 190" role="img" aria-label="The admin toolkit: dfsadmin to see and control the cluster, fsck to check file health, decommission to retire a node safely, balancer to spread blocks to new nodes.">
+        <g font-size="10">
+          <rect x="16" y="20" width="144" height="128" rx="10" class="s-board"/>
+          <text x="88" y="44" text-anchor="middle" font-weight="700" class="s-chalk">dfsadmin</text>
+          <g font-size="8.6" class="mono" style="fill:#9FD3B8"><text x="28" y="68">-report</text><text x="28" y="84">-refreshNodes</text><text x="28" y="100">-safemode</text><text x="28" y="116">-printTopology</text></g>
+          <text x="88" y="138" text-anchor="middle" font-size="8.6" style="fill:#F5C77E">see and control</text>
+
+          <rect x="172" y="20" width="144" height="128" rx="10" class="s-soft-blue" style="stroke:var(--blue)"/>
+          <text x="244" y="44" text-anchor="middle" font-weight="700" class="s-blue">fsck</text>
+          <g font-size="8.6" class="mono s-ink"><text x="184" y="68">-files -blocks</text><text x="184" y="84">-racks</text><text x="184" y="100">-list-corrupt…</text></g>
+          <text x="244" y="138" text-anchor="middle" font-size="8.6" class="s-ink2">is my data healthy?</text>
+
+          <rect x="328" y="20" width="144" height="128" rx="10" class="s-soft-red" style="stroke:var(--red)"/>
+          <text x="400" y="44" text-anchor="middle" font-weight="700" class="s-red">decommission</text>
+          <g font-size="8.6" class="s-ink"><text x="340" y="68">exclude file</text><text x="340" y="84">+ refreshNodes</text><text x="340" y="100">copy blocks away</text></g>
+          <text x="400" y="138" text-anchor="middle" font-size="8.6" class="s-ink2">retire a node safely</text>
+
+          <rect x="484" y="20" width="144" height="128" rx="10" class="s-soft-green" style="stroke:var(--green)"/>
+          <text x="556" y="44" text-anchor="middle" font-weight="700" class="s-green">balancer</text>
+          <g font-size="8.6" class="s-ink"><text x="496" y="68">full nodes →</text><text x="496" y="84">empty nodes</text><text x="496" y="100">-threshold %</text></g>
+          <text x="556" y="138" text-anchor="middle" font-size="8.6" class="s-ink2">spread blocks evenly</text>
+        </g>
+        <text x="320" y="172" text-anchor="middle" font-size="10" class="s-ink2">All four ran on our 5-DataNode lab cluster; the outputs below are real.</text>
+        <text x="632" y="186" text-anchor="end" class="s-wm">myphatshala.in</text>
+      </svg>
+    </div>
+
+    <div class="panel panel--right"><div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#DDEFE6"/><path d="M12 64c2-12 10-18 20-18s18 6 20 18z" fill="#F4F1EA"/><path d="M28 46l4 8 4-8" fill="#2F7D5B"/><circle cx="32" cy="28" r="12" fill="#B57A50"/><path d="M20 26c0-8 5-13 12-13s12 5 12 13c-2-3-6-5-12-5s-10 2-12 5z" fill="#5A5A5A"/><path d="M22 32c1 8 5 11 10 11s9-3 10-11c-2 3-6 4-10 4s-8-1-10-4z" fill="#5A5A5A"/><circle cx="27" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><circle cx="37" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><path d="M30.4 29h3.2" stroke="#1B2433" stroke-width="1.4"/><circle cx="27" cy="29" r="1.1" fill="#1B2433"/><circle cx="37" cy="29" r="1.1" fill="#1B2433"/></svg></div><div class="bubble"><b class="who">Arjun Sir</b><p>Just switching datanode-4 off would be a small disaster on purpose. The NameNode can't tell “retired” from “crashed”, so it waits until the node is declared dead and only then copies its blocks. Decommissioning tells it first: “copy everything this node holds to others, and tell me when it's safe”. On our lab that took one minute.</p></div></div>
+    <div class="panel"><div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#FCE6D6"/><path d="M14 64c2-12 9-18 18-18s16 6 18 18z" fill="#2E5AAC"/><circle cx="32" cy="29" r="12" fill="#C68B5E"/><path d="M19 29c0-10 6-15 13-15s13 5 13 15c-3-5-7-8-13-8s-10 3-13 8z" fill="#2A1B14"/><path d="M43 27c3 6 3 14 0 20" stroke="#2A1B14" stroke-width="4" fill="none" stroke-linecap="round"/><circle cx="27.5" cy="30" r="1.5" fill="#2A1B14"/><circle cx="36.5" cy="30" r="1.5" fill="#2A1B14"/><path d="M28 35q4 3 8 0" stroke="#2A1B14" stroke-width="1.6" fill="none" stroke-linecap="round"/><circle cx="32" cy="24" r="1.2" fill="#D64545"/></svg></div><div class="bubble"><b class="who">Riya</b><p>And the new server?</p></div></div>
+    <div class="panel panel--right"><div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#DDEFE6"/><path d="M12 64c2-12 10-18 20-18s18 6 20 18z" fill="#F4F1EA"/><path d="M28 46l4 8 4-8" fill="#2F7D5B"/><circle cx="32" cy="28" r="12" fill="#B57A50"/><path d="M20 26c0-8 5-13 12-13s12 5 12 13c-2-3-6-5-12-5s-10 2-12 5z" fill="#5A5A5A"/><path d="M22 32c1 8 5 11 10 11s9-3 10-11c-2 3-6 4-10 4s-8-1-10-4z" fill="#5A5A5A"/><circle cx="27" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><circle cx="37" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><path d="M30.4 29h3.2" stroke="#1B2433" stroke-width="1.4"/><circle cx="27" cy="29" r="1.1" fill="#1B2433"/><circle cx="37" cy="29" r="1.1" fill="#1B2433"/></svg></div><div class="bubble"><b class="who">Arjun Sir</b><p>HDFS never moves existing blocks by itself. New files will use the new node, but the old data stays where it is. The <b>balancer</b> moves blocks from fuller nodes to emptier ones. And after all that, <code>fsck</code> confirms every file still has all its replicas. Today we run all of it.</p></div></div>
+  </div>
+</section>
+
+<!-- ======================= PART 2: DEFINITION ======================= -->
+<section class="part" id="definition">
+  <span class="part-label"><b>2</b> Definition</span>
+  <h2>HDFS administration tools</h2>
+  <div class="def">
+    <div class="def__formal"><small>Formal definition (write this in exams)</small>
+      <p><b>hdfs dfsadmin</b> is the administration client for the NameNode: it reports cluster capacity and DataNode status (<code>-report</code>), controls safe mode (<code>-safemode</code>), reloads the include/exclude host lists (<code>-refreshNodes</code>), shows the rack topology (<code>-printTopology</code>), and manages checkpoints, quotas and balancer bandwidth. <b>hdfs fsck</b> checks the health of the namespace: for each file it compares the expected replication with the live replicas and reports missing, corrupt, under- and over-replicated blocks, without repairing anything unless asked (<code>-move</code>, <code>-delete</code>). <b>Decommissioning</b> retires a DataNode by listing it in the file named by <code>dfs.hosts.exclude</code> and running <code>-refreshNodes</code>; the NameNode re-replicates all its blocks to other nodes before marking it <i>Decommissioned</i>. The <b>balancer</b> (<code>hdfs balancer</code>) moves block replicas from over-utilised to under-utilised DataNodes until every node's utilisation is within <code>-threshold</code> percent of the cluster average, never reducing a block's replication or breaking rack placement.</p></div>
+    <div class="def__simple"><small>In simple words</small>
+      <p><code>dfsadmin</code> is the dashboard and control panel, <code>fsck</code> is the health check-up, decommission is a proper farewell for a server, and the balancer is the shelf-arranger who moves boxes from crowded shelves to empty ones.</p></div>
+  </div>
+
+  <h3>Words you'll meet in this lesson</h3>
+  <div class="terms">
+    <div class="term"><b>Decommission</b><span>Retire a DataNode after copying its blocks elsewhere.</span></div>
+    <div class="term"><b>Exclude file</b><span>The file named by <code>dfs.hosts.exclude</code>: nodes listed there are decommissioned.</span></div>
+    <div class="term"><b>refreshNodes</b><span>Tells the NameNode to re-read the include/exclude files, without a restart.</span></div>
+    <div class="term"><b>Recommission</b><span>Remove a node from the exclude file and refresh: it becomes Normal again.</span></div>
+    <div class="term"><b>Utilisation</b><span>How full a DataNode is: used space as a % of its capacity.</span></div>
+    <div class="term"><b>Threshold</b><span>Balancer target: every node within this many % of the average (default 10).</span></div>
+    <div class="term"><b>Iteration</b><span>One round of balancer planning and block moves.</span></div>
+    <div class="term"><b>Maintenance mode</b><span>Short planned downtime for a node without copying all its blocks.</span></div>
+  </div>
+
+  <h3>Defaults and limits (Hadoop 3.5.0, from the lab)</h3>
+  <table class="facts" style="table-layout:fixed;overflow-wrap:anywhere">
+    <tr><th>Balancer threshold</th><td>10% by default; allowed range 1.0 to 100.0 (“Expecting a number in the range of [1.0, 100.0]”)</td></tr>
+    <tr><th>Balancer bandwidth</th><td><code>dfs.datanode.balance.bandwidthPerSec</code> = 104857600 (100 MB/s per DataNode)</td></tr>
+    <tr><th>Concurrent moves</th><td><code>dfs.datanode.balance.max.concurrent.moves</code> = 100</td></tr>
+    <tr><th>Gives up after</th><td>5 iterations with no block moved (“max idle iteration = 5”)</td></tr>
+    <tr><th>Decommission check</th><td>Every 30 s (<code>dfs.namenode.decommission.interval</code>)</td></tr>
+    <tr><th>fsck</th><td>Read-only by default; <code>-move</code> / <code>-delete</code> change files</td></tr>
+  </table>
+
+  <h3 id="levels">Admin tools at three levels</h3>
+  <div class="modlab levels"><div class="modlab__bar"><b>Pick your level. New to this? Start at Beginner and climb.</b><button type="button" data-mod="b">Beginner</button><button type="button" data-mod="i">Intermediate</button><button type="button" data-mod="a">Advanced</button></div>
+    <div class="modlab__panel" data-mod="b"><h4><span class="lvl lvl--b">Beginner</span> Like moving house</h4>
+      <ul>
+        <li>Decommission: before you leave a flat, you pack and move everything out. Only then do you hand back the keys.</li>
+        <li>Balancer: a new cupboard arrives empty; you move some things into it so no cupboard overflows.</li>
+        <li>fsck: walking through the house with the inventory list to check nothing is missing.</li>
+      </ul>
+
+    </div>
+    <div class="modlab__panel" data-mod="i"><h4><span class="lvl lvl--i">Intermediate</span> The admin routine</h4>
+      <ul>
+        <li>Daily: <code>hdfs dfsadmin -report</code> (dead nodes? capacity?) and <code>hdfs fsck /</code> (HEALTHY?).</li>
+        <li>Retire a node: add it to the exclude file → <code>-refreshNodes</code> → wait for <i>Decommissioned</i> → stop it.</li>
+        <li>Add a node: start the DataNode (it registers itself) → run <code>hdfs balancer</code>, ideally at night.</li>
+        <li>Investigate a file: <code>hdfs fsck path -files -blocks -locations -racks</code>.</li>
+      </ul>
+
+    </div>
+    <div class="modlab__panel" data-mod="a"><h4><span class="lvl lvl--a">Advanced</span> What experienced admins watch for</h4>
+      <ul>
+        <li>Decommission needs somewhere to put the copies: with 3 racks and replication 3, retiring a whole rack can stall placement.</li>
+        <li>A decommission stuck at “still has 1 blocks to replicate” usually means a block whose copies can't be placed (bad target, full disks, open files).</li>
+        <li>The balancer is safe to stop at any time (Ctrl+C); moved blocks stay moved. Raise <code>-setBalancerBandwidth</code> only when jobs are quiet.</li>
+        <li>Recommissioned nodes often lose their replicas as “excess” and come back nearly empty: plan a balancer run.</li>
+        <li><code>fsck</code> on <code>/</code> of a huge cluster is heavy for the NameNode; run it on sub-trees or off-peak.</li>
+      </ul>
+
+    </div>
+  </div>
+  <div class="callout callout--exam"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19V5a2 2 0 0 1 2-2h12v18H6a2 2 0 0 1-2-2zm0 0a2 2 0 0 1 2-2h12"/></svg><p><b>Exam tip:</b> “What is decommissioning? How do you add and remove DataNodes?” Removing: add the host to <code>dfs.hosts.exclude</code>, run <code>hdfs dfsadmin -refreshNodes</code>, wait for status <i>Decommissioned</i> (blocks re-replicated), then stop the node. Adding: install Hadoop with the same configuration, start the DataNode (add it to <code>dfs.hosts</code> if an include list is used, then refreshNodes), and run the <b>balancer</b>.</p></div>
+</section>
+
+<!-- ======================= PART 3: TYPES AND WAYS TO USE IT ======================= -->
+<section class="part" id="types">
+  <span class="part-label"><b>3</b> Types and ways to use it</span>
+  <h2>The commands you will actually use</h2>
+  <div class="table-wrap">
+  <table class="compare" style="min-width:640px">
+    <thead><tr><th>Tool</th><th>Command</th><th>What it tells or does</th></tr></thead>
+    <tbody>
+      <tr><td>dfsadmin</td><td><code>-report [-live|-dead|-decommissioning]</code></td><td>Capacity, used, remaining; per-DataNode status and block counts</td></tr>
+      <tr><td>dfsadmin</td><td><code>-refreshNodes</code></td><td>Re-read include/exclude files: start decommission or recommission</td></tr>
+      <tr><td>dfsadmin</td><td><code>-safemode get|enter|leave|wait</code></td><td>Safe mode control (Lesson 5.6)</td></tr>
+      <tr><td>dfsadmin</td><td><code>-printTopology</code></td><td>Racks and nodes, with In Service / Decommissioned</td></tr>
+      <tr><td>dfsadmin</td><td><code>-getDatanodeInfo host:9867</code></td><td>Uptime and software version of one DataNode</td></tr>
+      <tr><td>dfsadmin</td><td><code>-setBalancerBandwidth bytes</code></td><td>Change balancer speed on all DataNodes, no restart</td></tr>
+      <tr><td>dfsadmin</td><td><code>-saveNamespace</code>, <code>-fetchImage dir</code></td><td>Force a checkpoint (needs safe mode); download the latest fsimage</td></tr>
+      <tr><td>fsck</td><td><code>path -files -blocks -locations -racks</code></td><td>Every file, block and replica location</td></tr>
+      <tr><td>fsck</td><td><code>/ -list-corruptfileblocks</code></td><td>Only the damaged blocks</td></tr>
+      <tr><td>fsck</td><td><code>-move</code> / <code>-delete</code></td><td>Move corrupt files to /lost+found or delete them (last resort)</td></tr>
+      <tr><td>balancer</td><td><code>-threshold N</code>, <code>-exclude</code>, <code>-source</code></td><td>How even, and which nodes may be involved</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <h3>Ways to take a DataNode out</h3>
+  <div class="cards">
+    <div class="card"><h4>Decommission</h4><p>Copies every block away first. For permanent removal. Took 48 to 60 s in our lab.</p><span class="tag">Safe, slow</span></div>
+    <div class="card"><h4>Maintenance mode</h4><p>For a reboot or short repair: blocks with enough other replicas are not copied; the node comes back with its data.</p><span class="tag">Planned, short</span></div>
+    <div class="card"><h4>Just stop it</h4><p>HDFS treats it as a failure: dead after about 10.5 minutes, then re-replication. Fine for crashes, wrong for planned work.</p><span class="tag">Unplanned</span></div>
+    <div class="card"><h4>Stop many at once</h4><p>Several nodes holding all replicas of a block = missing data. Always one at a time, or decommission together.</p><span class="tag">Dangerous</span></div>
+  </div>
+  <div class="callout callout--tip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18h6M10 22h4M12 2a7 7 0 0 0-4 12.7V17h8v-2.3A7 7 0 0 0 12 2z"/></svg><p>Run <code>hdfs dfsadmin</code> and <code>hdfs balancer -help</code> with no other arguments for the exact usage of your version. The balancer's own help describes the threshold as “Percentage of disk capacity”.</p></div>
+</section>
+
+<!-- ======================= PART 4: STEP BY STEP ======================= -->
+<section class="part" id="steps">
+  <span class="part-label"><b>4</b> Step by step</span>
+  <h2>A morning of real admin work</h2>
+  <p>All commands ran in the namenode container of the lab: 5 DataNodes, two racks (<code>/rack1</code>: datanode-1, -2; <code>/rack2</code>: datanode-3, -4, -5).</p>
+  <ol class="stepper">
+    <li><h4>Morning check: dfsadmin -report</h4>
+      <div class="code" data-lang="bash" data-file="Terminal"><pre><code>hdfs dfsadmin -report -dead</code></pre><div class="output">Configured Capacity: 1352765870080 (1.23 TB)
+Present Capacity: 92735646762 (86.37 GB)
+DFS Remaining: 89697912832 (83.54 GB)
+DFS Used: 3037733930 (2.83 GB)
+DFS Used%: 3.28%
+Replicated Blocks:
+	Under replicated blocks: 0
+	Blocks with corrupt replicas: 0
+	Missing blocks: 0
+	Missing blocks (with replication factor 1): 0
+	...
+-------------------------------------------------
+Dead datanodes (0):</div></div>
+      <span class="behind">The three numbers to read first: <b>dead datanodes</b>, <b>missing blocks</b>, <b>under-replicated blocks</b>. Capacity looks odd here (1.23 TB configured, 86 GB present) because all five lab DataNodes sit on one shared laptop disk; on real servers each node has its own disks.</span></li>
+    <li><h4>Health check: fsck</h4>
+      <div class="code" data-lang="bash" data-file="Terminal"><pre><code>hdfs fsck / -list-corruptfileblocks
+hdfs fsck /user/hadoop/canteen -files -blocks -racks</code></pre><div class="output">The filesystem under path '/' has 0 CORRUPT blocks
+/user/hadoop/canteen/raw/day1.csv 47 bytes, replicated: replication=3, 1 block(s):  OK
+0. BP-1507681208-172.19.0.3-1792565333483:blk_1073741852_1029 len=47 Live_repl=3  [/rack1/172.19.0.3:9866, /rack1/172.19.0.4:9866, /rack2/172.19.0.6:9866]
+/user/hadoop/canteen/raw/day2.csv 34 bytes, replicated: replication=3, 1 block(s):  OK
+0. BP-1507681208-172.19.0.3-1792565333483:blk_1073741855_1033 len=34 Live_repl=3  [/rack2/172.19.0.6:9866, /rack1/172.19.0.4:9866, /rack1/172.19.0.3:9866]
+Status: HEALTHY</div></div>
+      <span class="behind">fsck asks the NameNode only; it reads no data. It shows each block's live replicas with their racks: two in one rack and one in the other, exactly the placement rule from Lesson 5.3.</span></li>
+    <li><h4>Who is where: topology and node info</h4>
+      <div class="code" data-lang="bash" data-file="Terminal"><pre><code>hdfs dfsadmin -printTopology
+hdfs dfsadmin -getDatanodeInfo lab5-datanode-1:9867</code></pre><div class="output">Rack: /rack1
+   172.19.0.4:9866 (lab5-datanode-1.lab5_default) In Service
+   172.19.0.3:9866 (lab5-datanode-2.lab5_default) In Service
+
+Rack: /rack2
+   172.19.0.8:9866 (lab5-datanode-5.lab5_default) In Service
+   172.19.0.7:9866 (lab5-datanode-4.lab5_default) In Service
+   172.19.0.6:9866 (lab5-datanode-3.lab5_default) In Service
+
+Uptime: 945, Software version: 3.5.0, Config version: core-3.0.0,hdfs-1</div></div>
+      <span class="behind">9867 is the DataNode's IPC port (9866 is its data port). Uptime is in seconds.</span></li>
+    <li><h4>Decommission datanode-4</h4>
+      <div class="code" data-lang="bash" data-file="Terminal"><pre><code># once: hdfs-site.xml of the NameNode has
+#   dfs.hosts.exclude = /opt/hadoop/etc/hadoop/dfs.exclude
+echo 172.19.0.7 &gt; /opt/hadoop/etc/hadoop/dfs.exclude
+hdfs dfsadmin -refreshNodes
+hdfs dfsadmin -report | grep -A3 'Name: 172.19.0.7'     # repeated every few seconds</code></pre><div class="output">Refresh nodes successful
+t=2s Decommission Status : Decommission in progress
+t=8s Decommission Status : Decommission in progress
+  ...
+t=46s Decommission Status : Decommission in progress
+t=52s Decommission Status : Decommissioned</div></div>
+      <span class="behind">During decommission the node still serves reads, so nothing breaks. The NameNode copies each of its blocks from any live replica to another node, checking progress every 30 seconds. Then it is safe to switch it off.</span></li>
+    <li><h4>Prove it, then bring it back</h4>
+      <div class="code" data-lang="bash" data-file="Terminal"><pre><code>hdfs fsck / | grep -E 'Status|Under-replicated|Number of data-nodes'
+&gt; /opt/hadoop/etc/hadoop/dfs.exclude          # empty the exclude file
+hdfs dfsadmin -refreshNodes</code></pre><div class="output">Status: HEALTHY
+ Number of data-nodes:	4
+ Under-replicated blocks:	0 (0.0 %)
+Refresh nodes successful
+Decommission Status : Normal</div></div>
+      <span class="behind">“4 data-nodes” and 0 under-replicated: every block had 3 replicas without datanode-4. After recommissioning, its replicas became <i>extra</i> copies (4 instead of 3), and the NameNode deleted excess ones. Datanode-4 had 11 blocks before; a minute after coming back it had 0. A recommissioned node often returns nearly empty.</span></li>
+    <li><h4>A new, empty node and the balancer</h4>
+      <div class="code" data-lang="bash" data-file="Terminal"><pre><code>docker run -d --name lab5-datanode-6 ... --tmpfs /tmp/hadoop-hadoop:size=1536m apache/hadoop:3.5.0 hdfs datanode
+hdfs balancer -threshold 5</code></pre><div class="output">INFO  Balancer:568 - 1 underutilized: [172.19.0.9:9866:DISK]
+INFO  Balancer:810 - Need to move 1.32 GB to make the cluster balanced.
+INFO  Balancer:663 - Decided to move 340.33 MB bytes from 172.19.0.7:9866:DISK to 172.19.0.9:9866:DISK
+INFO  Balancer:663 - Decided to move 340.38 MB bytes from 172.19.0.4:9866:DISK to 172.19.0.9:9866:DISK
+  ...
+INFO  Dispatcher:407 - Successfully moved blk_1073741844_1020 with size=134217728 from 172.19.0.4:9866:DISK to 172.19.0.9:9866:DISK through 172.19.0.6:9866
+  ...
+INFO  Dispatcher:1289 - Total bytes (blocks) moved in this iteration 914.72 MB (8)</div></div>
+      <span class="behind">Datanode-6 got its own 1.5 GB disk, so it was the only empty one (the other five share one disk and look equally full). The balancer planned moves, then copied 8 blocks in 16 seconds. “through 172.19.0.6”: the bytes came from a replica in the target's own rack, not necessarily from the node being emptied. Afterwards the source replica is deleted, so replication stays 3.</span></li>
+    <li><h4>When the balancer gives up</h4>
+      <div class="code" data-lang="bash" data-file="Terminal"><pre><code># same run, iterations 1 to 5</code></pre><div class="output">Need to move 430.09 MB to make the cluster balanced.
+... Out of space: The volume with the most available space (=643919872 B) is less than the block size (=134217728 B).
+  ... (the same in iterations 2, 3, 4 and 5)
+No block has been moved for 5 iterations. Exiting...
+Oct 21, 2026, 10:04:11 AM Balancing took 1.1124 minutes
+
+$ hdfs dfsadmin -report  (DFS Used%)
+  172.19.0.3 0.27%   172.19.0.4 0.22%   172.19.0.6 0.27%
+  172.19.0.7 0.00%   172.19.0.8 0.00%   172.19.0.9 60.02%</div></div>
+      <span class="behind">The tiny lab disk started refusing blocks with “Out of space”. A failed move is just skipped: the block stays where it was, with all its replicas. After 5 rounds without progress, the balancer stops. On a real cluster, check the target's disks and rerun.</span></li>
+    <li><h4>Speed limits and mistakes</h4>
+      <div class="code" data-lang="bash" data-file="Terminal"><pre><code>hdfs dfsadmin -setBalancerBandwidth 52428800
+hdfs balancer -threshold 0.5
+hdfs dfsadmin -saveNamespace</code></pre><div class="output">Balancer bandwidth is set to 52428800
+Expecting a number in the range of [1.0, 100.0]: 0.5
+saveNamespace: Safe mode should be turned ON in order to create namespace image.</div></div>
+      <span class="behind">52428800 bytes = 50 MB/s per DataNode, applied at once. The threshold must be at least 1%. <code>-saveNamespace</code> is only allowed in safe mode, so the namespace doesn't change while it is written.</span></li>
+  </ol>
+  <div class="callout callout--warn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3 2 21h20L12 3z"/><path d="M12 10v5M12 18v.5"/></svg><p>Never decommission (or stop) more nodes at once than your replication can survive, and never put every node of a rack in the exclude file unless the other racks have room for all those blocks. Watch <code>-report -decommissioning</code> until it is empty.</p></div>
+</section>
+
+<!-- ======================= PART 5: SEE IT HAPPEN ======================= -->
+<section class="part" id="animation">
+  <span class="part-label"><b>5</b> See it happen</span>
+  <h2>Decommission, then balance</h2>
+  <p>Block A lives on dn-2, dn-4 and dn-5. We retire dn-4, then add an empty dn-6.</p>
+  <div class="anim" data-frames="6">
+    <div class="anim__title">Retire a node and fill a new one <span>6 steps</span></div>
+    <div class="anim__views">
+      <div class="view view--see">
+        <span class="view__tag">What you see</span>
+        <svg viewBox="0 0 360 250" role="img" aria-label="Admin commands and their output">
+          <rect x="14" y="14" width="332" height="206" rx="8" class="s-board"/>
+          <text x="26" y="32" font-size="9" class="mono" style="fill:#7F8C86">hadoop@namenode : ~</text>
+          <g data-on="1"><text x="26" y="56" font-size="8.6" class="mono" style="fill:#7F8C86">$ hdfs dfsadmin -report</text><text x="26" y="72" font-size="8.6" class="mono" style="fill:#9FD3B8">172.19.0.7  Decommission Status : Normal</text><text x="26" y="86" font-size="8.6" class="mono" style="fill:#9FD3B8">Num of Blocks: 11</text></g>
+          <g data-on="2"><text x="26" y="56" font-size="8.6" class="mono" style="fill:#7F8C86">$ echo 172.19.0.7 &gt; dfs.exclude</text><text x="26" y="72" font-size="8.6" class="mono" style="fill:#7F8C86">$ hdfs dfsadmin -refreshNodes</text><text x="26" y="88" font-size="8.6" class="mono" style="fill:#9FD3B8">Refresh nodes successful</text></g>
+          <g data-on="3"><text x="26" y="56" font-size="8.6" class="mono" style="fill:#9FD3B8">t=2s  Decommission in progress</text><text x="26" y="72" font-size="8.6" class="mono" style="fill:#9FD3B8">t=8s  Decommission in progress</text><text x="26" y="88" font-size="8.6" class="mono" style="fill:#9FD3B8">t=46s Decommission in progress</text></g>
+          <g data-on="4"><text x="26" y="56" font-size="8.6" class="mono" style="fill:#F5C77E">t=52s Decommissioned</text><text x="26" y="72" font-size="8.6" class="mono" style="fill:#7F8C86">$ hdfs fsck /</text><text x="26" y="88" font-size="8.6" class="mono" style="fill:#9FD3B8">Status: HEALTHY  Under-replicated: 0</text></g>
+          <g data-on="5"><text x="26" y="56" font-size="8.6" class="mono" style="fill:#7F8C86">$ hdfs balancer -threshold 5</text><text x="26" y="72" font-size="8.6" class="mono" style="fill:#9FD3B8">1 underutilized: [172.19.0.9]</text><text x="26" y="88" font-size="8.6" class="mono" style="fill:#9FD3B8">Need to move 1.32 GB</text></g>
+          <g data-on="6"><text x="26" y="56" font-size="8.6" class="mono" style="fill:#9FD3B8">Successfully moved blk_…844 to 172.19.0.9</text><text x="26" y="72" font-size="8.6" class="mono" style="fill:#9FD3B8">… moved in this iteration 914.72 MB (8)</text><text x="26" y="88" font-size="8.6" class="mono" style="fill:#F5C77E">172.19.0.9 used 60.02%</text></g>
+          <text x="352" y="244" text-anchor="end" class="s-wm">myphatshala.in</text>
+        </svg>
+        <ol class="caps" hidden>
+          <li>Datanode-4 is Normal and holds 11 blocks.</li>
+          <li>We list it in the exclude file and refresh: no restart needed.</li>
+          <li>Status changes to “Decommission in progress”.</li>
+          <li>52 seconds later: Decommissioned, and fsck shows nothing under-replicated.</li>
+          <li>A new, empty node appears; the balancer calls it underutilised.</li>
+          <li>8 blocks (914.72 MB) move to it in the first iteration.</li>
+        </ol>
+      </div>
+
+      <div class="view view--behind">
+        <span class="view__tag">Behind the screen</span>
+        <svg viewBox="0 0 360 250" role="img" aria-label="DataNodes and replicas of block A">
+          <rect x="130" y="12" width="100" height="34" rx="6" class="s-board"/><text x="180" y="33" text-anchor="middle" font-size="9" font-weight="700" class="s-chalk">NameNode</text>
+          <g font-size="8.6">
+            <rect x="14" y="90" width="72" height="70" rx="6" class="s-soft-green" style="stroke:var(--green)"/><text x="50" y="106" text-anchor="middle" class="s-green">dn-2</text>
+            <rect x="96" y="90" width="72" height="70" rx="6" class="s-soft-green" style="stroke:var(--green)"/><text x="132" y="106" text-anchor="middle" class="s-green">dn-3</text>
+            <g data-on="1"><rect x="178" y="90" width="72" height="70" rx="6" class="s-soft-green" style="stroke:var(--green)"/></g>
+            <g data-on="2,3"><rect x="178" y="90" width="72" height="70" rx="6" class="s-soft-acc" style="stroke:var(--track)"/></g>
+            <g data-on="4,5,6"><rect x="178" y="90" width="72" height="70" rx="6" class="s-card2" style="stroke:var(--red);stroke-dasharray:4 3"/></g>
+            <text x="214" y="106" text-anchor="middle" class="s-ink">dn-4</text>
+            <rect x="260" y="90" width="72" height="70" rx="6" class="s-soft-green" style="stroke:var(--green)"/><text x="296" y="106" text-anchor="middle" class="s-green">dn-5</text>
+            <rect x="20" y="118" width="60" height="16" rx="3" class="s-soft-blue" style="stroke:var(--blue)"/><text x="50" y="130" text-anchor="middle" class="s-blue">A</text>
+            <rect x="266" y="118" width="60" height="16" rx="3" class="s-soft-blue" style="stroke:var(--blue)"/><text x="296" y="130" text-anchor="middle" class="s-blue">A</text>
+            <g data-on="1,2,3,4"><rect x="184" y="118" width="60" height="16" rx="3" class="s-soft-blue" style="stroke:var(--blue)"/><text x="214" y="130" text-anchor="middle" class="s-blue">A</text></g>
+            <g data-on="3,4,5,6"><rect x="102" y="118" width="60" height="16" rx="3" class="s-soft-blue" style="stroke:var(--blue)"/><text x="132" y="130" text-anchor="middle" class="s-blue">A</text></g>
+            <g data-on="5,6"><rect x="96" y="176" width="236" height="30" rx="6" class="s-soft-acc" style="stroke:var(--track)"/><text x="106" y="195" class="s-acc">dn-6 (new, own disk)</text></g>
+            <g data-on="6"><rect x="250" y="183" width="60" height="16" rx="3" class="s-soft-blue" style="stroke:var(--blue)"/><text x="280" y="195" text-anchor="middle" class="s-blue">B</text></g>
+          </g>
+          <g data-on="2"><path d="M180 46v44" style="fill:none;stroke:var(--track);stroke-width:2"/><text x="180" y="226" text-anchor="middle" font-size="9" class="s-ink2">dn-4 marked “decommissioning”: still serves reads</text></g>
+          <g data-on="3"><path d="M50 134v14h82v-14" style="fill:none;stroke:var(--blue);stroke-width:2.4"/><text x="180" y="226" text-anchor="middle" font-size="9" class="s-ink2">copy A from a live replica to dn-3</text></g>
+          <g data-on="4"><text x="180" y="226" text-anchor="middle" font-size="9" class="s-ink2">all blocks have 3 other replicas: safe to switch off</text></g>
+          <g data-on="5"><text x="180" y="226" text-anchor="middle" font-size="9" class="s-ink2">dn-6 empty → “underutilized”</text></g>
+          <g data-on="6"><path d="M296 160v23" style="fill:none;stroke:var(--green);stroke-width:2.4"/><text x="180" y="226" text-anchor="middle" font-size="9" class="s-ink2">block B copied to dn-6, then removed from its source</text></g>
+          <text x="352" y="246" text-anchor="end" class="s-wm">myphatshala.in</text>
+        </svg>
+        <ol class="caps" hidden>
+          <li>Block A has 3 replicas: dn-2, dn-4, dn-5.</li>
+          <li>dn-4 is marked decommissioning. Its replicas no longer count towards the 3, but it still serves reads.</li>
+          <li>The NameNode asks dn-2 to copy A to dn-3, respecting rack placement.</li>
+          <li>Every block of dn-4 now has 3 replicas elsewhere: Decommissioned.</li>
+          <li>dn-6 joins with an empty disk. The average utilisation is far above its 0%, so it is underutilised.</li>
+          <li>The balancer copies block B to dn-6 and deletes one source replica: still 3 copies, just better spread.</li>
+        </ol>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ======================= PART 6: REAL-WORLD USE ======================= -->
+<section class="part" id="real-world">
+  <span class="part-label"><b>6</b> Real-world use</span>
+  <h2>Admin tools at work</h2>
+
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="20" y="20" width="80" height="50" rx="6" class="s-soft-red" style="stroke:var(--red)"/><text x="60" y="42" text-anchor="middle" font-size="8.6" font-weight="700" class="s-red">old servers</text><text x="60" y="58" text-anchor="middle" font-size="8.6" class="s-ink">one by one</text></svg></div>
+    <div><h4>1. Hardware refresh</h4>
+      <p>A bank replaces 200 five-year-old DataNodes. New nodes are added and balanced first; old ones are decommissioned a few at a time, each batch confirmed with fsck before the next. Users notice nothing.</p>
+      <div class="uc-flow"><span>Add new</span><i>→</i><span class="java">Balance + decommission</span><i>→</i><span>Remove old</span></div></div>
+  </div>
+
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="20" y="20" width="80" height="50" rx="6" class="s-soft-green" style="stroke:var(--green)"/><text x="60" y="42" text-anchor="middle" font-size="8.6" font-weight="700" class="s-green">balancer</text><text x="60" y="58" text-anchor="middle" font-size="8.6" class="s-ink">01:00 to 06:00</text></svg></div>
+    <div><h4>2. Night-time balancing</h4>
+      <p>Teams schedule <code>hdfs balancer -threshold 10</code> at night and raise the bandwidth for those hours with <code>-setBalancerBandwidth</code>, then lower it before office jobs start.</p>
+      <div class="uc-flow"><span>Scheduler</span><i>→</i><span class="java">balancer</span><i>→</i><span>Even disks by morning</span></div></div>
+  </div>
+
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="20" y="20" width="80" height="50" rx="6" class="s-board"/><text x="60" y="42" text-anchor="middle" font-size="8.6" class="mono" style="fill:#9FD3B8">HEALTHY</text><text x="60" y="58" text-anchor="middle" font-size="8.6" class="mono" style="fill:#F5C77E">missing: 0</text></svg></div>
+    <div><h4>3. Monitoring and alerts</h4>
+      <p>Monitoring reads the same numbers as <code>-report</code> (dead nodes, missing and under-replicated blocks) from the NameNode's metrics and pages the on-call engineer when missing blocks are above zero.</p>
+      <div class="uc-flow"><span>NameNode metrics</span><i>→</i><span class="java">Alert rules</span><i>→</i><span>On-call</span></div></div>
+  </div>
+
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="20" y="20" width="80" height="50" rx="6" class="s-card2"/><text x="60" y="42" text-anchor="middle" font-size="8.6" font-weight="700" class="s-ink">maintenance</text><text x="60" y="58" text-anchor="middle" font-size="8.6" class="s-ink2">reboot, patch</text></svg></div>
+    <div><h4>4. Patching without copying terabytes</h4>
+      <p>For a 20-minute OS patch, admins put a node into maintenance mode instead of decommissioning it, so HDFS doesn't copy its many terabytes away and back.</p>
+      <div class="uc-flow"><span>Maintenance</span><i>→</i><span class="java">Patch + reboot</span><i>→</i><span>In service</span></div></div>
+  </div>
+  <p class="muted">Simplified; organisations differ in tools and policies.</p>
+</section>
+
+
+<div class="ad-slot" data-slot="mid"></div>
+
+<section class="part" id="run">
+  <span class="part-label"><b>7</b> Run the code</span>
+  <h2>A balancer in 30 lines</h2>
+  <p>This program does what <code>hdfs balancer</code> does, simplified: compute each node's utilisation (used ÷ capacity) and the cluster average, then move 128 MB blocks from the fullest node to the emptiest until every node is within the threshold of the average.</p>
+  <div class="code" data-lang="python" data-file="main.py"><pre><code>cap = {&quot;dn-1&quot;: 4000, &quot;dn-2&quot;: 4000, &quot;dn-3&quot;: 4000, &quot;dn-6&quot;: 4000}    # MB
+used = {&quot;dn-1&quot;: 3200, &quot;dn-2&quot;: 3072, &quot;dn-3&quot;: 2944, &quot;dn-6&quot;: 0}
+threshold = 10          # percent
+block = 128             # MB
+
+def util(n):
+    return 100 * used[n] / cap[n]
+
+def average():
+    return 100 * sum(used.values()) / sum(cap.values())
+
+moves = 0
+while True:
+    avg = average()
+    src = max(used, key=util)
+    dst = min(used, key=util)
+    if util(src) - avg &lt;= threshold and avg - util(dst) &lt;= threshold:
+        break
+    used[src] -= block
+    used[dst] += block
+    moves += 1
+
+print(f&quot;average {average():.1f}%  moves {moves}  ({moves * block} MB)&quot;)
+for n in cap:
+    print(f&quot;  {n}: {util(n):5.1f}%&quot;)</code></pre><div class="output">average 57.6%  moves 15  (1920 MB)
+  dn-1:  60.8%
+  dn-2:  60.8%
+  dn-3:  60.8%
+  dn-6:  48.0%</div></div>
+  <ul class="anno"><li><code>    return 100 * used[n] / cap[n]</code><span>Utilisation is a percentage of capacity, not a block count. That is why a big new disk with 0 blocks is “underutilised”.</span></li><li><code>    if util(src) - avg &lt;= threshold and avg - util(dst) &lt;= threshold:</code><span>Balanced = every node within ±threshold of the average. Here 10%, the default; the real tool accepts 1 to 100.</span></li><li><code>    used[src] -= block</code><span>A real move copies the block to the target and then deletes the source replica, so replication never drops.</span></li></ul>
+  <div class="runner">
+    <script type="application/json">{
+ "lang": "python",
+ "file": "main.py",
+ "tasks": [
+  {
+   "label": "1 · Balance a new node",
+   "hint": "Press <b>Run<\/b>. How many blocks move before dn-6 is within 10% of the average?",
+   "code": "cap = {\"dn-1\": 4000, \"dn-2\": 4000, \"dn-3\": 4000, \"dn-6\": 4000}    # MB\nused = {\"dn-1\": 3200, \"dn-2\": 3072, \"dn-3\": 2944, \"dn-6\": 0}\nthreshold = 10          # percent\nblock = 128             # MB\n\ndef util(n):\n    return 100 * used[n] / cap[n]\n\ndef average():\n    return 100 * sum(used.values()) / sum(cap.values())\n\nmoves = 0\nwhile True:\n    avg = average()\n    src = max(used, key=util)\n    dst = min(used, key=util)\n    if util(src) - avg <= threshold and avg - util(dst) <= threshold:\n        break\n    used[src] -= block\n    used[dst] += block\n    moves += 1\n\nprint(f\"average {average():.1f}%  moves {moves}  ({moves * block} MB)\")\nfor n in cap:\n    print(f\"  {n}: {util(n):5.1f}%\")\n"
+  },
+  {
+   "label": "2 · Lower the threshold",
+   "hint": "<b>Predict first:<\/b> with threshold 5 instead of 10, will more or fewer blocks move?",
+   "code": "cap, used = {\"a\": 4000, \"b\": 4000, \"c\": 4000, \"new\": 4000}, {\"a\": 3200, \"b\": 3072, \"c\": 2944, \"new\": 0}\nfor threshold in [10, 5, 1]:\n    u = dict(used); moves = 0\n    while True:\n        util = {n: 100 * u[n] / cap[n] for n in u}\n        avg = 100 * sum(u.values()) / sum(cap.values())\n        s, d = max(util, key=util.get), min(util, key=util.get)\n        if util[s] - avg <= threshold and avg - util[d] <= threshold:\n            break\n        u[s] -= 128; u[d] += 128; moves += 1\n    print(f\"threshold {threshold:2}%: {moves} moves, {moves * 128} MB\")\n"
+  },
+  {
+   "label": "3 · Why our lab said “balanced”",
+   "hint": "Five nodes with 252 GB each; three hold 0.97 GB, two hold nothing. Is anyone more than 5% away from the average?",
+   "code": "cap = 252\nused = [0.97, 0.97, 0.97, 0, 0]\nutil = [100 * u / cap for u in used]\navg = sum(util) / len(util)\nprint(\"utilisations:\", [round(x, 2) for x in util], \" average\", round(avg, 2))\nprint(\"balanced at 5%:\", all(abs(x - avg) <= 5 for x in util))\n"
+  },
+  {
+   "label": "4 · How long will decommissioning take?",
+   "hint": "A node holds 6 TB. The other nodes can receive re-replication at 400 MB/s in total. Estimate the hours.",
+   "code": "tb, mb_per_s = 6, 400\nseconds = tb * 1024 * 1024 / mb_per_s\nprint(f\"about {seconds / 3600:.1f} hours\")\n"
+  },
+  {
+   "label": "5 · Spot the error",
+   "hint": "This check calls the cluster balanced too early: it compares only the fullest node. Fix it to check the emptiest node too.",
+   "code": "util = {\"dn-1\": 81.0, \"dn-2\": 77.0, \"dn-3\": 74.0, \"dn-6\": 2.0}\navg = sum(util.values()) / len(util)\nbalanced = max(util.values()) - avg <= 10\nprint(\"average\", avg, \"balanced:\", balanced)\n"
+  }
+ ]
+}</script>
+  </div>
+  <h3 id="pc">Run it on your PC: retire a node, fill a new one</h3>
+  <p>Two scripts for the <code>hdfs-lab</code> folder. The first decommissions a DataNode and prints its status every few seconds until it is <i>Decommissioned</i>, checks fsck and recommissions it. The second starts a sixth DataNode with its own small disk and runs the balancer. First add <code>HDFS-SITE.XML_dfs.hosts.exclude=/opt/hadoop/etc/hadoop/dfs.exclude</code> to the <code>config</code> file and recreate the namenode (<code>docker compose up -d</code>).</p>
+  <div class="pcrun"><h4>Decommission and recommission one DataNode</h4>
+  <div class="code" data-lang="bash" data-file="decommission_watch.sh"><pre><code>#!/usr/bin/env bash
+# decommission_watch.sh: retire one DataNode safely and watch HDFS copy its blocks away.
+# Needs dfs.hosts.exclude=/opt/hadoop/etc/hadoop/dfs.exclude in the NameNode&#x27;s hdfs-site.xml.
+# Run from the hdfs-lab folder:  bash decommission_watch.sh 172.19.0.4
+IP=${1:?give the DataNode IP}
+NN=&quot;docker exec lab5-namenode-1&quot;
+status() { $NN hdfs dfsadmin -report 2&gt;/dev/null | grep -m1 -A20 &quot;^Name: $IP:&quot; |
+           grep -E &quot;Decommission Status|Num of Blocks&quot; | sed &#x27;s/ : /: /&#x27; | paste -sd&#x27;|&#x27; | sed &#x27;s/|/,  /&#x27;; }
+echo &quot;before:  $(status)&quot;
+$NN bash -c &quot;echo $IP &gt; /opt/hadoop/etc/hadoop/dfs.exclude&quot;
+$NN hdfs dfsadmin -refreshNodes
+start=$(date +%s)
+while true; do
+  s=$(status); echo &quot;t=$(( $(date +%s) - start ))s  $s&quot;
+  [[ $s == *&quot;Status: Decommissioned&quot;* ]] &amp;&amp; break
+  sleep 5
+done
+$NN bash -c &quot;hdfs fsck / 2&gt;/dev/null | grep -E &#x27;Status:|Under-replicated|Number of data-nodes&#x27;&quot;
+echo &quot;### recommission&quot;
+$NN bash -c &quot;&gt; /opt/hadoop/etc/hadoop/dfs.exclude&quot;
+$NN hdfs dfsadmin -refreshNodes
+sleep 10; echo &quot;after:   $(status)&quot;
+
+# In the hdfs-lab folder (find the IP with: hdfs dfsadmin -printTopology):
+#   bash decommission_watch.sh 172.19.0.7</code></pre><div class="output">before:  Decommission Status: Normal,  Num of Blocks: 2
+Refresh nodes successful
+t=1s  Decommission Status: Decommission in progress,  Num of Blocks: 2
+t=8s  Decommission Status: Decommission in progress,  Num of Blocks: 2
+t=14s  Decommission Status: Decommission in progress,  Num of Blocks: 2
+t=21s  Decommission Status: Decommission in progress,  Num of Blocks: 2
+t=27s  Decommission Status: Decommission in progress,  Num of Blocks: 2
+t=34s  Decommission Status: Decommission in progress,  Num of Blocks: 2
+t=40s  Decommission Status: Decommission in progress,  Num of Blocks: 2
+t=47s  Decommission Status: Decommission in progress,  Num of Blocks: 2
+t=53s  Decommission Status: Decommission in progress,  Num of Blocks: 2
+t=60s  Decommission Status: Decommissioned,  Num of Blocks: 2
+Status: HEALTHY
+ Number of data-nodes:	5
+ Under-replicated blocks:	0 (0.0 %)
+### recommission
+Refresh nodes successful
+after:   Decommission Status: Normal,  Num of Blocks: 0</div></div>
+  <p class="muted">Real output. Only 2 blocks, yet 60 s: the NameNode checks decommission progress every 30 s. After recommissioning, its replicas were extra copies and were removed: 0 blocks.</p></div>
+  <div class="pcrun"><h4>Add a node, run the balancer</h4>
+  <div class="code" data-lang="bash" data-file="add_node_and_balance.sh"><pre><code>#!/usr/bin/env bash
+# add_node_and_balance.sh: add a new, empty DataNode with its own small disk, then run the balancer.
+# Run from the hdfs-lab folder (compose project &quot;lab5&quot;, network lab5_default).
+NN=&quot;docker exec lab5-namenode-1&quot;
+show() {
+  $NN hdfs dfsadmin -report 2&gt;/dev/null |
+    awk &#x27;/^Name:/{ip=$2; sub(&quot;:9866&quot;,&quot;&quot;,ip)} /^DFS Used%/{if(ip) printf &quot;  %-12s used %6s\n&quot;, ip, $3; ip=&quot;&quot;}&#x27;
+}
+echo &quot;### 1. Start datanode-6 with a 1.5 GB disk of its own (a RAM disk)&quot;
+docker run -d --name lab5-datanode-6 --hostname datanode-6 --network lab5_default \
+  --env-file config --tmpfs /tmp/hadoop-hadoop:size=1536m,mode=1777 \
+  apache/hadoop:3.5.0 hdfs datanode &gt; /dev/null
+sleep 25; show
+echo &quot;### 2. Balancer, threshold 5%&quot;
+$NN hdfs balancer -threshold 5 2&gt;&amp;1 |
+  grep -E &quot;underutilized|Need to move|Decided to move|Successfully moved|Out of space|^[A-Z][a-z]{2} [0-9]+, |No block|Iteration#&quot; |
+  sed -E &#x27;s/^2026-[0-9-]+ ([0-9:]+) (INFO|WARN)  [A-Za-z]+:[0-9]+ - /\1 /; s/java.io.IOException: Got error.*(Out of space)/  ... \1/; s/:9866:DISK//g&#x27; | cut -c1-150
+echo &quot;### 3. After&quot;
+show
+
+# In the hdfs-lab folder:
+#   bash add_node_and_balance.sh
+# Remove the extra node afterwards:  docker rm -f lab5-datanode-6</code></pre><div class="output">### 1. Start datanode-6 with a 1.5 GB disk of its own (a RAM disk)
+  172.19.0.3   used  0.32%
+  172.19.0.4   used  0.37%
+  172.19.0.6   used  0.37%
+  172.19.0.7   used  0.05%
+  172.19.0.8   used  0.00%
+  172.19.0.9   used  0.00%
+### 2. Balancer, threshold 5%
+Time Stamp               Iteration#  Bytes Already Moved  Bytes Left To Move  Bytes Being Moved  NameNode
+10:03:05 1 underutilized: [172.19.0.9]
+10:03:05 Need to move 1.32 GB to make the cluster balanced.
+10:03:05 Decided to move 340.33 MB bytes from 172.19.0.7 to 172.19.0.9
+10:03:05 Decided to move 250.58 MB bytes from 172.19.0.8 to 172.19.0.9
+10:03:05 Decided to move 250.54 MB bytes from 172.19.0.6 to 172.19.0.9
+10:03:05 Decided to move 250.58 MB bytes from 172.19.0.3 to 172.19.0.9
+10:03:05 Decided to move 340.38 MB bytes from 172.19.0.4 to 172.19.0.9
+  ... Out of space: The volume with the most available space (=1073725440 B) is less than the block size (=134217728 B)., reportedBlock move is failed
+10:03:07 Successfully moved blk_1073741846_1022 with size=19627626 from 172.19.0.4 to 172.19.0.9 through 172.19.0.6:9866
+10:03:08 Successfully moved blk_1073741860_1038 with size=134217728 from 172.19.0.7 to 172.19.0.9 through 172.19.0.7:9866
+10:03:17 Successfully moved blk_1073741844_1020 with size=134217728 from 172.19.0.4 to 172.19.0.9 through 172.19.0.6:9866
+10:03:18 Successfully moved blk_1073741847_1024 with size=134217728 from 172.19.0.3 to 172.19.0.9 through 172.19.0.6:9866
+10:03:20 Successfully moved blk_1073741845_1021 with size=134217728 from 172.19.0.4 to 172.19.0.9 through 172.19.0.6:9866
+10:03:20 Successfully moved blk_1073741849_1026 with size=134217728 from 172.19.0.4 to 172.19.0.9 through 172.19.0.6:9866
+10:03:20 Successfully moved blk_1073741850_1027 with size=134217728 from 172.19.0.6 to 172.19.0.9 through 172.19.0.6:9866
+10:03:20 Successfully moved blk_1073741842_1018 with size=134217728 from 172.19.0.6 to 172.19.0.9 through 172.19.0.6:9866
+Oct 21, 2026, 10:03:21 AM          0            914.72 MB             1.32 GB            1.40 GB                  8  hdfs://namenode:8020
+10:03:30 1 underutilized: [172.19.0.9]
+10:03:30 Need to move 430.09 MB to make the cluster balanced.
+10:03:30 Decided to move 26.85 MB bytes from 172.19.0.7 to 172.19.0.9
+10:03:30 Decided to move 195.07 MB bytes from 172.19.0.6 to 172.19.0.9
+10:03:30 Decided to move 65.06 MB bytes from 172.19.0.8 to 172.19.0.9
+10:03:30 Decided to move 65.06 MB bytes from 172.19.0.3 to 172.19.0.9
+10:03:30 Decided to move 154.85 MB bytes from 172.19.0.4 to 172.19.0.9
+  ... Out of space: The volume with the most available space (=643919872 B) is less than the block size (=134217728 B)., reportedBlock move is failed
+Oct 21, 2026, 10:03:31 AM          1            914.72 MB           430.09 MB          506.89 MB                  8  hdfs://namenode:8020
+[... iterations 2, 3 and 4 print the same lines; trimmed here ...]
+10:04:10 1 underutilized: [172.19.0.9]
+10:04:10 Need to move 429.78 MB to make the cluster balanced.
+10:04:10 Decided to move 116.60 MB bytes from 172.19.0.8 to 172.19.0.9
+10:04:10 Decided to move 78.39 MB bytes from 172.19.0.7 to 172.19.0.9
+10:04:10 Decided to move 116.60 MB bytes from 172.19.0.3 to 172.19.0.9
+10:04:10 Decided to move 194.99 MB bytes from 172.19.0.4 to 172.19.0.9
+  ... Out of space: The volume with the most available space (=643919872 B) is less than the block size (=134217728 B)., reportedBlock move is failed
+No block has been moved for 5 iterations. Exiting...
+Oct 21, 2026, 10:04:11 AM          5            914.72 MB           429.78 MB          506.58 MB                  8  hdfs://namenode:8020
+Oct 21, 2026, 10:04:11 AM Balancing took 1.1124 minutes
+### 3. After
+  172.19.0.3   used  0.27%
+  172.19.0.4   used  0.22%
+  172.19.0.6   used  0.27%
+  172.19.0.7   used  0.00%
+  172.19.0.8   used  0.00%
+  172.19.0.9   used 60.02%</div></div>
+  <p class="muted">Real output, with iterations 2 to 4 trimmed. 8 blocks moved in 16 s, then the 1.5 GB RAM disk refused more blocks (“Out of space”) and the balancer stopped after 5 idle iterations. No data was at risk: a failed move leaves the block where it was.</p></div>
+</section>
+
+<section class="part" id="tracer">
+  <span class="part-label"><b>8</b> Line by line</span>
+  <h2>Deciding what a decommission must copy</h2>
+  <p>For each block on the retiring node, count the replicas on other live nodes and decide whether a new copy is needed.</p>
+  <div class="tracer">
+    <script type="application/json">{
+ "lang": "python",
+ "code": [
+  "blocks = {\"A\": [\"dn-2\", \"dn-4\", \"dn-5\"], \"B\": [\"dn-4\", \"dn-1\", \"dn-3\"], \"C\": [\"dn-1\", \"dn-2\", \"dn-3\"]}",
+  "retiring = \"dn-4\"",
+  "to_copy = []",
+  "for blk, nodes in blocks.items():",
+  "    if retiring in nodes:",
+  "        others = [n for n in nodes if n != retiring]",
+  "        if len(others) < 3:",
+  "            to_copy.append((blk, others[0]))",
+  "print(\"copy:\", to_copy)"
+ ],
+ "steps": [
+  {
+   "line": 1,
+   "phase": "Python",
+   "note": "<code>blocks<\/code> is created: → dict #1.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "blocks",
+       "→ dict #1"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;A&#x27;: → list #2, &#x27;B&#x27;: → list #3, &#x27;C&#x27;: → list #4}",
+    "<b>#2 list (3)<\/b> [&#x27;dn-2&#x27;, &#x27;dn-4&#x27;, &#x27;dn-5&#x27;]",
+    "<b>#3 list (3)<\/b> [&#x27;dn-4&#x27;, &#x27;dn-1&#x27;, &#x27;dn-3&#x27;]",
+    "<b>#4 list (3)<\/b> [&#x27;dn-1&#x27;, &#x27;dn-2&#x27;, &#x27;dn-3&#x27;]"
+   ],
+   "newVar": "blocks"
+  },
+  {
+   "line": 2,
+   "phase": "Python",
+   "note": "<code>retiring<\/code> is created: &#x27;dn-4&#x27;.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "blocks",
+       "→ dict #1"
+      ],
+      [
+       "retiring",
+       "'dn-4'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;A&#x27;: → list #2, &#x27;B&#x27;: → list #3, &#x27;C&#x27;: → list #4}",
+    "<b>#2 list (3)<\/b> [&#x27;dn-2&#x27;, &#x27;dn-4&#x27;, &#x27;dn-5&#x27;]",
+    "<b>#3 list (3)<\/b> [&#x27;dn-4&#x27;, &#x27;dn-1&#x27;, &#x27;dn-3&#x27;]",
+    "<b>#4 list (3)<\/b> [&#x27;dn-1&#x27;, &#x27;dn-2&#x27;, &#x27;dn-3&#x27;]"
+   ],
+   "newVar": "retiring"
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "<code>to_copy<\/code> is created: → list #5. A new list object (#5) is created: []",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "blocks",
+       "→ dict #1"
+      ],
+      [
+       "retiring",
+       "'dn-4'"
+      ],
+      [
+       "to_copy",
+       "→ list #5"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;A&#x27;: → list #2, &#x27;B&#x27;: → list #3, &#x27;C&#x27;: → list #4}",
+    "<b>#2 list (3)<\/b> [&#x27;dn-2&#x27;, &#x27;dn-4&#x27;, &#x27;dn-5&#x27;]",
+    "<b>#3 list (3)<\/b> [&#x27;dn-4&#x27;, &#x27;dn-1&#x27;, &#x27;dn-3&#x27;]",
+    "<b>#4 list (3)<\/b> [&#x27;dn-1&#x27;, &#x27;dn-2&#x27;, &#x27;dn-3&#x27;]",
+    "<b>#5 list (0)<\/b> []"
+   ],
+   "newVar": "to_copy"
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "<code>blk<\/code> is created: &#x27;A&#x27;. <code>nodes<\/code> is created: → list #2.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "blocks",
+       "→ dict #1"
+      ],
+      [
+       "retiring",
+       "'dn-4'"
+      ],
+      [
+       "to_copy",
+       "→ list #5"
+      ],
+      [
+       "blk",
+       "'A'"
+      ],
+      [
+       "nodes",
+       "→ list #2"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;A&#x27;: → list #2, &#x27;B&#x27;: → list #3, &#x27;C&#x27;: → list #4}",
+    "<b>#2 list (3)<\/b> [&#x27;dn-2&#x27;, &#x27;dn-4&#x27;, &#x27;dn-5&#x27;]",
+    "<b>#3 list (3)<\/b> [&#x27;dn-4&#x27;, &#x27;dn-1&#x27;, &#x27;dn-3&#x27;]",
+    "<b>#4 list (3)<\/b> [&#x27;dn-1&#x27;, &#x27;dn-2&#x27;, &#x27;dn-3&#x27;]",
+    "<b>#5 list (0)<\/b> []"
+   ],
+   "newVar": "nodes"
+  },
+  {
+   "line": 5,
+   "phase": "Only its blocks",
+   "note": "Blocks that never lived on dn-4 are untouched. The condition is <b>True<\/b>, so the indented block runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "blocks",
+       "→ dict #1"
+      ],
+      [
+       "retiring",
+       "'dn-4'"
+      ],
+      [
+       "to_copy",
+       "→ list #5"
+      ],
+      [
+       "blk",
+       "'A'"
+      ],
+      [
+       "nodes",
+       "→ list #2"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;A&#x27;: → list #2, &#x27;B&#x27;: → list #3, &#x27;C&#x27;: → list #4}",
+    "<b>#2 list (3)<\/b> [&#x27;dn-2&#x27;, &#x27;dn-4&#x27;, &#x27;dn-5&#x27;]",
+    "<b>#3 list (3)<\/b> [&#x27;dn-4&#x27;, &#x27;dn-1&#x27;, &#x27;dn-3&#x27;]",
+    "<b>#4 list (3)<\/b> [&#x27;dn-1&#x27;, &#x27;dn-2&#x27;, &#x27;dn-3&#x27;]",
+    "<b>#5 list (0)<\/b> []"
+   ]
+  },
+  {
+   "line": 6,
+   "phase": "Count others",
+   "note": "Replicas on a decommissioning node no longer count towards the 3.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "blocks",
+       "→ dict #1"
+      ],
+      [
+       "retiring",
+       "'dn-4'"
+      ],
+      [
+       "to_copy",
+       "→ list #5"
+      ],
+      [
+       "blk",
+       "'A'"
+      ],
+      [
+       "nodes",
+       "→ list #2"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;A&#x27;: → list #2, &#x27;B&#x27;: → list #3, &#x27;C&#x27;: → list #4}",
+    "<b>#2 list (3)<\/b> [&#x27;dn-2&#x27;, &#x27;dn-4&#x27;, &#x27;dn-5&#x27;]",
+    "<b>#3 list (3)<\/b> [&#x27;dn-4&#x27;, &#x27;dn-1&#x27;, &#x27;dn-3&#x27;]",
+    "<b>#4 list (3)<\/b> [&#x27;dn-1&#x27;, &#x27;dn-2&#x27;, &#x27;dn-3&#x27;]",
+    "<b>#5 list (0)<\/b> []"
+   ]
+  },
+  {
+   "line": 6,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "blocks",
+       "→ dict #1"
+      ],
+      [
+       "retiring",
+       "'dn-4'"
+      ],
+      [
+       "to_copy",
+       "→ list #5"
+      ],
+      [
+       "blk",
+       "'A'"
+      ],
+      [
+       "nodes",
+       "→ list #2"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;A&#x27;: → list #2, &#x27;B&#x27;: → list #3, &#x27;C&#x27;: → list #4}",
+    "<b>#2 list (3)<\/b> [&#x27;dn-2&#x27;, &#x27;dn-4&#x27;, &#x27;dn-5&#x27;]",
+    "<b>#3 list (3)<\/b> [&#x27;dn-4&#x27;, &#x27;dn-1&#x27;, &#x27;dn-3&#x27;]",
+    "<b>#4 list (3)<\/b> [&#x27;dn-1&#x27;, &#x27;dn-2&#x27;, &#x27;dn-3&#x27;]",
+    "<b>#5 list (0)<\/b> []"
+   ]
+  },
+  {
+   "line": 6,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "blocks",
+       "→ dict #1"
+      ],
+      [
+       "retiring",
+       "'dn-4'"
+      ],
+      [
+       "to_copy",
+       "→ list #5"
+      ],
+      [
+       "blk",
+       "'A'"
+      ],
+      [
+       "nodes",
+       "→ list #2"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;A&#x27;: → list #2, &#x27;B&#x27;: → list #3, &#x27;C&#x27;: → list #4}",
+    "<b>#2 list (3)<\/b> [&#x27;dn-2&#x27;, &#x27;dn-4&#x27;, &#x27;dn-5&#x27;]",
+    "<b>#3 list (3)<\/b> [&#x27;dn-4&#x27;, &#x27;dn-1&#x27;, &#x27;dn-3&#x27;]",
+    "<b>#4 list (3)<\/b> [&#x27;dn-1&#x27;, &#x27;dn-2&#x27;, &#x27;dn-3&#x27;]",
+    "<b>#5 list (0)<\/b> []"
+   ]
+  },
+  {
+   "line": 6,
+   "phase": "Python",
+   "note": "<code>others<\/code> is created: → list #6. A new list object (#6) is created: [&#x27;dn-2&#x27;, &#x27;dn-5&#x27;]",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "blocks",
+       "→ dict #1"
+      ],
+      [
+       "retiring",
+       "'dn-4'"
+      ],
+      [
+       "to_copy",
+       "→ list #5"
+      ],
+      [
+       "blk",
+       "'A'"
+      ],
+      [
+       "nodes",
+       "→ list #2"
+      ],
+      [
+       "others",
+       "→ list #6"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;A&#x27;: → list #2, &#x27;B&#x27;: → list #3, &#x27;C&#x27;: → list #4}",
+    "<b>#2 list (3)<\/b> [&#x27;dn-2&#x27;, &#x27;dn-4&#x27;, &#x27;dn-5&#x27;]",
+    "<b>#3 list (3)<\/b> [&#x27;dn-4&#x27;, &#x27;dn-1&#x27;, &#x27;dn-3&#x27;]",
+    "<b>#4 list (3)<\/b> [&#x27;dn-1&#x27;, &#x27;dn-2&#x27;, &#x27;dn-3&#x27;]",
+    "<b>#5 list (0)<\/b> []",
+    "<b>#6 list (2)<\/b> [&#x27;dn-2&#x27;, &#x27;dn-5&#x27;]"
+   ],
+   "newVar": "others"
+  },
+  {
+   "line": 7,
+   "phase": "Python",
+   "note": "The condition is <b>True<\/b>, so the indented block runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "blocks",
+       "→ dict #1"
+      ],
+      [
+       "retiring",
+       "'dn-4'"
+      ],
+      [
+       "to_copy",
+       "→ list #5"
+      ],
+      [
+       "blk",
+       "'A'"
+      ],
+      [
+       "nodes",
+       "→ list #2"
+      ],
+      [
+       "others",
+       "→ list #6"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;A&#x27;: → list #2, &#x27;B&#x27;: → list #3, &#x27;C&#x27;: → list #4}",
+    "<b>#2 list (3)<\/b> [&#x27;dn-2&#x27;, &#x27;dn-4&#x27;, &#x27;dn-5&#x27;]",
+    "<b>#3 list (3)<\/b> [&#x27;dn-4&#x27;, &#x27;dn-1&#x27;, &#x27;dn-3&#x27;]",
+    "<b>#4 list (3)<\/b> [&#x27;dn-1&#x27;, &#x27;dn-2&#x27;, &#x27;dn-3&#x27;]",
+    "<b>#5 list (0)<\/b> []",
+    "<b>#6 list (2)<\/b> [&#x27;dn-2&#x27;, &#x27;dn-5&#x27;]"
+   ]
+  },
+  {
+   "line": 8,
+   "phase": "Source",
+   "note": "Copy from any live replica; the NameNode picks one and a target that keeps rack placement. Object #5 list now holds [→ tuple #7] A new tuple object (#7) is created: (&#x27;A&#x27;, &#x27;dn-2&#x27;)",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "blocks",
+       "→ dict #1"
+      ],
+      [
+       "retiring",
+       "'dn-4'"
+      ],
+      [
+       "to_copy",
+       "→ list #5"
+      ],
+      [
+       "blk",
+       "'A'"
+      ],
+      [
+       "nodes",
+       "→ list #2"
+      ],
+      [
+       "others",
+       "→ list #6"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;A&#x27;: → list #2, &#x27;B&#x27;: → list #3, &#x27;C&#x27;: → list #4}",
+    "<b>#2 list (3)<\/b> [&#x27;dn-2&#x27;, &#x27;dn-4&#x27;, &#x27;dn-5&#x27;]",
+    "<b>#3 list (3)<\/b> [&#x27;dn-4&#x27;, &#x27;dn-1&#x27;, &#x27;dn-3&#x27;]",
+    "<b>#4 list (3)<\/b> [&#x27;dn-1&#x27;, &#x27;dn-2&#x27;, &#x27;dn-3&#x27;]",
+    "<b>#5 list (1)<\/b> [→ tuple #7]",
+    "<b>#6 list (2)<\/b> [&#x27;dn-2&#x27;, &#x27;dn-5&#x27;]",
+    "<b>#7 tuple (2)<\/b> (&#x27;A&#x27;, &#x27;dn-2&#x27;)"
+   ]
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "<code>blk<\/code> changes to &#x27;B&#x27;. <code>nodes<\/code> changes to → list #3.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "blocks",
+       "→ dict #1"
+      ],
+      [
+       "retiring",
+       "'dn-4'"
+      ],
+      [
+       "to_copy",
+       "→ list #5"
+      ],
+      [
+       "blk",
+       "'B'"
+      ],
+      [
+       "nodes",
+       "→ list #3"
+      ],
+      [
+       "others",
+       "→ list #6"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;A&#x27;: → list #2, &#x27;B&#x27;: → list #3, &#x27;C&#x27;: → list #4}",
+    "<b>#2 list (3)<\/b> [&#x27;dn-2&#x27;, &#x27;dn-4&#x27;, &#x27;dn-5&#x27;]",
+    "<b>#3 list (3)<\/b> [&#x27;dn-4&#x27;, &#x27;dn-1&#x27;, &#x27;dn-3&#x27;]",
+    "<b>#4 list (3)<\/b> [&#x27;dn-1&#x27;, &#x27;dn-2&#x27;, &#x27;dn-3&#x27;]",
+    "<b>#5 list (1)<\/b> [→ tuple #7]",
+    "<b>#6 list (2)<\/b> [&#x27;dn-2&#x27;, &#x27;dn-5&#x27;]",
+    "<b>#7 tuple (2)<\/b> (&#x27;A&#x27;, &#x27;dn-2&#x27;)"
+   ],
+   "newVar": "nodes"
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "The condition is <b>True<\/b>, so the indented block runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "blocks",
+       "→ dict #1"
+      ],
+      [
+       "retiring",
+       "'dn-4'"
+      ],
+      [
+       "to_copy",
+       "→ list #5"
+      ],
+      [
+       "blk",
+       "'B'"
+      ],
+      [
+       "nodes",
+       "→ list #3"
+      ],
+      [
+       "others",
+       "→ list #6"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;A&#x27;: → list #2, &#x27;B&#x27;: → list #3, &#x27;C&#x27;: → list #4}",
+    "<b>#2 list (3)<\/b> [&#x27;dn-2&#x27;, &#x27;dn-4&#x27;, &#x27;dn-5&#x27;]",
+    "<b>#3 list (3)<\/b> [&#x27;dn-4&#x27;, &#x27;dn-1&#x27;, &#x27;dn-3&#x27;]",
+    "<b>#4 list (3)<\/b> [&#x27;dn-1&#x27;, &#x27;dn-2&#x27;, &#x27;dn-3&#x27;]",
+    "<b>#5 list (1)<\/b> [→ tuple #7]",
+    "<b>#6 list (2)<\/b> [&#x27;dn-2&#x27;, &#x27;dn-5&#x27;]",
+    "<b>#7 tuple (2)<\/b> (&#x27;A&#x27;, &#x27;dn-2&#x27;)"
+   ]
+  },
+  {
+   "line": 6,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "blocks",
+       "→ dict #1"
+      ],
+      [
+       "retiring",
+       "'dn-4'"
+      ],
+      [
+       "to_copy",
+       "→ list #5"
+      ],
+      [
+       "blk",
+       "'B'"
+      ],
+      [
+       "nodes",
+       "→ list #3"
+      ],
+      [
+       "others",
+       "→ list #6"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;A&#x27;: → list #2, &#x27;B&#x27;: → list #3, &#x27;C&#x27;: → list #4}",
+    "<b>#2 list (3)<\/b> [&#x27;dn-2&#x27;, &#x27;dn-4&#x27;, &#x27;dn-5&#x27;]",
+    "<b>#3 list (3)<\/b> [&#x27;dn-4&#x27;, &#x27;dn-1&#x27;, &#x27;dn-3&#x27;]",
+    "<b>#4 list (3)<\/b> [&#x27;dn-1&#x27;, &#x27;dn-2&#x27;, &#x27;dn-3&#x27;]",
+    "<b>#5 list (1)<\/b> [→ tuple #7]",
+    "<b>#6 list (2)<\/b> [&#x27;dn-2&#x27;, &#x27;dn-5&#x27;]",
+    "<b>#7 tuple (2)<\/b> (&#x27;A&#x27;, &#x27;dn-2&#x27;)"
+   ]
+  },
+  {
+   "line": 6,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "blocks",
+       "→ dict #1"
+      ],
+      [
+       "retiring",
+       "'dn-4'"
+      ],
+      [
+       "to_copy",
+       "→ list #5"
+      ],
+      [
+       "blk",
+       "'B'"
+      ],
+      [
+       "nodes",
+       "→ list #3"
+      ],
+      [
+       "others",
+       "→ list #6"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;A&#x27;: → list #2, &#x27;B&#x27;: → list #3, &#x27;C&#x27;: → list #4}",
+    "<b>#2 list (3)<\/b> [&#x27;dn-2&#x27;, &#x27;dn-4&#x27;, &#x27;dn-5&#x27;]",
+    "<b>#3 list (3)<\/b> [&#x27;dn-4&#x27;, &#x27;dn-1&#x27;, &#x27;dn-3&#x27;]",
+    "<b>#4 list (3)<\/b> [&#x27;dn-1&#x27;, &#x27;dn-2&#x27;, &#x27;dn-3&#x27;]",
+    "<b>#5 list (1)<\/b> [→ tuple #7]",
+    "<b>#6 list (2)<\/b> [&#x27;dn-2&#x27;, &#x27;dn-5&#x27;]",
+    "<b>#7 tuple (2)<\/b> (&#x27;A&#x27;, &#x27;dn-2&#x27;)"
+   ]
+  },
+  {
+   "line": 6,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "blocks",
+       "→ dict #1"
+      ],
+      [
+       "retiring",
+       "'dn-4'"
+      ],
+      [
+       "to_copy",
+       "→ list #5"
+      ],
+      [
+       "blk",
+       "'B'"
+      ],
+      [
+       "nodes",
+       "→ list #3"
+      ],
+      [
+       "others",
+       "→ list #6"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;A&#x27;: → list #2, &#x27;B&#x27;: → list #3, &#x27;C&#x27;: → list #4}",
+    "<b>#2 list (3)<\/b> [&#x27;dn-2&#x27;, &#x27;dn-4&#x27;, &#x27;dn-5&#x27;]",
+    "<b>#3 list (3)<\/b> [&#x27;dn-4&#x27;, &#x27;dn-1&#x27;, &#x27;dn-3&#x27;]",
+    "<b>#4 list (3)<\/b> [&#x27;dn-1&#x27;, &#x27;dn-2&#x27;, &#x27;dn-3&#x27;]",
+    "<b>#5 list (1)<\/b> [→ tuple #7]",
+    "<b>#6 list (2)<\/b> [&#x27;dn-2&#x27;, &#x27;dn-5&#x27;]",
+    "<b>#7 tuple (2)<\/b> (&#x27;A&#x27;, &#x27;dn-2&#x27;)"
+   ]
+  },
+  {
+   "line": 6,
+   "phase": "Python",
+   "note": "<code>others<\/code> changes to → list #8. A new list object (#8) is created: [&#x27;dn-1&#x27;, &#x27;dn-3&#x27;]",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "blocks",
+       "→ dict #1"
+      ],
+      [
+       "retiring",
+       "'dn-4'"
+      ],
+      [
+       "to_copy",
+       "→ list #5"
+      ],
+      [
+       "blk",
+       "'B'"
+      ],
+      [
+       "nodes",
+       "→ list #3"
+      ],
+      [
+       "others",
+       "→ list #8"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;A&#x27;: → list #2, &#x27;B&#x27;: → list #3, &#x27;C&#x27;: → list #4}",
+    "<b>#2 list (3)<\/b> [&#x27;dn-2&#x27;, &#x27;dn-4&#x27;, &#x27;dn-5&#x27;]",
+    "<b>#3 list (3)<\/b> [&#x27;dn-4&#x27;, &#x27;dn-1&#x27;, &#x27;dn-3&#x27;]",
+    "<b>#4 list (3)<\/b> [&#x27;dn-1&#x27;, &#x27;dn-2&#x27;, &#x27;dn-3&#x27;]",
+    "<b>#5 list (1)<\/b> [→ tuple #7]",
+    "<b>#7 tuple (2)<\/b> (&#x27;A&#x27;, &#x27;dn-2&#x27;)",
+    "<b>#8 list (2)<\/b> [&#x27;dn-1&#x27;, &#x27;dn-3&#x27;]"
+   ],
+   "newVar": "others"
+  },
+  {
+   "line": 7,
+   "phase": "Python",
+   "note": "The condition is <b>True<\/b>, so the indented block runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "blocks",
+       "→ dict #1"
+      ],
+      [
+       "retiring",
+       "'dn-4'"
+      ],
+      [
+       "to_copy",
+       "→ list #5"
+      ],
+      [
+       "blk",
+       "'B'"
+      ],
+      [
+       "nodes",
+       "→ list #3"
+      ],
+      [
+       "others",
+       "→ list #8"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;A&#x27;: → list #2, &#x27;B&#x27;: → list #3, &#x27;C&#x27;: → list #4}",
+    "<b>#2 list (3)<\/b> [&#x27;dn-2&#x27;, &#x27;dn-4&#x27;, &#x27;dn-5&#x27;]",
+    "<b>#3 list (3)<\/b> [&#x27;dn-4&#x27;, &#x27;dn-1&#x27;, &#x27;dn-3&#x27;]",
+    "<b>#4 list (3)<\/b> [&#x27;dn-1&#x27;, &#x27;dn-2&#x27;, &#x27;dn-3&#x27;]",
+    "<b>#5 list (1)<\/b> [→ tuple #7]",
+    "<b>#7 tuple (2)<\/b> (&#x27;A&#x27;, &#x27;dn-2&#x27;)",
+    "<b>#8 list (2)<\/b> [&#x27;dn-1&#x27;, &#x27;dn-3&#x27;]"
+   ]
+  },
+  {
+   "line": 8,
+   "phase": "Python",
+   "note": "Object #5 list now holds [→ tuple #7, → tuple #9] A new tuple object (#9) is created: (&#x27;B&#x27;, &#x27;dn-1&#x27;)",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "blocks",
+       "→ dict #1"
+      ],
+      [
+       "retiring",
+       "'dn-4'"
+      ],
+      [
+       "to_copy",
+       "→ list #5"
+      ],
+      [
+       "blk",
+       "'B'"
+      ],
+      [
+       "nodes",
+       "→ list #3"
+      ],
+      [
+       "others",
+       "→ list #8"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;A&#x27;: → list #2, &#x27;B&#x27;: → list #3, &#x27;C&#x27;: → list #4}",
+    "<b>#2 list (3)<\/b> [&#x27;dn-2&#x27;, &#x27;dn-4&#x27;, &#x27;dn-5&#x27;]",
+    "<b>#3 list (3)<\/b> [&#x27;dn-4&#x27;, &#x27;dn-1&#x27;, &#x27;dn-3&#x27;]",
+    "<b>#4 list (3)<\/b> [&#x27;dn-1&#x27;, &#x27;dn-2&#x27;, &#x27;dn-3&#x27;]",
+    "<b>#5 list (2)<\/b> [→ tuple #7, → tuple #9]",
+    "<b>#7 tuple (2)<\/b> (&#x27;A&#x27;, &#x27;dn-2&#x27;)",
+    "<b>#8 list (2)<\/b> [&#x27;dn-1&#x27;, &#x27;dn-3&#x27;]",
+    "<b>#9 tuple (2)<\/b> (&#x27;B&#x27;, &#x27;dn-1&#x27;)"
+   ]
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "<code>blk<\/code> changes to &#x27;C&#x27;. <code>nodes<\/code> changes to → list #4.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "blocks",
+       "→ dict #1"
+      ],
+      [
+       "retiring",
+       "'dn-4'"
+      ],
+      [
+       "to_copy",
+       "→ list #5"
+      ],
+      [
+       "blk",
+       "'C'"
+      ],
+      [
+       "nodes",
+       "→ list #4"
+      ],
+      [
+       "others",
+       "→ list #8"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;A&#x27;: → list #2, &#x27;B&#x27;: → list #3, &#x27;C&#x27;: → list #4}",
+    "<b>#2 list (3)<\/b> [&#x27;dn-2&#x27;, &#x27;dn-4&#x27;, &#x27;dn-5&#x27;]",
+    "<b>#3 list (3)<\/b> [&#x27;dn-4&#x27;, &#x27;dn-1&#x27;, &#x27;dn-3&#x27;]",
+    "<b>#4 list (3)<\/b> [&#x27;dn-1&#x27;, &#x27;dn-2&#x27;, &#x27;dn-3&#x27;]",
+    "<b>#5 list (2)<\/b> [→ tuple #7, → tuple #9]",
+    "<b>#7 tuple (2)<\/b> (&#x27;A&#x27;, &#x27;dn-2&#x27;)",
+    "<b>#8 list (2)<\/b> [&#x27;dn-1&#x27;, &#x27;dn-3&#x27;]",
+    "<b>#9 tuple (2)<\/b> (&#x27;B&#x27;, &#x27;dn-1&#x27;)"
+   ],
+   "newVar": "nodes"
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "The condition is <b>False<\/b>, so the indented block is skipped.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "blocks",
+       "→ dict #1"
+      ],
+      [
+       "retiring",
+       "'dn-4'"
+      ],
+      [
+       "to_copy",
+       "→ list #5"
+      ],
+      [
+       "blk",
+       "'C'"
+      ],
+      [
+       "nodes",
+       "→ list #4"
+      ],
+      [
+       "others",
+       "→ list #8"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;A&#x27;: → list #2, &#x27;B&#x27;: → list #3, &#x27;C&#x27;: → list #4}",
+    "<b>#2 list (3)<\/b> [&#x27;dn-2&#x27;, &#x27;dn-4&#x27;, &#x27;dn-5&#x27;]",
+    "<b>#3 list (3)<\/b> [&#x27;dn-4&#x27;, &#x27;dn-1&#x27;, &#x27;dn-3&#x27;]",
+    "<b>#4 list (3)<\/b> [&#x27;dn-1&#x27;, &#x27;dn-2&#x27;, &#x27;dn-3&#x27;]",
+    "<b>#5 list (2)<\/b> [→ tuple #7, → tuple #9]",
+    "<b>#7 tuple (2)<\/b> (&#x27;A&#x27;, &#x27;dn-2&#x27;)",
+    "<b>#8 list (2)<\/b> [&#x27;dn-1&#x27;, &#x27;dn-3&#x27;]",
+    "<b>#9 tuple (2)<\/b> (&#x27;B&#x27;, &#x27;dn-1&#x27;)"
+   ]
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "Nothing is left to loop over, so the loop ends and Python moves on.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "blocks",
+       "→ dict #1"
+      ],
+      [
+       "retiring",
+       "'dn-4'"
+      ],
+      [
+       "to_copy",
+       "→ list #5"
+      ],
+      [
+       "blk",
+       "'C'"
+      ],
+      [
+       "nodes",
+       "→ list #4"
+      ],
+      [
+       "others",
+       "→ list #8"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;A&#x27;: → list #2, &#x27;B&#x27;: → list #3, &#x27;C&#x27;: → list #4}",
+    "<b>#2 list (3)<\/b> [&#x27;dn-2&#x27;, &#x27;dn-4&#x27;, &#x27;dn-5&#x27;]",
+    "<b>#3 list (3)<\/b> [&#x27;dn-4&#x27;, &#x27;dn-1&#x27;, &#x27;dn-3&#x27;]",
+    "<b>#4 list (3)<\/b> [&#x27;dn-1&#x27;, &#x27;dn-2&#x27;, &#x27;dn-3&#x27;]",
+    "<b>#5 list (2)<\/b> [→ tuple #7, → tuple #9]",
+    "<b>#7 tuple (2)<\/b> (&#x27;A&#x27;, &#x27;dn-2&#x27;)",
+    "<b>#8 list (2)<\/b> [&#x27;dn-1&#x27;, &#x27;dn-3&#x27;]",
+    "<b>#9 tuple (2)<\/b> (&#x27;B&#x27;, &#x27;dn-1&#x27;)"
+   ]
+  },
+  {
+   "line": 9,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "blocks",
+       "→ dict #1"
+      ],
+      [
+       "retiring",
+       "'dn-4'"
+      ],
+      [
+       "to_copy",
+       "→ list #5"
+      ],
+      [
+       "blk",
+       "'C'"
+      ],
+      [
+       "nodes",
+       "→ list #4"
+      ],
+      [
+       "others",
+       "→ list #8"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;A&#x27;: → list #2, &#x27;B&#x27;: → list #3, &#x27;C&#x27;: → list #4}",
+    "<b>#2 list (3)<\/b> [&#x27;dn-2&#x27;, &#x27;dn-4&#x27;, &#x27;dn-5&#x27;]",
+    "<b>#3 list (3)<\/b> [&#x27;dn-4&#x27;, &#x27;dn-1&#x27;, &#x27;dn-3&#x27;]",
+    "<b>#4 list (3)<\/b> [&#x27;dn-1&#x27;, &#x27;dn-2&#x27;, &#x27;dn-3&#x27;]",
+    "<b>#5 list (2)<\/b> [→ tuple #7, → tuple #9]",
+    "<b>#7 tuple (2)<\/b> (&#x27;A&#x27;, &#x27;dn-2&#x27;)",
+    "<b>#8 list (2)<\/b> [&#x27;dn-1&#x27;, &#x27;dn-3&#x27;]",
+    "<b>#9 tuple (2)<\/b> (&#x27;B&#x27;, &#x27;dn-1&#x27;)"
+   ],
+   "out": "copy: [('A', 'dn-2'), ('B', 'dn-1')]\n"
+  }
+ ]
+}</script>
+  </div>
+
+<h3 id="worked">Worked examples: real problems, solved and traced in memory</h3>
+  <p class="wx-intro">Three admin calculations: how long a decommission takes, how much data a balancer must move, and how much faster it runs with more bandwidth. Each runs live and is traced in memory.</p>
+  <article class="wx">
+    <div class="wx__head"><span class="wx__num">Example 1</span><span class="lvl lvl--b">Beginner</span><span class="wx__tag">Decommission · time</span></div>
+    <h4>How long to retire a 12 TB node?</h4>
+    <div class="wx__problem"><p class="wx__label">Problem statement</p><p>A DataNode holds 12 TB. Re-replication across the cluster reaches about 1 GB/s in total. Roughly how long does decommissioning take, and why does it hardly matter how many blocks there are?</p></div>
+    <div class="prob__io"><div><small>Input</small><pre>12 TB · 1 GB/s</pre></div><div><small>Expected output</small><pre>about 3.4 hours</pre></div></div>
+    <div class="wx__approach"><p class="wx__label">Approach</p><ol><li>Time = data ÷ total copy speed.</li><li>Convert TB to GB (×1024).</li><li>Convert seconds to hours.</li></ol></div>
+    <p class="wx__label">Solution: run it live</p>
+    <div class="runner">
+    <script type="application/json">{
+ "lang": "python",
+ "file": "main.py",
+ "tasks": [
+  {
+   "label": "Solution",
+   "hint": "About 3.4 hours. Many nodes copy in parallel, which is why decommissioning a node is far faster than restoring 12 TB from a backup.",
+   "code": "tb, gb_per_s = 12, 1\nseconds = tb * 1024 / gb_per_s\nprint(f\"about {seconds / 3600:.1f} hours\")\n"
+  }
+ ]
+}</script>
+    </div>
+    <p class="wx__label">What happens in memory, step by step</p>
+    <p class="wx__how">Recorded from a real Python run: press <b>Next</b> to execute one line at a time. Watch variables change in each frame, and lists and dictionaries (numbered #1, #2 …) fill up as objects.</p>
+    <div class="tracer">
+    <script type="application/json">{
+ "lang": "python",
+ "code": [
+  "tb, gb_per_s = 12, 1",
+  "seconds = tb * 1024 / gb_per_s",
+  "print(f\"about {seconds / 3600:.1f} hours\")"
+ ],
+ "steps": [
+  {
+   "line": 1,
+   "phase": "Python",
+   "note": "<code>tb<\/code> is created: 12. <code>gb_per_s<\/code> is created: 1.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "tb",
+       "12"
+      ],
+      [
+       "gb_per_s",
+       "1"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "gb_per_s"
+  },
+  {
+   "line": 2,
+   "phase": "Bytes",
+   "note": "Copy time depends on bytes; block count matters only for tiny amounts, where the 30 s checks dominate (our 2-block run took 60 s). <code>seconds<\/code> is created: 12288.0.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "tb",
+       "12"
+      ],
+      [
+       "gb_per_s",
+       "1"
+      ],
+      [
+       "seconds",
+       "12288.0"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "seconds"
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "tb",
+       "12"
+      ],
+      [
+       "gb_per_s",
+       "1"
+      ],
+      [
+       "seconds",
+       "12288.0"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "out": "about 3.4 hours\n"
+  }
+ ]
+}</script>
+    </div>
+  </article>
+  <article class="wx">
+    <div class="wx__head"><span class="wx__num">Example 2</span><span class="lvl lvl--i">Intermediate</span><span class="wx__tag">Balancer · planning</span></div>
+    <h4>How much must the balancer move?</h4>
+    <div class="wx__problem"><p class="wx__label">Problem statement</p><p>Ten DataNodes of 40 TB each are 75% full. We add five empty 40 TB nodes. With threshold 10%, how much data must move at least, so that each new node is within 10% of the new average?</p></div>
+    <div class="prob__io"><div><small>Input</small><pre>10 × 40 TB at 75% · 5 new × 40 TB · threshold 10%</pre></div><div><small>Expected output</small><pre>average 50.0%, each new node needs 16.0 TB, total 80 TB</pre></div></div>
+    <div class="wx__approach"><p class="wx__label">Approach</p><ol><li>New average = total used ÷ total capacity.</li><li>Each new node needs at least (average − 10%) × 40 TB.</li><li>Multiply by 5.</li></ol></div>
+    <p class="wx__label">Solution: run it live</p>
+    <div class="runner">
+    <script type="application/json">{
+ "lang": "python",
+ "file": "main.py",
+ "tasks": [
+  {
+   "label": "Solution",
+   "hint": "The average drops to 50%; each new node must reach 40%: 16 TB each, 80 TB in total.",
+   "code": "used = 10 * 40 * 0.75\ncap = 15 * 40\navg = 100 * used / cap\nneed_each = (avg - 10) / 100 * 40\nprint(f\"average {avg:.1f}%, each new node needs {need_each:.1f} TB, total {5 * need_each:.0f} TB\")\n"
+  }
+ ]
+}</script>
+    </div>
+    <p class="wx__label">What happens in memory, step by step</p>
+    <p class="wx__how">Recorded from a real Python run: press <b>Next</b> to execute one line at a time. Watch variables change in each frame, and lists and dictionaries (numbered #1, #2 …) fill up as objects.</p>
+    <div class="tracer">
+    <script type="application/json">{
+ "lang": "python",
+ "code": [
+  "used = 10 * 40 * 0.75",
+  "cap = 15 * 40",
+  "avg = 100 * used / cap",
+  "need_each = (avg - 10) / 100 * 40",
+  "print(f\"average {avg:.1f}%, each new node needs {need_each:.1f} TB, total {5 * need_each:.0f} TB\")"
+ ],
+ "steps": [
+  {
+   "line": 1,
+   "phase": "Python",
+   "note": "<code>used<\/code> is created: 300.0.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "used",
+       "300.0"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "used"
+  },
+  {
+   "line": 2,
+   "phase": "Python",
+   "note": "<code>cap<\/code> is created: 600.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "used",
+       "300.0"
+      ],
+      [
+       "cap",
+       "600"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "cap"
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "<code>avg<\/code> is created: 50.0.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "used",
+       "300.0"
+      ],
+      [
+       "cap",
+       "600"
+      ],
+      [
+       "avg",
+       "50.0"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "avg"
+  },
+  {
+   "line": 4,
+   "phase": "Average",
+   "note": "Adding empty capacity lowers the average utilisation. <code>need_each<\/code> is created: 16.0.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "used",
+       "300.0"
+      ],
+      [
+       "cap",
+       "600"
+      ],
+      [
+       "avg",
+       "50.0"
+      ],
+      [
+       "need_each",
+       "16.0"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "need_each"
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "used",
+       "300.0"
+      ],
+      [
+       "cap",
+       "600"
+      ],
+      [
+       "avg",
+       "50.0"
+      ],
+      [
+       "need_each",
+       "16.0"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "out": "average 50.0%, each new node needs 16.0 TB, total 80 TB\n"
+  }
+ ]
+}</script>
+    </div>
+  </article>
+  <article class="wx">
+    <div class="wx__head"><span class="wx__num">Example 3</span><span class="lvl lvl--a">Advanced</span><span class="wx__tag">Balancer · bandwidth</span></div>
+    <h4>How long will that take at 100 MB/s per node?</h4>
+    <div class="wx__problem"><p class="wx__label">Problem statement</p><p>Moving those 80 TB: each of the 5 new nodes receives at most at the balancer bandwidth (default 100 MB/s per DataNode). How long does it take at 100 MB/s, and at 300 MB/s set with <code>-setBalancerBandwidth</code> at night?</p></div>
+    <div class="prob__io"><div><small>Input</small><pre>80 TB · 5 receivers · 100 or 300 MB/s</pre></div><div><small>Expected output</small><pre>100 MB/s: 47 hours (1.9 days)
+300 MB/s: 16 hours (0.6 days)</pre></div></div>
+    <div class="wx__approach"><p class="wx__label">Approach</p><ol><li>Each new node receives 16 TB.</li><li>Time = 16 TB ÷ per-node bandwidth.</li><li>Compare the two settings.</li></ol></div>
+    <p class="wx__label">Solution: run it live</p>
+    <div class="runner">
+    <script type="application/json">{
+ "lang": "python",
+ "file": "main.py",
+ "tasks": [
+  {
+   "label": "Solution",
+   "hint": "About 47 hours vs 16 hours. In practice teams balance over several nights, or add new nodes before the old ones are full.",
+   "code": "per_node_tb = 16\nfor mb_s in [100, 300]:\n    hours = per_node_tb * 1024 * 1024 / mb_s / 3600\n    print(f\"{mb_s} MB/s: {hours:.0f} hours ({hours / 24:.1f} days)\")\n"
+  }
+ ]
+}</script>
+    </div>
+    <p class="wx__label">What happens in memory, step by step</p>
+    <p class="wx__how">Recorded from a real Python run: press <b>Next</b> to execute one line at a time. Watch variables change in each frame, and lists and dictionaries (numbered #1, #2 …) fill up as objects.</p>
+    <div class="tracer">
+    <script type="application/json">{
+ "lang": "python",
+ "code": [
+  "per_node_tb = 16",
+  "for mb_s in [100, 300]:",
+  "    hours = per_node_tb * 1024 * 1024 / mb_s / 3600",
+  "    print(f\"{mb_s} MB/s: {hours:.0f} hours ({hours / 24:.1f} days)\")"
+ ],
+ "steps": [
+  {
+   "line": 1,
+   "phase": "Python",
+   "note": "<code>per_node_tb<\/code> is created: 16.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "per_node_tb",
+       "16"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "per_node_tb"
+  },
+  {
+   "line": 2,
+   "phase": "Python",
+   "note": "<code>mb_s<\/code> is created: 100.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "per_node_tb",
+       "16"
+      ],
+      [
+       "mb_s",
+       "100"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "mb_s"
+  },
+  {
+   "line": 3,
+   "phase": "Limit",
+   "note": "The bandwidth limit protects running jobs; raising it trades job speed for faster balancing. <code>hours<\/code> is created: 46.6034.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "per_node_tb",
+       "16"
+      ],
+      [
+       "mb_s",
+       "100"
+      ],
+      [
+       "hours",
+       "46.6034"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "hours"
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "per_node_tb",
+       "16"
+      ],
+      [
+       "mb_s",
+       "100"
+      ],
+      [
+       "hours",
+       "46.6034"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "out": "100 MB/s: 47 hours (1.9 days)\n"
+  },
+  {
+   "line": 2,
+   "phase": "Python",
+   "note": "<code>mb_s<\/code> changes to 300.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "per_node_tb",
+       "16"
+      ],
+      [
+       "mb_s",
+       "300"
+      ],
+      [
+       "hours",
+       "46.6034"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "mb_s"
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "<code>hours<\/code> changes to 15.5345.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "per_node_tb",
+       "16"
+      ],
+      [
+       "mb_s",
+       "300"
+      ],
+      [
+       "hours",
+       "15.5345"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "hours"
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "per_node_tb",
+       "16"
+      ],
+      [
+       "mb_s",
+       "300"
+      ],
+      [
+       "hours",
+       "15.5345"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "out": "300 MB/s: 16 hours (0.6 days)\n"
+  },
+  {
+   "line": 2,
+   "phase": "Python",
+   "note": "Nothing is left to loop over, so the loop ends and Python moves on.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "per_node_tb",
+       "16"
+      ],
+      [
+       "mb_s",
+       "300"
+      ],
+      [
+       "hours",
+       "15.5345"
+      ]
+     ]
+    }
+   ],
+   "heap": []
+  }
+ ]
+}</script>
+    </div>
+  </article>
+</section>
+
+<section class="part" id="quiz">
+  <span class="part-label"><b>9</b> Quiz and revision</span>
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <script type="application/json">[
+ {
+  "q": "How do you start decommissioning a DataNode?",
+  "options": [
+   "Stop the DataNode process",
+   "Run hdfs fsck -delete",
+   "Add it to the dfs.hosts.exclude file and run hdfs dfsadmin -refreshNodes",
+   "Run the balancer"
+  ],
+  "answer": 2,
+  "why": "Real: echo 172.19.0.7 &gt; dfs.exclude; refreshNodes → Decommission in progress."
+ },
+ {
+  "q": "Can a decommissioning node still serve reads?",
+  "options": [
+   "No, it is shut down immediately",
+   "Yes, until it is Decommissioned and stopped",
+   "Only for small files",
+   "Only for the NameNode"
+  ],
+  "answer": 1,
+  "why": "Its replicas are used as sources for copying and can serve reads."
+ },
+ {
+  "q": "Why not simply switch a DataNode off to retire it?",
+  "options": [
+   "HDFS waits until it is declared dead (about 10.5 minutes) before re-replicating; meanwhile blocks have fewer replicas",
+   "It is not allowed",
+   "It deletes all files",
+   "The balancer stops working"
+  ],
+  "answer": 0,
+  "why": "Decommissioning copies first; a sudden stop is treated as a failure."
+ },
+ {
+  "q": "What does the balancer threshold mean?",
+  "options": [
+   "Maximum number of blocks to move",
+   "Network speed",
+   "Minimum replication",
+   "Allowed difference, in % of capacity, between each node and the cluster average"
+  ],
+  "answer": 3,
+  "why": "The tool's own help: “Percentage of disk capacity”; range 1.0 to 100.0."
+ },
+ {
+  "q": "The balancer moved a block from dn-4 to dn-6. What happens to the replication factor?",
+  "options": [
+   "It increases to 4",
+   "It drops to 2",
+   "It stays the same: copy to the target, then delete the source replica",
+   "It becomes 1"
+  ],
+  "answer": 2,
+  "why": "Balancing never changes how many replicas a block has."
+ },
+ {
+  "q": "What does hdfs fsck do by default?",
+  "options": [
+   "Repairs corrupt blocks",
+   "Reports file and block health from NameNode metadata, without changing anything",
+   "Formats DataNodes",
+   "Restarts the NameNode"
+  ],
+  "answer": 1,
+  "why": "Only -move and -delete change files."
+ },
+ {
+  "q": "The lab balancer printed “No block has been moved for 5 iterations. Exiting...”. Why?",
+  "options": [
+   "Moves kept failing (target out of space), so it gave up after 5 idle iterations",
+   "The cluster was balanced",
+   "The NameNode crashed",
+   "The threshold was too high"
+  ],
+  "answer": 0,
+  "why": "“Out of space” on the 1.5 GB disk; max idle iteration = 5."
+ },
+ {
+  "q": "Which command changes the balancer speed on all DataNodes without a restart?",
+  "options": [
+   "hdfs balancer -speed",
+   "hdfs dfs -setrep",
+   "hdfs dfsadmin -refreshNodes",
+   "hdfs dfsadmin -setBalancerBandwidth"
+  ],
+  "answer": 3,
+  "why": "Real: “Balancer bandwidth is set to 52428800” (50 MB/s)."
+ }
+]</script>
+  </div>
+
+  <h3>Quick revision</h3>
+  <div class="revision">
+    <h3>Lesson 6.4 in one screen</h3>
+    <ul><li><code>hdfs dfsadmin -report</code>: capacity, dead nodes, missing / under-replicated blocks, per-node status.</li><li><code>hdfs fsck path -files -blocks -locations -racks</code>: health from metadata; read-only by default.</li><li>Decommission: host in <code>dfs.hosts.exclude</code> → <code>-refreshNodes</code> → <i>Decommission in progress</i> → <i>Decommissioned</i> → stop. Lab: 52 s and 60 s.</li><li>Recommission: remove from the exclude file + refresh; excess replicas are deleted, so the node may come back empty.</li><li>New nodes are not filled automatically: run <code>hdfs balancer [-threshold 10]</code>.</li><li>Balanced = every node within threshold % (of capacity) of the average; range 1 to 100.</li><li>Lab balancer: 8 blocks, 914.72 MB in 16 s; then “Out of space” and exit after 5 idle iterations.</li><li>Bandwidth: 100 MB/s per node by default; change live with <code>-setBalancerBandwidth</code>.</li></ul>
+  </div>
+
+  <h3>Interview and viva questions</h3>
+  <div class="faq">
+    <details><summary>What is DataNode decommissioning in HDFS?</summary><p>The safe way to remove a DataNode. You list it in the exclude file (dfs.hosts.exclude) and run hdfs dfsadmin -refreshNodes. The NameNode copies all its block replicas to other nodes while it keeps serving reads. When every block has enough replicas elsewhere, its status becomes Decommissioned and it can be shut down.</p></details>
+    <details><summary>How do you add a new DataNode to a running cluster?</summary><p>Install Hadoop with the cluster's configuration on the new machine and start the DataNode; it registers with the NameNode on its own. If an include file (dfs.hosts) is used, add it there and run -refreshNodes. Then run the balancer so existing data spreads onto it.</p></details>
+    <details><summary>What does the HDFS balancer do?</summary><p>It moves block replicas from DataNodes whose utilisation is above the cluster average to those below it, until every node is within the threshold (default 10%) of the average. Each move copies the block to the target and then removes one source replica, respecting rack placement, so replication is unchanged.</p></details>
+    <details><summary>Is it safe to stop the balancer in the middle?</summary><p>Yes. Each block move is complete or not done at all; stopping the balancer leaves the cluster partly balanced but fully consistent. You can rerun it later.</p></details>
+    <details><summary>What is the difference between fsck in Linux and hdfs fsck?</summary><p>Linux fsck checks and repairs a local file system's structures. hdfs fsck reports HDFS health from the NameNode: missing, corrupt and under-replicated blocks per file. It does not repair; HDFS repairs replicas itself, and -move or -delete only deal with files that have lost all good replicas.</p></details>
+    <details><summary>Why is a decommission stuck in progress?</summary><p>Usually some blocks cannot get new replicas: not enough nodes or racks for the placement policy, full disks, a failing target node, or files still open for writing. The NameNode log shows lines like “still has 1 blocks to replicate”, and hdfs fsck or -report -decommissioning help find them.</p></details>
+    
+  </div>
+
+  <h3 id="practice">Practice problems</h3>
+  <p class="prob-intro">Admin exercises using real reports, logs and timings from the lab.</p>
+  <div class="probs">
+    <article class="prob"><div class="prob__head"><span class="prob__num">P1</span><span class="prob__tag prob__tag--easy">Easy</span><h4>Read the report</h4></div>
+      <p>From the real report lines, how much of the configured capacity is used by HDFS, in %?</p>
+      <div class="prob__io"><div><small>Input</small><pre>Configured Capacity 1352765870080 · DFS Used 3037733930</pre></div><div><small>Expected output</small><pre>0.22%</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>print(f&quot;{100 * 3037733930 / 1352765870080:.2f}%&quot;)</code></pre><div class="output">0.22%</div></div>
+        <p><b>How it works:</b> 0.22% of configured capacity. The report printed 3.28% because DFS Used% is relative to Present Capacity (86.37 GB), not the 1.23 TB configured.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P2</span><span class="prob__tag prob__tag--easy">Easy</span><h4>Decommission duration</h4></div>
+      <p>The real watcher printed status at t = 2, 8, 14, 20, 28, 34, 40, 46 s (in progress) and 52 s (Decommissioned). How many checks were in progress, and what was the average gap between checks?</p>
+      <div class="prob__io"><div><small>Input</small><pre>2 8 14 20 28 34 40 46 52</pre></div><div><small>Expected output</small><pre>in progress: 8  average gap: 6.25 s</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>t = [2, 8, 14, 20, 28, 34, 40, 46, 52]
+gaps = [b - a for a, b in zip(t, t[1:])]
+print(&quot;in progress:&quot;, len(t) - 1, &quot; average gap:&quot;, sum(gaps) / len(gaps), &quot;s&quot;)</code></pre><div class="output">in progress: 8  average gap: 6.25 s</div></div>
+        <p><b>How it works:</b> 8 checks in progress, one every 6.25 s on average (sleep plus the time each -report takes), then Decommissioned at 52 s.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P3</span><span class="prob__tag prob__tag--easy">Easy</span><h4>Bandwidth in MB/s</h4></div>
+      <p>Convert the real <code>-setBalancerBandwidth 52428800</code> and the default 104857600 to MB/s.</p>
+      <div class="prob__io"><div><small>Input</small><pre>52428800 · 104857600 bytes/s</pre></div><div><small>Expected output</small><pre>52428800 = 50.0 MB/s
+104857600 = 100.0 MB/s</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>for b in [52428800, 104857600]:
+    print(b, &quot;=&quot;, b / 1024 / 1024, &quot;MB/s&quot;)</code></pre><div class="output">52428800 = 50.0 MB/s
+104857600 = 100.0 MB/s</div></div>
+        <p><b>How it works:</b> 50 MB/s and 100 MB/s per DataNode.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P4</span><span class="prob__tag prob__tag--medium">Medium</span><h4>Parse balancer moves</h4></div>
+      <p>From real “Successfully moved” lines, total the bytes moved and count moves per source.</p>
+      <div class="prob__io"><div><small>Input</small><pre>three log lines</pre></div><div><small>Expected output</small><pre>274.71836280822754 MB {&#x27;172.19.0.4&#x27;: 2, &#x27;172.19.0.7&#x27;: 1}</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>from collections import Counter
+lines = [&quot;Successfully moved blk_1073741846_1022 with size=19627626 from 172.19.0.4 to 172.19.0.9&quot;,
+         &quot;Successfully moved blk_1073741860_1038 with size=134217728 from 172.19.0.7 to 172.19.0.9&quot;,
+         &quot;Successfully moved blk_1073741844_1020 with size=134217728 from 172.19.0.4 to 172.19.0.9&quot;]
+total, src = 0, Counter()
+for l in lines:
+    w = l.split()
+    total += int(w[4].split(&quot;=&quot;)[1]); src[w[6]] += 1
+print(total / 1024 / 1024, &quot;MB&quot;, dict(src))</code></pre><div class="output">274.71836280822754 MB {&#x27;172.19.0.4&#x27;: 2, &#x27;172.19.0.7&#x27;: 1}</div></div>
+        <p><b>How it works:</b> About 274.7 MB from 3 moves; 172.19.0.4 was the source twice. On all 8 lines this gives the 914.72 MB the balancer printed.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P5</span><span class="prob__tag prob__tag--medium">Medium</span><h4>Over or under?</h4></div>
+      <p>Classify nodes like the balancer: over-utilised (&gt; avg + t), above average, below average, under-utilised (&lt; avg − t), with t = 10.</p>
+      <div class="prob__io"><div><small>Input</small><pre>utilisations 92, 81, 70, 64, 12 %</pre></div><div><small>Expected output</small><pre>dn-1 92 over
+dn-2 81 over
+dn-3 70 above
+dn-4 64 above
+dn-6 12 under
+average 63.8</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>util = {&quot;dn-1&quot;: 92, &quot;dn-2&quot;: 81, &quot;dn-3&quot;: 70, &quot;dn-4&quot;: 64, &quot;dn-6&quot;: 12}
+avg, t = sum(util.values()) / len(util), 10
+for n, u in util.items():
+    kind = &quot;over&quot; if u &gt; avg + t else &quot;above&quot; if u &gt; avg else &quot;under&quot; if u &lt; avg - t else &quot;below&quot;
+    print(n, u, kind)
+print(&quot;average&quot;, avg)</code></pre><div class="output">dn-1 92 over
+dn-2 81 over
+dn-3 70 above
+dn-4 64 above
+dn-6 12 under
+average 63.8</div></div>
+        <p><b>How it works:</b> Average 63.8%: dn-1 and dn-2 over-utilised, dn-3 and dn-4 above average, dn-6 under-utilised. The balancer pairs over with under first, as the real log shows (“overUtilized =&gt; underUtilized”).</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P6</span><span class="prob__tag prob__tag--medium">Medium</span><h4>Safe to stop two nodes?</h4></div>
+      <p>Given replica locations, can dn-2 and dn-5 be stopped at the same time without making any block unavailable?</p>
+      <div class="prob__io"><div><small>Input</small><pre>block → nodes</pre></div><div><small>Expected output</small><pre>A live replicas left: 1 
+B live replicas left: 1 
+C live replicas left: 2</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>blocks = {&quot;A&quot;: {&quot;dn-2&quot;, &quot;dn-4&quot;, &quot;dn-5&quot;}, &quot;B&quot;: {&quot;dn-2&quot;, &quot;dn-5&quot;, &quot;dn-3&quot;}, &quot;C&quot;: {&quot;dn-1&quot;, &quot;dn-2&quot;, &quot;dn-3&quot;}}
+stop = {&quot;dn-2&quot;, &quot;dn-5&quot;}
+for b, nodes in blocks.items():
+    left = nodes - stop
+    print(b, &quot;live replicas left:&quot;, len(left), &quot;&quot; if left else &quot;&lt;- UNAVAILABLE&quot;)</code></pre><div class="output">A live replicas left: 1 
+B live replicas left: 1 
+C live replicas left: 2</div></div>
+        <p><b>How it works:</b> All keep at least 1 replica, but A and B drop to 1: one more failure loses them. Decommission instead, or stop one at a time.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P7</span><span class="prob__tag prob__tag--business">Business problem</span><h4>Cost of an empty new rack</h4></div>
+      <p>A new rack of 20 nodes (Rs 4.5 lakh each) is added but the balancer is never run; for 6 months it holds only 5% of data while old nodes run near full and jobs slow down. What is the investment sitting mostly idle?</p>
+      <div class="prob__io"><div><small>Input</small><pre>20 × Rs 4.5 lakh · 5% used</pre></div><div><small>Expected output</small><pre>Rs 90 lakh of hardware, about Rs 85.5 lakh of it unused</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>cost = 20 * 4.5
+print(f&quot;Rs {cost:.0f} lakh of hardware, about Rs {cost * 0.95:.1f} lakh of it unused&quot;)</code></pre><div class="output">Rs 90 lakh of hardware, about Rs 85.5 lakh of it unused</div></div>
+        <p><b>How it works:</b> Rs 90 lakh of servers, about Rs 85.5 lakh worth idle (illustrative). A balancer run on day one puts it to work.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P8</span><span class="prob__tag prob__tag--advanced">Advanced</span><h4>Decommission planner</h4></div>
+      <p>Simulate decommissioning dn-4: for each of its blocks choose a target node that does not already hold the block, prefers keeping replicas on 2 racks, and has the most free space. Print the plan.</p>
+      <div class="prob__io"><div><small>Input</small><pre>4 blocks · 2 racks · free space per node</pre></div><div><small>Expected output</small><pre>A copy to dn-1 racks [1, 2]
+B copy to dn-2 racks [1, 2]
+D copy to dn-2 racks [1, 2]</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>rack = {&quot;dn-1&quot;: 1, &quot;dn-2&quot;: 1, &quot;dn-3&quot;: 2, &quot;dn-4&quot;: 2, &quot;dn-5&quot;: 2}
+free = {&quot;dn-1&quot;: 50, &quot;dn-2&quot;: 80, &quot;dn-3&quot;: 30, &quot;dn-5&quot;: 60}
+blocks = {&quot;A&quot;: [&quot;dn-2&quot;, &quot;dn-4&quot;, &quot;dn-5&quot;], &quot;B&quot;: [&quot;dn-4&quot;, &quot;dn-1&quot;, &quot;dn-3&quot;], &quot;D&quot;: [&quot;dn-4&quot;, &quot;dn-3&quot;, &quot;dn-5&quot;]}
+for b, nodes in blocks.items():
+    if &quot;dn-4&quot; not in nodes:
+        continue
+    keep = [n for n in nodes if n != &quot;dn-4&quot;]
+    racks = {rack[n] for n in keep}
+    cands = [n for n in free if n not in keep]
+    if len(racks) == 1:                       # all others on one rack: need the other rack
+        cands = [n for n in cands if rack[n] not in racks]
+    target = max(cands, key=free.get)
+    free[target] -= 1
+    print(b, &quot;copy to&quot;, target, &quot;racks&quot;, sorted(racks | {rack[target]}))</code></pre><div class="output">A copy to dn-1 racks [1, 2]
+B copy to dn-2 racks [1, 2]
+D copy to dn-2 racks [1, 2]</div></div>
+        <p><b>How it works:</b> A goes to dn-1 (dn-2 and dn-5 already span both racks, so the most free space wins after dn-2 is excluded). B goes to dn-2. D (left only on rack 2) must go to rack 1: dn-2. Real NameNodes apply the same ideas with more rules.</p>
+      </details>
+    </article>
+  </div>
+
+  <h3 id="scenarios">Real-world scenario questions (asked in company interviews)</h3>
+  <p class="scn-intro">Admin questions separate people who have run a cluster from people who have only read about one.</p>
+  <div class="scenarios">
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">HDFS · operations</span><span class="scn__tag scn__tag--level">Fresher</span></div>
+      <h4>“How do you remove a DataNode from a cluster?”</h4>
+      <p class="scn__situation">The classic commissioning and decommissioning question.</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> exclude file, refreshNodes, waiting for completion.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>Add the host to the file named by <code>dfs.hosts.exclude</code>, run <code>hdfs dfsadmin -refreshNodes</code>.</li>
+          <li>Watch <code>-report</code> until the status is <i>Decommissioned</i>; the NameNode copies all its blocks meanwhile. Then stop the DataNode and remove it.</li>
+          <li>Confirm with <code>hdfs fsck /</code>: HEALTHY, 0 under-replicated. Never just switch it off.</li>
+        </ul>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Operations · capacity</span><span class="scn__tag scn__tag--level">Experienced</span></div>
+      <h4>New nodes added last month are almost empty</h4>
+      <p class="scn__situation">Old DataNodes are at 92% and jobs fail with disk-full errors, while 10 new nodes are at 8%.</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> that HDFS never rebalances existing data on its own.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>Only new writes land on new nodes; existing blocks stay put. Run <code>hdfs balancer -threshold 10</code> (or lower).</li>
+          <li>Run it off-peak, raise <code>-setBalancerBandwidth</code> at night, and repeat until balanced.</li>
+          <li>Short term, free space on the full nodes (old temp data, trash) so jobs stop failing.</li>
+        </ul>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Troubleshooting</span><span class="scn__tag scn__tag--level">Experienced</span></div>
+      <h4>Decommission has been “in progress” for a day</h4>
+      <p class="scn__situation">The NameNode log repeats “still has 1 blocks to replicate”.</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> placement constraints and stuck blocks.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>Find the block in the log (BlockStateChange lines show its replicas) and its file with <code>hdfs fsck</code>.</li>
+          <li>Typical causes: no node/rack where a replica may go (small cluster, whole rack being retired), full or failing target disks, a file still open for writing, or replication higher than the node count.</li>
+          <li>Fix the cause: add capacity, close or recover the file, lower its replication; in our lab a broken target node kept failing until its pending copy timed out (5 minutes) and another node was chosen.</li>
+        </ul>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">HDFS · health</span><span class="scn__tag scn__tag--level">Fresher</span></div>
+      <h4>“What does hdfs fsck tell you?”</h4>
+      <p class="scn__situation">A quick check of whether you know what fsck reads and changes.</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> read-only report vs repair.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>For a path: files, blocks, replicas (with <code>-files -blocks -locations -racks</code>), and totals of missing, corrupt, under- and over-replicated blocks; status HEALTHY or CORRUPT.</li>
+          <li>It reads NameNode metadata only and changes nothing unless you pass <code>-move</code> or <code>-delete</code>.</li>
+          <li>HDFS repairs under-replicated blocks itself; fsck tells you whether anything is beyond repair.</li>
+        </ul>
+      </div></details>
+    </article>
+
+  </div>
+</section>
+
+<nav class="lesson-nav" id="lesson-nav" aria-label="Lesson navigation"></nav>
+<div class="ad-slot" data-slot="bottom"></div>
+</article>
+
+<aside class="lesson-side">
+  <nav class="toc" aria-label="In this lesson">
+    <h4>In this lesson</h4>
+    <ol>
+      <li><a href="#story">The story</a></li>
+      <li><a href="#definition">Definition</a></li><li><a href="#levels">Beginner → Advanced</a></li>
+      <li><a href="#types">Types and ways to use it</a></li>
+      <li><a href="#steps">Step by step</a></li>
+      <li><a href="#animation">See it happen</a></li>
+      <li><a href="#real-world">Real-world use</a></li>
+      <li><a href="#run">Run the code</a></li><li><a href="#pc">Run on your PC</a></li>
+      <li><a href="#tracer">Line by line</a></li>
+      <li><a href="#worked">Worked examples</a></li>
+      <li><a href="#quiz">Quiz and revision</a></li>
+      <li><a href="#practice">Practice problems</a></li>
+      <li><a href="#scenarios">Industry scenarios</a></li>
+    </ol>
+  </nav>
+  <div class="ad-slot" data-slot="side"></div>
+  <div class="outline" id="outline"></div>
+</aside>
+</div>
+</main>
+
+<footer class="site-footer">
+  <div class="wrap">
+    <div><h4>MyPhatshala</h4><p>Free programming and IT lessons that show what happens behind the screen.</p></div>
+    <div><h4>Learn</h4><a href="../../../../#tracks">All courses</a><a href="../../">Apache Hadoop syllabus</a></div>
+    <div><h4>Site</h4><a href="../../../../about.html">About</a><a href="../../../../contact.html">Contact</a><a href="../../../../privacy.html">Privacy policy</a><a href="../../../../disclaimer.html">Disclaimer</a></div>
+    <div class="copyright">© MyPhatshala. All lesson content, diagrams and animations are original. Please do not copy without permission.</div>
+  </div>
+</footer>
+
+<script src="../../../../data/courses/hadoop.js"></script>
+<script src="../../../../assets/js/lesson.js"></script>
+<script src="../../../../assets/js/ads.js"></script>
+<script src="../../../../assets/js/site.js"></script>
+</body>
+</html>

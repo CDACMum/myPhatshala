@@ -1,0 +1,1767 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HDFS shell commands | MyPhatshala</title>
+<meta name="description" content="The everyday hdfs dfs commands with real Hadoop 3.5.0 outputs: mkdir, put, ls, cat, du, df, count, cp, mv, appendToFile, getmerge, chmod, test, find, stat, setrep and rm. Why mv of a 403 MB file takes 1.9 s but cp takes 5.6 s, why trash is off by default, what the two du columns mean, and the errors you will meet. Python shell simulator, quiz and interview scenarios.">
+<meta name="mp:minutes" content="26">
+<link rel="canonical" href="https://myphatshala.in/courses/hadoop/06-hdfs-operations/03-hdfs-shell-commands/">
+<meta property="og:title" content="HDFS shell commands · MyPhatshala">
+<meta property="og:description" content="Linux file commands, with a twist: some only touch the NameNode, some move every byte. Real outputs from a real cluster.">
+<link rel="icon" href="../../../../assets/img/logo.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Fraunces:ital,opsz,wght@0,9..144,600;0,9..144,700;1,9..144,600&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../../../../assets/css/style.css">
+<link rel="stylesheet" href="../../../../assets/css/lesson.css">
+<script src="../../../../assets/js/config.js"></script>
+<script>try { const t = localStorage.getItem("mp-theme"); if (t) document.documentElement.dataset.theme = t; } catch (e) {}</script>
+<script type="application/ld+json">{"@context": "https://schema.org", "@type": "LearningResource", "name": "HDFS shell commands", "learningResourceType": "Lesson", "educationalLevel": "Beginner", "isAccessibleForFree": true, "inLanguage": "en", "isPartOf": {"@type": "Course", "name": "Apache Hadoop", "provider": {"@type": "Organization", "name": "MyPhatshala"}}}</script>
+</head>
+<body style="--track:#B45309" data-lesson="06-hdfs-operations/03-hdfs-shell-commands" data-course-root="../../">
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="site-header">
+  <div class="wrap">
+    <a class="brand" href="../../../../" aria-label="MyPhatshala home"><img src="../../../../assets/img/logo.svg" width="34" height="34" alt=""><span>My<b>Phatshala</b></span></a>
+    <nav class="nav" aria-label="Main">
+      <a href="../../../../#tracks">All courses</a>
+      <a href="../../">Apache Hadoop syllabus</a>
+      <button class="theme-btn" id="theme-btn" aria-label="Toggle dark mode"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg></button>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+<section class="lesson-hero">
+  <div class="wrap">
+    <nav class="crumbs" aria-label="Breadcrumb"><a href="../../../../">Home</a><span>›</span><a href="../../../../#track-big-data">Big Data Engineering</a><span>›</span><a href="../../">Apache Hadoop</a><span>›</span><b>Lesson 6.3</b></nav>
+    <h1>HDFS shell commands</h1>
+    <p class="lead">You will use hdfs dfs every day. This lesson runs the important commands on a real cluster and shows their exact output, then explains what each one does behind the screen: which commands only change the NameNode's metadata and finish instantly, which ones read and write data through DataNodes, and which defaults (like trash being off) catch people out.</p>
+    <div class="lesson-meta"><span>Module 6 · HDFS operations</span><span>⏱ 26 min</span><span>Beginner</span><span>Real command outputs</span><span>cp vs mv timed</span><span>Runs in your browser (Python)</span><span>8 practice problems</span></div>
+  </div>
+</section>
+
+<div class="wrap lesson-layout">
+<article class="lesson-main">
+<!-- ======================= PART 1: THE STORY ======================= -->
+<section class="part" id="story">
+  <span class="part-label"><b>1</b> The story</span>
+  <h2>Linux commands, with a twist</h2>
+  <div class="story">
+    <p class="narration">Riya's first day on the data team. Her task: put two days of canteen orders into HDFS, check them, merge them into one local file for the accounts team, and clean up. She guesses <code>hdfs dfs -ls</code>, <code>-mkdir</code>, <code>-cat</code>, <code>-rm</code>, and they all work like Linux. Then two surprises. Copying a 403 MB file takes 5.6 seconds, but moving it takes 1.9 seconds, the same as deleting it. And when she deletes a file by mistake, it's simply gone: no trash.</p>
+
+    <div class="scene">
+      <svg viewBox="0 0 640 180" role="img" aria-label="Some HDFS shell commands only change metadata on the NameNode (ls, mkdir, mv, rm, chmod), others move data through DataNodes (put, get, cat, cp).">
+        <g font-size="10">
+          <rect x="20" y="20" width="290" height="120" rx="10" class="s-board"/>
+          <text x="165" y="42" text-anchor="middle" font-weight="700" class="s-chalk">NameNode only (metadata)</text>
+          <g font-size="9" class="mono" style="fill:#9FD3B8"><text x="40" y="66">-ls  -mkdir  -mv  -rm</text><text x="40" y="84">-chmod  -chown  -count</text><text x="40" y="102">-du  -stat  -test  -setrep*</text></g>
+          <text x="165" y="128" text-anchor="middle" font-size="8.6" style="fill:#F5C77E">fast, whatever the file size</text>
+          <rect x="330" y="20" width="290" height="120" rx="10" class="s-soft-green" style="stroke:var(--green)"/>
+          <text x="475" y="42" text-anchor="middle" font-weight="700" class="s-green">NameNode + DataNodes (data)</text>
+          <g font-size="9" class="mono s-ink"><text x="350" y="66">-put  -get  -cat  -tail</text><text x="350" y="84">-cp  -getmerge  -appendToFile</text><text x="350" y="102">-text  -checksum</text></g>
+          <text x="475" y="128" text-anchor="middle" font-size="8.6" class="s-ink2">time grows with the data size</text>
+        </g>
+        <text x="320" y="164" text-anchor="middle" font-size="10" class="s-ink2">* setrep changes metadata at once; the DataNodes copy or delete replicas afterwards.</text>
+        <text x="632" y="176" text-anchor="end" class="s-wm">myphatshala.in</text>
+      </svg>
+    </div>
+
+    <div class="panel panel--right"><div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#DDEFE6"/><path d="M12 64c2-12 10-18 20-18s18 6 20 18z" fill="#F4F1EA"/><path d="M28 46l4 8 4-8" fill="#2F7D5B"/><circle cx="32" cy="28" r="12" fill="#B57A50"/><path d="M20 26c0-8 5-13 12-13s12 5 12 13c-2-3-6-5-12-5s-10 2-12 5z" fill="#5A5A5A"/><path d="M22 32c1 8 5 11 10 11s9-3 10-11c-2 3-6 4-10 4s-8-1-10-4z" fill="#5A5A5A"/><circle cx="27" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><circle cx="37" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><path d="M30.4 29h3.2" stroke="#1B2433" stroke-width="1.4"/><circle cx="27" cy="29" r="1.1" fill="#1B2433"/><circle cx="37" cy="29" r="1.1" fill="#1B2433"/></svg></div><div class="bubble"><b class="who">Arjun Sir</b><p><code>hdfs dfs</code> deliberately looks like Linux, so you'll feel at home in a day. But think about <i>where</i> each command works. <code>mv</code> only changes a name in the NameNode's memory, so moving a 403 MB file, or a 4 TB folder, takes the same time: most of those 1.9 seconds were just Java starting up. <code>cp</code> has to read every byte and write it again through a pipeline.</p></div></div>
+    <div class="panel"><div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#FCE6D6"/><path d="M14 64c2-12 9-18 18-18s16 6 18 18z" fill="#2E5AAC"/><circle cx="32" cy="29" r="12" fill="#C68B5E"/><path d="M19 29c0-10 6-15 13-15s13 5 13 15c-3-5-7-8-13-8s-10 3-13 8z" fill="#2A1B14"/><path d="M43 27c3 6 3 14 0 20" stroke="#2A1B14" stroke-width="4" fill="none" stroke-linecap="round"/><circle cx="27.5" cy="30" r="1.5" fill="#2A1B14"/><circle cx="36.5" cy="30" r="1.5" fill="#2A1B14"/><path d="M28 35q4 3 8 0" stroke="#2A1B14" stroke-width="1.6" fill="none" stroke-linecap="round"/><circle cx="32" cy="24" r="1.2" fill="#D64545"/></svg></div><div class="bubble"><b class="who">Riya</b><p>And the trash?</p></div></div>
+    <div class="panel panel--right"><div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#DDEFE6"/><path d="M12 64c2-12 10-18 20-18s18 6 20 18z" fill="#F4F1EA"/><path d="M28 46l4 8 4-8" fill="#2F7D5B"/><circle cx="32" cy="28" r="12" fill="#B57A50"/><path d="M20 26c0-8 5-13 12-13s12 5 12 13c-2-3-6-5-12-5s-10 2-12 5z" fill="#5A5A5A"/><path d="M22 32c1 8 5 11 10 11s9-3 10-11c-2 3-6 4-10 4s-8-1-10-4z" fill="#5A5A5A"/><circle cx="27" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><circle cx="37" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><path d="M30.4 29h3.2" stroke="#1B2433" stroke-width="1.4"/><circle cx="27" cy="29" r="1.1" fill="#1B2433"/><circle cx="37" cy="29" r="1.1" fill="#1B2433"/></svg></div><div class="bubble"><b class="who">Arjun Sir</b><p>HDFS has a trash, but <code>fs.trash.interval</code> is 0 by default, so it's off unless the admins switch it on. On our lab it's off. With it on, <code>-rm</code> moves files to <code>.Trash</code> and you can get them back. Today: the commands you'll use every day, with real outputs, and which ones to be careful with.</p></div></div>
+  </div>
+</section>
+
+<!-- ======================= PART 2: DEFINITION ======================= -->
+<section class="part" id="definition">
+  <span class="part-label"><b>2</b> Definition</span>
+  <h2>The HDFS shell</h2>
+  <div class="def">
+    <div class="def__formal"><small>Formal definition (write this in exams)</small>
+      <p>The <b>HDFS shell</b> is the command-line client for Hadoop file systems, invoked as <code>hdfs dfs &lt;command&gt;</code> (equivalent to <code>hadoop fs</code> for HDFS paths). Its commands mirror POSIX tools: listing and inspecting (<code>-ls</code>, <code>-du</code>, <code>-df</code>, <code>-count</code>, <code>-stat</code>, <code>-test</code>, <code>-find</code>, <code>-checksum</code>), reading (<code>-cat</code>, <code>-head</code>, <code>-tail</code>, <code>-text</code>), transferring between local and HDFS (<code>-put</code>/<code>-copyFromLocal</code>, <code>-get</code>/<code>-copyToLocal</code>, <code>-getmerge</code>, <code>-moveFromLocal</code>), changing the namespace (<code>-mkdir</code>, <code>-mv</code>, <code>-cp</code>, <code>-rm</code>, <code>-appendToFile</code>, <code>-touchz</code>) and managing attributes (<code>-chmod</code>, <code>-chown</code>, <code>-chgrp</code>, <code>-setrep</code>). Paths may be absolute (<code>/user/…</code>), relative to the user's home <code>/user/&lt;name&gt;</code>, or full URIs (<code>hdfs://namenode/…</code>, <code>file:///…</code>). Generic options such as <code>-D property=value</code> come before the command.</p></div>
+    <div class="def__simple"><small>In simple words</small>
+      <p><code>hdfs dfs -something</code> is Linux file handling for HDFS: list, copy in, copy out, read, move, delete, change permissions. Commands that only rename or list are instant; commands that move data take time.</p></div>
+  </div>
+
+  <h3>Words you'll meet in this lesson</h3>
+  <div class="terms">
+    <div class="term"><b>hdfs dfs vs hadoop fs</b><span>Same shell; <code>hadoop fs</code> works with any Hadoop file system (S3, local…), <code>hdfs dfs</code> is the usual name for HDFS.</span></div>
+    <div class="term"><b>Home directory</b><span><code>/user/&lt;username&gt;</code>; relative paths start there.</span></div>
+    <div class="term"><b>-put / -get</b><span>Copy local → HDFS / HDFS → local.</span></div>
+    <div class="term"><b>-getmerge</b><span>Concatenate all files of an HDFS folder into one local file.</span></div>
+    <div class="term"><b>Trash</b><span><code>.Trash/Current</code> in your home; used by <code>-rm</code> only if <code>fs.trash.interval</code> &gt; 0.</span></div>
+    <div class="term"><b>-skipTrash</b><span>Delete immediately even if trash is on.</span></div>
+    <div class="term"><b>-du first column</b><span>Logical size; second column: raw space including replicas.</span></div>
+    <div class="term"><b>Exit code</b><span>0 = success; <code>-test</code> returns 0/1, used in scripts.</span></div>
+  </div>
+
+  <h3>Defaults that surprise people (Hadoop 3.5.0)</h3>
+  <table class="facts" style="table-layout:fixed;overflow-wrap:anywhere">
+    <tr><th>fs.trash.interval</th><td>0: trash is <b>off</b>; set minutes (e.g. 1440 = 1 day) in core-site.xml to enable</td></tr>
+    <tr><th>-put on an existing file</th><td>Fails with “File exists”; use <code>-f</code> to overwrite</td></tr>
+    <tr><th>-mkdir on an existing folder</th><td>Fails; <code>-p</code> creates parents and ignores existing folders</td></tr>
+    <tr><th>JVM start-up</th><td>About 1.8 s per command in the lab: script many operations in one call where possible</td></tr>
+    <tr><th>-du columns</th><td>4.5 M, 13.4 M: data size and space used with 3 replicas</td></tr>
+  </table>
+
+  <h3 id="levels">The shell at three levels</h3>
+  <div class="modlab levels"><div class="modlab__bar"><b>Pick your level. New to this? Start at Beginner and climb.</b><button type="button" data-mod="b">Beginner</button><button type="button" data-mod="i">Intermediate</button><button type="button" data-mod="a">Advanced</button></div>
+    <div class="modlab__panel" data-mod="b"><h4><span class="lvl lvl--b">Beginner</span> Like a phone's file manager</h4>
+      <ul>
+        <li>Folders, files, copy, move, delete: the same ideas.</li>
+        <li>Upload (<code>-put</code>) is like sending a photo to the cloud; download (<code>-get</code>) brings it back.</li>
+        <li>Renaming is instant; copying a big video takes time. HDFS behaves the same way.</li>
+      </ul>
+
+    </div>
+    <div class="modlab__panel" data-mod="i"><h4><span class="lvl lvl--i">Intermediate</span> Everyday patterns</h4>
+      <ul>
+        <li>Load data: <code>-mkdir -p</code>, then <code>-put</code> (or <code>-put -f</code> to replace).</li>
+        <li>Check: <code>-ls</code>, <code>-du -s -h</code>, <code>-count</code>, <code>-head</code> / <code>-tail</code>.</li>
+        <li>Publish results: jobs write to a temporary folder, then one <code>-mv</code> makes them visible atomically.</li>
+        <li>Export: <code>-getmerge</code> a result folder into one local file for business users.</li>
+        <li>Script checks: <code>hdfs dfs -test -e path &amp;&amp; …</code>.</li>
+      </ul>
+
+    </div>
+    <div class="modlab__panel" data-mod="a"><h4><span class="lvl lvl--a">Advanced</span> Things to know before you script</h4>
+      <ul>
+        <li>Each call starts a JVM. For thousands of small operations use the Java API, WebHDFS, or one job, not a loop of shell calls.</li>
+        <li><code>-cp</code> copies through the client (it reads and writes every byte); for big copies use <code>distcp</code>, which runs as a parallel job.</li>
+        <li><code>-rm -r</code> on a big folder is fast for you but creates lots of block deletions for DataNodes, done in the background.</li>
+        <li>Trash is per user and client-side policy plus server setting; never rely on it for important data.</li>
+        <li>Globs (<code>*</code>, <code>?</code>) are expanded by HDFS: quote them so your local shell doesn't expand them first.</li>
+      </ul>
+
+    </div>
+  </div>
+  <div class="callout callout--exam"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19V5a2 2 0 0 1 2-2h12v18H6a2 2 0 0 1-2-2zm0 0a2 2 0 0 1 2-2h12"/></svg><p><b>Exam tip:</b> For “List any ten HDFS shell commands with syntax”, group them: <b>list</b> (<code>-ls</code>, <code>-du</code>, <code>-count</code>), <b>read</b> (<code>-cat</code>, <code>-tail</code>), <b>transfer</b> (<code>-put</code>, <code>-get</code>, <code>-getmerge</code>), <b>change</b> (<code>-mkdir</code>, <code>-mv</code>, <code>-cp</code>, <code>-rm</code>), <b>attributes</b> (<code>-chmod</code>, <code>-chown</code>, <code>-setrep</code>). Give the syntax <code>hdfs dfs -command [options] path</code> and one example each.</p></div>
+</section>
+
+<!-- ======================= PART 3: TYPES AND WAYS TO USE IT ======================= -->
+<section class="part" id="types">
+  <span class="part-label"><b>3</b> Types and ways to use it</span>
+  <h2>Command reference by task</h2>
+  <div class="table-wrap">
+  <table class="compare" style="min-width:640px">
+    <thead><tr><th>Task</th><th>Command</th><th>Example</th><th>Touches DataNodes?</th></tr></thead>
+    <tbody>
+      <tr><td>List</td><td><code>-ls [-R] [-h]</code></td><td><code>hdfs dfs -ls -h /user/hadoop/data</code></td><td>No</td></tr>
+      <tr><td>Make folder</td><td><code>-mkdir [-p]</code></td><td><code>hdfs dfs -mkdir -p raw/2026/10</code></td><td>No</td></tr>
+      <tr><td>Upload</td><td><code>-put [-f]</code></td><td><code>hdfs dfs -put day1.csv raw/</code></td><td>Yes (write pipeline)</td></tr>
+      <tr><td>Download</td><td><code>-get</code>, <code>-getmerge</code></td><td><code>hdfs dfs -getmerge out/ result.csv</code></td><td>Yes (reads)</td></tr>
+      <tr><td>Read</td><td><code>-cat</code>, <code>-head</code>, <code>-tail</code>, <code>-text</code></td><td><code>hdfs dfs -tail logs/app.log</code></td><td>Yes</td></tr>
+      <tr><td>Size</td><td><code>-du [-s] [-h]</code>, <code>-df -h</code>, <code>-count</code></td><td><code>hdfs dfs -du -s -h data</code></td><td>No</td></tr>
+      <tr><td>Move / rename</td><td><code>-mv</code></td><td><code>hdfs dfs -mv tmp/out final/</code></td><td>No</td></tr>
+      <tr><td>Copy</td><td><code>-cp</code> (small), <code>hadoop distcp</code> (big)</td><td><code>hdfs dfs -cp a.csv b.csv</code></td><td>Yes (read + write)</td></tr>
+      <tr><td>Delete</td><td><code>-rm [-r] [-skipTrash]</code></td><td><code>hdfs dfs -rm -r old/</code></td><td>Later (block deletion)</td></tr>
+      <tr><td>Permissions</td><td><code>-chmod</code>, <code>-chown</code>, <code>-chgrp</code></td><td><code>hdfs dfs -chmod 640 raw/day1.csv</code></td><td>No</td></tr>
+      <tr><td>Replication</td><td><code>-setrep [-w] N</code></td><td><code>hdfs dfs -setrep -w 2 archive/</code></td><td>Later (copies/deletes)</td></tr>
+      <tr><td>Inspect</td><td><code>-stat</code>, <code>-test</code>, <code>-find</code>, <code>-checksum</code></td><td><code>hdfs dfs -stat "%r %o" f</code></td><td>No (checksum: yes)</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <h3>Same shell, other file systems</h3>
+  <div class="cards">
+    <div class="card"><h4>hdfs://</h4><p>The default here (<code>fs.defaultFS</code>).</p><span class="tag">HDFS</span></div>
+    <div class="card"><h4>file://</h4><p><code>hadoop fs -ls file:///tmp</code> lists the local disk.</p><span class="tag">Local</span></div>
+    <div class="card"><h4>s3a://, abfs://, gs://</h4><p>With the right connector and credentials, the same commands work on cloud storage.</p><span class="tag">Cloud</span></div>
+    <div class="card"><h4>webhdfs://</h4><p>HDFS over HTTP, e.g. through firewalls or from other clusters.</p><span class="tag">HTTP</span></div>
+  </div>
+  <div class="callout callout--tip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18h6M10 22h4M12 2a7 7 0 0 0-4 12.7V17h8v-2.3A7 7 0 0 0 12 2z"/></svg><p>Run <code>hdfs dfs -help &lt;command&gt;</code> (without the dash) for the exact options of your Hadoop version; we used it below for <code>setrep</code>.</p></div>
+</section>
+
+<!-- ======================= PART 4: STEP BY STEP ======================= -->
+<section class="part" id="steps">
+  <span class="part-label"><b>4</b> Step by step</span>
+  <h2>A morning of real commands</h2>
+  <p>All run as user <code>hadoop</code> inside the namenode container of the lab cluster.</p>
+  <ol class="stepper">
+    <li><h4>Create a folder and upload</h4>
+      <div class="code" data-lang="bash" data-file="Terminal"><pre><code>printf 'order_id,item,amount\n2001,chai,15\n2002,dosa,45\n' &gt; day1.csv
+printf 'order_id,item,amount\n2003,poha,25\n' &gt; day2.csv
+hdfs dfs -mkdir -p /user/hadoop/canteen/raw
+hdfs dfs -put day1.csv day2.csv /user/hadoop/canteen/raw/
+hdfs dfs -ls /user/hadoop/canteen/raw</code></pre><div class="output">Found 2 items
+-rw-r--r--   3 hadoop supergroup         47 2026-10-21 09:38 /user/hadoop/canteen/raw/day1.csv
+-rw-r--r--   3 hadoop supergroup         34 2026-10-21 09:38 /user/hadoop/canteen/raw/day2.csv</div></div>
+      <span class="behind">Columns: permissions, replication, owner, group, size in bytes, modification time, path. Folders show <code>-</code> instead of a replication factor.</span></li>
+    <li><h4>Read and check sizes</h4>
+      <div class="code" data-lang="bash" data-file="Terminal"><pre><code>hdfs dfs -cat /user/hadoop/canteen/raw/day1.csv
+hdfs dfs -du -h /user/hadoop/data
+hdfs dfs -du -s -h /user/hadoop/data
+hdfs dfs -df -h /
+hdfs dfs -count -v -h /user/hadoop</code></pre><div class="output">order_id,item,amount
+2001,chai,15
+2002,dosa,45
+4.5 M    13.4 M   /user/hadoop/data/canteen_1mb.csv
+4.5 M    13.4 M   /user/hadoop/data/canteen_orders.csv
+134.2 M  402.7 M  /user/hadoop/data/orders_x30.csv
+402.7 M  1.2 G    /user/hadoop/data/orders_x90.csv
+402.7 M  1.2 G    /user/hadoop/data/orders_x90b.csv
+948.6 M  2.8 G  /user/hadoop/data
+Filesystem           Size   Used  Available  Use%
+hdfs://namenode  1007.9 G  2.8 G     66.8 G    0%
+   DIR_COUNT   FILE_COUNT       CONTENT_SIZE PATHNAME
+          13           11            958.1 M /user/hadoop</div></div>
+      <span class="behind"><code>-du</code>: the first column is the data size, the second the raw disk used with 3 replicas (4.5 M × 3 = 13.4 M). <code>-df</code> is the whole file system. <code>-count -v</code> adds a header.</span></li>
+    <li><h4>Copy, rename, append, merge</h4>
+      <div class="code" data-lang="bash" data-file="Terminal"><pre><code>hdfs dfs -cp /user/hadoop/canteen/raw/day1.csv /user/hadoop/canteen/day1_copy.csv
+hdfs dfs -mv /user/hadoop/canteen/day1_copy.csv /user/hadoop/canteen/day1_backup.csv
+hdfs dfs -appendToFile day2.csv /user/hadoop/canteen/day1_backup.csv
+hdfs dfs -cat /user/hadoop/canteen/day1_backup.csv
+hdfs dfs -getmerge /user/hadoop/canteen/raw merged.csv &amp;&amp; cat merged.csv</code></pre><div class="output">order_id,item,amount
+2001,chai,15
+2002,dosa,45
+order_id,item,amount
+2003,poha,25
+order_id,item,amount
+2001,chai,15
+2002,dosa,45
+order_id,item,amount
+2003,poha,25</div></div>
+      <span class="behind">Both append and getmerge simply concatenate bytes, so the header line appears twice. HDFS knows nothing about CSV headers; that is your program's job.</span></li>
+    <li><h4>Permissions, tests and search</h4>
+      <div class="code" data-lang="bash" data-file="Terminal"><pre><code>hdfs dfs -chmod 640 /user/hadoop/canteen/raw/day1.csv
+hdfs dfs -ls /user/hadoop/canteen/raw
+hdfs dfs -test -e /user/hadoop/canteen/raw/day1.csv; echo "exists: $?"
+hdfs dfs -test -e /user/hadoop/canteen/raw/day9.csv; echo "exists: $?"
+hdfs dfs -find /user/hadoop -name "*.csv"
+hdfs dfs -stat "%n %b bytes, replication %r, block %o, modified %y" /user/hadoop/canteen/raw/day1.csv</code></pre><div class="output">-rw-r-----   3 hadoop supergroup         47 2026-10-21 09:38 /user/hadoop/canteen/raw/day1.csv
+-rw-r--r--   3 hadoop supergroup         34 2026-10-21 09:38 /user/hadoop/canteen/raw/day2.csv
+exists: 0
+exists: 1
+/user/hadoop/canteen/day1_backup.csv
+/user/hadoop/canteen/raw/day1.csv
+/user/hadoop/canteen/raw/day2.csv
+/user/hadoop/data/canteen_1mb.csv
+/user/hadoop/data/canteen_orders.csv
+/user/hadoop/data/orders_x30.csv
+/user/hadoop/data/orders_x90.csv
+/user/hadoop/data/orders_x90b.csv
+day1.csv 47 bytes, replication 3, block 134217728, modified 2026-10-21 09:38:04</div></div>
+      <span class="behind"><code>-test</code> prints nothing; its exit code (0 = true) is what scripts use. Quote <code>"*.csv"</code> so the pattern reaches HDFS.</span></li>
+    <li><h4>Delete: trash off, then on</h4>
+      <div class="code" data-lang="bash" data-file="Terminal"><pre><code>hdfs getconf -confKey fs.trash.interval
+hdfs dfs -rm /user/hadoop/canteen/day1_backup.csv
+hdfs dfs -ls /user/hadoop/.Trash/Current/user/hadoop/canteen
+hdfs dfs -D fs.trash.interval=1440 -rm /user/hadoop/canteen/raw/day2.csv
+hdfs dfs -mv /user/hadoop/.Trash/Current/user/hadoop/canteen/raw/day2.csv /user/hadoop/canteen/raw/</code></pre><div class="output">0
+Deleted /user/hadoop/canteen/day1_backup.csv
+ls: `/user/hadoop/.Trash/Current/user/hadoop/canteen': No such file or directory
+INFO  TrashPolicyDefault:196 - Moved: 'hdfs://namenode/user/hadoop/canteen/raw/day2.csv' to trash at: hdfs://namenode/user/hadoop/.Trash/Current/user/hadoop/canteen/raw/day2.csv</div></div>
+      <span class="behind">With trash off (0), “Deleted” means gone. With trash on, the file moves to <code>.Trash/Current</code> under the same path, and a <code>-mv</code> restores it. Real clusters usually set <code>fs.trash.interval</code> in core-site.xml.</span></li>
+    <li><h4>cp vs mv on a 403 MB file</h4>
+      <div class="code" data-lang="bash" data-file="Terminal"><pre><code>time hdfs dfs -cp data/orders_x90.csv data/orders_x90_copy.csv
+time hdfs dfs -mv data/orders_x90_copy.csv data/orders_x90_moved.csv
+time hdfs dfs -rm -skipTrash data/orders_x90_moved.csv</code></pre><div class="output">real	0m5.615s
+real	0m1.863s
+Deleted /user/hadoop/data/orders_x90_moved.csv
+real	0m1.830s</div></div>
+      <span class="behind"><code>cp</code> read and rewrote 403 MB (×3 replicas on disk). <code>mv</code> and <code>rm</code> are metadata changes; their time is mostly the JVM starting, and would be the same for 4 TB.</span></li>
+    <li><h4>Errors you will meet</h4>
+      <div class="code" data-lang="bash" data-file="Terminal"><pre><code>hdfs dfs -ls /user/hadoop/canteen/raw/day9.csv
+hdfs dfs -mkdir /user/hadoop/canteen/raw
+hdfs dfs -put day1.csv /user/hadoop/canteen/raw/</code></pre><div class="output">ls: `/user/hadoop/canteen/raw/day9.csv': No such file or directory
+mkdir: `/user/hadoop/canteen/raw': File exists
+put: `/user/hadoop/canteen/raw/day1.csv': File exists</div></div>
+      <span class="behind">Fixes: check the path; use <code>-mkdir -p</code>; use <code>-put -f</code> to overwrite on purpose.</span></li>
+  </ol>
+  <div class="callout callout--warn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3 2 21h20L12 3z"/><path d="M12 10v5M12 18v.5"/></svg><p><code>hdfs dfs -rm -r -skipTrash /some/path</code> cannot be undone. Many teams protect important folders with snapshots (Lesson 7.4) and require trash to be enabled on the cluster.</p></div>
+</section>
+
+<!-- ======================= PART 5: SEE IT HAPPEN ======================= -->
+<section class="part" id="animation">
+  <span class="part-label"><b>5</b> See it happen</span>
+  <h2>Which daemons does each command wake up?</h2>
+  <p>Six commands from Part 4, and the daemons each one involves.</p>
+  <div class="anim" data-frames="6">
+    <div class="anim__title">Metadata commands vs data commands <span>6 steps</span></div>
+    <div class="anim__views">
+      <div class="view view--see">
+        <span class="view__tag">What you see</span>
+        <svg viewBox="0 0 360 250" role="img" aria-label="Commands and outputs">
+          <rect x="14" y="14" width="332" height="206" rx="8" class="s-board"/>
+          <text x="26" y="32" font-size="9" class="mono" style="fill:#7F8C86">hadoop@namenode : /tmp</text>
+          <g data-on="1"><text x="26" y="56" font-size="8.6" class="mono" style="fill:#7F8C86">$ hdfs dfs -ls …/canteen/raw</text><text x="26" y="72" font-size="8.6" class="mono" style="fill:#9FD3B8">-rw-r--r-- 3 hadoop … 47 … day1.csv</text><text x="26" y="86" font-size="8.6" class="mono" style="fill:#9FD3B8">-rw-r--r-- 3 hadoop … 34 … day2.csv</text></g>
+          <g data-on="2"><text x="26" y="56" font-size="8.6" class="mono" style="fill:#7F8C86">$ hdfs dfs -put day1.csv day2.csv …/raw/</text><text x="180" y="190" text-anchor="middle" font-size="10" class="s-chalk">(no output = success)</text></g>
+          <g data-on="3"><text x="26" y="56" font-size="8.6" class="mono" style="fill:#7F8C86">$ hdfs dfs -cat …/raw/day1.csv</text><text x="26" y="72" font-size="8.6" class="mono" style="fill:#9FD3B8">order_id,item,amount</text><text x="26" y="86" font-size="8.6" class="mono" style="fill:#9FD3B8">2001,chai,15</text><text x="26" y="100" font-size="8.6" class="mono" style="fill:#9FD3B8">2002,dosa,45</text></g>
+          <g data-on="4"><text x="26" y="56" font-size="8.6" class="mono" style="fill:#7F8C86">$ time hdfs dfs -mv …x90_copy.csv …x90_moved.csv</text><text x="26" y="72" font-size="8.6" class="mono" style="fill:#9FD3B8">real 0m1.863s</text></g>
+          <g data-on="5"><text x="26" y="56" font-size="8.6" class="mono" style="fill:#7F8C86">$ time hdfs dfs -cp …x90.csv …x90_copy.csv</text><text x="26" y="72" font-size="8.6" class="mono" style="fill:#F5C77E">real 0m5.615s</text></g>
+          <g data-on="6"><text x="26" y="56" font-size="8.6" class="mono" style="fill:#7F8C86">$ hdfs dfs -rm …/day1_backup.csv</text><text x="26" y="72" font-size="8.6" class="mono" style="fill:#9FD3B8">Deleted …/day1_backup.csv</text><text x="180" y="190" text-anchor="middle" font-size="10" class="s-chalk">Trash is off: it is gone.</text></g>
+          <text x="352" y="244" text-anchor="end" class="s-wm">myphatshala.in</text>
+        </svg>
+        <ol class="caps" hidden>
+          <li><code>-ls</code>: a listing with permissions, replication, owner, size and time.</li>
+          <li><code>-put</code>: uploads two files; silence means success.</li>
+          <li><code>-cat</code>: prints the file contents.</li>
+          <li><code>-mv</code> of a 403 MB file: under 2 seconds, mostly Java start-up.</li>
+          <li><code>-cp</code> of the same file: 5.6 seconds, three times longer.</li>
+          <li><code>-rm</code> with trash off: deleted immediately.</li>
+        </ol>
+      </div>
+
+      <div class="view view--behind">
+        <span class="view__tag">Behind the screen</span>
+        <svg viewBox="0 0 360 250" role="img" aria-label="Client, NameNode and DataNodes">
+          <rect x="130" y="16" width="100" height="40" rx="6" class="s-board"/><text x="180" y="40" text-anchor="middle" font-size="9" font-weight="700" class="s-chalk">NameNode</text>
+          <rect x="14" y="100" width="80" height="44" rx="6" class="s-soft-acc" style="stroke:var(--track)"/><text x="54" y="126" text-anchor="middle" font-size="8.6" font-weight="700" class="s-acc">client</text>
+          <rect x="140" y="110" width="60" height="40" rx="6" class="s-soft-green" style="stroke:var(--green)"/><text x="170" y="134" text-anchor="middle" font-size="8.6" class="s-green">dn</text>
+          <rect x="210" y="110" width="60" height="40" rx="6" class="s-soft-green" style="stroke:var(--green)"/><text x="240" y="134" text-anchor="middle" font-size="8.6" class="s-green">dn</text>
+          <rect x="280" y="110" width="60" height="40" rx="6" class="s-soft-green" style="stroke:var(--green)"/><text x="310" y="134" text-anchor="middle" font-size="8.6" class="s-green">dn</text>
+          <g data-on="1,4"><path d="M54 100V36h76" style="fill:none;stroke:var(--track);stroke-width:2.4"/></g>
+          <g data-on="1"><text x="180" y="190" text-anchor="middle" font-size="9" class="s-ink2">metadata only: answered from NameNode memory</text></g>
+          <g data-on="2"><path d="M54 100V36h76" style="fill:none;stroke:var(--track);stroke-width:2"/><path d="M94 130h46M200 130h10M270 130h10" style="stroke:var(--blue);stroke-width:3"/><text x="180" y="190" text-anchor="middle" font-size="9" class="s-ink2">create + addBlock, then the write pipeline</text></g>
+          <g data-on="3"><path d="M54 100V36h76" style="fill:none;stroke:var(--track);stroke-width:2"/><path d="M140 136H94" style="stroke:var(--blue);stroke-width:3"/><text x="180" y="190" text-anchor="middle" font-size="9" class="s-ink2">block locations, then bytes from one DataNode</text></g>
+          <g data-on="4"><text x="180" y="190" text-anchor="middle" font-size="9" class="s-ink2">rename in the namespace: no block moves</text><text x="180" y="206" text-anchor="middle" font-size="8.6" class="s-ink2">same speed for 4 KB or 4 TB</text></g>
+          <g data-on="5"><path d="M54 100V36h76" style="fill:none;stroke:var(--track);stroke-width:2"/><path d="M140 140H94M94 124h46M200 124h10M270 124h10" style="stroke:var(--blue);stroke-width:3"/><text x="180" y="190" text-anchor="middle" font-size="9" class="s-ink2">read every byte, write it again (3 replicas)</text></g>
+          <g data-on="6"><path d="M54 100V36h76" style="fill:none;stroke:var(--track);stroke-width:2.4"/><path d="M180 56v54M200 50l40 60M220 46l90 64" style="fill:none;stroke:var(--red);stroke-width:1.4;stroke-dasharray:3 3"/><text x="180" y="190" text-anchor="middle" font-size="9" class="s-ink2">namespace entry removed now;</text><text x="180" y="206" text-anchor="middle" font-size="8.6" class="s-ink2">blocks deleted later via heartbeat replies</text></g>
+          <text x="352" y="246" text-anchor="end" class="s-wm">myphatshala.in</text>
+        </svg>
+        <ol class="caps" hidden>
+          <li><code>-ls</code> talks only to the NameNode.</li>
+          <li><code>-put</code> uses the full write pipeline (Lesson 6.1).</li>
+          <li><code>-cat</code> uses the read path (Lesson 6.2).</li>
+          <li><code>-mv</code> changes one entry in the namespace: no DataNode is involved.</li>
+          <li><code>-cp</code> is a read plus a write of the whole file through the client.</li>
+          <li><code>-rm</code> removes the entry at once; DataNodes delete the block files later, when the NameNode tells them in heartbeat replies.</li>
+        </ol>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ======================= PART 6: REAL-WORLD USE ======================= -->
+<section class="part" id="real-world">
+  <span class="part-label"><b>6</b> Real-world use</span>
+  <h2>The shell at work</h2>
+
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="20" y="20" width="80" height="50" rx="6" class="s-soft-acc" style="stroke:var(--track)"/><text x="60" y="42" text-anchor="middle" font-size="8.6" font-weight="700" class="s-acc">_tmp → final</text><text x="60" y="58" text-anchor="middle" font-size="8.6" class="s-ink">one -mv</text></svg></div>
+    <div><h4>1. Atomic publishing with mv</h4>
+      <p>Pipelines write today's results into <code>out/_tmp_2026-10-21</code> and only then <code>-mv</code> it to <code>out/2026-10-21</code>. Readers never see half-written data, because a rename is instant and all-or-nothing.</p>
+      <div class="uc-flow"><span>Write to tmp</span><i>→</i><span class="java">-mv</span><i>→</i><span>Visible at once</span></div></div>
+  </div>
+
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="20" y="20" width="80" height="50" rx="6" class="s-board"/><text x="60" y="42" text-anchor="middle" font-size="8.6" class="mono" style="fill:#9FD3B8">-test -e</text><text x="60" y="58" text-anchor="middle" font-size="8.6" class="mono" style="fill:#F5C77E">_SUCCESS?</text></svg></div>
+    <div><h4>2. Shell checks in schedulers</h4>
+      <p>Airflow or cron jobs start the next step only if <code>hdfs dfs -test -e input/_SUCCESS</code> returns 0, and alert if <code>-du -s</code> shows an unusually small input.</p>
+      <div class="uc-flow"><span>-test</span><i>→</i><span class="java">Exit code</span><i>→</i><span>Run or alert</span></div></div>
+  </div>
+
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="20" y="20" width="80" height="50" rx="6" class="s-soft-blue" style="stroke:var(--blue)"/><text x="60" y="42" text-anchor="middle" font-size="8.6" font-weight="700" class="s-blue">getmerge</text><text x="60" y="58" text-anchor="middle" font-size="8.6" class="s-ink">one file for Excel</text></svg></div>
+    <div><h4>3. Handing results to business users</h4>
+      <p>A job writes <code>part-00000 … part-00099</code>; an analyst runs <code>-getmerge</code> to get one CSV for a spreadsheet (and removes repeated headers first, as we saw).</p>
+      <div class="uc-flow"><span>part files</span><i>→</i><span class="java">getmerge</span><i>→</i><span>One CSV</span></div></div>
+  </div>
+
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="20" y="20" width="80" height="50" rx="6" class="s-card2"/><text x="60" y="42" text-anchor="middle" font-size="8.6" font-weight="700" class="s-ink">trash 1 day</text><text x="60" y="58" text-anchor="middle" font-size="8.6" class="s-ink2">undo mistakes</text></svg></div>
+    <div><h4>4. Trash as a safety net</h4>
+      <p>Most production clusters set <code>fs.trash.interval</code> to a day or more. Support teams regularly restore files from <code>.Trash</code> after accidental deletes, something impossible with the default of 0.</p>
+      <div class="uc-flow"><span>Wrong -rm</span><i>→</i><span class="java">.Trash</span><i>→</i><span>-mv back</span></div></div>
+  </div>
+  <p class="muted">Simplified; organisations differ in tools and policies.</p>
+</section>
+
+
+<div class="ad-slot" data-slot="mid"></div>
+
+<section class="part" id="run">
+  <span class="part-label"><b>7</b> Run the code</span>
+  <h2>A tiny HDFS shell in Python</h2>
+  <p>This program keeps a namespace in a dictionary (path → size and replication) and implements <code>ls</code>, <code>mv</code>, <code>du</code> and <code>rm</code>, counting which ones would touch DataNodes. Run it, then try the tasks.</p>
+  <div class="code" data-lang="python" data-file="main.py"><pre><code>ns = {&quot;/user/hadoop/raw/mon.csv&quot;: (47, 3), &quot;/user/hadoop/raw/tue.csv&quot;: (34, 3)}
+datanode_bytes = 0
+
+def ls(folder):
+    for path, (size, rep) in sorted(ns.items()):
+        if path.startswith(folder + &quot;/&quot;):
+            print(f&quot;-rw-r--r--  {rep} hadoop {size:&gt;6} {path}&quot;)
+
+def mv(src, dst):                 # metadata only: no bytes move
+    ns[dst] = ns.pop(src)
+
+def cp(src, dst):                 # reads and writes every byte
+    global datanode_bytes
+    size, rep = ns[src]
+    datanode_bytes += size + size * rep
+    ns[dst] = (size, rep)
+
+def du(folder):
+    files = [v for p, v in ns.items() if p.startswith(folder + &quot;/&quot;)]
+    print(sum(s for s, r in files), sum(s * r for s, r in files), folder)
+
+cp(&quot;/user/hadoop/raw/mon.csv&quot;, &quot;/user/hadoop/mon_backup.csv&quot;)
+mv(&quot;/user/hadoop/mon_backup.csv&quot;, &quot;/user/hadoop/archive_mon.csv&quot;)
+ls(&quot;/user/hadoop/raw&quot;)
+du(&quot;/user/hadoop&quot;)
+print(&quot;bytes through DataNodes:&quot;, datanode_bytes)</code></pre><div class="output">-rw-r--r--  3 hadoop     47 /user/hadoop/raw/mon.csv
+-rw-r--r--  3 hadoop     34 /user/hadoop/raw/tue.csv
+128 384 /user/hadoop
+bytes through DataNodes: 188</div></div>
+  <ul class="anno"><li><code>def mv(src, dst):                 # metadata only: no bytes move</code><span>A rename only changes the key in the namespace. That is why -mv of 403 MB took 1.863 s, mostly Java start-up.</span></li><li><code>datanode_bytes += size + size * rep</code><span>cp reads the file once and writes it again with 3 replicas: 47 + 141 bytes here.</span></li><li><code>print(sum(s for s, r in files), sum(s * r for s, r in files), folder)</code><span>The two du columns: data size and raw space with replicas. Real output: 81 243 for the shell_lab folder before the copy.</span></li></ul>
+  <div class="runner">
+    <script type="application/json">{
+ "lang": "python",
+ "file": "main.py",
+ "tasks": [
+  {
+   "label": "1 · Copy, move, list",
+   "hint": "Press <b>Run<\/b>. The du line should say 128 384: three files (47 + 34 + 47).",
+   "code": "ns = {\"/user/hadoop/raw/mon.csv\": (47, 3), \"/user/hadoop/raw/tue.csv\": (34, 3)}\ndatanode_bytes = 0\n\ndef ls(folder):\n    for path, (size, rep) in sorted(ns.items()):\n        if path.startswith(folder + \"/\"):\n            print(f\"-rw-r--r--  {rep} hadoop {size:>6} {path}\")\n\ndef mv(src, dst):                 # metadata only: no bytes move\n    ns[dst] = ns.pop(src)\n\ndef cp(src, dst):                 # reads and writes every byte\n    global datanode_bytes\n    size, rep = ns[src]\n    datanode_bytes += size + size * rep\n    ns[dst] = (size, rep)\n\ndef du(folder):\n    files = [v for p, v in ns.items() if p.startswith(folder + \"/\")]\n    print(sum(s for s, r in files), sum(s * r for s, r in files), folder)\n\ncp(\"/user/hadoop/raw/mon.csv\", \"/user/hadoop/mon_backup.csv\")\nmv(\"/user/hadoop/mon_backup.csv\", \"/user/hadoop/archive_mon.csv\")\nls(\"/user/hadoop/raw\")\ndu(\"/user/hadoop\")\nprint(\"bytes through DataNodes:\", datanode_bytes)\n"
+  },
+  {
+   "label": "2 · The real du numbers",
+   "hint": "<b>Predict first:<\/b> the lab printed <code>81  243<\/code> for two files of 47 and 34 bytes with replication 3. Check it.",
+   "code": "sizes = [47, 34]\nprint(sum(sizes), sum(sizes) * 3)\n"
+  },
+  {
+   "label": "3 · setrep changes the second column",
+   "hint": "After <code>-setrep 2<\/code> on archive_mon.csv (47 bytes), what does <code>du<\/code> show for the three files?",
+   "code": "files = {\"mon.csv\": (47, 3), \"tue.csv\": (34, 3), \"archive_mon.csv\": (47, 2)}\nprint(sum(s for s, r in files.values()), sum(s * r for s, r in files.values()))\n"
+  },
+  {
+   "label": "4 · Trash path",
+   "hint": "With trash on, <code>-rm<\/code> moves a file to <code>.Trash/Current<\/code> plus its full path. Build the trash path for any file.",
+   "code": "def trash_path(path, user=\"hadoop\"):\n    return f\"/user/{user}/.Trash/Current{path}\"\n\nprint(trash_path(\"/user/hadoop/shell_lab/archive_mon.csv\"))\n"
+  },
+  {
+   "label": "5 · Spot the error",
+   "hint": "This mv crashes because the source does not exist, like <code>mv: `…': No such file or directory<\/code>. Fix the path.",
+   "code": "ns = {\"/user/hadoop/raw/mon.csv\": 47}\nns[\"/user/hadoop/archive.csv\"] = ns.pop(\"/user/hadoop/raw/monday.csv\")\nprint(ns)\n"
+  }
+ ]
+}</script>
+  </div>
+  <h3 id="pc">Run it on your PC: a shell workout</h3>
+  <p>This script creates two small CSV files and runs 14 everyday commands on a practice folder, printing each command before its output. Save it as <code>shell_lab.sh</code> in the <code>hdfs-lab</code> folder, copy it into the namenode container and run it.</p>
+  <div class="pcrun"><h4>Fourteen commands, one folder</h4>
+  <div class="code" data-lang="bash" data-file="shell_lab.sh"><pre><code>#!/usr/bin/env bash
+# shell_lab.sh: practise the everyday hdfs dfs commands on a small folder.
+# Run inside the namenode container:  bash shell_lab.sh
+set -e
+run() { echo &quot;\$ $*&quot;; eval &quot;$@&quot;; echo; }
+cd /tmp
+printf &#x27;order_id,item,amount\n4001,idli,30\n4002,chai,15\n&#x27; &gt; mon.csv
+printf &#x27;order_id,item,amount\n4003,dosa,45\n&#x27; &gt; tue.csv
+D=/user/hadoop/shell_lab
+
+run &quot;hdfs dfs -rm -r -f -skipTrash $D &gt; /dev/null&quot;
+run &quot;hdfs dfs -mkdir -p $D/raw&quot;
+run &quot;hdfs dfs -put mon.csv tue.csv $D/raw/&quot;
+run &quot;hdfs dfs -ls $D/raw&quot;
+run &quot;hdfs dfs -cat $D/raw/mon.csv&quot;
+run &quot;hdfs dfs -du -s -h $D&quot;
+run &quot;hdfs dfs -cp $D/raw/mon.csv $D/mon_backup.csv&quot;
+run &quot;hdfs dfs -mv $D/mon_backup.csv $D/archive_mon.csv&quot;
+run &quot;hdfs dfs -getmerge $D/raw week.csv &amp;&amp; wc -l week.csv&quot;
+run &quot;hdfs dfs -setrep -w 2 $D/archive_mon.csv&quot;
+run &quot;hdfs dfs -stat &#x27;%n %r %b&#x27; $D/archive_mon.csv&quot;
+run &quot;hdfs dfs -count -v $D&quot;
+run &quot;hdfs dfs -D fs.trash.interval=60 -rm $D/archive_mon.csv&quot;
+run &quot;hdfs dfs -ls -R $D&quot;
+
+# In the hdfs-lab folder:
+#   docker cp shell_lab.sh lab5-namenode-1:/tmp/
+#   docker exec lab5-namenode-1 bash /tmp/shell_lab.sh</code></pre><div class="output">$ hdfs dfs -rm -r -f -skipTrash /user/hadoop/shell_lab &gt; /dev/null
+
+$ hdfs dfs -mkdir -p /user/hadoop/shell_lab/raw
+
+$ hdfs dfs -put mon.csv tue.csv /user/hadoop/shell_lab/raw/
+
+$ hdfs dfs -ls /user/hadoop/shell_lab/raw
+Found 2 items
+-rw-r--r--   3 hadoop supergroup         47 2026-10-21 09:54 /user/hadoop/shell_lab/raw/mon.csv
+-rw-r--r--   3 hadoop supergroup         34 2026-10-21 09:54 /user/hadoop/shell_lab/raw/tue.csv
+
+$ hdfs dfs -cat /user/hadoop/shell_lab/raw/mon.csv
+order_id,item,amount
+4001,idli,30
+4002,chai,15
+
+$ hdfs dfs -du -s -h /user/hadoop/shell_lab
+81  243  /user/hadoop/shell_lab
+
+$ hdfs dfs -cp /user/hadoop/shell_lab/raw/mon.csv /user/hadoop/shell_lab/mon_backup.csv
+
+$ hdfs dfs -mv /user/hadoop/shell_lab/mon_backup.csv /user/hadoop/shell_lab/archive_mon.csv
+
+$ hdfs dfs -getmerge /user/hadoop/shell_lab/raw week.csv &amp;&amp; wc -l week.csv
+5 week.csv
+
+$ hdfs dfs -setrep -w 2 /user/hadoop/shell_lab/archive_mon.csv
+Replication 2 set: /user/hadoop/shell_lab/archive_mon.csv
+Waiting for /user/hadoop/shell_lab/archive_mon.csv ...
+WARNING: the waiting time may be long for DECREASING the number of replications.
+. done
+
+$ hdfs dfs -stat &#x27;%n %r %b&#x27; /user/hadoop/shell_lab/archive_mon.csv
+archive_mon.csv 2 47
+
+$ hdfs dfs -count -v /user/hadoop/shell_lab
+   DIR_COUNT   FILE_COUNT       CONTENT_SIZE PATHNAME
+           2            3                128 /user/hadoop/shell_lab
+
+$ hdfs dfs -D fs.trash.interval=60 -rm /user/hadoop/shell_lab/archive_mon.csv
+2026-10-21 09:54:53 INFO  TrashPolicyDefault:196 - Moved: &#x27;hdfs://namenode/user/hadoop/shell_lab/archive_mon.csv&#x27; to trash at: hdfs://namenode/user/hadoop/.Trash/Current/user/hadoop/shell_lab/archive_mon.csv
+
+$ hdfs dfs -ls -R /user/hadoop/shell_lab
+drwxr-xr-x   - hadoop supergroup          0 2026-10-21 09:54 /user/hadoop/shell_lab/raw
+-rw-r--r--   3 hadoop supergroup         47 2026-10-21 09:54 /user/hadoop/shell_lab/raw/mon.csv
+-rw-r--r--   3 hadoop supergroup         34 2026-10-21 09:54 /user/hadoop/shell_lab/raw/tue.csv</div></div>
+  <p class="muted">Real output from the lab cluster. Dates differ on your run. Note: CONTENT_SIZE 128 = 47 + 34 + 47, DIR_COUNT 2 counts shell_lab itself and raw, and the trash message proves the file can still be restored.</p></div>
+</section>
+
+<section class="part" id="tracer">
+  <span class="part-label"><b>8</b> Line by line</span>
+  <h2>Publishing results with one rename</h2>
+  <p>Follow a job that writes part files into a temporary folder and publishes them with a single move: readers see either nothing or everything.</p>
+  <div class="tracer">
+    <script type="application/json">{
+ "lang": "python",
+ "code": [
+  "ns = {}",
+  "for i in range(3):",
+  "    ns[f\"out/_tmp/part-0000{i}\"] = 100 + i",
+  "visible = [p for p in ns if p.startswith(\"out/final/\")]",
+  "print(\"before mv, visible:\", visible)",
+  "ns = {p.replace(\"out/_tmp/\", \"out/final/\"): s for p, s in ns.items()}",
+  "visible = [p for p in ns if p.startswith(\"out/final/\")]",
+  "print(\"after mv, visible:\", len(visible), \"files\")"
+ ],
+ "steps": [
+  {
+   "line": 1,
+   "phase": "Python",
+   "note": "<code>ns<\/code> is created: → dict #1.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "ns",
+       "→ dict #1"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (0)<\/b> {}"
+   ],
+   "newVar": "ns"
+  },
+  {
+   "line": 2,
+   "phase": "Python",
+   "note": "<code>i<\/code> is created: 0.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "ns",
+       "→ dict #1"
+      ],
+      [
+       "i",
+       "0"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (0)<\/b> {}"
+   ],
+   "newVar": "i"
+  },
+  {
+   "line": 3,
+   "phase": "Write",
+   "note": "The job writes its part files under _tmp; nobody reads there. Object #1 dict now holds {&#x27;out/_tmp/part-0000…: 100}",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "ns",
+       "→ dict #1"
+      ],
+      [
+       "i",
+       "0"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (1)<\/b> {&#x27;out/_tmp/part-0000…: 100}"
+   ]
+  },
+  {
+   "line": 2,
+   "phase": "Python",
+   "note": "<code>i<\/code> changes to 1.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "ns",
+       "→ dict #1"
+      ],
+      [
+       "i",
+       "1"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (1)<\/b> {&#x27;out/_tmp/part-0000…: 100}"
+   ],
+   "newVar": "i"
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "Object #1 dict now holds {&#x27;out/_tmp/part-0000…: 100, &#x27;out/_tmp/part-0000…: 101}",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "ns",
+       "→ dict #1"
+      ],
+      [
+       "i",
+       "1"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (2)<\/b> {&#x27;out/_tmp/part-0000…: 100, &#x27;out/_tmp/part-0000…: 101}"
+   ]
+  },
+  {
+   "line": 2,
+   "phase": "Python",
+   "note": "<code>i<\/code> changes to 2.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "ns",
+       "→ dict #1"
+      ],
+      [
+       "i",
+       "2"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (2)<\/b> {&#x27;out/_tmp/part-0000…: 100, &#x27;out/_tmp/part-0000…: 101}"
+   ],
+   "newVar": "i"
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "Object #1 dict now holds {&#x27;out/_tmp/part-0000…: 100, &#x27;out/_tmp/part-0000…: 101, &#x27;out/_tmp/part-0000…: 102}",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "ns",
+       "→ dict #1"
+      ],
+      [
+       "i",
+       "2"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;out/_tmp/part-0000…: 100, &#x27;out/_tmp/part-0000…: 101, &#x27;out/_tmp/part-0000…: 102}"
+   ]
+  },
+  {
+   "line": 2,
+   "phase": "Python",
+   "note": "Nothing is left to loop over, so the loop ends and Python moves on.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "ns",
+       "→ dict #1"
+      ],
+      [
+       "i",
+       "2"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;out/_tmp/part-0000…: 100, &#x27;out/_tmp/part-0000…: 101, &#x27;out/_tmp/part-0000…: 102}"
+   ]
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "ns",
+       "→ dict #1"
+      ],
+      [
+       "i",
+       "2"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;out/_tmp/part-0000…: 100, &#x27;out/_tmp/part-0000…: 101, &#x27;out/_tmp/part-0000…: 102}"
+   ]
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "ns",
+       "→ dict #1"
+      ],
+      [
+       "i",
+       "2"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;out/_tmp/part-0000…: 100, &#x27;out/_tmp/part-0000…: 101, &#x27;out/_tmp/part-0000…: 102}"
+   ]
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "ns",
+       "→ dict #1"
+      ],
+      [
+       "i",
+       "2"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;out/_tmp/part-0000…: 100, &#x27;out/_tmp/part-0000…: 101, &#x27;out/_tmp/part-0000…: 102}"
+   ]
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "<code>visible<\/code> is created: → list #2. A new list object (#2) is created: []",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "ns",
+       "→ dict #1"
+      ],
+      [
+       "i",
+       "2"
+      ],
+      [
+       "visible",
+       "→ list #2"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;out/_tmp/part-0000…: 100, &#x27;out/_tmp/part-0000…: 101, &#x27;out/_tmp/part-0000…: 102}",
+    "<b>#2 list (0)<\/b> []"
+   ],
+   "newVar": "visible"
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "ns",
+       "→ dict #1"
+      ],
+      [
+       "i",
+       "2"
+      ],
+      [
+       "visible",
+       "→ list #2"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;out/_tmp/part-0000…: 100, &#x27;out/_tmp/part-0000…: 101, &#x27;out/_tmp/part-0000…: 102}",
+    "<b>#2 list (0)<\/b> []"
+   ],
+   "out": "before mv, visible: []\n"
+  },
+  {
+   "line": 6,
+   "phase": "Rename",
+   "note": "One -mv of the folder renames everything in a single NameNode operation.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "ns",
+       "→ dict #1"
+      ],
+      [
+       "i",
+       "2"
+      ],
+      [
+       "visible",
+       "→ list #2"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;out/_tmp/part-0000…: 100, &#x27;out/_tmp/part-0000…: 101, &#x27;out/_tmp/part-0000…: 102}",
+    "<b>#2 list (0)<\/b> []"
+   ]
+  },
+  {
+   "line": 6,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "ns",
+       "→ dict #1"
+      ],
+      [
+       "i",
+       "2"
+      ],
+      [
+       "visible",
+       "→ list #2"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;out/_tmp/part-0000…: 100, &#x27;out/_tmp/part-0000…: 101, &#x27;out/_tmp/part-0000…: 102}",
+    "<b>#2 list (0)<\/b> []"
+   ]
+  },
+  {
+   "line": 6,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "ns",
+       "→ dict #1"
+      ],
+      [
+       "i",
+       "2"
+      ],
+      [
+       "visible",
+       "→ list #2"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;out/_tmp/part-0000…: 100, &#x27;out/_tmp/part-0000…: 101, &#x27;out/_tmp/part-0000…: 102}",
+    "<b>#2 list (0)<\/b> []"
+   ]
+  },
+  {
+   "line": 6,
+   "phase": "Python",
+   "note": "<code>ns<\/code> changes to → dict #3. A new dict object (#3) is created: {&#x27;out/final/part-000…: 100, &#x27;out/final/part-000…: 101, &#x27;out/final/part-000…: 102}",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "ns",
+       "→ dict #3"
+      ],
+      [
+       "i",
+       "2"
+      ],
+      [
+       "visible",
+       "→ list #2"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#2 list (0)<\/b> []",
+    "<b>#3 dict (3)<\/b> {&#x27;out/final/part-000…: 100, &#x27;out/final/part-000…: 101, &#x27;out/final/part-000…: 102}"
+   ],
+   "newVar": "ns"
+  },
+  {
+   "line": 7,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "ns",
+       "→ dict #3"
+      ],
+      [
+       "i",
+       "2"
+      ],
+      [
+       "visible",
+       "→ list #2"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#2 list (0)<\/b> []",
+    "<b>#3 dict (3)<\/b> {&#x27;out/final/part-000…: 100, &#x27;out/final/part-000…: 101, &#x27;out/final/part-000…: 102}"
+   ]
+  },
+  {
+   "line": 7,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "ns",
+       "→ dict #3"
+      ],
+      [
+       "i",
+       "2"
+      ],
+      [
+       "visible",
+       "→ list #2"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#2 list (0)<\/b> []",
+    "<b>#3 dict (3)<\/b> {&#x27;out/final/part-000…: 100, &#x27;out/final/part-000…: 101, &#x27;out/final/part-000…: 102}"
+   ]
+  },
+  {
+   "line": 7,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "ns",
+       "→ dict #3"
+      ],
+      [
+       "i",
+       "2"
+      ],
+      [
+       "visible",
+       "→ list #2"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#2 list (0)<\/b> []",
+    "<b>#3 dict (3)<\/b> {&#x27;out/final/part-000…: 100, &#x27;out/final/part-000…: 101, &#x27;out/final/part-000…: 102}"
+   ]
+  },
+  {
+   "line": 7,
+   "phase": "Python",
+   "note": "<code>visible<\/code> changes to → list #4. A new list object (#4) is created: [&#x27;out/final/part-00000&#x27;, &#x27;out/final/part-00001&#x27;, &#x27;out/final/part-00002&#x27;]",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "ns",
+       "→ dict #3"
+      ],
+      [
+       "i",
+       "2"
+      ],
+      [
+       "visible",
+       "→ list #4"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#3 dict (3)<\/b> {&#x27;out/final/part-000…: 100, &#x27;out/final/part-000…: 101, &#x27;out/final/part-000…: 102}",
+    "<b>#4 list (3)<\/b> [&#x27;out/final/part-00000&#x27;, &#x27;out/final/part-00001&#x27;, &#x27;out/final/part-00002&#x27;]"
+   ],
+   "newVar": "visible"
+  },
+  {
+   "line": 8,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "ns",
+       "→ dict #3"
+      ],
+      [
+       "i",
+       "2"
+      ],
+      [
+       "visible",
+       "→ list #4"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#3 dict (3)<\/b> {&#x27;out/final/part-000…: 100, &#x27;out/final/part-000…: 101, &#x27;out/final/part-000…: 102}",
+    "<b>#4 list (3)<\/b> [&#x27;out/final/part-00000&#x27;, &#x27;out/final/part-00001&#x27;, &#x27;out/final/part-00002&#x27;]"
+   ],
+   "out": "after mv, visible: 3 files\n"
+  }
+ ]
+}</script>
+  </div>
+
+<h3 id="worked">Worked examples: real problems, solved and traced in memory</h3>
+  <p class="wx-intro">Three shell questions with numbers: how much JVM start-up costs in a loop, how big a folder really is on disk, and how much setrep can free. Each runs live and is traced in memory.</p>
+  <article class="wx">
+    <div class="wx__head"><span class="wx__num">Example 1</span><span class="lvl lvl--b">Beginner</span><span class="wx__tag">Scripting · cost</span></div>
+    <h4>Is a loop of hdfs dfs calls slow?</h4>
+    <div class="wx__problem"><p class="wx__label">Problem statement</p><p>A script checks 600 files with one <code>hdfs dfs -test -e</code> each. Each call costs about 1.8 s of JVM start-up (measured in the lab). How long does the loop take, versus one <code>-ls -R</code> of the folder (one call) and checking the names in the output?</p></div>
+    <div class="prob__io"><div><small>Input</small><pre>600 calls · 1.8 s each</pre></div><div><small>Expected output</small><pre>loop: 18 minutes, one listing: 1.8 s</pre></div></div>
+    <div class="wx__approach"><p class="wx__label">Approach</p><ol><li>Loop time = calls × start-up time.</li><li>One listing = one start-up.</li><li>Compare.</li></ol></div>
+    <p class="wx__label">Solution: run it live</p>
+    <div class="runner">
+    <script type="application/json">{
+ "lang": "python",
+ "file": "main.py",
+ "tasks": [
+  {
+   "label": "Solution",
+   "hint": "18 minutes vs about 2 seconds. For many small checks use one listing, the Java API or WebHDFS.",
+   "code": "calls, startup = 600, 1.8\nprint(f\"loop: {calls * startup / 60:.0f} minutes, one listing: {startup} s\")\n"
+  }
+ ]
+}</script>
+    </div>
+    <p class="wx__label">What happens in memory, step by step</p>
+    <p class="wx__how">Recorded from a real Python run: press <b>Next</b> to execute one line at a time. Watch variables change in each frame, and lists and dictionaries (numbered #1, #2 …) fill up as objects.</p>
+    <div class="tracer">
+    <script type="application/json">{
+ "lang": "python",
+ "code": [
+  "calls, startup = 600, 1.8",
+  "print(f\"loop: {calls * startup / 60:.0f} minutes, one listing: {startup} s\")"
+ ],
+ "steps": [
+  {
+   "line": 1,
+   "phase": "Python",
+   "note": "<code>calls<\/code> is created: 600. <code>startup<\/code> is created: 1.8.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "calls",
+       "600"
+      ],
+      [
+       "startup",
+       "1.8"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "startup"
+  },
+  {
+   "line": 2,
+   "phase": "JVM",
+   "note": "Most of each call is Java starting, not HDFS work. The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "calls",
+       "600"
+      ],
+      [
+       "startup",
+       "1.8"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "out": "loop: 18 minutes, one listing: 1.8 s\n"
+  }
+ ]
+}</script>
+    </div>
+  </article>
+  <article class="wx">
+    <div class="wx__head"><span class="wx__num">Example 2</span><span class="lvl lvl--i">Intermediate</span><span class="wx__tag">Capacity · du</span></div>
+    <h4>How much disk does the data folder really use?</h4>
+    <div class="wx__problem"><p class="wx__label">Problem statement</p><p>The lab printed <code>948.6 M  2.8 G  /user/hadoop/data</code>. The files are 4.5 M, 4.5 M, 134.2 M, 402.7 M and 402.7 M with replication 3. Recompute both columns.</p></div>
+    <div class="prob__io"><div><small>Input</small><pre>five files · replication 3</pre></div><div><small>Expected output</small><pre>948.6 M   2.8 G</pre></div></div>
+    <div class="wx__approach"><p class="wx__label">Approach</p><ol><li>First column = sum of file sizes.</li><li>Second = sum × replication.</li><li>Convert MB to GB by dividing by 1024.</li></ol></div>
+    <p class="wx__label">Solution: run it live</p>
+    <div class="runner">
+    <script type="application/json">{
+ "lang": "python",
+ "file": "main.py",
+ "tasks": [
+  {
+   "label": "Solution",
+   "hint": "Capacity planning uses the second column: 1 TB of data costs 3 TB of disk at replication 3.",
+   "code": "sizes = [4.5, 4.5, 134.2, 402.7, 402.7]\ndata = sum(sizes)\nprint(f\"{data:.1f} M   {data * 3 / 1024:.1f} G\")\n"
+  }
+ ]
+}</script>
+    </div>
+    <p class="wx__label">What happens in memory, step by step</p>
+    <p class="wx__how">Recorded from a real Python run: press <b>Next</b> to execute one line at a time. Watch variables change in each frame, and lists and dictionaries (numbered #1, #2 …) fill up as objects.</p>
+    <div class="tracer">
+    <script type="application/json">{
+ "lang": "python",
+ "code": [
+  "sizes = [4.5, 4.5, 134.2, 402.7, 402.7]",
+  "data = sum(sizes)",
+  "print(f\"{data:.1f} M   {data * 3 / 1024:.1f} G\")"
+ ],
+ "steps": [
+  {
+   "line": 1,
+   "phase": "Python",
+   "note": "<code>sizes<\/code> is created: → list #1.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "sizes",
+       "→ list #1"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (5)<\/b> [4.5, 4.5, 134.2, 402.7, 402.7]"
+   ],
+   "newVar": "sizes"
+  },
+  {
+   "line": 2,
+   "phase": "Logical",
+   "note": "What you think of as the folder size. <code>data<\/code> is created: 948.6.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "sizes",
+       "→ list #1"
+      ],
+      [
+       "data",
+       "948.6"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (5)<\/b> [4.5, 4.5, 134.2, 402.7, 402.7]"
+   ],
+   "newVar": "data"
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "sizes",
+       "→ list #1"
+      ],
+      [
+       "data",
+       "948.6"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (5)<\/b> [4.5, 4.5, 134.2, 402.7, 402.7]"
+   ],
+   "out": "948.6 M   2.8 G\n"
+  }
+ ]
+}</script>
+    </div>
+  </article>
+  <article class="wx">
+    <div class="wx__head"><span class="wx__num">Example 3</span><span class="lvl lvl--a">Advanced</span><span class="wx__tag">Cost · setrep</span></div>
+    <h4>How much space does setrep 2 on old data free?</h4>
+    <div class="wx__problem"><p class="wx__label">Problem statement</p><p>A cluster has 600 TB of data at replication 3. Data older than 90 days is 70% of it and rarely read. If we <code>-setrep 2</code> the old data, how much raw disk is freed, and what is the risk?</p></div>
+    <div class="prob__io"><div><small>Input</small><pre>600 TB · 70% old · 3 → 2</pre></div><div><small>Expected output</small><pre>raw before 1800 TB, after 1380 TB, freed 420 TB</pre></div></div>
+    <div class="wx__approach"><p class="wx__label">Approach</p><ol><li>Raw before = 600 × 3.</li><li>Raw after = old × 2 + new × 3.</li><li>Difference is the saving; risk: only one spare copy.</li></ol></div>
+    <p class="wx__label">Solution: run it live</p>
+    <div class="runner">
+    <script type="application/json">{
+ "lang": "python",
+ "file": "main.py",
+ "tasks": [
+  {
+   "label": "Solution",
+   "hint": "420 TB freed. Erasure coding (Lesson 7.3) gets similar savings with better durability.",
+   "code": "data, old_share = 600, 0.70\nbefore = data * 3\nafter = data * old_share * 2 + data * (1 - old_share) * 3\nprint(f\"raw before {before:.0f} TB, after {after:.0f} TB, freed {before - after:.0f} TB\")\n"
+  }
+ ]
+}</script>
+    </div>
+    <p class="wx__label">What happens in memory, step by step</p>
+    <p class="wx__how">Recorded from a real Python run: press <b>Next</b> to execute one line at a time. Watch variables change in each frame, and lists and dictionaries (numbered #1, #2 …) fill up as objects.</p>
+    <div class="tracer">
+    <script type="application/json">{
+ "lang": "python",
+ "code": [
+  "data, old_share = 600, 0.70",
+  "before = data * 3",
+  "after = data * old_share * 2 + data * (1 - old_share) * 3",
+  "print(f\"raw before {before:.0f} TB, after {after:.0f} TB, freed {before - after:.0f} TB\")"
+ ],
+ "steps": [
+  {
+   "line": 1,
+   "phase": "Python",
+   "note": "<code>data<\/code> is created: 600. <code>old_share<\/code> is created: 0.7.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "data",
+       "600"
+      ],
+      [
+       "old_share",
+       "0.7"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "old_share"
+  },
+  {
+   "line": 2,
+   "phase": "Python",
+   "note": "<code>before<\/code> is created: 1800.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "data",
+       "600"
+      ],
+      [
+       "old_share",
+       "0.7"
+      ],
+      [
+       "before",
+       "1800"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "before"
+  },
+  {
+   "line": 3,
+   "phase": "Mix",
+   "note": "Only the old part changes replication. <code>after<\/code> is created: 1380.0.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "data",
+       "600"
+      ],
+      [
+       "old_share",
+       "0.7"
+      ],
+      [
+       "before",
+       "1800"
+      ],
+      [
+       "after",
+       "1380.0"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "after"
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "data",
+       "600"
+      ],
+      [
+       "old_share",
+       "0.7"
+      ],
+      [
+       "before",
+       "1800"
+      ],
+      [
+       "after",
+       "1380.0"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "out": "raw before 1800 TB, after 1380 TB, freed 420 TB\n"
+  }
+ ]
+}</script>
+    </div>
+  </article>
+</section>
+
+<section class="part" id="quiz">
+  <span class="part-label"><b>9</b> Quiz and revision</span>
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <script type="application/json">[
+ {
+  "q": "Which command creates a folder and any missing parents?",
+  "options": [
+   "hdfs dfs -mkdir",
+   "hdfs dfs -touchz",
+   "hdfs dfs -mkdir -p",
+   "hdfs dfs -put -p"
+  ],
+  "answer": 2,
+  "why": "Without -p, a missing parent or an existing folder causes an error."
+ },
+ {
+  "q": "Why did -mv of a 403 MB file take about the same time as -rm?",
+  "options": [
+   "Both are cached",
+   "Both only change NameNode metadata; the time is mostly JVM start-up",
+   "mv deletes the file first",
+   "The file was small"
+  ],
+  "answer": 1,
+  "why": "Real: mv 1.863 s, rm 1.830 s, cp 5.615 s."
+ },
+ {
+  "q": "hdfs dfs -du -s -h printed \"81  243\". What is 243?",
+  "options": [
+   "Space used including 3 replicas",
+   "Block count",
+   "Free space",
+   "Number of files"
+  ],
+  "answer": 0,
+  "why": "81 bytes of data × 3 replicas."
+ },
+ {
+  "q": "What is the default value of fs.trash.interval?",
+  "options": [
+   "1440",
+   "60",
+   "360",
+   "0 (trash off)"
+  ],
+  "answer": 3,
+  "why": "hdfs getconf -confKey fs.trash.interval printed 0 on the lab."
+ },
+ {
+  "q": "Where does a file go when deleted with trash enabled?",
+  "options": [
+   "/tmp",
+   "It is deleted at once",
+   "/user/<name>/.Trash/Current/<full path>",
+   "The NameNode backup"
+  ],
+  "answer": 2,
+  "why": "Real: Moved … to trash at: …/.Trash/Current/user/hadoop/shell_lab/archive_mon.csv"
+ },
+ {
+  "q": "What does -getmerge do?",
+  "options": [
+   "Merges two HDFS folders",
+   "Concatenates the files of an HDFS folder into one local file",
+   "Joins CSVs by key",
+   "Merges small blocks"
+  ],
+  "answer": 1,
+  "why": "It just concatenates bytes, so headers repeat."
+ },
+ {
+  "q": "How does a script know whether a path exists?",
+  "options": [
+   "Use hdfs dfs -test -e and check the exit code",
+   "Parse -ls output only",
+   "Use -cat",
+   "It cannot"
+  ],
+  "answer": 0,
+  "why": "Real: exists: 0 for day1.csv, exists: 1 for day9.csv."
+ },
+ {
+  "q": "For copying 5 TB between folders, the better tool is:",
+  "options": [
+   "hdfs dfs -cp",
+   "hdfs dfs -getmerge",
+   "hdfs dfs -mv",
+   "hadoop distcp"
+  ],
+  "answer": 3,
+  "why": "-cp streams everything through one client; distcp runs a parallel job."
+ }
+]</script>
+  </div>
+
+  <h3>Quick revision</h3>
+  <div class="revision">
+    <h3>Lesson 6.3 in one screen</h3>
+    <ul><li>Syntax: <code>hdfs dfs [-D prop=value] -command [options] paths</code>; relative paths start at <code>/user/&lt;name&gt;</code>.</li><li>Metadata only (instant): <code>-ls -mkdir -mv -rm -chmod -count -du -stat -test</code>.</li><li>Data commands (time ∝ size): <code>-put -get -cat -cp -getmerge -appendToFile</code>.</li><li>Lab: <code>cp</code> 5.615 s vs <code>mv</code> 1.863 s vs <code>rm</code> 1.830 s on 403 MB.</li><li><code>-du</code>: data size, raw size with replicas (81 / 243).</li><li>Trash is <b>off</b> by default (<code>fs.trash.interval=0</code>); with it on, files go to <code>.Trash/Current</code>.</li><li>Errors: <code>File exists</code> (use <code>-p</code> / <code>-f</code>), <code>No such file or directory</code>.</li><li>Scripts: use <code>-test</code> exit codes; quote globs; avoid thousands of separate calls.</li></ul>
+  </div>
+
+  <h3>Interview and viva questions</h3>
+  <div class="faq">
+    <details><summary>What is the difference between hadoop fs and hdfs dfs?</summary><p>They run the same FsShell. hadoop fs works with any file system Hadoop supports (HDFS, local, S3, ADLS…), and hdfs dfs is the conventional name when working with HDFS. hadoop dfs is an old deprecated form.</p></details>
+    <details><summary>How do I copy a file from local disk to HDFS?</summary><p>hdfs dfs -put localfile /hdfs/path/ (or -copyFromLocal). Use -f to overwrite an existing file. To move instead of copy, -moveFromLocal deletes the local file after upload.</p></details>
+    <details><summary>Why is hdfs dfs -mv so fast?</summary><p>A move or rename within HDFS only changes the path in the NameNode namespace; no block data is copied. Its time is dominated by the client JVM start-up, so it is the same for a tiny or a huge file.</p></details>
+    <details><summary>How do I recover a deleted file?</summary><p>Only if trash was enabled (fs.trash.interval &gt; 0) and the file was not deleted with -skipTrash: move it back from /user/&lt;name&gt;/.Trash/Current/&lt;original path&gt;. Otherwise restore from a snapshot or backup if one exists.</p></details>
+    <details><summary>What do the columns of hdfs dfs -du mean?</summary><p>First: the size of the data. Second: the disk space consumed including all replicas. Then the path. With -s you get one total line for the folder, and -h prints human-readable units.</p></details>
+    <details><summary>How do I change the replication factor of existing files?</summary><p>hdfs dfs -setrep N path (folders apply to all files inside). The NameNode updates the metadata immediately and schedules extra copies or deletions; -w waits until the actual replica count matches.</p></details>
+    
+  </div>
+
+  <h3 id="practice">Practice problems</h3>
+  <p class="prob-intro">Shell exercises using the real outputs from the lab.</p>
+  <div class="probs">
+    <article class="prob"><div class="prob__head"><span class="prob__num">P1</span><span class="prob__tag prob__tag--easy">Easy</span><h4>Parse an ls line</h4></div>
+      <p>From a real <code>-ls</code> line, extract permissions, replication, size and file name.</p>
+      <div class="prob__io"><div><small>Input</small><pre>-rw-r--r--   3 hadoop supergroup         47 2026-10-21 09:54 /user/hadoop/shell_lab/raw/mon.csv</pre></div><div><small>Expected output</small><pre>-rw-r--r-- 3 47 mon.csv</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>line = &quot;-rw-r--r--   3 hadoop supergroup         47 2026-10-21 09:54 /user/hadoop/shell_lab/raw/mon.csv&quot;
+f = line.split()
+print(f[0], int(f[1]), int(f[4]), f[7].rsplit(&quot;/&quot;, 1)[1])</code></pre><div class="output">-rw-r--r-- 3 47 mon.csv</div></div>
+        <p><b>How it works:</b> -rw-r--r--, replication 3, 47 bytes, mon.csv. Split on whitespace; field 1 is replication (or - for folders).</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P2</span><span class="prob__tag prob__tag--easy">Easy</span><h4>Count lines after getmerge</h4></div>
+      <p>mon.csv has 3 lines, tue.csv has 2. How many lines does getmerge produce, and how many are headers?</p>
+      <div class="prob__io"><div><small>Input</small><pre>3 + 2 lines</pre></div><div><small>Expected output</small><pre>lines: 5  headers: 2</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>files = {&quot;mon.csv&quot;: 3, &quot;tue.csv&quot;: 2}
+print(&quot;lines:&quot;, sum(files.values()), &quot; headers:&quot;, len(files))</code></pre><div class="output">lines: 5  headers: 2</div></div>
+        <p><b>How it works:</b> 5 lines (the real wc -l printed 5 week.csv), of which 2 are header lines.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P3</span><span class="prob__tag prob__tag--easy">Easy</span><h4>Octal permissions</h4></div>
+      <p>Convert chmod 640 into the rwx string that -ls shows.</p>
+      <div class="prob__io"><div><small>Input</small><pre>640</pre></div><div><small>Expected output</small><pre>-rw-r-----</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>def rwx(mode):
+    return &quot;&quot;.join((&quot;r&quot; if d &amp; 4 else &quot;-&quot;) + (&quot;w&quot; if d &amp; 2 else &quot;-&quot;) + (&quot;x&quot; if d &amp; 1 else &quot;-&quot;) for d in map(int, mode))
+print(&quot;-&quot; + rwx(&quot;640&quot;))</code></pre><div class="output">-rw-r-----</div></div>
+        <p><b>How it works:</b> -rw-r-----, exactly what the real -ls showed after hdfs dfs -chmod 640 day1.csv.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P4</span><span class="prob__tag prob__tag--medium">Medium</span><h4>Remove repeated headers</h4></div>
+      <p>After getmerge, keep only the first header line.</p>
+      <div class="prob__io"><div><small>Input</small><pre>merged lines with header repeated</pre></div><div><small>Expected output</small><pre>order_id,item,amount
+4001,idli,30
+4002,chai,15
+4003,dosa,45</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>merged = [&quot;order_id,item,amount&quot;, &quot;4001,idli,30&quot;, &quot;4002,chai,15&quot;, &quot;order_id,item,amount&quot;, &quot;4003,dosa,45&quot;]
+clean = merged[:1] + [l for l in merged[1:] if l != merged[0]]
+print(&quot;\n&quot;.join(clean))</code></pre><div class="output">order_id,item,amount
+4001,idli,30
+4002,chai,15
+4003,dosa,45</div></div>
+        <p><b>How it works:</b> 4 lines remain: one header and three orders. Do this before handing a file to Excel.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P5</span><span class="prob__tag prob__tag--medium">Medium</span><h4>Check count -v</h4></div>
+      <p>The real <code>-count -v</code> printed 2 dirs, 3 files, 128 bytes for shell_lab. Rebuild those numbers from the paths.</p>
+      <div class="prob__io"><div><small>Input</small><pre>shell_lab, raw, 3 files (47, 34, 47)</pre></div><div><small>Expected output</small><pre>2 3 128</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>paths = {&quot;shell_lab/&quot;: None, &quot;shell_lab/raw/&quot;: None, &quot;shell_lab/raw/mon.csv&quot;: 47,
+         &quot;shell_lab/raw/tue.csv&quot;: 34, &quot;shell_lab/archive_mon.csv&quot;: 47}
+dirs = sum(v is None for v in paths.values())
+files = [v for v in paths.values() if v is not None]
+print(dirs, len(files), sum(files))</code></pre><div class="output">2 3 128</div></div>
+        <p><b>How it works:</b> 2 3 128: the folder itself counts as a directory.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P6</span><span class="prob__tag prob__tag--medium">Medium</span><h4>Time a cleanup script</h4></div>
+      <p>A cleanup script runs 120 separate <code>hdfs dfs -rm</code> calls at 1.83 s each. Rewritten as one call with 120 paths, it takes about 3 s. How much time is saved per run and per month (one run a day)?</p>
+      <div class="prob__io"><div><small>Input</small><pre>120 × 1.83 s vs 3 s · 30 runs</pre></div><div><small>Expected output</small><pre>per run 217 s saved, per month 1.8 hours</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>loop, single = 120 * 1.83, 3
+print(f&quot;per run {loop - single:.0f} s saved, per month {(loop - single) * 30 / 3600:.1f} hours&quot;)</code></pre><div class="output">per run 217 s saved, per month 1.8 hours</div></div>
+        <p><b>How it works:</b> About 217 s per run and 1.8 hours a month: -rm accepts many paths (and globs) in one call.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P7</span><span class="prob__tag prob__tag--business">Business problem</span><h4>Cost of no trash</h4></div>
+      <p>A team deletes data by mistake about 4 times a year. Without trash, each restore from backup takes 2 engineers × 6 hours at Rs 1,500/hour. With trash (1 day), each takes 15 minutes of one engineer. What does enabling trash save per year?</p>
+      <div class="prob__io"><div><small>Input</small><pre>4 incidents · Rs 1,500/hour</pre></div><div><small>Expected output</small><pre>Rs 70,500 per year</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>rate = 1500
+without = 4 * 2 * 6 * rate
+with_trash = 4 * 0.25 * rate
+print(f&quot;Rs {without - with_trash:,.0f} per year&quot;)</code></pre><div class="output">Rs 70,500 per year</div></div>
+        <p><b>How it works:</b> Rs 70,500 per year (illustrative), and some deletions cannot be restored at all without trash or snapshots.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P8</span><span class="prob__tag prob__tag--advanced">Advanced</span><h4>Mini FsShell</h4></div>
+      <p>Implement <code>mkdir -p</code>, <code>put</code> (fail if the file exists unless <code>-f</code>), and <code>rm</code> with optional trash on a dictionary namespace. Print the messages like the real shell.</p>
+      <div class="prob__io"><div><small>Input</small><pre>commands list</pre></div><div><small>Expected output</small><pre>put: `/user/hadoop/lab/raw/a.csv&#x27;: File exists
+Moved: &#x27;/user/hadoop/lab/raw/a.csv&#x27; to trash at: /user/hadoop/.Trash/Current/user/hadoop/lab/raw/a.csv
+[&#x27;/user/hadoop/.Trash/Current/user/hadoop/lab/raw/a.csv&#x27;]</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>ns, trash_on = {&quot;/user/hadoop&quot;: &quot;dir&quot;}, True
+
+def mkdir_p(p):
+    parts = p.strip(&quot;/&quot;).split(&quot;/&quot;)
+    for i in range(1, len(parts) + 1):
+        ns.setdefault(&quot;/&quot; + &quot;/&quot;.join(parts[:i]), &quot;dir&quot;)
+
+def put(p, size, force=False):
+    if p in ns and not force:
+        print(f&quot;put: `{p}&#x27;: File exists&quot;); return
+    ns[p] = size
+
+def rm(p):
+    if trash_on:
+        t = &quot;/user/hadoop/.Trash/Current&quot; + p
+        ns[t] = ns.pop(p); print(f&quot;Moved: &#x27;{p}&#x27; to trash at: {t}&quot;)
+    else:
+        del ns[p]; print(&quot;Deleted&quot;, p)
+
+mkdir_p(&quot;/user/hadoop/lab/raw&quot;); put(&quot;/user/hadoop/lab/raw/a.csv&quot;, 47)
+put(&quot;/user/hadoop/lab/raw/a.csv&quot;, 50); put(&quot;/user/hadoop/lab/raw/a.csv&quot;, 50, force=True)
+rm(&quot;/user/hadoop/lab/raw/a.csv&quot;)
+print(sorted(p for p in ns if ns[p] != &quot;dir&quot;))</code></pre><div class="output">put: `/user/hadoop/lab/raw/a.csv&#x27;: File exists
+Moved: &#x27;/user/hadoop/lab/raw/a.csv&#x27; to trash at: /user/hadoop/.Trash/Current/user/hadoop/lab/raw/a.csv
+[&#x27;/user/hadoop/.Trash/Current/user/hadoop/lab/raw/a.csv&#x27;]</div></div>
+        <p><b>How it works:</b> The second put prints File exists, the -f put overwrites, and rm moves the file to .Trash/Current with its full path, which is all that is left as a file.</p>
+      </details>
+    </article>
+  </div>
+
+  <h3 id="scenarios">Real-world scenario questions (asked in company interviews)</h3>
+  <p class="scn-intro">Shell questions check practical habits: safe deletes, fast scripts and knowing what each command really costs.</p>
+  <div class="scenarios">
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">HDFS · basics</span><span class="scn__tag scn__tag--level">Fresher</span></div>
+      <h4>“Name ten HDFS commands you use”</h4>
+      <p class="scn__situation">The most common first question on HDFS.</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> real usage, not a memorised list.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>Group them: list/size (<code>-ls</code>, <code>-du -s -h</code>, <code>-count</code>), transfer (<code>-put</code>, <code>-get</code>, <code>-getmerge</code>), read (<code>-cat</code>, <code>-tail</code>), change (<code>-mkdir -p</code>, <code>-mv</code>, <code>-cp</code>, <code>-rm -r</code>), attributes (<code>-chmod</code>, <code>-setrep</code>).</li>
+          <li>Add one detail that shows experience: du's second column includes replicas; mv is metadata-only; trash is off by default.</li>
+        </ul>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Operations · safety</span><span class="scn__tag scn__tag--level">Experienced</span></div>
+      <h4>Someone ran hdfs dfs -rm -r on a production folder</h4>
+      <p class="scn__situation">A colleague deleted yesterday's processed data by mistake and asks you to bring it back.</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> trash, snapshots and prevention.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>Check <code>.Trash/Current</code> of the user who ran it; if it is there, <code>-mv</code> it back.</li>
+          <li>If trash was off or <code>-skipTrash</code> was used, restore from a snapshot (<code>.snapshot</code>) or reprocess from raw data.</li>
+          <li>Prevent: enable <code>fs.trash.interval</code>, snapshot important folders, restrict write permissions on production paths.</li>
+        </ul>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Scripting · performance</span><span class="scn__tag scn__tag--level">Experienced</span></div>
+      <h4>A housekeeping script takes 40 minutes</h4>
+      <p class="scn__situation">It loops over 1,300 paths, calling hdfs dfs -test and -rm for each.</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> JVM start-up cost.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>Each call starts a JVM (about 1.8 s): 1,300 × 2 calls ≈ 40 minutes, almost all start-up.</li>
+          <li>List once (<code>-ls -R</code> or <code>-find</code>), decide in the script, then pass many paths or a glob to one <code>-rm</code>.</li>
+          <li>For complex logic, use the Java API or Python with WebHDFS in a single process.</li>
+        </ul>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Pipelines · correctness</span><span class="scn__tag scn__tag--level">Fresher</span></div>
+      <h4>Reports sometimes read half-written output</h4>
+      <p class="scn__situation">A dashboard reads a folder while the nightly job is still writing to it.</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> atomic rename.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>Write to a temporary folder first, then publish with one <code>-mv</code>; a rename is atomic in the NameNode.</li>
+          <li>Also have readers wait for a <code>_SUCCESS</code> marker (<code>-test -e</code>).</li>
+        </ul>
+      </div></details>
+    </article>
+
+  </div>
+</section>
+
+<nav class="lesson-nav" id="lesson-nav" aria-label="Lesson navigation"></nav>
+<div class="ad-slot" data-slot="bottom"></div>
+</article>
+
+<aside class="lesson-side">
+  <nav class="toc" aria-label="In this lesson">
+    <h4>In this lesson</h4>
+    <ol>
+      <li><a href="#story">The story</a></li>
+      <li><a href="#definition">Definition</a></li><li><a href="#levels">Beginner → Advanced</a></li>
+      <li><a href="#types">Types and ways to use it</a></li>
+      <li><a href="#steps">Step by step</a></li>
+      <li><a href="#animation">See it happen</a></li>
+      <li><a href="#real-world">Real-world use</a></li>
+      <li><a href="#run">Run the code</a></li><li><a href="#pc">Run on your PC</a></li>
+      <li><a href="#tracer">Line by line</a></li>
+      <li><a href="#worked">Worked examples</a></li>
+      <li><a href="#quiz">Quiz and revision</a></li>
+      <li><a href="#practice">Practice problems</a></li>
+      <li><a href="#scenarios">Industry scenarios</a></li>
+    </ol>
+  </nav>
+  <div class="ad-slot" data-slot="side"></div>
+  <div class="outline" id="outline"></div>
+</aside>
+</div>
+</main>
+
+<footer class="site-footer">
+  <div class="wrap">
+    <div><h4>MyPhatshala</h4><p>Free programming and IT lessons that show what happens behind the screen.</p></div>
+    <div><h4>Learn</h4><a href="../../../../#tracks">All courses</a><a href="../../">Apache Hadoop syllabus</a></div>
+    <div><h4>Site</h4><a href="../../../../about.html">About</a><a href="../../../../contact.html">Contact</a><a href="../../../../privacy.html">Privacy policy</a><a href="../../../../disclaimer.html">Disclaimer</a></div>
+    <div class="copyright">© MyPhatshala. All lesson content, diagrams and animations are original. Please do not copy without permission.</div>
+  </div>
+</footer>
+
+<script src="../../../../data/courses/hadoop.js"></script>
+<script src="../../../../assets/js/lesson.js"></script>
+<script src="../../../../assets/js/ads.js"></script>
+<script src="../../../../assets/js/site.js"></script>
+</body>
+</html>

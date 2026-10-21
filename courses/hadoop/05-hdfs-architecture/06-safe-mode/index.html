@@ -1,0 +1,2108 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Safe mode | MyPhatshala</title>
+<meta name="description" content="HDFS safe mode: the NameNode&#x27;s read-only start-up state while it waits for block reports, the 0.999 threshold and 30-second extension, manual safe mode, and what a stuck safe mode means. Real Hadoop 3.5.0 runs: restarts with all, none and some DataNodes, SafeModeException on write, “Zero blocklocations” on read, and a missing block that slipped past the whole-number threshold. Python threshold calculator, quiz and interview scenarios.">
+<meta name="mp:minutes" content="22">
+<link rel="canonical" href="https://myphatshala.in/courses/hadoop/05-hdfs-architecture/06-safe-mode/">
+<meta property="og:title" content="Safe mode · MyPhatshala">
+<meta property="og:description" content="Why HDFS says “Name node is in safe mode”, when it ends by itself, and when it never will. Real restarts on a lab cluster.">
+<link rel="icon" href="../../../../assets/img/logo.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Fraunces:ital,opsz,wght@0,9..144,600;0,9..144,700;1,9..144,600&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../../../../assets/css/style.css">
+<link rel="stylesheet" href="../../../../assets/css/lesson.css">
+<script src="../../../../assets/js/config.js"></script>
+<script>try { const t = localStorage.getItem("mp-theme"); if (t) document.documentElement.dataset.theme = t; } catch (e) {}</script>
+<script type="application/ld+json">{"@context": "https://schema.org", "@type": "LearningResource", "name": "Safe mode", "learningResourceType": "Lesson", "educationalLevel": "Beginner → Intermediate", "isAccessibleForFree": true, "inLanguage": "en", "isPartOf": {"@type": "Course", "name": "Apache Hadoop", "provider": {"@type": "Organization", "name": "MyPhatshala"}}}</script>
+</head>
+<body style="--track:#B45309" data-lesson="05-hdfs-architecture/06-safe-mode" data-course-root="../../">
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="site-header">
+  <div class="wrap">
+    <a class="brand" href="../../../../" aria-label="MyPhatshala home"><img src="../../../../assets/img/logo.svg" width="34" height="34" alt=""><span>My<b>Phatshala</b></span></a>
+    <nav class="nav" aria-label="Main">
+      <a href="../../../../#tracks">All courses</a>
+      <a href="../../">Apache Hadoop syllabus</a>
+      <button class="theme-btn" id="theme-btn" aria-label="Toggle dark mode"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg></button>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+<section class="lesson-hero">
+  <div class="wrap">
+    <nav class="crumbs" aria-label="Breadcrumb"><a href="../../../../">Home</a><span>›</span><a href="../../../../#track-big-data">Big Data Engineering</a><span>›</span><a href="../../">Apache Hadoop</a><span>›</span><b>Lesson 5.6</b></nav>
+    <h1>Safe mode</h1>
+    <p class="lead">Every time a NameNode starts, it spends a little while in safe mode: it can list files but won't change anything until DataNodes have reported where the blocks are. This lesson shows real restarts with all, none and some DataNodes running, explains the threshold and extension behind the countdown, and teaches you to read a stuck safe mode as a symptom rather than an obstacle to force away.</p>
+    <div class="lesson-meta"><span>Module 5 · HDFS architecture</span><span>⏱ 22 min</span><span>Beginner → Intermediate</span><span>Real restart timelines</span><span>Threshold calculator</span><span>Runs in your browser (Python)</span><span>8 practice problems</span></div>
+  </div>
+</section>
+
+<div class="wrap lesson-layout">
+<article class="lesson-main">
+<!-- ======================= PART 1: THE STORY ======================= -->
+<section class="part" id="story">
+  <span class="part-label"><b>1</b> The story</span>
+  <h2>“Name node is in safe mode”</h2>
+  <div class="story">
+    <p class="narration">Kabir restarts the NameNode and, without waiting, uploads a file. HDFS refuses: <code>put: Cannot create file … Name node is in safe mode.</code> He tries again a minute later and it works. Riya does a nastier experiment: she stops all four DataNodes and restarts the NameNode. Now <code>hdfs dfs -ls</code> lists every file with its size, but <code>hdfs dfs -cat</code> fails with <code>Zero blocklocations … Name node is in safe mode.</code> “It knows the files but can't find them?”</p>
+
+    <div class="scene">
+      <svg viewBox="0 0 640 180" role="img" aria-label="After a restart the NameNode loads the namespace, then waits in read-only safe mode until DataNodes report enough blocks, then waits 30 more seconds and leaves safe mode.">
+        <g font-size="10">
+          <rect x="16" y="40" width="130" height="64" rx="10" class="s-soft-blue" style="stroke:var(--blue)"/><text x="81" y="66" text-anchor="middle" font-weight="700" class="s-blue">1. load fsimage</text><text x="81" y="84" text-anchor="middle" font-size="8.6" class="s-ink">+ replay edits</text>
+          <rect x="170" y="40" width="160" height="64" rx="10" class="s-soft-acc" style="stroke:var(--track)"/><text x="250" y="62" text-anchor="middle" font-weight="700" class="s-acc">2. SAFE MODE</text><text x="250" y="78" text-anchor="middle" font-size="8.6" class="s-ink">read-only; wait for</text><text x="250" y="92" text-anchor="middle" font-size="8.6" class="s-ink">block reports (99.9%)</text>
+          <rect x="354" y="40" width="130" height="64" rx="10" class="s-card2"/><text x="419" y="66" text-anchor="middle" font-weight="700" class="s-ink">3. extension</text><text x="419" y="84" text-anchor="middle" font-size="8.6" class="s-ink">30 more seconds</text>
+          <rect x="508" y="40" width="116" height="64" rx="10" class="s-soft-green" style="stroke:var(--green)"/><text x="566" y="66" text-anchor="middle" font-weight="700" class="s-green">4. normal</text><text x="566" y="84" text-anchor="middle" font-size="8.6" class="s-ink">writes allowed</text>
+          <path d="M146 72h24M330 72h24M484 72h24" class="s-line"/>
+        </g>
+        <text x="320" y="140" text-anchor="middle" font-size="10" class="s-ink2">Real restart in our lab: safe mode for about 40 seconds, then OFF automatically.</text>
+        <text x="632" y="174" text-anchor="end" class="s-wm">myphatshala.in</text>
+      </svg>
+    </div>
+
+    <div class="panel panel--right"><div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#DDEFE6"/><path d="M12 64c2-12 10-18 20-18s18 6 20 18z" fill="#F4F1EA"/><path d="M28 46l4 8 4-8" fill="#2F7D5B"/><circle cx="32" cy="28" r="12" fill="#B57A50"/><path d="M20 26c0-8 5-13 12-13s12 5 12 13c-2-3-6-5-12-5s-10 2-12 5z" fill="#5A5A5A"/><path d="M22 32c1 8 5 11 10 11s9-3 10-11c-2 3-6 4-10 4s-8-1-10-4z" fill="#5A5A5A"/><circle cx="27" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><circle cx="37" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><path d="M30.4 29h3.2" stroke="#1B2433" stroke-width="1.4"/><circle cx="27" cy="29" r="1.1" fill="#1B2433"/><circle cx="37" cy="29" r="1.1" fill="#1B2433"/></svg></div><div class="bubble"><b class="who">Arjun Sir</b><p>Remember: after a restart the NameNode knows every file from its fsimage and edits, but <i>not</i> where the blocks are. That map comes only from DataNode block reports. Until enough blocks have been reported, the NameNode protects you: it allows reading the namespace, but no changes, and it won't start re-replicating blocks just because their DataNodes haven't reported yet.</p></div></div>
+    <div class="panel"><div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#E1E9F7"/><path d="M12 64c2-12 10-18 20-18s18 6 20 18z" fill="#B45309"/><circle cx="32" cy="29" r="12" fill="#A9714A"/><path d="M19 27c0-9 6-14 13-14s13 5 13 14c-2-4-5-6-8-6-3 3-9 4-13 3-2 1-4 2-5 3z" fill="#1E1A17"/><circle cx="27.5" cy="30" r="1.5" fill="#1E1A17"/><circle cx="36.5" cy="30" r="1.5" fill="#1E1A17"/><path d="M27 35.5q5 3.5 10 0" stroke="#1E1A17" stroke-width="1.6" fill="none" stroke-linecap="round"/><rect x="41" y="40" width="10" height="7" rx="1.5" fill="#2E5AAC"/></svg></div><div class="bubble"><b class="who">Kabir</b><p>So it's waiting for the roll call.</p></div></div>
+    <div class="panel panel--right"><div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#DDEFE6"/><path d="M12 64c2-12 10-18 20-18s18 6 20 18z" fill="#F4F1EA"/><path d="M28 46l4 8 4-8" fill="#2F7D5B"/><circle cx="32" cy="28" r="12" fill="#B57A50"/><path d="M20 26c0-8 5-13 12-13s12 5 12 13c-2-3-6-5-12-5s-10 2-12 5z" fill="#5A5A5A"/><path d="M22 32c1 8 5 11 10 11s9-3 10-11c-2 3-6 4-10 4s-8-1-10-4z" fill="#5A5A5A"/><circle cx="27" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><circle cx="37" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><path d="M30.4 29h3.2" stroke="#1B2433" stroke-width="1.4"/><circle cx="27" cy="29" r="1.1" fill="#1B2433"/><circle cx="37" cy="29" r="1.1" fill="#1B2433"/></svg></div><div class="bubble"><b class="who">Arjun Sir</b><p>Exactly. When 99.9% of blocks have at least one reported replica, it waits 30 more seconds for the stragglers, then leaves safe mode by itself. With no DataNodes at all, the threshold can never be reached, so it waits for ever, unless an admin forces it out, which you should do only when you understand why it's stuck.</p></div></div>
+  </div>
+</section>
+
+<!-- ======================= PART 2: DEFINITION ======================= -->
+<section class="part" id="definition">
+  <span class="part-label"><b>2</b> Definition</span>
+  <h2>Safe mode</h2>
+  <div class="def">
+    <div class="def__formal"><small>Formal definition (write this in exams)</small>
+      <p><b>Safe mode</b> is a read-only state of the NameNode in which the namespace can be read but not modified (no create, delete, rename or append) and no blocks are replicated or deleted. The NameNode enters it automatically at start-up, after loading the fsimage and edit log, while it collects block reports from DataNodes. It leaves automatically when (1) the fraction of blocks that have at least <code>dfs.namenode.replication.min</code> (1) reported replicas reaches <code>dfs.namenode.safemode.threshold-pct</code> (<b>0.999</b>), and (2) the number of live DataNodes reaches <code>dfs.namenode.safemode.min.datanodes</code> (0), followed by an extension period of <code>dfs.namenode.safemode.extension</code> (<b>30,000 ms</b>). Administrators can control it with <code>hdfs dfsadmin -safemode get | enter | leave | wait</code>; manual safe mode (entered with <code>enter</code>) must be left manually.</p></div>
+    <div class="def__simple"><small>In simple words</small>
+      <p>Right after starting, HDFS is in a careful read-only mode until DataNodes have reported almost all blocks. Then it waits 30 seconds more and opens for writing. Admins can also switch it on and off.</p></div>
+  </div>
+
+  <h3>Words you'll meet in this lesson</h3>
+  <div class="terms">
+    <div class="term"><b>Safe mode</b><span>NameNode read-only state: list and read metadata, no changes, no replication.</span></div>
+    <div class="term"><b>Threshold</b><span>Share of blocks that must be reported (with ≥ 1 replica): 0.999 by default.</span></div>
+    <div class="term"><b>Extension</b><span>Extra wait after reaching the threshold: 30 s by default.</span></div>
+    <div class="term"><b>Safe block</b><span>A block with at least the minimum number of reported replicas (1).</span></div>
+    <div class="term"><b>SafeModeException</b><span>The error a write gets during safe mode.</span></div>
+    <div class="term"><b>-safemode wait</b><span>Blocks a script until safe mode is off. Use it after starting HDFS.</span></div>
+    <div class="term"><b>Manual safe mode</b><span>Entered with <code>-safemode enter</code>, e.g. for <code>saveNamespace</code>; never leaves on its own.</span></div>
+    <div class="term"><b>Missing block</b><span>A block with no live replica. Enough of them keep the NameNode in safe mode.</span></div>
+  </div>
+
+  <h3>Safe mode settings (Hadoop 3.5.0 defaults)</h3>
+  <table class="facts" style="table-layout:fixed;overflow-wrap:anywhere">
+    <tr><th>threshold-pct</th><td>0.999: the NameNode computes the needed count as the whole number part of total × 0.999</td></tr>
+    <tr><th>extension</th><td>30,000 ms</td></tr>
+    <tr><th>min.datanodes</th><td>0 (“The minimum number of live datanodes is not required”)</td></tr>
+    <tr><th>replication.min</th><td>1 replica counts a block as safe</td></tr>
+    <tr><th>Allowed in safe mode</th><td>ls, stat, cat/get of blocks already reported, getconf, fsck, <code>saveNamespace</code></td></tr>
+    <tr><th>Refused</th><td>put, mkdir, rm, mv, setrep, append; no replication or deletion of blocks</td></tr>
+  </table>
+
+  <h3 id="levels">Safe mode at three levels</h3>
+  <div class="modlab levels"><div class="modlab__bar"><b>Pick your level. New to this? Start at Beginner and climb.</b><button type="button" data-mod="b">Beginner</button><button type="button" data-mod="i">Intermediate</button><button type="button" data-mod="a">Advanced</button></div>
+    <div class="modlab__panel" data-mod="b"><h4><span class="lvl lvl--b">Beginner</span> The morning roll call</h4>
+      <ul>
+        <li>The school opens, but the principal doesn't start classes until almost every teacher has signed in.</li>
+        <li>Students can look at the timetable (read the namespace) but no room changes are allowed (no writes).</li>
+        <li>When 99.9% have signed in, she waits a little for latecomers, then rings the bell.</li>
+      </ul>
+
+    </div>
+    <div class="modlab__panel" data-mod="i"><h4><span class="lvl lvl--i">Intermediate</span> Why it exists</h4>
+      <ul>
+        <li>Without it, a restarting NameNode would see “no replicas” for every block and immediately order lakhs of copies, then delete them again as reports arrived.</li>
+        <li>It stops clients from writing while the NameNode can't yet choose good DataNodes or confirm space.</li>
+        <li>The 30 s extension avoids leaving the moment the threshold is touched, while a few DataNodes are still reporting.</li>
+        <li>Scripts that start HDFS and then write data should run <code>hdfs dfsadmin -safemode wait</code> first.</li>
+      </ul>
+
+    </div>
+    <div class="modlab__panel" data-mod="a"><h4><span class="lvl lvl--a">Advanced</span> Stuck in safe mode: what it tells you</h4>
+      <ul>
+        <li>Stuck means too many blocks have no reported replica: DataNodes down, disks lost, or a wrong <code>dfs.datanode.data.dir</code>.</li>
+        <li>The threshold uses a whole-number count: with 9 blocks, int(9 × 0.999) = 8, so one missing block is tolerated (we saw exactly this). With 10 lakh blocks, only 1,000 may be missing.</li>
+        <li><code>-safemode leave</code> lets the cluster work, but files with missing blocks stay unreadable; first bring DataNodes back or accept the loss.</li>
+        <li>Low disk space on the NameNode's metadata disks (<code>dfs.namenode.resource.du.reserved</code>) also puts it into safe mode.</li>
+      </ul>
+
+    </div>
+  </div>
+  <div class="callout callout--exam"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19V5a2 2 0 0 1 2-2h12v18H6a2 2 0 0 1-2-2zm0 0a2 2 0 0 1 2-2h12"/></svg><p><b>Exam tip:</b> “What is safe mode in Hadoop?”: a <b>read-only</b> state of the NameNode at start-up while it receives <b>block reports</b>; no modifications or replication; exits automatically when <b>99.9%</b> of blocks have the minimum replicas, after a <b>30 s</b> extension. Commands: <code>hdfs dfsadmin -safemode get|enter|leave|wait</code>.</p></div>
+</section>
+
+<!-- ======================= PART 3: TYPES AND WAYS TO USE IT ======================= -->
+<section class="part" id="types">
+  <span class="part-label"><b>3</b> Types and ways to use it</span>
+  <h2>Ways into and out of safe mode</h2>
+  <div class="table-wrap">
+  <table class="compare" style="min-width:600px">
+    <thead><tr><th></th><th>Automatic (start-up)</th><th>Manual</th><th>Resource low</th></tr></thead>
+    <tbody>
+      <tr><td><b>How it starts</b></td><td>Every NameNode start</td><td><code>hdfs dfsadmin -safemode enter</code></td><td>Metadata disk nearly full</td></tr>
+      <tr><td><b>How it ends</b></td><td>Threshold + extension reached</td><td>Only <code>-safemode leave</code></td><td>Free space, then <code>leave</code></td></tr>
+      <tr><td><b>Typical use</b></td><td>Waiting for block reports</td><td>saveNamespace, maintenance, freezing changes before upgrades</td><td>Protecting the edit log from running out of disk</td></tr>
+      <tr><td><b>Seen in our lab</b></td><td>About 40 s after each restart</td><td>Around <code>saveNamespace</code> (Lesson 5.4)</td><td>Not tested</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <h3>The four safemode commands</h3>
+  <div class="cards">
+    <div class="card"><h4>-safemode get</h4><p>Prints “Safe mode is ON” or “OFF”.</p><span class="tag">Check</span></div>
+    <div class="card"><h4>-safemode wait</h4><p>Waits until it is OFF. Put it in start-up scripts before any writes.</p><span class="tag">Scripts</span></div>
+    <div class="card"><h4>-safemode enter</h4><p>Freeze changes manually (stays until you leave).</p><span class="tag">Admin</span></div>
+    <div class="card"><h4>-safemode leave</h4><p>Force it off. Only after you know why it's on.</p><span class="tag">Careful</span></div>
+  </div>
+  <div class="callout callout--tip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18h6M10 22h4M12 2a7 7 0 0 0-4 12.7V17h8v-2.3A7 7 0 0 0 12 2z"/></svg><p>The NameNode explains itself. The web UI's Overview, or the <code>Safemode</code> field in <code>/jmx</code>, says how many blocks have been reported, how many are needed, and how many seconds are left. Read it before forcing anything.</p></div>
+</section>
+
+<!-- ======================= PART 4: STEP BY STEP ======================= -->
+<section class="part" id="steps">
+  <span class="part-label"><b>4</b> Step by step</span>
+  <h2>Restart the NameNode and watch safe mode</h2>
+  <p>On the Module 5 lab cluster (8 blocks, 4 DataNodes). The NameNode's own explanation is read from its <code>/jmx</code> “Safemode” field.</p>
+  <ol class="stepper">
+    <li><h4>Read the settings</h4>
+      <div class="code" data-lang="bash" data-file="Terminal"><pre><code>for k in dfs.namenode.safemode.threshold-pct dfs.namenode.safemode.extension \
+         dfs.namenode.safemode.min.datanodes dfs.namenode.replication.min; do
+  echo "$k = $(docker compose exec namenode hdfs getconf -confKey $k)"
+done</code></pre><div class="output">dfs.namenode.safemode.threshold-pct = 0.999f
+dfs.namenode.safemode.extension = 30000
+dfs.namenode.safemode.min.datanodes = 0
+dfs.namenode.replication.min = 1</div></div>
+      <span class="behind">The <code>f</code> in <code>0.999f</code> just means a floating-point number in the defaults file.</span></li>
+    <li><h4>Restart the NameNode with all DataNodes up</h4>
+      <div class="code" data-lang="bash" data-file="Terminal"><pre><code>docker restart lab5-namenode-1
+# every few seconds:
+docker compose exec namenode hdfs dfsadmin -safemode get</code></pre><div class="output">t=5s   Call From namenode/172.19.0.3 to namenode:8020 failed on connection exception: java.net.ConnectException: Connection refused
+t=10s  Safe mode is ON  |  The reported blocks 8 has reached the threshold 0.9990 of total blocks 8. … In safe mode extension. Safe mode will be turned off automatically in 28 seconds.
+t=15s  Safe mode is ON  |  … Safe mode will be turned off automatically in 23 seconds.
+t=28s  Safe mode is ON  |  … Safe mode will be turned off automatically in 10 seconds.
+t=38s  Safe mode is ON  |  … Safe mode will be turned off automatically in 0 seconds.
+t=43s  Safe mode is OFF</div></div>
+      <span class="behind">For the first seconds the NameNode isn't even listening yet (loading fsimage and edits). Then the four DataNodes report within moments, the threshold is reached, and the 30 s extension counts down.</span></li>
+    <li><h4>Try to write during safe mode</h4>
+      <div class="code" data-lang="bash" data-file="Terminal"><pre><code>docker compose exec namenode hdfs dfs -put /tmp/canteen_orders.csv data/during_safemode.csv</code></pre><div class="output">put: Cannot create file/user/hadoop/data/during_safemode.csv._COPYING_. Name node is in safe mode.</div></div>
+      <span class="behind">Writes are refused (<code>SafeModeException</code>). <code>put</code> first writes to a temporary <code>._COPYING_</code> name, which is what it tried to create.</span></li>
+    <li><h4>Restart with no DataNodes at all</h4>
+      <div class="code" data-lang="bash" data-file="Terminal"><pre><code>docker stop lab5-datanode-1 lab5-datanode-2 lab5-datanode-3 lab5-datanode-4
+docker restart lab5-namenode-1
+docker compose exec namenode hdfs dfsadmin -safemode get
+docker compose exec namenode hdfs dfs -ls data
+docker compose exec namenode hdfs dfs -cat data/canteen_orders.csv</code></pre><div class="output">Safe mode is ON
+NameNode says: The minimum number of live datanodes is not required. Safe mode will be turned off automatically once the thresholds have been reached.
+Found 2 items
+-rw-r--r--   3 hadoop supergroup    4692009 2026-10-21 06:49 data/canteen_1mb.csv
+-rw-r--r--   3 hadoop supergroup    4692009 2026-10-21 06:49 data/canteen_orders.csv
+cat: Zero blocklocations for /user/hadoop/data/canteen_orders.csv. Name node is in safe mode.</div></div>
+      <span class="behind">The namespace is all there (from the fsimage), so <code>ls</code> works. But no block has a known location, so the data can't be read. The threshold can't be reached, so it waits.</span></li>
+    <li><h4>Bring the DataNodes back</h4>
+      <div class="code" data-lang="bash" data-file="Terminal"><pre><code>docker start lab5-datanode-1 lab5-datanode-2 lab5-datanode-3 lab5-datanode-4
+docker compose logs namenode | grep "STATE\*"</code></pre><div class="output">t=13s  Safe mode is ON  |  … Safe mode will be turned off automatically once the thresholds have been reached.
+t=19s  Safe mode is ON  |  The reported blocks 8 has reached the threshold 0.9990 of total blocks 8. … turned off automatically in 24 seconds.
+t=37s  Safe mode is ON  |  … turned off automatically in 5 seconds.
+t=49s  Safe mode is OFF
+INFO  StateChange:406 - STATE* Safe mode is OFF
+INFO  StateChange:411 - STATE* Leaving safe mode after 70 secs</div></div>
+      <span class="behind">As soon as the DataNodes register and report, the threshold is met, the extension runs, and the NameNode leaves safe mode on its own: 70 s after its start in total.</span></li>
+    <li><h4>A missing block: what safe mode does and doesn't catch</h4>
+      <div class="code" data-lang="bash" data-file="Terminal"><pre><code>docker compose exec namenode hdfs dfs -D dfs.replication=1 -put /tmp/canteen_orders.csv data/scratch_r1.csv
+# its only replica is on lab5-datanode-1: stop it, restart the NameNode
+docker stop lab5-datanode-1
+docker restart lab5-namenode-1
+docker compose logs namenode | grep -A1 "Safe mode ON"
+docker compose exec namenode hdfs fsck / | grep -E "MISSING|Missing blocks|Status"</code></pre><div class="output">STATE* Safe mode ON, in safe mode extension.
+The reported blocks 8 has reached the threshold 0.9990 of total blocks 9. …
+/user/hadoop/data/scratch_r1.csv: MISSING 1 blocks of total size 4692009 B.
+Status: CORRUPT
+ Missing blocks:		1</div></div>
+      <span class="behind">The threshold is a whole number: int(9 × 0.999) = 8, so 8 of 9 blocks was “enough” and the NameNode left safe mode with a block missing. fsck reports it. Starting datanode-1 again made the file HEALTHY. On a big cluster the threshold is tighter (1,000 missing blocks out of 10 lakh), but safe mode is not a data-integrity check: fsck is.</span></li>
+  </ol>
+  <div class="callout callout--warn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3 2 21h20L12 3z"/><path d="M12 10v5M12 18v.5"/></svg><p>Don't make <code>hdfs dfsadmin -safemode leave</code> a habit. If the NameNode is waiting, it is usually waiting for DataNodes that hold real data. Forcing it out turns “not reported yet” into “missing”, and can start unnecessary re-replication.</p></div>
+</section>
+
+<!-- ======================= PART 5: SEE IT HAPPEN ======================= -->
+<section class="part" id="animation">
+  <span class="part-label"><b>5</b> See it happen</span>
+  <h2>A NameNode restart with no DataNodes, then four</h2>
+  <p>Step 4 and step 5 from the real lab, frame by frame.</p>
+  <div class="anim" data-frames="6">
+    <div class="anim__title">Safe mode from start to finish <span>6 steps</span></div>
+    <div class="anim__views">
+      <div class="view view--see">
+        <span class="view__tag">What you see</span>
+        <svg viewBox="0 0 360 250" role="img" aria-label="Terminal during safe mode">
+          <rect x="14" y="14" width="332" height="206" rx="8" class="s-board"/>
+          <text x="26" y="32" font-size="9" class="mono" style="fill:#7F8C86">riya@lab : ~/hdfs-lab</text>
+          <g data-on="1"><text x="26" y="56" font-size="8.6" class="mono" style="fill:#7F8C86">$ docker restart lab5-namenode-1</text><text x="26" y="72" font-size="8.6" class="mono" style="fill:#FF8A80">Call From namenode … to namenode:8020</text><text x="26" y="86" font-size="8.6" class="mono" style="fill:#FF8A80">failed … Connection refused</text></g>
+          <g data-on="2"><text x="26" y="56" font-size="8.6" class="mono" style="fill:#7F8C86">$ hdfs dfsadmin -safemode get</text><text x="26" y="72" font-size="8.6" class="mono" style="fill:#F5C77E">Safe mode is ON</text><text x="26" y="88" font-size="8.6" class="mono" style="fill:#7F8C86">$ hdfs dfs -ls data</text><text x="26" y="104" font-size="8.6" class="mono" style="fill:#9FD3B8">… 4692009 … data/canteen_orders.csv</text></g>
+          <g data-on="3"><text x="26" y="56" font-size="8.6" class="mono" style="fill:#7F8C86">$ hdfs dfs -cat data/canteen_orders.csv</text><text x="26" y="72" font-size="8.6" class="mono" style="fill:#FF8A80">cat: Zero blocklocations for …</text><text x="26" y="86" font-size="8.6" class="mono" style="fill:#FF8A80">Name node is in safe mode.</text><text x="26" y="104" font-size="8.6" class="mono" style="fill:#7F8C86">$ hdfs dfs -put …</text><text x="26" y="118" font-size="8.6" class="mono" style="fill:#FF8A80">put: … Name node is in safe mode.</text></g>
+          <g data-on="4"><text x="26" y="56" font-size="8.6" class="mono" style="fill:#7F8C86">$ docker start lab5-datanode-{1..4}</text><text x="26" y="72" font-size="8.6" class="mono" style="fill:#F5C77E">The reported blocks 8 has reached</text><text x="26" y="86" font-size="8.6" class="mono" style="fill:#F5C77E">the threshold 0.9990 of total blocks 8.</text></g>
+          <g data-on="5"><text x="26" y="56" font-size="8.6" class="mono" style="fill:#F5C77E">In safe mode extension. Safe mode</text><text x="26" y="70" font-size="8.6" class="mono" style="fill:#F5C77E">will be turned off automatically</text><text x="26" y="84" font-size="8.6" class="mono" style="fill:#F5C77E">in 24 seconds.</text></g>
+          <g data-on="6"><text x="26" y="56" font-size="8.6" class="mono" style="fill:#9FD3B8">STATE* Safe mode is OFF</text><text x="26" y="70" font-size="8.6" class="mono" style="fill:#9FD3B8">STATE* Leaving safe mode after 70 secs</text><text x="26" y="88" font-size="8.6" class="mono" style="fill:#7F8C86">$ hdfs dfs -cat … | head -1</text><text x="26" y="102" font-size="8.6" class="mono" style="fill:#9FD3B8">order_id,item,amount</text></g>
+          <text x="352" y="244" text-anchor="end" class="s-wm">myphatshala.in</text>
+        </svg>
+        <ol class="caps" hidden>
+          <li>Right after the restart the NameNode is still loading the fsimage and edits; its RPC port isn't open yet.</li>
+          <li>Now it answers: safe mode is ON. Listing works, because the namespace is loaded.</li>
+          <li>Reading fails (no block locations yet) and writing is refused.</li>
+          <li>The DataNodes start, register and send block reports: 8 of 8 blocks reported.</li>
+          <li>Threshold reached; the 30 s extension counts down.</li>
+          <li>Safe mode turns off by itself. Reads and writes work again.</li>
+        </ol>
+      </div>
+
+      <div class="view view--behind">
+        <span class="view__tag">Behind the screen</span>
+        <svg viewBox="0 0 360 250" role="img" aria-label="NameNode memory during safe mode">
+          <rect x="16" y="16" width="200" height="160" rx="8" class="s-board"/><text x="116" y="34" text-anchor="middle" font-size="9" font-weight="700" class="s-chalk">NameNode memory</text>
+          <g data-on="1-"><text x="28" y="56" font-size="8" class="s-chalk">namespace: 13 inodes ✓</text></g>
+          <g data-on="1-3"><text x="28" y="74" font-size="8" style="fill:#FF8A80">block map: 0 of 8 located</text></g>
+          <g data-on="4-"><text x="28" y="74" font-size="8" style="fill:#9FD3B8">block map: 8 of 8 located</text></g>
+          <g data-on="1"><text x="28" y="100" font-size="8" class="s-chalk">loading fsimage + edits…</text></g>
+          <g data-on="2-5"><rect x="28" y="90" width="176" height="24" rx="5" class="s-soft-acc" style="stroke:var(--track)"/><text x="116" y="106" text-anchor="middle" font-size="8.6" font-weight="700" class="s-acc">SAFE MODE (read-only)</text></g>
+          <g data-on="6"><rect x="28" y="90" width="176" height="24" rx="5" class="s-soft-green" style="stroke:var(--green)"/><text x="116" y="106" text-anchor="middle" font-size="8.6" font-weight="700" class="s-green">normal: read + write</text></g>
+          <g data-on="2-3"><text x="28" y="136" font-size="8" class="s-chalk">needed: int(8 × 0.999) = 7 blocks</text><text x="28" y="152" font-size="8" class="s-chalk">reported: 0</text></g>
+          <g data-on="4-5"><text x="28" y="136" font-size="8" class="s-chalk">needed: 7 · reported: 8 ✓</text></g>
+          <g data-on="5"><text x="28" y="152" font-size="8" style="fill:#F5C77E">extension: 30 s countdown</text></g>
+          <rect x="236" y="30" width="110" height="32" rx="6" class="s-card2"/><text x="291" y="50" text-anchor="middle" font-size="8.6" class="s-ink">dn-1</text>
+          <rect x="236" y="70" width="110" height="32" rx="6" class="s-card2"/><text x="291" y="90" text-anchor="middle" font-size="8.6" class="s-ink">dn-2</text>
+          <rect x="236" y="110" width="110" height="32" rx="6" class="s-card2"/><text x="291" y="130" text-anchor="middle" font-size="8.6" class="s-ink">dn-3</text>
+          <rect x="236" y="150" width="110" height="32" rx="6" class="s-card2"/><text x="291" y="170" text-anchor="middle" font-size="8.6" class="s-ink">dn-4</text>
+          <g data-on="1-3"><text x="291" y="200" text-anchor="middle" font-size="8.6" class="s-red">all stopped</text></g>
+          <g data-on="4-"><g style="fill:none;stroke:var(--green);stroke-width:2"><rect x="236" y="30" width="110" height="32" rx="6"/><rect x="236" y="70" width="110" height="32" rx="6"/><rect x="236" y="110" width="110" height="32" rx="6"/><rect x="236" y="150" width="110" height="32" rx="6"/></g></g>
+          <g data-on="4"><path d="M236 46h-20M236 86h-20M236 126h-20M236 166h-20" style="stroke:var(--blue);stroke-width:2;stroke-dasharray:4 3"/><text x="116" y="200" text-anchor="middle" font-size="8.6" class="s-blue">register + full block reports</text></g>
+          <text x="352" y="246" text-anchor="end" class="s-wm">myphatshala.in</text>
+        </svg>
+        <ol class="caps" hidden>
+          <li>The NameNode rebuilds its namespace from disk. The block map starts empty.</li>
+          <li>It enters safe mode: the namespace is complete, so metadata reads work.</li>
+          <li>With 0 of 8 blocks located, it can't serve data and won't allow changes. (8 × 0.999 = 7.99, so 7 blocks would be enough.)</li>
+          <li>DataNodes register and send their block reports: every block now has known replicas.</li>
+          <li>The threshold is met; the NameNode waits the 30 s extension for any late reports.</li>
+          <li>Safe mode ends automatically. Replication monitoring and writes resume.</li>
+        </ol>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ======================= PART 6: REAL-WORLD USE ======================= -->
+<section class="part" id="real-world">
+  <span class="part-label"><b>6</b> Real-world use</span>
+  <h2>Safe mode at work</h2>
+
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="20" y="20" width="80" height="50" rx="6" class="s-board"/><text x="60" y="42" text-anchor="middle" font-size="8.6" class="mono" style="fill:#9FD3B8">safemode wait</text><text x="60" y="58" text-anchor="middle" font-size="8.6" class="mono" style="fill:#F5C77E">then load</text></svg></div>
+    <div><h4>1. Start-up scripts that wait</h4>
+      <p>Automation that restarts a cluster and then loads data runs <code>hdfs dfsadmin -safemode wait</code> before the first write, instead of failing with SafeModeException or sleeping for a guessed time.</p>
+      <div class="uc-flow"><span>Start HDFS</span><i>→</i><span class="java">safemode wait</span><i>→</i><span>Run jobs</span></div></div>
+  </div>
+
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="20" y="20" width="80" height="50" rx="6" class="s-soft-acc" style="stroke:var(--track)"/><text x="60" y="42" text-anchor="middle" font-size="8.6" font-weight="700" class="s-acc">stuck at 97%</text><text x="60" y="58" text-anchor="middle" font-size="8.6" class="s-ink">find the DataNodes</text></svg></div>
+    <div><h4>2. Diagnosing a stuck restart</h4>
+      <p>When a large cluster stays in safe mode, admins compare reported vs total blocks in the NameNode UI and look for DataNodes that haven't registered (often a failed disk mount or a whole rack still powering up) before deciding anything.</p>
+      <div class="uc-flow"><span>Stuck</span><i>→</i><span class="java">Which nodes missing?</span><i>→</i><span>Fix, don't force</span></div></div>
+  </div>
+
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="20" y="20" width="80" height="50" rx="6" class="s-soft-blue" style="stroke:var(--blue)"/><text x="60" y="42" text-anchor="middle" font-size="8.6" font-weight="700" class="s-blue">enter → upgrade</text><text x="60" y="58" text-anchor="middle" font-size="8.6" class="s-ink">freeze changes</text></svg></div>
+    <div><h4>3. Freezing the namespace for maintenance</h4>
+      <p>Before upgrades or metadata backups, admins enter safe mode so nothing changes, run <code>saveNamespace</code>, copy the metadata, and only then proceed.</p>
+      <div class="uc-flow"><span>safemode enter</span><i>→</i><span class="java">saveNamespace + backup</span><i>→</i><span>Upgrade</span></div></div>
+  </div>
+
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="20" y="20" width="80" height="50" rx="6" class="s-card2"/><text x="60" y="42" text-anchor="middle" font-size="8.6" font-weight="700" class="s-ink">disk 99% full</text><text x="60" y="58" text-anchor="middle" font-size="8.6" class="s-ink2">NameNode protects</text></svg></div>
+    <div><h4>4. When the NameNode's own disk fills</h4>
+      <p>If the disk holding the edit log runs low, the NameNode enters safe mode to avoid corrupting its metadata. Free space on that disk, then leave safe mode.</p>
+      <div class="uc-flow"><span>Metadata disk full</span><i>→</i><span class="java">Safe mode</span><i>→</i><span>Free space, leave</span></div></div>
+  </div>
+  <p class="muted">Simplified; organisations differ in tools and policies.</p>
+</section>
+
+
+<div class="ad-slot" data-slot="mid"></div>
+
+<section class="part" id="run">
+  <span class="part-label"><b>7</b> Run the code</span>
+  <h2>Will the NameNode leave safe mode?</h2>
+  <p>This function applies the safe mode rules: the needed count is the whole-number part of total blocks × threshold, plus the minimum number of live DataNodes. Run it on the real cases from Part 4.</p>
+  <div class="code" data-lang="python" data-file="main.py"><pre><code>def safe_mode(total_blocks, reported, live_dns, threshold=0.999, min_dns=0):
+    needed = int(total_blocks * threshold)
+    blocks_ok = reported &gt;= needed
+    dns_ok = live_dns &gt;= min_dns
+    if blocks_ok and dns_ok:
+        return f&quot;reported {reported}/{total_blocks} (needed {needed}): leaves after 30 s extension&quot;
+    return f&quot;reported {reported}/{total_blocks} (needed {needed}): STAYS in safe mode&quot;
+
+print(safe_mode(8, 8, 4))       # restart, all DataNodes up
+print(safe_mode(8, 0, 0))       # restart, no DataNodes
+print(safe_mode(9, 8, 3))       # replication-1 file on a stopped DataNode
+print(safe_mode(10_00_000, 998_000, 400))</code></pre><div class="output">reported 8/8 (needed 7): leaves after 30 s extension
+reported 0/8 (needed 7): STAYS in safe mode
+reported 8/9 (needed 8): leaves after 30 s extension
+reported 998000/1000000 (needed 999000): STAYS in safe mode</div></div>
+  <ul class="anno"><li><code>needed = int(total_blocks * threshold)</code><span>int() keeps only the whole-number part: int(9 × 0.999) = int(8.991) = 8. That is why 8 of 9 was enough in our lab.</span></li><li><code>dns_ok = live_dns &gt;= min_dns</code><span>dfs.namenode.safemode.min.datanodes is 0 by default, so this never blocks unless an admin sets it.</span></li></ul>
+  <div class="runner">
+    <script type="application/json">{
+ "lang": "python",
+ "file": "main.py",
+ "tasks": [
+  {
+   "label": "1 · The real cases",
+   "hint": "Press <b>Run<\/b>. Then try <code>safe_mode(1000, 999, 10)<\/code> and <code>safe_mode(1000, 998, 10)<\/code>.",
+   "code": "def safe_mode(total_blocks, reported, live_dns, threshold=0.999, min_dns=0):\n    needed = int(total_blocks * threshold)\n    blocks_ok = reported >= needed\n    dns_ok = live_dns >= min_dns\n    if blocks_ok and dns_ok:\n        return f\"reported {reported}/{total_blocks} (needed {needed}): leaves after 30 s extension\"\n    return f\"reported {reported}/{total_blocks} (needed {needed}): STAYS in safe mode\"\n\nprint(safe_mode(8, 8, 4))       # restart, all DataNodes up\nprint(safe_mode(8, 0, 0))       # restart, no DataNodes\nprint(safe_mode(9, 8, 3))       # replication-1 file on a stopped DataNode\nprint(safe_mode(10_00_000, 998_000, 400))\n"
+  },
+  {
+   "label": "2 · How many may be missing?",
+   "hint": "<b>Predict first:<\/b> how many blocks can be missing and still let the NameNode leave safe mode, for 9, 1,000 and 1 crore blocks?",
+   "code": "for total in [9, 1_000, 1_00_00_000]:\n    print(f\"{total:>11,} blocks: up to {total - int(total * 0.999):,} missing\")\n"
+  },
+  {
+   "label": "3 · Extension countdown",
+   "hint": "The real log said “turned off automatically in 28 seconds” at t=10 s. When was the threshold reached, and when will safe mode end?",
+   "code": "t_now, left, extension = 10, 28, 30\nreached = t_now - (extension - left)\nprint(\"threshold reached at t =\", reached, \"s; safe mode ends at t =\", t_now + left, \"s\")\n"
+  },
+  {
+   "label": "4 · Allowed or refused?",
+   "hint": "Classify commands as allowed or refused in safe mode.",
+   "code": "allowed = {\"ls\", \"stat\", \"cat\", \"get\", \"fsck\", \"getconf\", \"saveNamespace\"}\nfor cmd in [\"ls\", \"put\", \"mkdir\", \"cat\", \"rm\", \"fsck\", \"setrep\", \"saveNamespace\"]:\n    print(f\"{cmd:14}\", \"allowed\" if cmd in allowed else \"REFUSED\")\n"
+  },
+  {
+   "label": "5 · Spot the error",
+   "hint": "This calculator rounds the needed count up, which disagrees with the real NameNode for 9 blocks. Fix it.",
+   "code": "import math\nneeded = math.ceil(9 * 0.999)\nprint(\"needed:\", needed, \"-> 8 reported is\", \"enough\" if 8 >= needed else \"NOT enough\")\n"
+  }
+ ]
+}</script>
+  </div>
+  <h3 id="pc">Run it on your PC: follow a NameNode restart</h3>
+  <p>This script restarts the lab NameNode, then every few seconds asks for the safe mode state and reads the NameNode's own explanation from <code>/jmx</code>. Save it as <code>safemode_watch.py</code> in the <code>hdfs-lab</code> folder and run it while the DataNodes are up.</p>
+  <div class="pcrun"><h4>Safe mode from restart to OFF</h4>
+  <div class="code" data-lang="bash" data-file="safemode_watch.py"><pre><code># safemode_watch.py: restart the NameNode and follow safe mode until it ends.
+# Run in the hdfs-lab folder while the cluster is up.
+import json
+import re
+import subprocess
+import time
+
+URL = &quot;http://namenode:9870/jmx?qry=Hadoop:service=NameNode,name=NameNodeInfo&quot;
+
+def nn(*cmd):
+    return subprocess.run([&quot;docker&quot;, &quot;compose&quot;, &quot;exec&quot;, &quot;-T&quot;, &quot;namenode&quot;, *cmd],
+                          capture_output=True, text=True).stdout.strip()
+
+def explanation():
+    try:
+        return json.loads(nn(&quot;curl&quot;, &quot;-s&quot;, URL))[&quot;beans&quot;][0][&quot;Safemode&quot;] or &quot;(off)&quot;
+    except (ValueError, KeyError, IndexError):
+        return &quot;(NameNode not answering yet)&quot;
+
+subprocess.run([&quot;docker&quot;, &quot;restart&quot;, &quot;lab5-namenode-1&quot;], capture_output=True)
+start = time.time()
+while time.time() - start &lt; 120:
+    state = nn(&quot;hdfs&quot;, &quot;dfsadmin&quot;, &quot;-safemode&quot;, &quot;get&quot;).splitlines()
+    state = state[-1] if state else &quot;(no answer)&quot;
+    why = explanation()
+    blocks = re.search(r&quot;reported blocks (\d+).*?total blocks (\d+)&quot;, why)
+    left = re.search(r&quot;in (\d+) seconds&quot;, why)
+    detail = (f&quot;reported {blocks.group(1)}/{blocks.group(2)} blocks&quot; if blocks else why[:40]) + \
+             (f&quot;, off in {left.group(1)} s&quot; if left else &quot;&quot;)
+    print(f&quot;t={time.time() - start:3.0f}s  {state:24} {detail}&quot;)
+    if &quot;OFF&quot; in state:
+        break
+    time.sleep(5)
+
+# In the hdfs-lab folder:
+#   python3 safemode_watch.py</code></pre><div class="output">t=  4s  (no answer)              (NameNode not answering yet)
+t= 11s  Safe mode is ON          reported 8/8 blocks, off in 25 s
+t= 18s  Safe mode is ON          reported 8/8 blocks, off in 18 s
+t= 25s  Safe mode is ON          reported 8/8 blocks, off in 11 s
+t= 32s  Safe mode is ON          reported 8/8 blocks, off in 4 s
+t= 39s  Safe mode is OFF         (off)</div></div>
+  <p class="muted">Real output. Stop one or all DataNodes before running it to see the other cases from Part 4; with none running, the loop ends after 2 minutes with safe mode still ON.</p></div>
+</section>
+
+<section class="part" id="tracer">
+  <span class="part-label"><b>8</b> Line by line</span>
+  <h2>The NameNode counting block reports</h2>
+  <p>Follow the safe-block count as three DataNodes report, and see the moment the threshold is reached.</p>
+  <div class="tracer">
+    <script type="application/json">{
+ "lang": "python",
+ "code": [
+  "total = 9",
+  "needed = int(total * 0.999)",
+  "safe = set()",
+  "reports = {\"dn2\": [\"b1\", \"b2\", \"b3\", \"b4\"], \"dn3\": [\"b3\", \"b5\", \"b6\"], \"dn4\": [\"b7\", \"b8\", \"b1\"]}",
+  "for dn, blocks in reports.items():",
+  "    safe.update(blocks)",
+  "    print(dn, \"reported ->\", len(safe), \"safe blocks\", \"(threshold reached)\" if len(safe) >= needed else \"\")"
+ ],
+ "steps": [
+  {
+   "line": 1,
+   "phase": "Python",
+   "note": "<code>total<\/code> is created: 9.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "total",
+       "9"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "total"
+  },
+  {
+   "line": 2,
+   "phase": "Needed",
+   "note": "int(8.991) = 8. <code>needed<\/code> is created: 8.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "total",
+       "9"
+      ],
+      [
+       "needed",
+       "8"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "needed"
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "<code>safe<\/code> is created: → set #1. A new set object (#1) is created: {}",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "total",
+       "9"
+      ],
+      [
+       "needed",
+       "8"
+      ],
+      [
+       "safe",
+       "→ set #1"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 set (0)<\/b> {}"
+   ],
+   "newVar": "safe"
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "<code>reports<\/code> is created: → dict #2. A new dict object (#2) is created: {&#x27;dn2&#x27;: → list #3, &#x27;dn3&#x27;: → list #4, &#x27;dn4&#x27;: → list #5} A new list object (#3) is created: [&#x27;b1&#x27;, &#x27;b2&#x27;, &#x27;b3&#x27;, &#x27;b4&#x27;] A new list object (#4) is created: [&#x27;b3&#x27;, &#x27;b5&#x27;, &#x27;b6&#x27;] A new list object (#5) is created: [&#x27;b7&#x27;, &#x27;b8&#x27;, &#x27;b1&#x27;]",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "total",
+       "9"
+      ],
+      [
+       "needed",
+       "8"
+      ],
+      [
+       "safe",
+       "→ set #1"
+      ],
+      [
+       "reports",
+       "→ dict #2"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 set (0)<\/b> {}",
+    "<b>#2 dict (3)<\/b> {&#x27;dn2&#x27;: → list #3, &#x27;dn3&#x27;: → list #4, &#x27;dn4&#x27;: → list #5}",
+    "<b>#3 list (4)<\/b> [&#x27;b1&#x27;, &#x27;b2&#x27;, &#x27;b3&#x27;, &#x27;b4&#x27;]",
+    "<b>#4 list (3)<\/b> [&#x27;b3&#x27;, &#x27;b5&#x27;, &#x27;b6&#x27;]",
+    "<b>#5 list (3)<\/b> [&#x27;b7&#x27;, &#x27;b8&#x27;, &#x27;b1&#x27;]"
+   ],
+   "newVar": "reports"
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "<code>dn<\/code> is created: &#x27;dn2&#x27;. <code>blocks<\/code> is created: → list #3.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "total",
+       "9"
+      ],
+      [
+       "needed",
+       "8"
+      ],
+      [
+       "safe",
+       "→ set #1"
+      ],
+      [
+       "reports",
+       "→ dict #2"
+      ],
+      [
+       "dn",
+       "'dn2'"
+      ],
+      [
+       "blocks",
+       "→ list #3"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 set (0)<\/b> {}",
+    "<b>#2 dict (3)<\/b> {&#x27;dn2&#x27;: → list #3, &#x27;dn3&#x27;: → list #4, &#x27;dn4&#x27;: → list #5}",
+    "<b>#3 list (4)<\/b> [&#x27;b1&#x27;, &#x27;b2&#x27;, &#x27;b3&#x27;, &#x27;b4&#x27;]",
+    "<b>#4 list (3)<\/b> [&#x27;b3&#x27;, &#x27;b5&#x27;, &#x27;b6&#x27;]",
+    "<b>#5 list (3)<\/b> [&#x27;b7&#x27;, &#x27;b8&#x27;, &#x27;b1&#x27;]"
+   ],
+   "newVar": "blocks"
+  },
+  {
+   "line": 6,
+   "phase": "Safe",
+   "note": "A block counts once it has one reported replica, however many DataNodes report it. Object #1 set now holds {&#x27;b1&#x27;, &#x27;b2&#x27;, &#x27;b3&#x27;, &#x27;b4&#x27;}",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "total",
+       "9"
+      ],
+      [
+       "needed",
+       "8"
+      ],
+      [
+       "safe",
+       "→ set #1"
+      ],
+      [
+       "reports",
+       "→ dict #2"
+      ],
+      [
+       "dn",
+       "'dn2'"
+      ],
+      [
+       "blocks",
+       "→ list #3"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 set (4)<\/b> {&#x27;b1&#x27;, &#x27;b2&#x27;, &#x27;b3&#x27;, &#x27;b4&#x27;}",
+    "<b>#2 dict (3)<\/b> {&#x27;dn2&#x27;: → list #3, &#x27;dn3&#x27;: → list #4, &#x27;dn4&#x27;: → list #5}",
+    "<b>#3 list (4)<\/b> [&#x27;b1&#x27;, &#x27;b2&#x27;, &#x27;b3&#x27;, &#x27;b4&#x27;]",
+    "<b>#4 list (3)<\/b> [&#x27;b3&#x27;, &#x27;b5&#x27;, &#x27;b6&#x27;]",
+    "<b>#5 list (3)<\/b> [&#x27;b7&#x27;, &#x27;b8&#x27;, &#x27;b1&#x27;]"
+   ]
+  },
+  {
+   "line": 7,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "total",
+       "9"
+      ],
+      [
+       "needed",
+       "8"
+      ],
+      [
+       "safe",
+       "→ set #1"
+      ],
+      [
+       "reports",
+       "→ dict #2"
+      ],
+      [
+       "dn",
+       "'dn2'"
+      ],
+      [
+       "blocks",
+       "→ list #3"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 set (4)<\/b> {&#x27;b1&#x27;, &#x27;b2&#x27;, &#x27;b3&#x27;, &#x27;b4&#x27;}",
+    "<b>#2 dict (3)<\/b> {&#x27;dn2&#x27;: → list #3, &#x27;dn3&#x27;: → list #4, &#x27;dn4&#x27;: → list #5}",
+    "<b>#3 list (4)<\/b> [&#x27;b1&#x27;, &#x27;b2&#x27;, &#x27;b3&#x27;, &#x27;b4&#x27;]",
+    "<b>#4 list (3)<\/b> [&#x27;b3&#x27;, &#x27;b5&#x27;, &#x27;b6&#x27;]",
+    "<b>#5 list (3)<\/b> [&#x27;b7&#x27;, &#x27;b8&#x27;, &#x27;b1&#x27;]"
+   ],
+   "out": "dn2 reported -> 4 safe blocks \n"
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "<code>dn<\/code> changes to &#x27;dn3&#x27;. <code>blocks<\/code> changes to → list #4.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "total",
+       "9"
+      ],
+      [
+       "needed",
+       "8"
+      ],
+      [
+       "safe",
+       "→ set #1"
+      ],
+      [
+       "reports",
+       "→ dict #2"
+      ],
+      [
+       "dn",
+       "'dn3'"
+      ],
+      [
+       "blocks",
+       "→ list #4"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 set (4)<\/b> {&#x27;b1&#x27;, &#x27;b2&#x27;, &#x27;b3&#x27;, &#x27;b4&#x27;}",
+    "<b>#2 dict (3)<\/b> {&#x27;dn2&#x27;: → list #3, &#x27;dn3&#x27;: → list #4, &#x27;dn4&#x27;: → list #5}",
+    "<b>#3 list (4)<\/b> [&#x27;b1&#x27;, &#x27;b2&#x27;, &#x27;b3&#x27;, &#x27;b4&#x27;]",
+    "<b>#4 list (3)<\/b> [&#x27;b3&#x27;, &#x27;b5&#x27;, &#x27;b6&#x27;]",
+    "<b>#5 list (3)<\/b> [&#x27;b7&#x27;, &#x27;b8&#x27;, &#x27;b1&#x27;]"
+   ],
+   "newVar": "blocks"
+  },
+  {
+   "line": 6,
+   "phase": "Python",
+   "note": "Object #1 set now holds {&#x27;b1&#x27;, &#x27;b2&#x27;, &#x27;b3&#x27;, &#x27;b4&#x27;, &#x27;b5&#x27;, &#x27;b6&#x27;}",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "total",
+       "9"
+      ],
+      [
+       "needed",
+       "8"
+      ],
+      [
+       "safe",
+       "→ set #1"
+      ],
+      [
+       "reports",
+       "→ dict #2"
+      ],
+      [
+       "dn",
+       "'dn3'"
+      ],
+      [
+       "blocks",
+       "→ list #4"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 set (6)<\/b> {&#x27;b1&#x27;, &#x27;b2&#x27;, &#x27;b3&#x27;, &#x27;b4&#x27;, &#x27;b5&#x27;, &#x27;b6&#x27;}",
+    "<b>#2 dict (3)<\/b> {&#x27;dn2&#x27;: → list #3, &#x27;dn3&#x27;: → list #4, &#x27;dn4&#x27;: → list #5}",
+    "<b>#3 list (4)<\/b> [&#x27;b1&#x27;, &#x27;b2&#x27;, &#x27;b3&#x27;, &#x27;b4&#x27;]",
+    "<b>#4 list (3)<\/b> [&#x27;b3&#x27;, &#x27;b5&#x27;, &#x27;b6&#x27;]",
+    "<b>#5 list (3)<\/b> [&#x27;b7&#x27;, &#x27;b8&#x27;, &#x27;b1&#x27;]"
+   ]
+  },
+  {
+   "line": 7,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "total",
+       "9"
+      ],
+      [
+       "needed",
+       "8"
+      ],
+      [
+       "safe",
+       "→ set #1"
+      ],
+      [
+       "reports",
+       "→ dict #2"
+      ],
+      [
+       "dn",
+       "'dn3'"
+      ],
+      [
+       "blocks",
+       "→ list #4"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 set (6)<\/b> {&#x27;b1&#x27;, &#x27;b2&#x27;, &#x27;b3&#x27;, &#x27;b4&#x27;, &#x27;b5&#x27;, &#x27;b6&#x27;}",
+    "<b>#2 dict (3)<\/b> {&#x27;dn2&#x27;: → list #3, &#x27;dn3&#x27;: → list #4, &#x27;dn4&#x27;: → list #5}",
+    "<b>#3 list (4)<\/b> [&#x27;b1&#x27;, &#x27;b2&#x27;, &#x27;b3&#x27;, &#x27;b4&#x27;]",
+    "<b>#4 list (3)<\/b> [&#x27;b3&#x27;, &#x27;b5&#x27;, &#x27;b6&#x27;]",
+    "<b>#5 list (3)<\/b> [&#x27;b7&#x27;, &#x27;b8&#x27;, &#x27;b1&#x27;]"
+   ],
+   "out": "dn3 reported -> 6 safe blocks \n"
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "<code>dn<\/code> changes to &#x27;dn4&#x27;. <code>blocks<\/code> changes to → list #5.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "total",
+       "9"
+      ],
+      [
+       "needed",
+       "8"
+      ],
+      [
+       "safe",
+       "→ set #1"
+      ],
+      [
+       "reports",
+       "→ dict #2"
+      ],
+      [
+       "dn",
+       "'dn4'"
+      ],
+      [
+       "blocks",
+       "→ list #5"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 set (6)<\/b> {&#x27;b1&#x27;, &#x27;b2&#x27;, &#x27;b3&#x27;, &#x27;b4&#x27;, &#x27;b5&#x27;, &#x27;b6&#x27;}",
+    "<b>#2 dict (3)<\/b> {&#x27;dn2&#x27;: → list #3, &#x27;dn3&#x27;: → list #4, &#x27;dn4&#x27;: → list #5}",
+    "<b>#3 list (4)<\/b> [&#x27;b1&#x27;, &#x27;b2&#x27;, &#x27;b3&#x27;, &#x27;b4&#x27;]",
+    "<b>#4 list (3)<\/b> [&#x27;b3&#x27;, &#x27;b5&#x27;, &#x27;b6&#x27;]",
+    "<b>#5 list (3)<\/b> [&#x27;b7&#x27;, &#x27;b8&#x27;, &#x27;b1&#x27;]"
+   ],
+   "newVar": "blocks"
+  },
+  {
+   "line": 6,
+   "phase": "Python",
+   "note": "Object #1 set now holds {&#x27;b1&#x27;, &#x27;b2&#x27;, &#x27;b3&#x27;, &#x27;b4&#x27;, &#x27;b5&#x27;, &#x27;b6&#x27;, &#x27;b7&#x27;, &#x27;b8&#x27;}",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "total",
+       "9"
+      ],
+      [
+       "needed",
+       "8"
+      ],
+      [
+       "safe",
+       "→ set #1"
+      ],
+      [
+       "reports",
+       "→ dict #2"
+      ],
+      [
+       "dn",
+       "'dn4'"
+      ],
+      [
+       "blocks",
+       "→ list #5"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 set (8)<\/b> {&#x27;b1&#x27;, &#x27;b2&#x27;, &#x27;b3&#x27;, &#x27;b4&#x27;, &#x27;b5&#x27;, &#x27;b6&#x27;, &#x27;b7&#x27;, &#x27;b8&#x27;}",
+    "<b>#2 dict (3)<\/b> {&#x27;dn2&#x27;: → list #3, &#x27;dn3&#x27;: → list #4, &#x27;dn4&#x27;: → list #5}",
+    "<b>#3 list (4)<\/b> [&#x27;b1&#x27;, &#x27;b2&#x27;, &#x27;b3&#x27;, &#x27;b4&#x27;]",
+    "<b>#4 list (3)<\/b> [&#x27;b3&#x27;, &#x27;b5&#x27;, &#x27;b6&#x27;]",
+    "<b>#5 list (3)<\/b> [&#x27;b7&#x27;, &#x27;b8&#x27;, &#x27;b1&#x27;]"
+   ]
+  },
+  {
+   "line": 7,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "total",
+       "9"
+      ],
+      [
+       "needed",
+       "8"
+      ],
+      [
+       "safe",
+       "→ set #1"
+      ],
+      [
+       "reports",
+       "→ dict #2"
+      ],
+      [
+       "dn",
+       "'dn4'"
+      ],
+      [
+       "blocks",
+       "→ list #5"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 set (8)<\/b> {&#x27;b1&#x27;, &#x27;b2&#x27;, &#x27;b3&#x27;, &#x27;b4&#x27;, &#x27;b5&#x27;, &#x27;b6&#x27;, &#x27;b7&#x27;, &#x27;b8&#x27;}",
+    "<b>#2 dict (3)<\/b> {&#x27;dn2&#x27;: → list #3, &#x27;dn3&#x27;: → list #4, &#x27;dn4&#x27;: → list #5}",
+    "<b>#3 list (4)<\/b> [&#x27;b1&#x27;, &#x27;b2&#x27;, &#x27;b3&#x27;, &#x27;b4&#x27;]",
+    "<b>#4 list (3)<\/b> [&#x27;b3&#x27;, &#x27;b5&#x27;, &#x27;b6&#x27;]",
+    "<b>#5 list (3)<\/b> [&#x27;b7&#x27;, &#x27;b8&#x27;, &#x27;b1&#x27;]"
+   ],
+   "out": "dn4 reported -> 8 safe blocks (threshold reached)\n"
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "Nothing is left to loop over, so the loop ends and Python moves on.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "total",
+       "9"
+      ],
+      [
+       "needed",
+       "8"
+      ],
+      [
+       "safe",
+       "→ set #1"
+      ],
+      [
+       "reports",
+       "→ dict #2"
+      ],
+      [
+       "dn",
+       "'dn4'"
+      ],
+      [
+       "blocks",
+       "→ list #5"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 set (8)<\/b> {&#x27;b1&#x27;, &#x27;b2&#x27;, &#x27;b3&#x27;, &#x27;b4&#x27;, &#x27;b5&#x27;, &#x27;b6&#x27;, &#x27;b7&#x27;, &#x27;b8&#x27;}",
+    "<b>#2 dict (3)<\/b> {&#x27;dn2&#x27;: → list #3, &#x27;dn3&#x27;: → list #4, &#x27;dn4&#x27;: → list #5}",
+    "<b>#3 list (4)<\/b> [&#x27;b1&#x27;, &#x27;b2&#x27;, &#x27;b3&#x27;, &#x27;b4&#x27;]",
+    "<b>#4 list (3)<\/b> [&#x27;b3&#x27;, &#x27;b5&#x27;, &#x27;b6&#x27;]",
+    "<b>#5 list (3)<\/b> [&#x27;b7&#x27;, &#x27;b8&#x27;, &#x27;b1&#x27;]"
+   ]
+  }
+ ]
+}</script>
+  </div>
+
+<h3 id="worked">Worked examples: real problems, solved and traced in memory</h3>
+  <p class="wx-intro">Three safe mode questions that come up in operations: how long a restart will keep the cluster read-only, how much missing data the threshold tolerates, and when forcing safe mode off is reasonable. Each runs live and is traced in memory.</p>
+  <article class="wx">
+    <div class="wx__head"><span class="wx__num">Example 1</span><span class="lvl lvl--b">Beginner</span><span class="wx__tag">Operations · timing</span></div>
+    <h4>How long will the cluster be read-only?</h4>
+    <div class="wx__problem"><p class="wx__label">Problem statement</p><p>A NameNode takes 6 minutes to load its fsimage and edits. DataNodes then report over 4 minutes, with the threshold reached at 3 min 50 s. The extension is 30 s. How long after the restart can jobs write again?</p></div>
+    <div class="prob__io"><div><small>Input</small><pre>load 6 min · threshold at 3 min 50 s after reports start · extension 30 s</pre></div><div><small>Expected output</small><pre>writes allowed after 10 min 20 s</pre></div></div>
+    <div class="wx__approach"><p class="wx__label">Approach</p><ol><li>Start of safe mode = after loading.</li><li>Threshold time = load + 230 s.</li><li>Add the extension.</li></ol></div>
+    <p class="wx__label">Solution: run it live</p>
+    <div class="runner">
+    <script type="application/json">{
+ "lang": "python",
+ "file": "main.py",
+ "tasks": [
+  {
+   "label": "Solution",
+   "hint": "Regular checkpoints shrink the load time (Lesson 5.4); spreading block reports avoids a slow reporting phase.",
+   "code": "load_s, to_threshold_s, extension_s = 6 * 60, 3 * 60 + 50, 30\ntotal = load_s + to_threshold_s + extension_s\nprint(f\"writes allowed after {total // 60} min {total % 60} s\")\n"
+  }
+ ]
+}</script>
+    </div>
+    <p class="wx__label">What happens in memory, step by step</p>
+    <p class="wx__how">Recorded from a real Python run: press <b>Next</b> to execute one line at a time. Watch variables change in each frame, and lists and dictionaries (numbered #1, #2 …) fill up as objects.</p>
+    <div class="tracer">
+    <script type="application/json">{
+ "lang": "python",
+ "code": [
+  "load_s, to_threshold_s, extension_s = 6 * 60, 3 * 60 + 50, 30",
+  "total = load_s + to_threshold_s + extension_s",
+  "print(f\"writes allowed after {total // 60} min {total % 60} s\")"
+ ],
+ "steps": [
+  {
+   "line": 1,
+   "phase": "Python",
+   "note": "<code>load_s<\/code> is created: 360. <code>to_threshold_s<\/code> is created: 230. <code>extension_s<\/code> is created: 30.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "load_s",
+       "360"
+      ],
+      [
+       "to_threshold_s",
+       "230"
+      ],
+      [
+       "extension_s",
+       "30"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "extension_s"
+  },
+  {
+   "line": 2,
+   "phase": "Sum",
+   "note": "Loading, reporting and extension happen one after another. <code>total<\/code> is created: 620.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "load_s",
+       "360"
+      ],
+      [
+       "to_threshold_s",
+       "230"
+      ],
+      [
+       "extension_s",
+       "30"
+      ],
+      [
+       "total",
+       "620"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "total"
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "load_s",
+       "360"
+      ],
+      [
+       "to_threshold_s",
+       "230"
+      ],
+      [
+       "extension_s",
+       "30"
+      ],
+      [
+       "total",
+       "620"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "out": "writes allowed after 10 min 20 s\n"
+  }
+ ]
+}</script>
+    </div>
+  </article>
+  <article class="wx">
+    <div class="wx__head"><span class="wx__num">Example 2</span><span class="lvl lvl--i">Intermediate</span><span class="wx__tag">Risk · threshold</span></div>
+    <h4>How much data could be missing when it leaves?</h4>
+    <div class="wx__problem"><p class="wx__label">Problem statement</p><p>A cluster has 2 crore blocks averaging 100 MB. With the default threshold, how many blocks (and roughly how much data) may still have no reported replica when the NameNode leaves safe mode?</p></div>
+    <div class="prob__io"><div><small>Input</small><pre>2,00,00,000 blocks · 100 MB each · 0.999</pre></div><div><small>Expected output</small><pre>up to 20,000 blocks, about 1.9 TB</pre></div></div>
+    <div class="wx__approach"><p class="wx__label">Approach</p><ol><li>Missing allowed = total − int(total × 0.999).</li><li>Data = missing × 100 MB.</li><li>Convert to TB.</li></ol></div>
+    <p class="wx__label">Solution: run it live</p>
+    <div class="runner">
+    <script type="application/json">{
+ "lang": "python",
+ "file": "main.py",
+ "tasks": [
+  {
+   "label": "Solution",
+   "hint": "Those blocks may just be on late DataNodes, but always run fsck after a big restart to see if any are really missing.",
+   "code": "total, mb = 2_00_00_000, 100\nmissing = total - int(total * 0.999)\nprint(f\"up to {missing:,} blocks, about {missing * mb / 2**20:.1f} TB\")\n"
+  }
+ ]
+}</script>
+    </div>
+    <p class="wx__label">What happens in memory, step by step</p>
+    <p class="wx__how">Recorded from a real Python run: press <b>Next</b> to execute one line at a time. Watch variables change in each frame, and lists and dictionaries (numbered #1, #2 …) fill up as objects.</p>
+    <div class="tracer">
+    <script type="application/json">{
+ "lang": "python",
+ "code": [
+  "total, mb = 2_00_00_000, 100",
+  "missing = total - int(total * 0.999)",
+  "print(f\"up to {missing:,} blocks, about {missing * mb / 2**20:.1f} TB\")"
+ ],
+ "steps": [
+  {
+   "line": 1,
+   "phase": "Python",
+   "note": "<code>total<\/code> is created: 20000000. <code>mb<\/code> is created: 100.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "total",
+       "20000000"
+      ],
+      [
+       "mb",
+       "100"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "mb"
+  },
+  {
+   "line": 2,
+   "phase": "Python",
+   "note": "<code>missing<\/code> is created: 20000.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "total",
+       "20000000"
+      ],
+      [
+       "mb",
+       "100"
+      ],
+      [
+       "missing",
+       "20000"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "missing"
+  },
+  {
+   "line": 3,
+   "phase": "Tolerance",
+   "note": "0.1% of blocks may still be unreported. The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "total",
+       "20000000"
+      ],
+      [
+       "mb",
+       "100"
+      ],
+      [
+       "missing",
+       "20000"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "out": "up to 20,000 blocks, about 1.9 TB\n"
+  }
+ ]
+}</script>
+    </div>
+  </article>
+  <article class="wx">
+    <div class="wx__head"><span class="wx__num">Example 3</span><span class="lvl lvl--a">Advanced</span><span class="wx__tag">Decision · force leave</span></div>
+    <h4>Should we force safe mode off?</h4>
+    <div class="wx__problem"><p class="wx__label">Problem statement</p><p>Write a small decision helper: given total and reported blocks, the number of DataNodes expected and registered, and whether those missing DataNodes are known to be permanently lost, recommend “wait”, “investigate”, or “leave and accept loss”.</p></div>
+    <div class="prob__io"><div><small>Input</small><pre>case A: 1,000,000 / 990,000, 400 expected / 380 up, not lost · case B: same, nodes lost</pre></div><div><small>Expected output</small><pre>A: investigate: 20 DataNodes not registered yet
+B: leave safe mode, then run fsck and restore/regenerate missing data</pre></div></div>
+    <div class="wx__approach"><p class="wx__label">Approach</p><ol><li>If DataNodes are still missing and might return → wait/investigate.</li><li>If they are permanently lost and data is accepted as lost (or other replicas exist elsewhere) → leave, then fsck.</li><li>Print the reasoning.</li></ol></div>
+    <p class="wx__label">Solution: run it live</p>
+    <div class="runner">
+    <script type="application/json">{
+ "lang": "python",
+ "file": "main.py",
+ "tasks": [
+  {
+   "label": "Solution",
+   "hint": "Case A is the common one: a rack powering up late. Forcing safe mode off there would mark lakhs of healthy blocks as missing.",
+   "code": "def advise(total, reported, expected_dns, up_dns, lost_for_good):\n    needed = int(total * 0.999)\n    if reported >= needed:\n        return \"wait: it will leave by itself after the extension\"\n    if up_dns < expected_dns and not lost_for_good:\n        return f\"investigate: {expected_dns - up_dns} DataNodes not registered yet\"\n    return \"leave safe mode, then run fsck and restore/regenerate missing data\"\n\nprint(\"A:\", advise(1_000_000, 990_000, 400, 380, False))\nprint(\"B:\", advise(1_000_000, 990_000, 400, 380, True))\n"
+  }
+ ]
+}</script>
+    </div>
+    <p class="wx__label">What happens in memory, step by step</p>
+    <p class="wx__how">Recorded from a real Python run: press <b>Next</b> to execute one line at a time. Watch variables change in each frame, and lists and dictionaries (numbered #1, #2 …) fill up as objects.</p>
+    <div class="tracer">
+    <script type="application/json">{
+ "lang": "python",
+ "code": [
+  "def advise(total, reported, expected_dns, up_dns, lost_for_good):",
+  "    needed = int(total * 0.999)",
+  "    if reported >= needed:",
+  "        return \"wait: it will leave by itself after the extension\"",
+  "    if up_dns < expected_dns and not lost_for_good:",
+  "        return f\"investigate: {expected_dns - up_dns} DataNodes not registered yet\"",
+  "    return \"leave safe mode, then run fsck and restore/regenerate missing data\"",
+  "",
+  "print(\"A:\", advise(1_000_000, 990_000, 400, 380, False))",
+  "print(\"B:\", advise(1_000_000, 990_000, 400, 380, True))"
+ ],
+ "steps": [
+  {
+   "line": 1,
+   "phase": "Python",
+   "note": "<code>advise<\/code> is created: function advise().",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "advise",
+       "function advise()"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "advise"
+  },
+  {
+   "line": 9,
+   "phase": "Python",
+   "note": "<code>advise()<\/code> is called: a new frame is pushed with <code>total<\/code> = 1000000, <code>reported<\/code> = 990000, <code>expected_dns<\/code> = 400, <code>up_dns<\/code> = 380, <code>lost_for_good<\/code> = False.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "advise",
+       "function advise()"
+      ]
+     ]
+    },
+    {
+     "frame": "advise()",
+     "vars": [
+      [
+       "total",
+       "1000000"
+      ],
+      [
+       "reported",
+       "990000"
+      ],
+      [
+       "expected_dns",
+       "400"
+      ],
+      [
+       "up_dns",
+       "380"
+      ],
+      [
+       "lost_for_good",
+       "False"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "lost_for_good"
+  },
+  {
+   "line": 2,
+   "phase": "Python",
+   "note": "<code>needed<\/code> is created: 999000.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "advise",
+       "function advise()"
+      ]
+     ]
+    },
+    {
+     "frame": "advise()",
+     "vars": [
+      [
+       "total",
+       "1000000"
+      ],
+      [
+       "reported",
+       "990000"
+      ],
+      [
+       "expected_dns",
+       "400"
+      ],
+      [
+       "up_dns",
+       "380"
+      ],
+      [
+       "lost_for_good",
+       "False"
+      ],
+      [
+       "needed",
+       "999000"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "needed"
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "The condition is <b>False<\/b>, so the indented block is skipped.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "advise",
+       "function advise()"
+      ]
+     ]
+    },
+    {
+     "frame": "advise()",
+     "vars": [
+      [
+       "total",
+       "1000000"
+      ],
+      [
+       "reported",
+       "990000"
+      ],
+      [
+       "expected_dns",
+       "400"
+      ],
+      [
+       "up_dns",
+       "380"
+      ],
+      [
+       "lost_for_good",
+       "False"
+      ],
+      [
+       "needed",
+       "999000"
+      ]
+     ]
+    }
+   ],
+   "heap": []
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "The condition is <b>True<\/b>, so the indented block runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "advise",
+       "function advise()"
+      ]
+     ]
+    },
+    {
+     "frame": "advise()",
+     "vars": [
+      [
+       "total",
+       "1000000"
+      ],
+      [
+       "reported",
+       "990000"
+      ],
+      [
+       "expected_dns",
+       "400"
+      ],
+      [
+       "up_dns",
+       "380"
+      ],
+      [
+       "lost_for_good",
+       "False"
+      ],
+      [
+       "needed",
+       "999000"
+      ]
+     ]
+    }
+   ],
+   "heap": []
+  },
+  {
+   "line": 6,
+   "phase": "Python",
+   "note": "The return value is worked out and handed back to the caller.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "advise",
+       "function advise()"
+      ]
+     ]
+    },
+    {
+     "frame": "advise()",
+     "vars": [
+      [
+       "total",
+       "1000000"
+      ],
+      [
+       "reported",
+       "990000"
+      ],
+      [
+       "expected_dns",
+       "400"
+      ],
+      [
+       "up_dns",
+       "380"
+      ],
+      [
+       "lost_for_good",
+       "False"
+      ],
+      [
+       "needed",
+       "999000"
+      ]
+     ]
+    }
+   ],
+   "heap": []
+  },
+  {
+   "line": 9,
+   "phase": "Return",
+   "note": "<code>advise()<\/code> returns <b>&#x27;investigate: 20 DataNodes not registered yet&#x27;<\/b> and its frame is popped. The caller continues on this line with that value.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "advise",
+       "function advise()"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "out": "A: investigate: 20 DataNodes not registered yet\n"
+  },
+  {
+   "line": 10,
+   "phase": "Python",
+   "note": "<code>advise()<\/code> is called: a new frame is pushed with <code>total<\/code> = 1000000, <code>reported<\/code> = 990000, <code>expected_dns<\/code> = 400, <code>up_dns<\/code> = 380, <code>lost_for_good<\/code> = True.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "advise",
+       "function advise()"
+      ]
+     ]
+    },
+    {
+     "frame": "advise()",
+     "vars": [
+      [
+       "total",
+       "1000000"
+      ],
+      [
+       "reported",
+       "990000"
+      ],
+      [
+       "expected_dns",
+       "400"
+      ],
+      [
+       "up_dns",
+       "380"
+      ],
+      [
+       "lost_for_good",
+       "True"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "lost_for_good"
+  },
+  {
+   "line": 2,
+   "phase": "Python",
+   "note": "<code>needed<\/code> is created: 999000.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "advise",
+       "function advise()"
+      ]
+     ]
+    },
+    {
+     "frame": "advise()",
+     "vars": [
+      [
+       "total",
+       "1000000"
+      ],
+      [
+       "reported",
+       "990000"
+      ],
+      [
+       "expected_dns",
+       "400"
+      ],
+      [
+       "up_dns",
+       "380"
+      ],
+      [
+       "lost_for_good",
+       "True"
+      ],
+      [
+       "needed",
+       "999000"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "needed"
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "The condition is <b>False<\/b>, so the indented block is skipped.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "advise",
+       "function advise()"
+      ]
+     ]
+    },
+    {
+     "frame": "advise()",
+     "vars": [
+      [
+       "total",
+       "1000000"
+      ],
+      [
+       "reported",
+       "990000"
+      ],
+      [
+       "expected_dns",
+       "400"
+      ],
+      [
+       "up_dns",
+       "380"
+      ],
+      [
+       "lost_for_good",
+       "True"
+      ],
+      [
+       "needed",
+       "999000"
+      ]
+     ]
+    }
+   ],
+   "heap": []
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "The condition is <b>False<\/b>, so the indented block is skipped.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "advise",
+       "function advise()"
+      ]
+     ]
+    },
+    {
+     "frame": "advise()",
+     "vars": [
+      [
+       "total",
+       "1000000"
+      ],
+      [
+       "reported",
+       "990000"
+      ],
+      [
+       "expected_dns",
+       "400"
+      ],
+      [
+       "up_dns",
+       "380"
+      ],
+      [
+       "lost_for_good",
+       "True"
+      ],
+      [
+       "needed",
+       "999000"
+      ]
+     ]
+    }
+   ],
+   "heap": []
+  },
+  {
+   "line": 7,
+   "phase": "Python",
+   "note": "The return value is worked out and handed back to the caller.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "advise",
+       "function advise()"
+      ]
+     ]
+    },
+    {
+     "frame": "advise()",
+     "vars": [
+      [
+       "total",
+       "1000000"
+      ],
+      [
+       "reported",
+       "990000"
+      ],
+      [
+       "expected_dns",
+       "400"
+      ],
+      [
+       "up_dns",
+       "380"
+      ],
+      [
+       "lost_for_good",
+       "True"
+      ],
+      [
+       "needed",
+       "999000"
+      ]
+     ]
+    }
+   ],
+   "heap": []
+  },
+  {
+   "line": 10,
+   "phase": "Return",
+   "note": "<code>advise()<\/code> returns <b>&#x27;leave safe mode, then run fsck and restore/regenerate missing data&#x27;<\/b> and its frame is popped. The caller continues on this line with that value.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "advise",
+       "function advise()"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "out": "B: leave safe mode, then run fsck and restore/regenerate missing data\n"
+  }
+ ]
+}</script>
+    </div>
+  </article>
+</section>
+
+<section class="part" id="quiz">
+  <span class="part-label"><b>9</b> Quiz and revision</span>
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <script type="application/json">[
+ {
+  "q": "What is HDFS safe mode?",
+  "options": [
+   "A backup copy of HDFS",
+   "Encryption of all files",
+   "A read-only NameNode state, mainly at start-up while block reports arrive",
+   "A mode where DataNodes stop"
+  ],
+  "answer": 2,
+  "why": "Reads of metadata are allowed; changes and replication are not."
+ },
+ {
+  "q": "When does the NameNode leave start-up safe mode automatically?",
+  "options": [
+   "After exactly 1 minute",
+   "When 99.9% of blocks have at least one reported replica, plus a 30 s extension",
+   "When all DataNodes have restarted twice",
+   "Never; an admin must leave it"
+  ],
+  "answer": 1,
+  "why": "threshold-pct 0.999, extension 30,000 ms."
+ },
+ {
+  "q": "During safe mode, hdfs dfs -put fails with:",
+  "options": [
+   "Name node is in safe mode (SafeModeException)",
+   "FileNotFoundException",
+   "Permission denied",
+   "Disk full"
+  ],
+  "answer": 0,
+  "why": "We saw: “put: Cannot create file … Name node is in safe mode.”"
+ },
+ {
+  "q": "With all DataNodes stopped, why does hdfs dfs -ls work but -cat fail?",
+  "options": [
+   "ls is cached on the client",
+   "cat needs YARN",
+   "ls bypasses the NameNode",
+   "The namespace is loaded from the fsimage, but block locations come only from DataNode reports"
+  ],
+  "answer": 3,
+  "why": "“Zero blocklocations … Name node is in safe mode.”"
+ },
+ {
+  "q": "Which command should a start-up script run before writing data?",
+  "options": [
+   "hdfs dfsadmin -safemode leave",
+   "hdfs namenode -format",
+   "hdfs dfsadmin -safemode wait",
+   "hdfs dfs -rm -r /"
+  ],
+  "answer": 2,
+  "why": "wait blocks until safe mode is off, without forcing anything."
+ },
+ {
+  "q": "A NameNode entered safe mode with -safemode enter. When does it leave?",
+  "options": [
+   "After 30 s",
+   "Only when an admin runs -safemode leave",
+   "When block reports arrive",
+   "At the next checkpoint"
+  ],
+  "answer": 1,
+  "why": "Manual safe mode is never left automatically."
+ },
+ {
+  "q": "With 9 blocks and threshold 0.999, how many must be reported?",
+  "options": [
+   "8",
+   "9",
+   "7",
+   "1"
+  ],
+  "answer": 0,
+  "why": "int(9 × 0.999) = int(8.991) = 8. Our lab left safe mode with 1 block missing."
+ },
+ {
+  "q": "The NameNode is stuck in safe mode after a restart. The best first step is:",
+  "options": [
+   "Run -safemode leave immediately",
+   "Format the NameNode",
+   "Delete the edit log",
+   "Check reported vs total blocks and which DataNodes haven't registered"
+  ],
+  "answer": 3,
+  "why": "Stuck safe mode is a symptom: usually DataNodes or disks are missing."
+ }
+]</script>
+  </div>
+
+  <h3>Quick revision</h3>
+  <div class="revision">
+    <h3>Lesson 5.6 in one screen</h3>
+    <ul><li>Safe mode = NameNode <b>read-only</b>: metadata reads OK; no create/delete/rename; no replication.</li><li>Entered automatically at <b>start-up</b> (after loading fsimage + edits) until block reports arrive.</li><li>Leaves when reported safe blocks ≥ <b>int(total × 0.999)</b> and live DNs ≥ min (0), then after a <b>30 s</b> extension.</li><li>Real lab: ~40 s in safe mode per restart; with no DataNodes it waits for ever.</li><li>Commands: <code>hdfs dfsadmin -safemode get | wait | enter | leave</code>.</li><li>Manual (<code>enter</code>) safe mode only ends with <code>leave</code>. Also entered when metadata disk is low.</li><li>Errors: put → “Name node is in safe mode”; cat → “Zero blocklocations”.</li><li>Stuck = missing DataNodes/blocks. Investigate before forcing; check fsck after leaving.</li></ul>
+  </div>
+
+  <h3>Interview and viva questions</h3>
+  <div class="faq">
+    <details><summary>What is safe mode in HDFS?</summary><p>A read-only state of the NameNode. At start-up it loads the namespace and then waits for DataNodes to report their blocks. Until enough blocks are reported, it allows reading metadata but no modifications and no replication, so it doesn't act on incomplete information.</p></details>
+    <details><summary>How do I leave safe mode?</summary><p>Normally you just wait: it ends automatically when 99.9% of blocks are reported plus 30 seconds. Use hdfs dfsadmin -safemode wait in scripts. hdfs dfsadmin -safemode leave forces it off, which is appropriate only after you know why it is stuck (or after a manual enter).</p></details>
+    <details><summary>Why is my NameNode stuck in safe mode?</summary><p>Usually because DataNodes holding a significant share of blocks have not registered: they are down, their disks are not mounted, or dfs.datanode.data.dir points to the wrong folder. It can also be caused by low disk space on the NameNode's metadata directories.</p></details>
+    <details><summary>Can I read files in safe mode?</summary><p>You can read metadata (ls, stat). File data can be read for blocks whose replicas have already been reported; blocks with no reported replica cannot be read yet.</p></details>
+    <details><summary>What do threshold-pct and extension mean?</summary><p>dfs.namenode.safemode.threshold-pct (0.999) is the fraction of blocks that must have at least dfs.namenode.replication.min reported replicas. dfs.namenode.safemode.extension (30,000 ms) is how long the NameNode stays in safe mode after reaching that threshold, to let late reports arrive.</p></details>
+    <details><summary>Does leaving safe mode guarantee no data is missing?</summary><p>No. The threshold allows a small fraction of blocks (0.1%, rounded) to be unreported. Run hdfs fsck / after restarts to find missing or corrupt blocks.</p></details>
+    
+  </div>
+
+  <h3 id="practice">Practice problems</h3>
+  <p class="prob-intro">Safe mode exercises built on the real restarts from the lab.</p>
+  <div class="probs">
+    <article class="prob"><div class="prob__head"><span class="prob__num">P1</span><span class="prob__tag prob__tag--easy">Easy</span><h4>Needed blocks</h4></div>
+      <p>Compute the number of blocks that must be reported for totals 8, 9 and 1,000.</p>
+      <div class="prob__io"><div><small>Input</small><pre>8 · 9 · 1000</pre></div><div><small>Expected output</small><pre>8 -&gt; 7
+9 -&gt; 8
+1000 -&gt; 999</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>for t in [8, 9, 1000]:
+    print(t, &quot;-&gt;&quot;, int(t * 0.999))</code></pre><div class="output">8 -&gt; 7
+9 -&gt; 8
+1000 -&gt; 999</div></div>
+        <p><b>How it works:</b> 7, 8 and 999. For tiny clusters one block may be missing; at 1,000 blocks exactly one may be.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P2</span><span class="prob__tag prob__tag--easy">Easy</span><h4>Extension end</h4></div>
+      <p>A NameNode log line at 07:27:01 says “Safe mode will be turned off automatically in 9 seconds.” When should it turn off?</p>
+      <div class="prob__io"><div><small>Input</small><pre>07:27:01 + 9 s</pre></div><div><small>Expected output</small><pre>07:27:10</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>from datetime import datetime, timedelta
+print((datetime(2026, 10, 21, 7, 27, 1) + timedelta(seconds=9)).time())</code></pre><div class="output">07:27:10</div></div>
+        <p><b>How it works:</b> 07:27:10. The real log shows “STATE* Safe mode is OFF” at 07:27:11, one second later because the check runs periodically.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P3</span><span class="prob__tag prob__tag--easy">Easy</span><h4>Time in safe mode</h4></div>
+      <p>A log says “Leaving safe mode after 70 secs”. The NameNode spent 25 s waiting for DataNodes to start and 30 s in the extension. How long was it waiting for block reports after the DataNodes started?</p>
+      <div class="prob__io"><div><small>Input</small><pre>70 · 25 · 30</pre></div><div><small>Expected output</small><pre>15 s</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>print(70 - 25 - 30, &quot;s&quot;)</code></pre><div class="output">15 s</div></div>
+        <p><b>How it works:</b> About 15 s for registration and block reports.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P4</span><span class="prob__tag prob__tag--medium">Medium</span><h4>Parse the NameNode message</h4></div>
+      <p>Extract reported, total and seconds left from the real message.</p>
+      <div class="prob__io"><div><small>Input</small><pre>The reported blocks 8 has reached the threshold 0.9990 of total blocks 8. … in 24 seconds.</pre></div><div><small>Expected output</small><pre>8/8 reported, 24 s left</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>import re
+msg = (&quot;The reported blocks 8 has reached the threshold 0.9990 of total blocks 8. &quot;
+       &quot;The minimum number of live datanodes is not required. In safe mode extension. &quot;
+       &quot;Safe mode will be turned off automatically in 24 seconds.&quot;)
+r, t = re.search(r&quot;reported blocks (\d+).*total blocks (\d+)&quot;, msg).groups()
+left = re.search(r&quot;in (\d+) seconds&quot;, msg).group(1)
+print(f&quot;{r}/{t} reported, {left} s left&quot;)</code></pre><div class="output">8/8 reported, 24 s left</div></div>
+        <p><b>How it works:</b> 8/8 reported, 24 s left: the same parsing safemode_watch.py does.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P5</span><span class="prob__tag prob__tag--medium">Medium</span><h4>Blocks per DataNode needed</h4></div>
+      <p>600,000 blocks with replication 3 are spread evenly over 300 DataNodes. Roughly how many DataNodes must report before every block has at least one reported replica, if reports arrive from random nodes? Simulate it.</p>
+      <div class="prob__io"><div><small>Input</small><pre>600,000 blocks · 3 replicas · 300 nodes</pre></div><div><small>Expected output</small><pre>threshold reached after 270 of 300 DataNodes</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>import random
+random.seed(1)
+nodes = 300
+blocks = [random.sample(range(nodes), 3) for _ in range(60_000)]   # 1/10 sample
+order = random.sample(range(nodes), nodes)
+reported = set()
+for i, n in enumerate(order, 1):
+    reported.add(n)
+    safe = sum(1 for b in blocks if reported.intersection(b))
+    if safe &gt;= int(len(blocks) * 0.999):
+        print(&quot;threshold reached after&quot;, i, &quot;of&quot;, nodes, &quot;DataNodes&quot;)
+        break</code></pre><div class="output">threshold reached after 270 of 300 DataNodes</div></div>
+        <p><b>How it works:</b> The threshold was reached after 270 of 300 DataNodes: about 30 nodes (10%) could still be missing, because each block needs only one of its three replicas reported. Replication also shortens safe mode.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P6</span><span class="prob__tag prob__tag--medium">Medium</span><h4>Manual or automatic?</h4></div>
+      <p>For each situation, say whether safe mode will end by itself.</p>
+      <div class="prob__io"><div><small>Input</small><pre>restart · enter · disk low</pre></div><div><small>Expected output</small><pre>after restart          -&gt; ends by itself
+after -safemode enter  -&gt; needs -safemode leave
+metadata disk low      -&gt; needs -safemode leave</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>cases = {&quot;after restart&quot;: True, &quot;after -safemode enter&quot;: False, &quot;metadata disk low&quot;: False}
+for c, auto in cases.items():
+    print(f&quot;{c:22} -&gt; {&#x27;ends by itself&#x27; if auto else &#x27;needs -safemode leave&#x27;}&quot;)</code></pre><div class="output">after restart          -&gt; ends by itself
+after -safemode enter  -&gt; needs -safemode leave
+metadata disk low      -&gt; needs -safemode leave</div></div>
+        <p><b>How it works:</b> Only start-up safe mode ends automatically; manual and resource-low safe mode need an admin.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P7</span><span class="prob__tag prob__tag--business">Business problem</span><h4>Cost of read-only minutes</h4></div>
+      <p>Nightly pipelines restart the NameNode for patching. Safe mode lasts 12 minutes, blocking 40 ingestion jobs that each queue Rs 300 of SLA penalty per minute late after a 5-minute grace. What is the penalty, and what if checkpoints cut it to 4 minutes?</p>
+      <div class="prob__io"><div><small>Input</small><pre>12 vs 4 min · 40 jobs · Rs 300/min after 5 min</pre></div><div><small>Expected output</small><pre>12 min safe mode -&gt; Rs 84,000
+ 4 min safe mode -&gt; Rs 0</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>for minutes in [12, 4]:
+    late = max(0, minutes - 5)
+    print(f&quot;{minutes:&gt;2} min safe mode -&gt; Rs {late * 300 * 40:,}&quot;)</code></pre><div class="output">12 min safe mode -&gt; Rs 84,000
+ 4 min safe mode -&gt; Rs 0</div></div>
+        <p><b>How it works:</b> Rs 84,000 for 12 minutes, nothing for 4. Fast restarts (checkpoints, quick block reports) have real money value.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P8</span><span class="prob__tag prob__tag--advanced">Advanced</span><h4>Find missing blocks after leaving</h4></div>
+      <p>Given the block → reported DataNodes map after leaving safe mode, list files with missing blocks.</p>
+      <div class="prob__io"><div><small>Input</small><pre>file → blocks · reported replicas</pre></div><div><small>Expected output</small><pre>orders.csv ok
+scratch_r1.csv MISSING b9
+users.csv ok</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>files = {&quot;orders.csv&quot;: [&quot;b1&quot;, &quot;b2&quot;], &quot;scratch_r1.csv&quot;: [&quot;b9&quot;], &quot;users.csv&quot;: [&quot;b5&quot;]}
+reported = {&quot;b1&quot;: [&quot;dn2&quot;], &quot;b2&quot;: [&quot;dn3&quot;, &quot;dn4&quot;], &quot;b5&quot;: [&quot;dn2&quot;, &quot;dn4&quot;], &quot;b9&quot;: []}
+for f, blocks in files.items():
+    missing = [b for b in blocks if not reported.get(b)]
+    print(f, &quot;MISSING &quot; + &quot;, &quot;.join(missing) if missing else &quot;ok&quot;)</code></pre><div class="output">orders.csv ok
+scratch_r1.csv MISSING b9
+users.csv ok</div></div>
+        <p><b>How it works:</b> Only scratch_r1.csv (its one replica was on the stopped DataNode), exactly as the real fsck reported.</p>
+      </details>
+    </article>
+  </div>
+
+  <h3 id="scenarios">Real-world scenario questions (asked in company interviews)</h3>
+  <p class="scn-intro">Safe mode questions check both knowledge and judgement: do you force it, or do you find out why?</p>
+  <div class="scenarios">
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">HDFS · basics</span><span class="scn__tag scn__tag--level">Fresher</span></div>
+      <h4>“My job fails with ‘Name node is in safe mode’ right after starting HDFS”</h4>
+      <p class="scn__situation">A student's script runs start-dfs.sh and immediately hdfs dfs -put.</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> what safe mode is and the right fix.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>At start-up the NameNode stays read-only until DataNodes report 99.9% of blocks, plus 30 s.</li>
+          <li>Add <code>hdfs dfsadmin -safemode wait</code> after starting HDFS, before any write.</li>
+          <li>Don't add <code>-safemode leave</code> to the script: it would hide real problems.</li>
+        </ul>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Operations · incident</span><span class="scn__tag scn__tag--level">Experienced</span></div>
+      <h4>Production NameNode stuck in safe mode at 96%</h4>
+      <p class="scn__situation">After a data-centre power cut, the NameNode reports 96% of blocks after 30 minutes. Users want you to force it out.</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> calm, systematic recovery.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>4% unreported blocks means many DataNodes or disks are missing. Compare expected vs registered DataNodes (<code>dfsadmin -report</code>, UI).</li>
+          <li>Check those hosts: powered on? DataNode running? Disks mounted? Logs for clusterID or volume errors.</li>
+          <li>As nodes return, the count rises and safe mode ends by itself. Force it off only if the missing nodes are confirmed lost, then run fsck and restore data from backups/DR.</li>
+          <li>Communicate: the cluster is readable for reported data meanwhile.</li>
+        </ul>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">HDFS · internals</span><span class="scn__tag scn__tag--level">Experienced</span></div>
+      <h4>Why doesn't the NameNode just start re-replicating straight away?</h4>
+      <p class="scn__situation">A design question about the purpose of safe mode.</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> understanding of the block map.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>Right after start-up the block map is empty: every block looks like it has 0 replicas.</li>
+          <li>Acting on that would trigger copies of the whole cluster, followed by mass deletion when reports arrive.</li>
+          <li>Safe mode waits until the map is nearly complete, so replication decisions are based on real data.</li>
+        </ul>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Admin · maintenance</span><span class="scn__tag scn__tag--level">Fresher</span></div>
+      <h4>When would you put HDFS into safe mode on purpose?</h4>
+      <p class="scn__situation">An interviewer asks for real uses of <code>-safemode enter</code>.</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> practical admin experience.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>Before <code>hdfs dfsadmin -saveNamespace</code> (required), e.g. to create a clean checkpoint before maintenance.</li>
+          <li>To freeze the namespace while taking a metadata backup or before an upgrade.</li>
+          <li>Remember to run <code>-safemode leave</code> afterwards: manual safe mode never ends by itself.</li>
+        </ul>
+      </div></details>
+    </article>
+
+  </div>
+</section>
+
+<nav class="lesson-nav" id="lesson-nav" aria-label="Lesson navigation"></nav>
+<div class="ad-slot" data-slot="bottom"></div>
+</article>
+
+<aside class="lesson-side">
+  <nav class="toc" aria-label="In this lesson">
+    <h4>In this lesson</h4>
+    <ol>
+      <li><a href="#story">The story</a></li>
+      <li><a href="#definition">Definition</a></li><li><a href="#levels">Beginner → Advanced</a></li>
+      <li><a href="#types">Types and ways to use it</a></li>
+      <li><a href="#steps">Step by step</a></li>
+      <li><a href="#animation">See it happen</a></li>
+      <li><a href="#real-world">Real-world use</a></li>
+      <li><a href="#run">Run the code</a></li><li><a href="#pc">Run on your PC</a></li>
+      <li><a href="#tracer">Line by line</a></li>
+      <li><a href="#worked">Worked examples</a></li>
+      <li><a href="#quiz">Quiz and revision</a></li>
+      <li><a href="#practice">Practice problems</a></li>
+      <li><a href="#scenarios">Industry scenarios</a></li>
+    </ol>
+  </nav>
+  <div class="ad-slot" data-slot="side"></div>
+  <div class="outline" id="outline"></div>
+</aside>
+</div>
+</main>
+
+<footer class="site-footer">
+  <div class="wrap">
+    <div><h4>MyPhatshala</h4><p>Free programming and IT lessons that show what happens behind the screen.</p></div>
+    <div><h4>Learn</h4><a href="../../../../#tracks">All courses</a><a href="../../">Apache Hadoop syllabus</a></div>
+    <div><h4>Site</h4><a href="../../../../about.html">About</a><a href="../../../../contact.html">Contact</a><a href="../../../../privacy.html">Privacy policy</a><a href="../../../../disclaimer.html">Disclaimer</a></div>
+    <div class="copyright">© MyPhatshala. All lesson content, diagrams and animations are original. Please do not copy without permission.</div>
+  </div>
+</footer>
+
+<script src="../../../../data/courses/hadoop.js"></script>
+<script src="../../../../assets/js/lesson.js"></script>
+<script src="../../../../assets/js/ads.js"></script>
+<script src="../../../../assets/js/site.js"></script>
+</body>
+</html>

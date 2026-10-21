@@ -1,0 +1,4075 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>How Hadoop solved each problem | MyPhatshala</title>
+<meta name="description" content="Hadoop&#x27;s architecture as answers to concrete problems: HDFS for storage, replication for failures, MapReduce for parallel processing, data locality for the network, the map/reduce model for simplicity, YARN and HA in Hadoop 2, erasure coding in Hadoop 3, and the problems Hadoop did not solve. With animations, a full-feature playground, a tiny MapReduce in Python, quiz and interview scenarios.">
+<meta name="mp:minutes" content="25">
+<link rel="canonical" href="https://myphatshala.in/courses/hadoop/02-why-hadoop/03-how-hadoop-solved-each-problem/">
+<meta property="og:title" content="How Hadoop solved each problem · MyPhatshala">
+<meta property="og:description" content="Every part of Hadoop exists to fix one problem. Map them, test them in a live cluster, and learn what Hadoop does not fix.">
+<link rel="icon" href="../../../../assets/img/logo.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Fraunces:ital,opsz,wght@0,9..144,600;0,9..144,700;1,9..144,600&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../../../../assets/css/style.css">
+<link rel="stylesheet" href="../../../../assets/css/lesson.css">
+<link rel="stylesheet" href="../../../../assets/css/cluster-sim.css">
+<script src="../../../../assets/js/config.js"></script>
+<script>try { const t = localStorage.getItem("mp-theme"); if (t) document.documentElement.dataset.theme = t; } catch (e) {}</script>
+<script type="application/ld+json">{"@context": "https://schema.org", "@type": "LearningResource", "name": "How Hadoop solved each problem", "learningResourceType": "Lesson", "educationalLevel": "Beginner → Advanced", "isAccessibleForFree": true, "inLanguage": "en", "isPartOf": {"@type": "Course", "name": "Apache Hadoop", "provider": {"@type": "Organization", "name": "MyPhatshala"}}}</script>
+</head>
+<body style="--track:#B45309" data-lesson="02-why-hadoop/03-how-hadoop-solved-each-problem" data-course-root="../../">
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="site-header">
+  <div class="wrap">
+    <a class="brand" href="../../../../" aria-label="MyPhatshala home"><img src="../../../../assets/img/logo.svg" width="34" height="34" alt=""><span>My<b>Phatshala</b></span></a>
+    <nav class="nav" aria-label="Main">
+      <a href="../../../../#tracks">All courses</a>
+      <a href="../../">Apache Hadoop syllabus</a>
+      <button class="theme-btn" id="theme-btn" aria-label="Toggle dark mode"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg></button>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+<section class="lesson-hero">
+  <div class="wrap">
+    <nav class="crumbs" aria-label="Breadcrumb"><a href="../../../../">Home</a><span>›</span><a href="../../../../#track-big-data">Big Data Engineering</a><span>›</span><a href="../../">Apache Hadoop</a><span>›</span><b>Lesson 2.3</b></nav>
+    <h1>How Hadoop solved each problem</h1>
+    <p class="lead">Every component of Hadoop exists because of a specific problem: data that doesn't fit, disks that die, jobs that take days, a jammed network, mountains of plumbing code, and a master that must not fail. This lesson maps each problem to its fix, runs a tiny MapReduce in Python so you see exactly which part you write and which part Hadoop does, and ends with the problems Hadoop never solved, which is why Spark and other tools exist.</p>
+    <div class="lesson-meta"><span>Module 2 · Why Hadoop was born</span><span>⏱ 25 min</span><span>Beginner → Advanced</span><span>Full-feature playground</span><span>Tiny MapReduce in Python</span><span>Strengths and limits</span><span>8 practice problems</span></div>
+  </div>
+</section>
+
+<div class="wrap lesson-layout">
+<article class="lesson-main">
+<!-- ======================= PART 1: THE STORY ======================= -->
+<section class="part" id="story">
+  <span class="part-label"><b>1</b> The story</span>
+  <h2>Riya's problem list, ticked off one by one</h2>
+  <div class="story">
+    <p class="narration">On the whiteboard, Riya has written every problem BharatSearch hit while growing: <i>doesn't fit, disks die, too slow, network jammed, too much plumbing code, adding machines is painful, costs too much</i>. Arjun Sir hands her a green marker. “For each one, write the part of Hadoop that fixes it. If you can fill this board, you understand Hadoop's architecture.”</p>
+
+    <div class="scene">
+      <svg viewBox="0 0 640 186" role="img" aria-label="A whiteboard with problems on the left and Hadoop's answers on the right, connected by arrows.">
+        <g font-size="10">
+          <rect x="10" y="10" width="620" height="150" rx="10" class="s-board"/>
+          <text x="40" y="34" font-weight="700" style="fill:#FF8A80">Problem</text>
+          <text x="370" y="34" font-weight="700" style="fill:#9FD3B8">Hadoop's answer</text>
+          <g font-size="9" class="mono">
+            <text x="40" y="56" style="fill:#EDEBE3">data doesn't fit</text><text x="370" y="56" style="fill:#9FD3B8">HDFS blocks on many nodes</text>
+            <text x="40" y="74" style="fill:#EDEBE3">disks and nodes die</text><text x="370" y="74" style="fill:#9FD3B8">3 replicas + re-replication</text>
+            <text x="40" y="92" style="fill:#EDEBE3">processing too slow</text><text x="370" y="92" style="fill:#9FD3B8">MapReduce: parallel tasks</text>
+            <text x="40" y="110" style="fill:#EDEBE3">network jammed</text><text x="370" y="110" style="fill:#9FD3B8">data locality</text>
+            <text x="40" y="128" style="fill:#EDEBE3">too much plumbing code</text><text x="370" y="128" style="fill:#9FD3B8">write map + reduce only</text>
+            <text x="40" y="146" style="fill:#EDEBE3">growing is painful</text><text x="370" y="146" style="fill:#9FD3B8">add nodes; NameNode tracks blocks</text>
+          </g>
+          <path d="M250 53h100M250 71h100M250 89h100M250 107h100M250 125h100M250 143h100" style="stroke:#F5C77E;stroke-width:1.5;stroke-dasharray:4 3"/>
+        </g>
+        <text x="320" y="180" text-anchor="middle" font-size="10" class="s-ink2">Every part of Hadoop exists because of one line on this board.</text>
+        <text x="632" y="180" text-anchor="end" class="s-wm">myphatshala.in</text>
+      </svg>
+    </div>
+
+    <div class="panel"><div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#FCE6D6"/><path d="M14 64c2-12 9-18 18-18s16 6 18 18z" fill="#2E5AAC"/><circle cx="32" cy="29" r="12" fill="#C68B5E"/><path d="M19 29c0-10 6-15 13-15s13 5 13 15c-3-5-7-8-13-8s-10 3-13 8z" fill="#2A1B14"/><path d="M43 27c3 6 3 14 0 20" stroke="#2A1B14" stroke-width="4" fill="none" stroke-linecap="round"/><circle cx="27.5" cy="30" r="1.5" fill="#2A1B14"/><circle cx="36.5" cy="30" r="1.5" fill="#2A1B14"/><path d="M28 35q4 3 8 0" stroke="#2A1B14" stroke-width="1.6" fill="none" stroke-linecap="round"/><circle cx="32" cy="24" r="1.2" fill="#D64545"/></svg></div><div class="bubble"><b class="who">Riya</b><p>“Doesn't fit”: HDFS cuts files into blocks and spreads them over many machines.</p></div></div>
+    <div class="panel panel--right"><div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#DDEFE6"/><path d="M12 64c2-12 10-18 20-18s18 6 20 18z" fill="#F4F1EA"/><path d="M28 46l4 8 4-8" fill="#2F7D5B"/><circle cx="32" cy="28" r="12" fill="#B57A50"/><path d="M20 26c0-8 5-13 12-13s12 5 12 13c-2-3-6-5-12-5s-10 2-12 5z" fill="#5A5A5A"/><path d="M22 32c1 8 5 11 10 11s9-3 10-11c-2 3-6 4-10 4s-8-1-10-4z" fill="#5A5A5A"/><circle cx="27" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><circle cx="37" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><path d="M30.4 29h3.2" stroke="#1B2433" stroke-width="1.4"/><circle cx="27" cy="29" r="1.1" fill="#1B2433"/><circle cx="37" cy="29" r="1.1" fill="#1B2433"/></svg></div><div class="bubble"><b class="who">Arjun Sir</b><p>Good. And “disks die”?</p></div></div>
+    <div class="panel"><div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#E1E9F7"/><path d="M12 64c2-12 10-18 20-18s18 6 20 18z" fill="#B45309"/><circle cx="32" cy="29" r="12" fill="#A9714A"/><path d="M19 27c0-9 6-14 13-14s13 5 13 14c-2-4-5-6-8-6-3 3-9 4-13 3-2 1-4 2-5 3z" fill="#1E1A17"/><circle cx="27.5" cy="30" r="1.5" fill="#1E1A17"/><circle cx="36.5" cy="30" r="1.5" fill="#1E1A17"/><path d="M27 35.5q5 3.5 10 0" stroke="#1E1A17" stroke-width="1.6" fill="none" stroke-linecap="round"/><rect x="41" y="40" width="10" height="7" rx="1.5" fill="#2E5AAC"/></svg></div><div class="bubble"><b class="who">Kabir</b><p>Three copies of every block, on different racks. And the NameNode re-copies when a node dies.</p></div></div>
+    <div class="panel"><div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#FCE6D6"/><path d="M14 64c2-12 9-18 18-18s16 6 18 18z" fill="#2E5AAC"/><circle cx="32" cy="29" r="12" fill="#C68B5E"/><path d="M19 29c0-10 6-15 13-15s13 5 13 15c-3-5-7-8-13-8s-10 3-13 8z" fill="#2A1B14"/><path d="M43 27c3 6 3 14 0 20" stroke="#2A1B14" stroke-width="4" fill="none" stroke-linecap="round"/><circle cx="27.5" cy="30" r="1.5" fill="#2A1B14"/><circle cx="36.5" cy="30" r="1.5" fill="#2A1B14"/><path d="M28 35q4 3 8 0" stroke="#2A1B14" stroke-width="1.6" fill="none" stroke-linecap="round"/><circle cx="32" cy="24" r="1.2" fill="#D64545"/></svg></div><div class="bubble"><b class="who">Riya</b><p>“Too slow” is MapReduce: thousands of small tasks running at the same time. “Network jammed” is data locality.</p></div></div>
+    <div class="panel panel--right"><div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#DDEFE6"/><path d="M12 64c2-12 10-18 20-18s18 6 20 18z" fill="#F4F1EA"/><path d="M28 46l4 8 4-8" fill="#2F7D5B"/><circle cx="32" cy="28" r="12" fill="#B57A50"/><path d="M20 26c0-8 5-13 12-13s12 5 12 13c-2-3-6-5-12-5s-10 2-12 5z" fill="#5A5A5A"/><path d="M22 32c1 8 5 11 10 11s9-3 10-11c-2 3-6 4-10 4s-8-1-10-4z" fill="#5A5A5A"/><circle cx="27" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><circle cx="37" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><path d="M30.4 29h3.2" stroke="#1B2433" stroke-width="1.4"/><circle cx="27" cy="29" r="1.1" fill="#1B2433"/><circle cx="37" cy="29" r="1.1" fill="#1B2433"/></svg></div><div class="bubble"><b class="who">Arjun Sir</b><p>And the one most people forget?</p></div></div>
+    <div class="panel"><div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#E1E9F7"/><path d="M12 64c2-12 10-18 20-18s18 6 20 18z" fill="#B45309"/><circle cx="32" cy="29" r="12" fill="#A9714A"/><path d="M19 27c0-9 6-14 13-14s13 5 13 14c-2-4-5-6-8-6-3 3-9 4-13 3-2 1-4 2-5 3z" fill="#1E1A17"/><circle cx="27.5" cy="30" r="1.5" fill="#1E1A17"/><circle cx="36.5" cy="30" r="1.5" fill="#1E1A17"/><path d="M27 35.5q5 3.5 10 0" stroke="#1E1A17" stroke-width="1.6" fill="none" stroke-linecap="round"/><rect x="41" y="40" width="10" height="7" rx="1.5" fill="#2E5AAC"/></svg></div><div class="bubble"><b class="who">Kabir</b><p>“Too much plumbing.” We only write <code>map</code> and <code>reduce</code>, and Hadoop does the splitting, scheduling, retrying and merging.</p></div></div>
+    <div class="panel panel--right"><div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#DDEFE6"/><path d="M12 64c2-12 10-18 20-18s18 6 20 18z" fill="#F4F1EA"/><path d="M28 46l4 8 4-8" fill="#2F7D5B"/><circle cx="32" cy="28" r="12" fill="#B57A50"/><path d="M20 26c0-8 5-13 12-13s12 5 12 13c-2-3-6-5-12-5s-10 2-12 5z" fill="#5A5A5A"/><path d="M22 32c1 8 5 11 10 11s9-3 10-11c-2 3-6 4-10 4s-8-1-10-4z" fill="#5A5A5A"/><circle cx="27" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><circle cx="37" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><path d="M30.4 29h3.2" stroke="#1B2433" stroke-width="1.4"/><circle cx="27" cy="29" r="1.1" fill="#1B2433"/><circle cx="37" cy="29" r="1.1" fill="#1B2433"/></svg></div><div class="bubble"><b class="who">Arjun Sir</b><p>Then I'll add two harder lines to your board: “the master is a single point of failure” and “only one kind of job can run”. Hadoop 1 couldn't fix those. Hadoop 2 did, with High Availability and YARN. Today we'll go through every line, see each fix in action, and then be honest about the problems Hadoop <b>didn't</b> solve.</p></div></div>
+  </div>
+</section>
+
+<!-- ======================= PART 2: DEFINITION ======================= -->
+<section class="part" id="definition">
+  <span class="part-label"><b>2</b> Definition</span>
+  <h2>Hadoop's architecture as a set of answers</h2>
+  <div class="def">
+    <div class="def__formal"><small>Formal definition (write this in exams)</small>
+      <p>Apache Hadoop consists of four core modules. <b>Hadoop Common</b>: shared libraries and utilities. <b>HDFS</b>: a distributed file system that splits files into large blocks, replicates each block across DataNodes and racks, and keeps metadata on a NameNode, providing scalable, fault-tolerant, high-throughput storage. <b>YARN</b> (since Hadoop 2): a cluster resource manager that allocates CPU and memory as containers to many applications. <b>MapReduce</b>: a programming model and engine in which user-defined <i>map</i> and <i>reduce</i> functions are executed in parallel near the data, with the framework handling partitioning, scheduling, shuffling, sorting and failure recovery.</p></div>
+    <div class="def__simple"><small>In simple words</small>
+      <p>Hadoop is four pieces. HDFS stores huge files safely across many machines. MapReduce processes them in parallel. YARN decides which job gets which machines' CPU and memory. Common holds the shared code. Each piece was built to fix a specific problem of big data.</p></div>
+  </div>
+
+  <h3>Words you'll meet in this lesson</h3>
+  <div class="terms">
+    <div class="term"><b>Hadoop Common</b><span>Shared Java libraries, configuration and tools used by all other Hadoop modules.</span></div>
+    <div class="term"><b>HDFS</b><span>Hadoop Distributed File System: blocks + replicas on DataNodes, metadata on the NameNode.</span></div>
+    <div class="term"><b>YARN</b><span>Yet Another Resource Negotiator: shares the cluster's CPU and memory between applications.</span></div>
+    <div class="term"><b>MapReduce</b><span>Map tasks turn records into key–value pairs; reduce tasks combine all values for each key.</span></div>
+    <div class="term"><b>Shuffle and sort</b><span>Moving map outputs to reducers, grouped and sorted by key. Done by the framework.</span></div>
+    <div class="term"><b>Horizontal scalability</b><span>Capacity grows roughly in line with the number of nodes added.</span></div>
+    <div class="term"><b>Schema-on-read</b><span>Store raw data as it is; apply structure when reading it.</span></div>
+    <div class="term"><b>High Availability (HA)</b><span>An active and a standby master, with automatic failover.</span></div>
+  </div>
+
+  <h3>Problem → solution map</h3>
+  <table class="facts">
+    <tr><th>Data bigger than one machine</th><td><b>HDFS</b> splits files into 128 MB blocks across many DataNodes</td></tr>
+    <tr><th>Cheap hardware fails</th><td><b>Replication</b> (3, rack-aware), heartbeats, re-replication, checksums</td></tr>
+    <tr><th>Processing too slow</th><td><b>MapReduce</b>: one map task per block, thousands in parallel</td></tr>
+    <tr><th>Network too slow to move data</th><td><b>Data locality</b>: tasks scheduled on nodes holding the block</td></tr>
+    <tr><th>Distributed code is hard</th><td>Write <b>map</b> and <b>reduce</b>; the framework does splits, scheduling, shuffle, retries</td></tr>
+    <tr><th>Tasks fail mid-job</th><td>Automatic <b>re-execution</b> (up to 4 attempts) and speculative execution</td></tr>
+    <tr><th>Need to grow</th><td><b>Add nodes</b>; the NameNode tracks every block, the balancer spreads data</td></tr>
+    <tr><th>Raw, messy data</th><td>HDFS stores any bytes: <b>schema-on-read</b></td></tr>
+    <tr><th>Master is a single point of failure</th><td><b>NameNode HA</b> (Hadoop 2+), multiple standbys (Hadoop 3)</td></tr>
+    <tr><th>Only MapReduce could run</th><td><b>YARN</b> (Hadoop 2+): Spark, Tez, Hive and others share one cluster</td></tr>
+    <tr><th>3× storage is expensive</th><td><b>Erasure coding</b> (Hadoop 3): about 1.5× for cold data</td></tr>
+  </table>
+
+  <h3 id="levels">The architecture at three levels</h3>
+  <div class="modlab levels"><div class="modlab__bar"><b>Pick your level. New to this? Start at Beginner and climb.</b><button type="button" data-mod="b">Beginner</button><button type="button" data-mod="i">Intermediate</button><button type="button" data-mod="a">Advanced</button></div>
+    <div class="modlab__panel" data-mod="b"><h4><span class="lvl lvl--b">Beginner</span> A courier company</h4>
+      <ul>
+        <li><b>HDFS is the warehouse network:</b> parcels (blocks) stored in many warehouses (nodes), each parcel copied to three warehouses in different areas.</li>
+        <li><b>The NameNode is the head office register:</b> it knows which warehouse holds which parcel, but never touches the parcels.</li>
+        <li><b>MapReduce is the sorting work:</b> every warehouse sorts its own parcels by city at the same time (map), then all parcels for one city go to one hub (shuffle) to be counted (reduce).</li>
+        <li><b>YARN is the staff manager:</b> it decides which team uses which warehouse workers today.</li>
+      </ul>
+
+    </div>
+    <div class="modlab__panel" data-mod="i"><h4><span class="lvl lvl--i">Intermediate</span> How the pieces work together on one job</h4>
+      <ul>
+        <li>You copy a file into HDFS: the NameNode picks DataNodes, the client writes blocks to them in a pipeline.</li>
+        <li>You submit a job: YARN starts an ApplicationMaster for it.</li>
+        <li>The ApplicationMaster asks the NameNode where the input blocks are, then asks YARN for containers on those nodes.</li>
+        <li>Map tasks read their local blocks; outputs are shuffled to reducers; reducers write results back to HDFS.</li>
+        <li>Throughout, heartbeats let the masters notice failures and re-run work.</li>
+      </ul>
+
+    </div>
+    <div class="modlab__panel" data-mod="a"><h4><span class="lvl lvl--a">Advanced</span> What Hadoop did not solve (and what came next)</h4>
+      <ul>
+        <li><b>Latency:</b> MapReduce jobs take seconds to start and write intermediate data to disk. Interactive SQL came from Impala, Presto/Trino, Hive LLAP and cloud warehouses.</li>
+        <li><b>Iterative algorithms</b> (machine learning, graph processing) reread data in every pass. <b>Spark</b> keeps working data in memory and became the main engine.</li>
+        <li><b>Streaming:</b> MapReduce is batch-only. Kafka, Flink and Spark Structured Streaming handle real-time data.</li>
+        <li><b>Small files:</b> every file and block costs NameNode memory. Mitigations: bigger files, HAR/SequenceFiles, compaction, federation.</li>
+        <li><b>Updates:</b> HDFS files are write-once. Table formats like Apache Iceberg, Delta Lake and Hudi added updates and deletes on top of files.</li>
+        <li><b>Operations and security:</b> running Kerberos, Ranger, upgrades and capacity planning takes skilled staff. Managed cloud services reduced this burden.</li>
+      </ul>
+
+    </div>
+  </div>
+  <div class="callout callout--exam"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19V5a2 2 0 0 1 2-2h12v18H6a2 2 0 0 1-2-2zm0 0a2 2 0 0 1 2-2h12"/></svg><p><b>Exam tip:</b> For “Explain the core components of Hadoop”, name all four (<b>Common, HDFS, YARN, MapReduce</b>), give each one's job in one line, and connect each to the problem it solves. Adding one line on Hadoop's limitations (latency, small files, iterative jobs) shows real understanding.</p></div>
+</section>
+
+<!-- ======================= PART 3: TYPES AND WAYS TO USE IT ======================= -->
+<section class="part" id="types">
+  <span class="part-label"><b>3</b> Types and ways to use it</span>
+  <h2>The four core modules, side by side</h2>
+  <div class="cards">
+    <div class="card"><h4>Hadoop Common</h4><p>Configuration system (<code>core-site.xml</code>), file-system abstraction, RPC, security, command-line tools. Everything else is built on it.</p><span class="tag">Foundation</span></div>
+    <div class="card"><h4>HDFS</h4><p>NameNode (metadata), DataNodes (blocks), optional standby NameNode and JournalNodes for HA. Commands: <code>hdfs dfs …</code>.</p><span class="tag">Storage</span></div>
+    <div class="card"><h4>YARN</h4><p>ResourceManager (cluster-wide scheduler), NodeManagers (run containers), one ApplicationMaster per job.</p><span class="tag">Resources</span></div>
+    <div class="card"><h4>MapReduce</h4><p>Java API (<code>Mapper</code>, <code>Reducer</code>, <code>Job</code>) and the engine that runs map, shuffle, sort and reduce as a YARN application.</p><span class="tag">Processing</span></div>
+  </div>
+
+  <h3>Hadoop's strengths and limits</h3>
+  <div class="table-wrap">
+  <table class="compare" style="min-width:560px">
+    <thead><tr><th>Hadoop is good at</th><th>Hadoop is weak at</th></tr></thead>
+    <tbody>
+      <tr><td>Storing petabytes cheaply and safely</td><td>Millisecond lookups of single records</td></tr>
+      <tr><td>Scanning whole data sets in parallel</td><td>Interactive queries with MapReduce (start-up cost)</td></tr>
+      <tr><td>Surviving hardware failures automatically</td><td>Many small files</td></tr>
+      <tr><td>Raw and semi-structured data (logs, JSON, text)</td><td>Updating records in place</td></tr>
+      <tr><td>Long-running batch pipelines</td><td>Real-time streams and iterative ML (without Spark etc.)</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <div class="callout callout--tip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18h6M10 22h4M12 2a7 7 0 0 0-4 12.7V17h8v-2.3A7 7 0 0 0 12 2z"/></svg><p>When someone asks “Can Hadoop do X?”, ask yourself which problem on Riya's board X belongs to. If X is about <b>large, batch, throughput</b>, Hadoop fits. If X is about <b>small, instant, constantly changing</b>, another tool is usually better, even if it stores its history in HDFS.</p></div>
+</section>
+
+<!-- ======================= PART 4: STEP BY STEP ======================= -->
+<section class="part" id="steps">
+  <span class="part-label"><b>4</b> Step by step</span>
+  <h2>A word count, and which Hadoop part handles each step</h2>
+  <ol class="stepper">
+    <li><h4>Store: put the file in HDFS</h4>
+      <div class="code" data-lang="bash" data-file="Terminal"><pre><code>hdfs dfs -put pages.txt /data/pages.txt</code></pre></div>
+      <span class="behind"><b>HDFS</b> splits the file into 128 MB blocks and writes 3 replicas of each to DataNodes on two racks. Solves: <i>doesn't fit</i> and <i>disks die</i>.</span></li>
+    <li><h4>Map: each task reads one block</h4>
+      <div class="code" data-lang="python" data-file="map.py"><pre><code>def map_words(line):
+    return [(w, 1) for w in line.lower().split()]
+print(map_words("Pune Delhi Pune"))</code></pre><div class="output">[('pune', 1), ('delhi', 1), ('pune', 1)]</div></div>
+      <span class="behind">Your only code. <b>MapReduce</b> runs one copy per block, in parallel, on nodes that hold the blocks (<b>locality</b>). Solves: <i>too slow</i> and <i>network jammed</i>.</span></li>
+    <li><h4>Shuffle and sort: group by key</h4>
+      <div class="code" data-lang="python" data-file="shuffle.py"><pre><code>pairs = [("pune", 1), ("delhi", 1), ("pune", 1)]
+groups = {}
+for k, v in sorted(pairs):
+    groups.setdefault(k, []).append(v)
+print(groups)</code></pre><div class="output">{'delhi': [1], 'pune': [1, 1]}</div></div>
+      <span class="behind">Done entirely by the <b>framework</b>: map outputs are partitioned by key, copied over the network to reducers and sorted. Solves: <i>too much plumbing</i>.</span></li>
+    <li><h4>Reduce: combine each key's values</h4>
+      <div class="code" data-lang="python" data-file="reduce.py"><pre><code>def reduce_count(word, ones):
+    return word, sum(ones)
+print(reduce_count("pune", [1, 1]))</code></pre><div class="output">('pune', 2)</div></div>
+      <span class="behind">Your second function. Reducers write results back to HDFS, replicated like any other file.</span></li>
+    <li><h4>Recover: a node dies halfway</h4>
+      <p>A DataNode with three running map tasks loses power.</p>
+      <span class="behind"><b>YARN</b> and the ApplicationMaster re-run those tasks on other nodes, reading other replicas. The job finishes. Solves: <i>tasks fail mid-job</i>.</span></li>
+  </ol>
+</section>
+
+<!-- ======================= PART 5: SEE IT HAPPEN ======================= -->
+<section class="part" id="animation">
+  <span class="part-label"><b>5</b> See it happen</span>
+  <h2>Six problems, six fixes: the board and the cluster</h2>
+  <p>Each frame takes one line from Riya's board. Left: the problem as a user feels it. Right: the Hadoop mechanism that fixes it.</p>
+  <div class="anim" data-frames="6">
+    <div class="anim__title">Problem → Hadoop mechanism <span>6 steps</span></div>
+    <div class="anim__views">
+      <div class="view view--see">
+        <span class="view__tag">The problem</span>
+        <svg viewBox="0 0 360 250" role="img" aria-label="Each big data problem">
+          <rect x="14" y="14" width="332" height="206" rx="8" class="s-soft-acc" style="stroke:#D64545"/>
+          <g data-on="1"><text x="180" y="50" text-anchor="middle" font-size="12" font-weight="700" class="s-red">“It doesn't fit.”</text><rect x="60" y="80" width="90" height="90" rx="8" class="s-card2"/><text x="105" y="130" text-anchor="middle" font-size="9" class="s-ink">4 TB disk</text><rect x="190" y="70" width="110" height="110" rx="8" class="s-red"/><text x="245" y="130" text-anchor="middle" font-size="11" font-weight="700" style="fill:#fff">400 TB</text></g>
+          <g data-on="2"><text x="180" y="50" text-anchor="middle" font-size="12" font-weight="700" class="s-red">“A disk died. Data gone.”</text><rect x="130" y="80" width="100" height="80" rx="8" class="s-board"/><text x="180" y="126" text-anchor="middle" font-size="12" font-weight="700" style="fill:#FF8A80">✕ disk</text></g>
+          <g data-on="3"><text x="180" y="50" text-anchor="middle" font-size="12" font-weight="700" class="s-red">“The report takes 3 days.”</text><rect x="40" y="96" width="280" height="18" rx="5" class="s-card2"/><rect x="40" y="96" width="30" height="18" rx="5" class="s-red"/><text x="180" y="146" text-anchor="middle" font-size="9" class="s-ink">one machine reading 400 TB</text></g>
+          <g data-on="4"><text x="180" y="50" text-anchor="middle" font-size="12" font-weight="700" class="s-red">“The network is jammed.”</text><path d="M60 110h240" style="stroke:#D64545;stroke-width:14;opacity:.8"/><text x="180" y="150" text-anchor="middle" font-size="9" class="s-ink">everyone copying data to one place</text></g>
+          <g data-on="5"><text x="180" y="50" text-anchor="middle" font-size="12" font-weight="700" class="s-red">“Our retry script is 900 lines.”</text><rect x="80" y="74" width="200" height="110" rx="6" class="s-board"/><text x="94" y="96" font-size="8" class="mono" style="fill:#7F8C86">split() schedule() retry()</text><text x="94" y="112" font-size="8" class="mono" style="fill:#7F8C86">merge() rebalance() monitor()</text><text x="94" y="128" font-size="8" class="mono" style="fill:#7F8C86">recover() copy() wait() …</text><text x="94" y="160" font-size="8" class="mono" style="fill:#F5C77E">count_words()  ← the real work</text></g>
+          <g data-on="6"><text x="180" y="50" text-anchor="middle" font-size="12" font-weight="700" class="s-red">“We need more capacity.”</text><text x="180" y="110" text-anchor="middle" font-size="9" class="s-ink">adding machines means</text><text x="180" y="126" text-anchor="middle" font-size="9" class="s-ink">re-sharding all the data by hand</text></g>
+          <text x="352" y="244" text-anchor="end" class="s-wm">myphatshala.in</text>
+        </svg>
+        <ol class="caps" hidden>
+          <li><b>Storage:</b> 400 TB of data and disks of 4 TB. No single machine can hold it.</li>
+          <li><b>Reliability:</b> with one copy, a dead disk means lost data and a failed job.</li>
+          <li><b>Speed:</b> one machine reading 400 TB takes days.</li>
+          <li><b>Network:</b> pulling all the data to a central place saturates the network.</li>
+          <li><b>Complexity:</b> distribution code dwarfs the actual business logic.</li>
+          <li><b>Growth:</b> adding machines forces a painful manual re-shard.</li>
+        </ol>
+      </div>
+
+      <div class="view view--behind">
+        <span class="view__tag">Hadoop's fix</span>
+        <svg viewBox="0 0 360 250" role="img" aria-label="Hadoop mechanisms">
+          <rect x="14" y="14" width="332" height="206" rx="8" class="s-soft-green" style="stroke:var(--green)"/>
+          <g data-on="1"><text x="180" y="44" text-anchor="middle" font-size="11" font-weight="700" class="s-green">HDFS blocks on many nodes</text>
+            <g><rect x="30" y="66" width="56" height="44" rx="5" class="s-card"/><rect x="92" y="66" width="56" height="44" rx="5" class="s-card"/><rect x="154" y="66" width="56" height="44" rx="5" class="s-card"/><rect x="216" y="66" width="56" height="44" rx="5" class="s-card"/><rect x="278" y="66" width="56" height="44" rx="5" class="s-card"/>
+            <rect x="38" y="78" width="16" height="12" rx="2" style="fill:var(--track)"/><rect x="58" y="78" width="16" height="12" rx="2" style="fill:var(--track)"/><rect x="100" y="78" width="16" height="12" rx="2" style="fill:var(--track)"/><rect x="120" y="78" width="16" height="12" rx="2" style="fill:var(--track)"/><rect x="162" y="78" width="16" height="12" rx="2" style="fill:var(--track)"/><rect x="224" y="78" width="16" height="12" rx="2" style="fill:var(--track)"/><rect x="244" y="78" width="16" height="12" rx="2" style="fill:var(--track)"/><rect x="286" y="78" width="16" height="12" rx="2" style="fill:var(--track)"/></g>
+            <text x="180" y="146" text-anchor="middle" font-size="9" class="s-ink">capacity = sum of all nodes' disks</text></g>
+          <g data-on="2"><text x="180" y="44" text-anchor="middle" font-size="11" font-weight="700" class="s-green">3 replicas + re-replication</text>
+            <rect x="40" y="70" width="80" height="60" rx="6" class="s-card" style="stroke:var(--red);stroke-dasharray:5 3"/><rect x="140" y="70" width="80" height="60" rx="6" class="s-card"/><rect x="240" y="70" width="80" height="60" rx="6" class="s-card"/>
+            <rect x="64" y="92" width="32" height="16" rx="3" style="fill:var(--track);opacity:.3"/><rect x="164" y="92" width="32" height="16" rx="3" style="fill:var(--track)"/><rect x="264" y="92" width="32" height="16" rx="3" style="fill:var(--track)"/>
+            <text x="180" y="156" text-anchor="middle" font-size="9" class="s-ink">two copies left; a new one is made automatically</text></g>
+          <g data-on="3"><text x="180" y="44" text-anchor="middle" font-size="11" font-weight="700" class="s-green">MapReduce: 1,000s of tasks at once</text>
+            <rect x="40" y="70" width="280" height="10" rx="3" class="s-green"/><rect x="40" y="86" width="280" height="10" rx="3" class="s-green"/><rect x="40" y="102" width="280" height="10" rx="3" class="s-green"/><rect x="40" y="118" width="280" height="10" rx="3" class="s-green"/>
+            <text x="180" y="156" text-anchor="middle" font-size="9" class="s-ink">every node reads its share in parallel: minutes</text></g>
+          <g data-on="4"><text x="180" y="44" text-anchor="middle" font-size="11" font-weight="700" class="s-green">Data locality</text>
+            <rect x="40" y="70" width="80" height="60" rx="6" class="s-card"/><rect x="140" y="70" width="80" height="60" rx="6" class="s-card"/><rect x="240" y="70" width="80" height="60" rx="6" class="s-card"/>
+            <text x="80" y="104" text-anchor="middle" font-size="9" class="s-green" font-weight="700">task ↔ block</text><text x="180" y="104" text-anchor="middle" font-size="9" class="s-green" font-weight="700">task ↔ block</text><text x="280" y="104" text-anchor="middle" font-size="9" class="s-green" font-weight="700">task ↔ block</text>
+            <text x="180" y="156" text-anchor="middle" font-size="9" class="s-ink">the program goes to the data; the network stays free</text></g>
+          <g data-on="5"><text x="180" y="44" text-anchor="middle" font-size="11" font-weight="700" class="s-green">You write map + reduce</text>
+            <rect x="80" y="64" width="200" height="40" rx="6" class="s-board"/><text x="94" y="82" font-size="8.6" class="mono" style="fill:#9FD3B8">map(line)  → (word, 1)</text><text x="94" y="96" font-size="8.6" class="mono" style="fill:#9FD3B8">reduce(w, ones) → sum</text>
+            <text x="180" y="130" text-anchor="middle" font-size="9" class="s-ink">splits, scheduling, shuffle, sort,</text><text x="180" y="144" text-anchor="middle" font-size="9" class="s-ink">retries, output: the framework</text></g>
+          <g data-on="6"><text x="180" y="44" text-anchor="middle" font-size="11" font-weight="700" class="s-green">Add a node: it just joins</text>
+            <rect x="30" y="72" width="56" height="44" rx="5" class="s-card"/><rect x="92" y="72" width="56" height="44" rx="5" class="s-card"/><rect x="154" y="72" width="56" height="44" rx="5" class="s-card"/><rect x="216" y="72" width="56" height="44" rx="5" class="s-card"/><rect x="278" y="72" width="56" height="44" rx="5" class="s-card" style="stroke:var(--green);stroke-width:2.5"/>
+            <text x="306" y="98" text-anchor="middle" font-size="9" font-weight="700" class="s-green">new</text>
+            <text x="180" y="146" text-anchor="middle" font-size="9" class="s-ink">NameNode tracks each block; nothing re-sharded</text><text x="180" y="160" text-anchor="middle" font-size="9" class="s-ink">(balancer moves some blocks when you want)</text></g>
+          <text x="352" y="244" text-anchor="end" class="s-wm">myphatshala.in</text>
+        </svg>
+        <ol class="caps" hidden>
+          <li><b>HDFS</b> cuts the file into blocks and spreads them, so capacity is the sum of every node's disks.</li>
+          <li><b>Replication:</b> each block lives on three nodes; when one dies, the NameNode makes a new copy from the others.</li>
+          <li><b>MapReduce</b> runs one task per block, all at the same time, so reading 400 TB takes minutes, not days.</li>
+          <li><b>Locality:</b> tasks run where their blocks are, so input data doesn't cross the network.</li>
+          <li><b>The programming model:</b> you write two small functions; Hadoop handles everything around them.</li>
+          <li><b>Growth:</b> a new DataNode registers and starts receiving blocks. The NameNode tracks blocks individually, so no re-sharding.</li>
+        </ol>
+      </div>
+    </div>
+  </div>
+
+  <h3 id="playground">Try it yourself: test every fix</h3>
+  <p>This cluster has everything switched on, including High Availability for the NameNode. Work through the checklist to see each fix with your own eyes.</p>
+  <div class="csim"><script type="application/json">{"title": "Test every fix", "intro": "<p>Three racks, a standby NameNode, and every feature switched on. Each checklist item tests one line of Riya's board.<\/p>", "racks": 3, "nodes": 3, "features": ["upload", "fail", "job", "locality", "ha", "fsck"], "preload": [{"name": "bharatsearch_pages.txt", "sizeMB": 1024}], "try": [{"text": "<b>Doesn't fit →<\/b> upload a 2 GB file and see its blocks spread across nine nodes.", "on": "upload-done"}, {"text": "<b>Too slow + network →<\/b> run the job: parallel tasks, almost all data-local.", "on": "job-done"}, {"text": "<b>Disks die →<\/b> stop a node and skip to the timeout: re-replication.", "on": "rereplicated"}, {"text": "<b>Master is a SPOF →<\/b> stop the active NameNode: the standby takes over.", "on": "nn-failover"}, {"text": "<b>Is it healthy? →<\/b> run <b>hdfs fsck /<\/b>.", "on": "fsck"}]}</script></div>
+</section>
+
+<!-- ======================= PART 6: REAL-WORLD USE ======================= -->
+<section class="part" id="real-world">
+  <span class="part-label"><b>6</b> Real-world use</span>
+  <h2>Which fix matters most, by industry</h2>
+
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="18" y="22" width="84" height="46" rx="6" class="s-soft-blue" style="stroke:var(--blue)"/><text x="60" y="50" text-anchor="middle" font-size="9" font-weight="700" class="s-blue">7 years</text></svg></div>
+    <div><h4>1. Telecom: cheap, safe storage for years</h4>
+      <p>Regulations require keeping call and data records for years. HDFS on commodity disks with replication (or erasure coding for old data) is far cheaper per TB than enterprise storage.</p>
+      <div class="uc-flow"><span>Records</span><i>→</i><span class="java">HDFS + replication / EC</span><i>→</i><span>Retained for years</span></div></div>
+  </div>
+
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="20" y="20" width="80" height="50" rx="6" class="s-board"/><text x="60" y="50" text-anchor="middle" font-size="9" font-weight="700" class="s-chalk">EOD batch</text></svg></div>
+    <div><h4>2. Banking: finishing the batch window</h4>
+      <p>End-of-day risk and reconciliation jobs must finish before morning. Parallel processing near the data and automatic retries make the deadline reliable, even when nodes fail at night.</p>
+      <div class="uc-flow"><span>Day's transactions</span><i>→</i><span class="java">Parallel jobs + retries</span><i>→</i><span>Ready by 6 am</span></div></div>
+  </div>
+
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="18" y="18" width="84" height="54" rx="6" class="s-card2"/><text x="60" y="42" text-anchor="middle" font-size="9" class="mono s-ink">{"evt":"tap"}</text><text x="60" y="58" text-anchor="middle" font-size="8.6" class="s-ink2">raw JSON</text></svg></div>
+    <div><h4>3. E-commerce: schema-on-read for app events</h4>
+      <p>App events change format every few weeks as new features ship. Storing them raw in HDFS and applying a schema at query time (Hive, Spark) means nothing is lost when the format changes.</p>
+      <div class="uc-flow"><span>Raw events</span><i>→</i><span class="java">Stored as-is</span><i>→</i><span>Schema applied by queries</span></div></div>
+  </div>
+
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="16" y="20" width="40" height="50" rx="6" class="s-soft-acc" style="stroke:var(--track)"/><rect x="64" y="20" width="40" height="50" rx="6" class="s-soft-green" style="stroke:var(--green)"/><text x="36" y="49" text-anchor="middle" font-size="8.6" font-weight="700" class="s-acc">Spark</text><text x="84" y="49" text-anchor="middle" font-size="8.6" font-weight="700" class="s-green">Hive</text></svg></div>
+    <div><h4>4. Many teams, one cluster</h4>
+      <p>With YARN, the fraud team's Spark jobs, the BI team's Hive queries and nightly MapReduce jobs share one cluster, each in its own queue with guaranteed capacity (Module 11).</p>
+      <div class="uc-flow"><span>Many teams</span><i>→</i><span class="java">YARN queues</span><i>→</i><span>One shared cluster</span></div></div>
+  </div>
+
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="20" y="22" width="34" height="46" rx="5" class="s-board"/><rect x="66" y="22" width="34" height="46" rx="5" class="s-board" style="opacity:.6"/><path d="M54 45h12" style="stroke:var(--green);stroke-width:3"/><text x="37" y="80" text-anchor="middle" font-size="8.6" class="s-ink">active</text><text x="83" y="80" text-anchor="middle" font-size="8.6" class="s-ink">standby</text></svg></div>
+    <div><h4>5. Always-on data platforms</h4>
+      <p>When dashboards and pipelines depend on HDFS around the clock, NameNode High Availability turns a master failure from an outage into a short pause.</p>
+      <div class="uc-flow"><span>Active NN fails</span><i>→</i><span class="java">Standby takes over</span><i>→</i><span>Pipelines continue</span></div></div>
+  </div>
+  <p class="muted">Examples are simplified descriptions of common patterns.</p>
+</section>
+
+
+<div class="ad-slot" data-slot="mid"></div>
+
+<section class="part" id="run">
+  <span class="part-label"><b>7</b> Run the code</span>
+  <h2>A tiny MapReduce, in 20 lines of Python</h2>
+  <p>This is the whole MapReduce idea on one machine. <code>map_fn</code> and <code>reduce_fn</code> are the only parts you would write in Hadoop; <code>run_job</code> plays the framework: it splits the input, runs every map, shuffles and sorts by key, and runs every reduce.</p>
+  <div class="code" data-lang="python" data-file="main.py"><pre><code>def map_fn(line):                        # YOU write this
+    city, amount = line.split(&quot;,&quot;)
+    return [(city, int(amount))]
+
+def reduce_fn(city, amounts):            # YOU write this
+    return city, sum(amounts)
+
+def run_job(lines, splits=2):            # HADOOP does this part
+    parts = [lines[i::splits] for i in range(splits)]
+    mapped = [kv for part in parts for line in part for kv in map_fn(line)]
+    groups = {}
+    for k, v in sorted(mapped):          # shuffle and sort by key
+        groups.setdefault(k, []).append(v)
+    return [reduce_fn(k, vs) for k, vs in groups.items()]
+
+orders = [&quot;Pune,240&quot;, &quot;Delhi,120&quot;, &quot;Pune,60&quot;, &quot;Goa,300&quot;, &quot;Delhi,80&quot;]
+print(run_job(orders))</code></pre><div class="output">[(&#x27;Delhi&#x27;, 200), (&#x27;Goa&#x27;, 300), (&#x27;Pune&#x27;, 300)]</div></div>
+  <ul class="anno"><li><code>def map_fn(line):</code><span>Map: turn one input record into zero or more (key, value) pairs. Here: (city, amount).</span></li><li><code>parts = [lines[i::splits] for i in range(splits)]</code><span>Split the input into pieces, like HDFS blocks. <code>lines[i::2]</code> takes every second line starting at <code>i</code>.</span></li><li><code>for k, v in sorted(mapped):</code><span>Shuffle and sort: all values with the same key end up together, in key order.</span></li><li><code>return [reduce_fn(k, vs) for k, vs in groups.items()]</code><span>Reduce: called once per key with the list of all its values.</span></li></ul>
+  <div class="runner">
+    <script type="application/json">{
+ "lang": "python",
+ "file": "main.py",
+ "tasks": [
+  {
+   "label": "1 · Sales per city",
+   "hint": "Press <b>Run<\/b>. Then add <code>\"Goa,50\"<\/code> to the orders. Only the input changed; the framework code didn't.",
+   "code": "def map_fn(line):                        # YOU write this\n    city, amount = line.split(\",\")\n    return [(city, int(amount))]\n\ndef reduce_fn(city, amounts):            # YOU write this\n    return city, sum(amounts)\n\ndef run_job(lines, splits=2):            # HADOOP does this part\n    parts = [lines[i::splits] for i in range(splits)]\n    mapped = [kv for part in parts for line in part for kv in map_fn(line)]\n    groups = {}\n    for k, v in sorted(mapped):          # shuffle and sort by key\n        groups.setdefault(k, []).append(v)\n    return [reduce_fn(k, vs) for k, vs in groups.items()]\n\norders = [\"Pune,240\", \"Delhi,120\", \"Pune,60\", \"Goa,300\", \"Delhi,80\"]\nprint(run_job(orders))\n"
+  },
+  {
+   "label": "2 · Word count",
+   "hint": "<b>Predict first:<\/b> what does the output look like? Change only <code>map_fn<\/code> and <code>reduce_fn<\/code>; <code>run_job<\/code> stays the same.",
+   "code": "def map_fn(line):\n    return [(w, 1) for w in line.lower().split()]\n\ndef reduce_fn(word, ones):\n    return word, sum(ones)\n\ndef run_job(lines, splits=2):\n    parts = [lines[i::splits] for i in range(splits)]\n    mapped = [kv for part in parts for line in part for kv in map_fn(line)]\n    groups = {}\n    for k, v in sorted(mapped):\n        groups.setdefault(k, []).append(v)\n    return [reduce_fn(k, vs) for k, vs in groups.items()]\n\nprint(run_job([\"Hadoop stores data\", \"Hadoop processes data\", \"data data data\"]))\n"
+  },
+  {
+   "label": "3 · Max per key",
+   "hint": "Find the biggest order per city. Which function do you change? Replace <code>sum<\/code> with something else.",
+   "code": "def map_fn(line):\n    city, amount = line.split(\",\")\n    return [(city, int(amount))]\n\ndef reduce_fn(city, amounts):\n    return city, max(amounts)\n\ndef run_job(lines):\n    groups = {}\n    for k, v in sorted(kv for line in lines for kv in map_fn(line)):\n        groups.setdefault(k, []).append(v)\n    return [reduce_fn(k, vs) for k, vs in groups.items()]\n\nprint(run_job([\"Pune,240\", \"Delhi,120\", \"Pune,60\", \"Goa,300\", \"Delhi,80\"]))\n"
+  },
+  {
+   "label": "4 · A failed split is re-run",
+   "hint": "The framework retries a split whose map fails the first time. Watch the attempt numbers; make split 0 fail twice.",
+   "code": "import itertools\nfailures = {1: 1}                        # split 1 fails once\ndef run_split(n, attempt):\n    if failures.get(n, 0) >= attempt:\n        raise RuntimeError(f\"split {n} lost its node\")\n    return f\"split {n} ok on attempt {attempt}\"\n\nfor n in range(3):\n    for attempt in itertools.count(1):\n        try:\n            print(run_split(n, attempt)); break\n        except RuntimeError as e:\n            print(\"  retry:\", e)\n"
+  },
+  {
+   "label": "5 · Spot the error",
+   "hint": "This map function crashes on one bad record. Real data always has some. Make it skip lines that don't have exactly two fields.",
+   "code": "def map_fn(line):\n    city, amount = line.split(\",\")\n    return [(city, int(amount))]\n\nfor line in [\"Pune,240\", \"Delhi\", \"Goa,300\"]:\n    print(map_fn(line))\n"
+  }
+ ]
+}</script>
+  </div>
+</section>
+
+<section class="part" id="tracer">
+  <span class="part-label"><b>8</b> Line by line</span>
+  <h2>Map, shuffle and reduce, one line at a time</h2>
+  <p>Follow three orders through map (records → pairs), shuffle (pairs grouped by key) and reduce (one total per city). Watch the <code>groups</code> dictionary build up.</p>
+  <div class="tracer">
+    <script type="application/json">{
+ "lang": "python",
+ "code": [
+  "orders = [\"Pune,240\", \"Goa,300\", \"Pune,60\"]",
+  "",
+  "pairs = []",
+  "for line in orders:",
+  "    city, amt = line.split(\",\")",
+  "    pairs.append((city, int(amt)))",
+  "",
+  "groups = {}",
+  "for city, amt in sorted(pairs):",
+  "    groups.setdefault(city, []).append(amt)",
+  "",
+  "for city, amts in groups.items():",
+  "    print(city, sum(amts))"
+ ],
+ "steps": [
+  {
+   "line": 1,
+   "phase": "Python",
+   "note": "<code>orders<\/code> is created: → list #1.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "orders",
+       "→ list #1"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (3)<\/b> [&#x27;Pune,240&#x27;, &#x27;Goa,300&#x27;, &#x27;Pune,60&#x27;]"
+   ],
+   "newVar": "orders"
+  },
+  {
+   "line": 3,
+   "phase": "Map",
+   "note": "Each order becomes one (city, amount) pair. <code>pairs<\/code> is created: → list #2. A new list object (#2) is created: []",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "orders",
+       "→ list #1"
+      ],
+      [
+       "pairs",
+       "→ list #2"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (3)<\/b> [&#x27;Pune,240&#x27;, &#x27;Goa,300&#x27;, &#x27;Pune,60&#x27;]",
+    "<b>#2 list (0)<\/b> []"
+   ],
+   "newVar": "pairs"
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "<code>line<\/code> is created: &#x27;Pune,240&#x27;.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "orders",
+       "→ list #1"
+      ],
+      [
+       "pairs",
+       "→ list #2"
+      ],
+      [
+       "line",
+       "'Pune,240'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (3)<\/b> [&#x27;Pune,240&#x27;, &#x27;Goa,300&#x27;, &#x27;Pune,60&#x27;]",
+    "<b>#2 list (0)<\/b> []"
+   ],
+   "newVar": "line"
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "<code>city<\/code> is created: &#x27;Pune&#x27;. <code>amt<\/code> is created: &#x27;240&#x27;.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "orders",
+       "→ list #1"
+      ],
+      [
+       "pairs",
+       "→ list #2"
+      ],
+      [
+       "line",
+       "'Pune,240'"
+      ],
+      [
+       "city",
+       "'Pune'"
+      ],
+      [
+       "amt",
+       "'240'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (3)<\/b> [&#x27;Pune,240&#x27;, &#x27;Goa,300&#x27;, &#x27;Pune,60&#x27;]",
+    "<b>#2 list (0)<\/b> []"
+   ],
+   "newVar": "amt"
+  },
+  {
+   "line": 6,
+   "phase": "Python",
+   "note": "Object #2 list now holds [→ tuple #3] A new tuple object (#3) is created: (&#x27;Pune&#x27;, 240)",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "orders",
+       "→ list #1"
+      ],
+      [
+       "pairs",
+       "→ list #2"
+      ],
+      [
+       "line",
+       "'Pune,240'"
+      ],
+      [
+       "city",
+       "'Pune'"
+      ],
+      [
+       "amt",
+       "'240'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (3)<\/b> [&#x27;Pune,240&#x27;, &#x27;Goa,300&#x27;, &#x27;Pune,60&#x27;]",
+    "<b>#2 list (1)<\/b> [→ tuple #3]",
+    "<b>#3 tuple (2)<\/b> (&#x27;Pune&#x27;, 240)"
+   ]
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "<code>line<\/code> changes to &#x27;Goa,300&#x27;.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "orders",
+       "→ list #1"
+      ],
+      [
+       "pairs",
+       "→ list #2"
+      ],
+      [
+       "line",
+       "'Goa,300'"
+      ],
+      [
+       "city",
+       "'Pune'"
+      ],
+      [
+       "amt",
+       "'240'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (3)<\/b> [&#x27;Pune,240&#x27;, &#x27;Goa,300&#x27;, &#x27;Pune,60&#x27;]",
+    "<b>#2 list (1)<\/b> [→ tuple #3]",
+    "<b>#3 tuple (2)<\/b> (&#x27;Pune&#x27;, 240)"
+   ],
+   "newVar": "line"
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "<code>city<\/code> changes to &#x27;Goa&#x27;. <code>amt<\/code> changes to &#x27;300&#x27;.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "orders",
+       "→ list #1"
+      ],
+      [
+       "pairs",
+       "→ list #2"
+      ],
+      [
+       "line",
+       "'Goa,300'"
+      ],
+      [
+       "city",
+       "'Goa'"
+      ],
+      [
+       "amt",
+       "'300'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (3)<\/b> [&#x27;Pune,240&#x27;, &#x27;Goa,300&#x27;, &#x27;Pune,60&#x27;]",
+    "<b>#2 list (1)<\/b> [→ tuple #3]",
+    "<b>#3 tuple (2)<\/b> (&#x27;Pune&#x27;, 240)"
+   ],
+   "newVar": "amt"
+  },
+  {
+   "line": 6,
+   "phase": "Python",
+   "note": "Object #2 list now holds [→ tuple #3, → tuple #4] A new tuple object (#4) is created: (&#x27;Goa&#x27;, 300)",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "orders",
+       "→ list #1"
+      ],
+      [
+       "pairs",
+       "→ list #2"
+      ],
+      [
+       "line",
+       "'Goa,300'"
+      ],
+      [
+       "city",
+       "'Goa'"
+      ],
+      [
+       "amt",
+       "'300'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (3)<\/b> [&#x27;Pune,240&#x27;, &#x27;Goa,300&#x27;, &#x27;Pune,60&#x27;]",
+    "<b>#2 list (2)<\/b> [→ tuple #3, → tuple #4]",
+    "<b>#3 tuple (2)<\/b> (&#x27;Pune&#x27;, 240)",
+    "<b>#4 tuple (2)<\/b> (&#x27;Goa&#x27;, 300)"
+   ]
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "<code>line<\/code> changes to &#x27;Pune,60&#x27;.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "orders",
+       "→ list #1"
+      ],
+      [
+       "pairs",
+       "→ list #2"
+      ],
+      [
+       "line",
+       "'Pune,60'"
+      ],
+      [
+       "city",
+       "'Goa'"
+      ],
+      [
+       "amt",
+       "'300'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (3)<\/b> [&#x27;Pune,240&#x27;, &#x27;Goa,300&#x27;, &#x27;Pune,60&#x27;]",
+    "<b>#2 list (2)<\/b> [→ tuple #3, → tuple #4]",
+    "<b>#3 tuple (2)<\/b> (&#x27;Pune&#x27;, 240)",
+    "<b>#4 tuple (2)<\/b> (&#x27;Goa&#x27;, 300)"
+   ],
+   "newVar": "line"
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "<code>city<\/code> changes to &#x27;Pune&#x27;. <code>amt<\/code> changes to &#x27;60&#x27;.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "orders",
+       "→ list #1"
+      ],
+      [
+       "pairs",
+       "→ list #2"
+      ],
+      [
+       "line",
+       "'Pune,60'"
+      ],
+      [
+       "city",
+       "'Pune'"
+      ],
+      [
+       "amt",
+       "'60'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (3)<\/b> [&#x27;Pune,240&#x27;, &#x27;Goa,300&#x27;, &#x27;Pune,60&#x27;]",
+    "<b>#2 list (2)<\/b> [→ tuple #3, → tuple #4]",
+    "<b>#3 tuple (2)<\/b> (&#x27;Pune&#x27;, 240)",
+    "<b>#4 tuple (2)<\/b> (&#x27;Goa&#x27;, 300)"
+   ],
+   "newVar": "amt"
+  },
+  {
+   "line": 6,
+   "phase": "Python",
+   "note": "Object #2 list now holds [→ tuple #3, → tuple #4, → tuple #5] A new tuple object (#5) is created: (&#x27;Pune&#x27;, 60)",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "orders",
+       "→ list #1"
+      ],
+      [
+       "pairs",
+       "→ list #2"
+      ],
+      [
+       "line",
+       "'Pune,60'"
+      ],
+      [
+       "city",
+       "'Pune'"
+      ],
+      [
+       "amt",
+       "'60'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (3)<\/b> [&#x27;Pune,240&#x27;, &#x27;Goa,300&#x27;, &#x27;Pune,60&#x27;]",
+    "<b>#2 list (3)<\/b> [→ tuple #3, → tuple #4, → tuple #5]",
+    "<b>#3 tuple (2)<\/b> (&#x27;Pune&#x27;, 240)",
+    "<b>#4 tuple (2)<\/b> (&#x27;Goa&#x27;, 300)",
+    "<b>#5 tuple (2)<\/b> (&#x27;Pune&#x27;, 60)"
+   ]
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "Nothing is left to loop over, so the loop ends and Python moves on.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "orders",
+       "→ list #1"
+      ],
+      [
+       "pairs",
+       "→ list #2"
+      ],
+      [
+       "line",
+       "'Pune,60'"
+      ],
+      [
+       "city",
+       "'Pune'"
+      ],
+      [
+       "amt",
+       "'60'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (3)<\/b> [&#x27;Pune,240&#x27;, &#x27;Goa,300&#x27;, &#x27;Pune,60&#x27;]",
+    "<b>#2 list (3)<\/b> [→ tuple #3, → tuple #4, → tuple #5]",
+    "<b>#3 tuple (2)<\/b> (&#x27;Pune&#x27;, 240)",
+    "<b>#4 tuple (2)<\/b> (&#x27;Goa&#x27;, 300)",
+    "<b>#5 tuple (2)<\/b> (&#x27;Pune&#x27;, 60)"
+   ]
+  },
+  {
+   "line": 8,
+   "phase": "Shuffle",
+   "note": "Group the pairs by key, in sorted order. <code>groups<\/code> is created: → dict #6. A new dict object (#6) is created: {}",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "orders",
+       "→ list #1"
+      ],
+      [
+       "pairs",
+       "→ list #2"
+      ],
+      [
+       "line",
+       "'Pune,60'"
+      ],
+      [
+       "city",
+       "'Pune'"
+      ],
+      [
+       "amt",
+       "'60'"
+      ],
+      [
+       "groups",
+       "→ dict #6"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (3)<\/b> [&#x27;Pune,240&#x27;, &#x27;Goa,300&#x27;, &#x27;Pune,60&#x27;]",
+    "<b>#2 list (3)<\/b> [→ tuple #3, → tuple #4, → tuple #5]",
+    "<b>#3 tuple (2)<\/b> (&#x27;Pune&#x27;, 240)",
+    "<b>#4 tuple (2)<\/b> (&#x27;Goa&#x27;, 300)",
+    "<b>#5 tuple (2)<\/b> (&#x27;Pune&#x27;, 60)",
+    "<b>#6 dict (0)<\/b> {}"
+   ],
+   "newVar": "groups"
+  },
+  {
+   "line": 9,
+   "phase": "Python",
+   "note": "<code>city<\/code> changes to &#x27;Goa&#x27;. <code>amt<\/code> changes to 300.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "orders",
+       "→ list #1"
+      ],
+      [
+       "pairs",
+       "→ list #2"
+      ],
+      [
+       "line",
+       "'Pune,60'"
+      ],
+      [
+       "city",
+       "'Goa'"
+      ],
+      [
+       "amt",
+       "300"
+      ],
+      [
+       "groups",
+       "→ dict #6"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (3)<\/b> [&#x27;Pune,240&#x27;, &#x27;Goa,300&#x27;, &#x27;Pune,60&#x27;]",
+    "<b>#2 list (3)<\/b> [→ tuple #3, → tuple #4, → tuple #5]",
+    "<b>#3 tuple (2)<\/b> (&#x27;Pune&#x27;, 240)",
+    "<b>#4 tuple (2)<\/b> (&#x27;Goa&#x27;, 300)",
+    "<b>#5 tuple (2)<\/b> (&#x27;Pune&#x27;, 60)",
+    "<b>#6 dict (0)<\/b> {}"
+   ],
+   "newVar": "amt"
+  },
+  {
+   "line": 10,
+   "phase": "Python",
+   "note": "Object #6 dict now holds {&#x27;Goa&#x27;: → list #7} A new list object (#7) is created: [300]",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "orders",
+       "→ list #1"
+      ],
+      [
+       "pairs",
+       "→ list #2"
+      ],
+      [
+       "line",
+       "'Pune,60'"
+      ],
+      [
+       "city",
+       "'Goa'"
+      ],
+      [
+       "amt",
+       "300"
+      ],
+      [
+       "groups",
+       "→ dict #6"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (3)<\/b> [&#x27;Pune,240&#x27;, &#x27;Goa,300&#x27;, &#x27;Pune,60&#x27;]",
+    "<b>#2 list (3)<\/b> [→ tuple #3, → tuple #4, → tuple #5]",
+    "<b>#3 tuple (2)<\/b> (&#x27;Pune&#x27;, 240)",
+    "<b>#4 tuple (2)<\/b> (&#x27;Goa&#x27;, 300)",
+    "<b>#5 tuple (2)<\/b> (&#x27;Pune&#x27;, 60)",
+    "<b>#6 dict (1)<\/b> {&#x27;Goa&#x27;: → list #7}",
+    "<b>#7 list (1)<\/b> [300]"
+   ]
+  },
+  {
+   "line": 9,
+   "phase": "Python",
+   "note": "<code>city<\/code> changes to &#x27;Pune&#x27;. <code>amt<\/code> changes to 60.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "orders",
+       "→ list #1"
+      ],
+      [
+       "pairs",
+       "→ list #2"
+      ],
+      [
+       "line",
+       "'Pune,60'"
+      ],
+      [
+       "city",
+       "'Pune'"
+      ],
+      [
+       "amt",
+       "60"
+      ],
+      [
+       "groups",
+       "→ dict #6"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (3)<\/b> [&#x27;Pune,240&#x27;, &#x27;Goa,300&#x27;, &#x27;Pune,60&#x27;]",
+    "<b>#2 list (3)<\/b> [→ tuple #3, → tuple #4, → tuple #5]",
+    "<b>#3 tuple (2)<\/b> (&#x27;Pune&#x27;, 240)",
+    "<b>#4 tuple (2)<\/b> (&#x27;Goa&#x27;, 300)",
+    "<b>#5 tuple (2)<\/b> (&#x27;Pune&#x27;, 60)",
+    "<b>#6 dict (1)<\/b> {&#x27;Goa&#x27;: → list #7}",
+    "<b>#7 list (1)<\/b> [300]"
+   ],
+   "newVar": "amt"
+  },
+  {
+   "line": 10,
+   "phase": "Python",
+   "note": "Object #6 dict now holds {&#x27;Goa&#x27;: → list #7, &#x27;Pune&#x27;: → list #8} A new list object (#8) is created: [60]",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "orders",
+       "→ list #1"
+      ],
+      [
+       "pairs",
+       "→ list #2"
+      ],
+      [
+       "line",
+       "'Pune,60'"
+      ],
+      [
+       "city",
+       "'Pune'"
+      ],
+      [
+       "amt",
+       "60"
+      ],
+      [
+       "groups",
+       "→ dict #6"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (3)<\/b> [&#x27;Pune,240&#x27;, &#x27;Goa,300&#x27;, &#x27;Pune,60&#x27;]",
+    "<b>#2 list (3)<\/b> [→ tuple #3, → tuple #4, → tuple #5]",
+    "<b>#3 tuple (2)<\/b> (&#x27;Pune&#x27;, 240)",
+    "<b>#4 tuple (2)<\/b> (&#x27;Goa&#x27;, 300)",
+    "<b>#5 tuple (2)<\/b> (&#x27;Pune&#x27;, 60)",
+    "<b>#6 dict (2)<\/b> {&#x27;Goa&#x27;: → list #7, &#x27;Pune&#x27;: → list #8}",
+    "<b>#7 list (1)<\/b> [300]",
+    "<b>#8 list (1)<\/b> [60]"
+   ]
+  },
+  {
+   "line": 9,
+   "phase": "Python",
+   "note": "<code>amt<\/code> changes to 240.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "orders",
+       "→ list #1"
+      ],
+      [
+       "pairs",
+       "→ list #2"
+      ],
+      [
+       "line",
+       "'Pune,60'"
+      ],
+      [
+       "city",
+       "'Pune'"
+      ],
+      [
+       "amt",
+       "240"
+      ],
+      [
+       "groups",
+       "→ dict #6"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (3)<\/b> [&#x27;Pune,240&#x27;, &#x27;Goa,300&#x27;, &#x27;Pune,60&#x27;]",
+    "<b>#2 list (3)<\/b> [→ tuple #3, → tuple #4, → tuple #5]",
+    "<b>#3 tuple (2)<\/b> (&#x27;Pune&#x27;, 240)",
+    "<b>#4 tuple (2)<\/b> (&#x27;Goa&#x27;, 300)",
+    "<b>#5 tuple (2)<\/b> (&#x27;Pune&#x27;, 60)",
+    "<b>#6 dict (2)<\/b> {&#x27;Goa&#x27;: → list #7, &#x27;Pune&#x27;: → list #8}",
+    "<b>#7 list (1)<\/b> [300]",
+    "<b>#8 list (1)<\/b> [60]"
+   ],
+   "newVar": "amt"
+  },
+  {
+   "line": 10,
+   "phase": "Python",
+   "note": "Object #8 list now holds [60, 240]",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "orders",
+       "→ list #1"
+      ],
+      [
+       "pairs",
+       "→ list #2"
+      ],
+      [
+       "line",
+       "'Pune,60'"
+      ],
+      [
+       "city",
+       "'Pune'"
+      ],
+      [
+       "amt",
+       "240"
+      ],
+      [
+       "groups",
+       "→ dict #6"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (3)<\/b> [&#x27;Pune,240&#x27;, &#x27;Goa,300&#x27;, &#x27;Pune,60&#x27;]",
+    "<b>#2 list (3)<\/b> [→ tuple #3, → tuple #4, → tuple #5]",
+    "<b>#3 tuple (2)<\/b> (&#x27;Pune&#x27;, 240)",
+    "<b>#4 tuple (2)<\/b> (&#x27;Goa&#x27;, 300)",
+    "<b>#5 tuple (2)<\/b> (&#x27;Pune&#x27;, 60)",
+    "<b>#6 dict (2)<\/b> {&#x27;Goa&#x27;: → list #7, &#x27;Pune&#x27;: → list #8}",
+    "<b>#7 list (1)<\/b> [300]",
+    "<b>#8 list (2)<\/b> [60, 240]"
+   ]
+  },
+  {
+   "line": 9,
+   "phase": "Python",
+   "note": "Nothing is left to loop over, so the loop ends and Python moves on.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "orders",
+       "→ list #1"
+      ],
+      [
+       "pairs",
+       "→ list #2"
+      ],
+      [
+       "line",
+       "'Pune,60'"
+      ],
+      [
+       "city",
+       "'Pune'"
+      ],
+      [
+       "amt",
+       "240"
+      ],
+      [
+       "groups",
+       "→ dict #6"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (3)<\/b> [&#x27;Pune,240&#x27;, &#x27;Goa,300&#x27;, &#x27;Pune,60&#x27;]",
+    "<b>#2 list (3)<\/b> [→ tuple #3, → tuple #4, → tuple #5]",
+    "<b>#3 tuple (2)<\/b> (&#x27;Pune&#x27;, 240)",
+    "<b>#4 tuple (2)<\/b> (&#x27;Goa&#x27;, 300)",
+    "<b>#5 tuple (2)<\/b> (&#x27;Pune&#x27;, 60)",
+    "<b>#6 dict (2)<\/b> {&#x27;Goa&#x27;: → list #7, &#x27;Pune&#x27;: → list #8}",
+    "<b>#7 list (1)<\/b> [300]",
+    "<b>#8 list (2)<\/b> [60, 240]"
+   ]
+  },
+  {
+   "line": 12,
+   "phase": "Python",
+   "note": "<code>city<\/code> changes to &#x27;Goa&#x27;. <code>amts<\/code> is created: → list #7.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "orders",
+       "→ list #1"
+      ],
+      [
+       "pairs",
+       "→ list #2"
+      ],
+      [
+       "line",
+       "'Pune,60'"
+      ],
+      [
+       "city",
+       "'Goa'"
+      ],
+      [
+       "amt",
+       "240"
+      ],
+      [
+       "groups",
+       "→ dict #6"
+      ],
+      [
+       "amts",
+       "→ list #7"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (3)<\/b> [&#x27;Pune,240&#x27;, &#x27;Goa,300&#x27;, &#x27;Pune,60&#x27;]",
+    "<b>#2 list (3)<\/b> [→ tuple #3, → tuple #4, → tuple #5]",
+    "<b>#3 tuple (2)<\/b> (&#x27;Pune&#x27;, 240)",
+    "<b>#4 tuple (2)<\/b> (&#x27;Goa&#x27;, 300)",
+    "<b>#5 tuple (2)<\/b> (&#x27;Pune&#x27;, 60)",
+    "<b>#6 dict (2)<\/b> {&#x27;Goa&#x27;: → list #7, &#x27;Pune&#x27;: → list #8}",
+    "<b>#7 list (1)<\/b> [300]",
+    "<b>#8 list (2)<\/b> [60, 240]"
+   ],
+   "newVar": "amts"
+  },
+  {
+   "line": 13,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "orders",
+       "→ list #1"
+      ],
+      [
+       "pairs",
+       "→ list #2"
+      ],
+      [
+       "line",
+       "'Pune,60'"
+      ],
+      [
+       "city",
+       "'Goa'"
+      ],
+      [
+       "amt",
+       "240"
+      ],
+      [
+       "groups",
+       "→ dict #6"
+      ],
+      [
+       "amts",
+       "→ list #7"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (3)<\/b> [&#x27;Pune,240&#x27;, &#x27;Goa,300&#x27;, &#x27;Pune,60&#x27;]",
+    "<b>#2 list (3)<\/b> [→ tuple #3, → tuple #4, → tuple #5]",
+    "<b>#3 tuple (2)<\/b> (&#x27;Pune&#x27;, 240)",
+    "<b>#4 tuple (2)<\/b> (&#x27;Goa&#x27;, 300)",
+    "<b>#5 tuple (2)<\/b> (&#x27;Pune&#x27;, 60)",
+    "<b>#6 dict (2)<\/b> {&#x27;Goa&#x27;: → list #7, &#x27;Pune&#x27;: → list #8}",
+    "<b>#7 list (1)<\/b> [300]",
+    "<b>#8 list (2)<\/b> [60, 240]"
+   ],
+   "out": "Goa 300\n"
+  },
+  {
+   "line": 12,
+   "phase": "Python",
+   "note": "<code>city<\/code> changes to &#x27;Pune&#x27;. <code>amts<\/code> changes to → list #8.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "orders",
+       "→ list #1"
+      ],
+      [
+       "pairs",
+       "→ list #2"
+      ],
+      [
+       "line",
+       "'Pune,60'"
+      ],
+      [
+       "city",
+       "'Pune'"
+      ],
+      [
+       "amt",
+       "240"
+      ],
+      [
+       "groups",
+       "→ dict #6"
+      ],
+      [
+       "amts",
+       "→ list #8"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (3)<\/b> [&#x27;Pune,240&#x27;, &#x27;Goa,300&#x27;, &#x27;Pune,60&#x27;]",
+    "<b>#2 list (3)<\/b> [→ tuple #3, → tuple #4, → tuple #5]",
+    "<b>#3 tuple (2)<\/b> (&#x27;Pune&#x27;, 240)",
+    "<b>#4 tuple (2)<\/b> (&#x27;Goa&#x27;, 300)",
+    "<b>#5 tuple (2)<\/b> (&#x27;Pune&#x27;, 60)",
+    "<b>#6 dict (2)<\/b> {&#x27;Goa&#x27;: → list #7, &#x27;Pune&#x27;: → list #8}",
+    "<b>#7 list (1)<\/b> [300]",
+    "<b>#8 list (2)<\/b> [60, 240]"
+   ],
+   "newVar": "amts"
+  },
+  {
+   "line": 13,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "orders",
+       "→ list #1"
+      ],
+      [
+       "pairs",
+       "→ list #2"
+      ],
+      [
+       "line",
+       "'Pune,60'"
+      ],
+      [
+       "city",
+       "'Pune'"
+      ],
+      [
+       "amt",
+       "240"
+      ],
+      [
+       "groups",
+       "→ dict #6"
+      ],
+      [
+       "amts",
+       "→ list #8"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (3)<\/b> [&#x27;Pune,240&#x27;, &#x27;Goa,300&#x27;, &#x27;Pune,60&#x27;]",
+    "<b>#2 list (3)<\/b> [→ tuple #3, → tuple #4, → tuple #5]",
+    "<b>#3 tuple (2)<\/b> (&#x27;Pune&#x27;, 240)",
+    "<b>#4 tuple (2)<\/b> (&#x27;Goa&#x27;, 300)",
+    "<b>#5 tuple (2)<\/b> (&#x27;Pune&#x27;, 60)",
+    "<b>#6 dict (2)<\/b> {&#x27;Goa&#x27;: → list #7, &#x27;Pune&#x27;: → list #8}",
+    "<b>#7 list (1)<\/b> [300]",
+    "<b>#8 list (2)<\/b> [60, 240]"
+   ],
+   "out": "Pune 300\n"
+  },
+  {
+   "line": 12,
+   "phase": "Python",
+   "note": "Nothing is left to loop over, so the loop ends and Python moves on.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "orders",
+       "→ list #1"
+      ],
+      [
+       "pairs",
+       "→ list #2"
+      ],
+      [
+       "line",
+       "'Pune,60'"
+      ],
+      [
+       "city",
+       "'Pune'"
+      ],
+      [
+       "amt",
+       "240"
+      ],
+      [
+       "groups",
+       "→ dict #6"
+      ],
+      [
+       "amts",
+       "→ list #8"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (3)<\/b> [&#x27;Pune,240&#x27;, &#x27;Goa,300&#x27;, &#x27;Pune,60&#x27;]",
+    "<b>#2 list (3)<\/b> [→ tuple #3, → tuple #4, → tuple #5]",
+    "<b>#3 tuple (2)<\/b> (&#x27;Pune&#x27;, 240)",
+    "<b>#4 tuple (2)<\/b> (&#x27;Goa&#x27;, 300)",
+    "<b>#5 tuple (2)<\/b> (&#x27;Pune&#x27;, 60)",
+    "<b>#6 dict (2)<\/b> {&#x27;Goa&#x27;: → list #7, &#x27;Pune&#x27;: → list #8}",
+    "<b>#7 list (1)<\/b> [300]",
+    "<b>#8 list (2)<\/b> [60, 240]"
+   ]
+  }
+ ]
+}</script>
+  </div>
+
+<h3 id="worked">Worked examples: real problems, solved and traced in memory</h3>
+  <p class="wx-intro">Three problems that show each layer of Hadoop doing its job: a MapReduce on business data, the storage cost of replication versus erasure coding, and the gain from YARN sharing one cluster. Each runs live and is traced in memory.</p>
+  <article class="wx">
+    <div class="wx__head"><span class="wx__num">Example 1</span><span class="lvl lvl--b">Beginner</span><span class="wx__tag">Retail · MapReduce</span></div>
+    <h4>Total sales per store with map and reduce</h4>
+    <div class="wx__problem"><p class="wx__label">Problem statement</p><p>A chain of chai stalls logs each sale as <code>store,item,amount</code>. Using only a map function and a reduce function, compute the total sales per store.</p></div>
+    <div class="prob__io"><div><small>Input</small><pre>[&quot;Kharghar,chai,20&quot;, &quot;Vashi,samosa,15&quot;, &quot;Kharghar,samosa,15&quot;, &quot;Vashi,chai,20&quot;, &quot;Kharghar,chai,20&quot;]</pre></div><div><small>Expected output</small><pre>(&#x27;Kharghar&#x27;, 55)
+(&#x27;Vashi&#x27;, 35)</pre></div></div>
+    <div class="wx__approach"><p class="wx__label">Approach</p><ol><li>Map: from each line, emit (store, amount).</li><li>Shuffle: group amounts by store (sorted).</li><li>Reduce: sum each store's list.</li></ol></div>
+    <p class="wx__label">Solution: run it live</p>
+    <div class="runner">
+    <script type="application/json">{
+ "lang": "python",
+ "file": "main.py",
+ "tasks": [
+  {
+   "label": "Solution",
+   "hint": "Change the map function to emit (item, amount) instead. The same framework now gives sales per item.",
+   "code": "def map_fn(line):\n    store, item, amount = line.split(\",\")\n    return (store, int(amount))\n\ndef reduce_fn(store, amounts):\n    return store, sum(amounts)\n\nsales = [\"Kharghar,chai,20\", \"Vashi,samosa,15\", \"Kharghar,samosa,15\",\n         \"Vashi,chai,20\", \"Kharghar,chai,20\"]\ngroups = {}\nfor store, amt in sorted(map_fn(s) for s in sales):\n    groups.setdefault(store, []).append(amt)\nfor store, amts in groups.items():\n    print(reduce_fn(store, amts))\n"
+  }
+ ]
+}</script>
+    </div>
+    <p class="wx__label">What happens in memory, step by step</p>
+    <p class="wx__how">Recorded from a real Python run: press <b>Next</b> to execute one line at a time. Watch variables change in each frame, and lists and dictionaries (numbered #1, #2 …) fill up as objects.</p>
+    <div class="tracer">
+    <script type="application/json">{
+ "lang": "python",
+ "code": [
+  "def map_fn(line):",
+  "    store, item, amount = line.split(\",\")",
+  "    return (store, int(amount))",
+  "",
+  "def reduce_fn(store, amounts):",
+  "    return store, sum(amounts)",
+  "",
+  "sales = [\"Kharghar,chai,20\", \"Vashi,samosa,15\", \"Kharghar,samosa,15\",",
+  "         \"Vashi,chai,20\", \"Kharghar,chai,20\"]",
+  "groups = {}",
+  "for store, amt in sorted(map_fn(s) for s in sales):",
+  "    groups.setdefault(store, []).append(amt)",
+  "for store, amts in groups.items():",
+  "    print(reduce_fn(store, amts))"
+ ],
+ "steps": [
+  {
+   "line": 1,
+   "phase": "Python",
+   "note": "<code>map_fn<\/code> is created: function map_fn().",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "map_fn",
+       "function map_fn()"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "map_fn"
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "<code>reduce_fn<\/code> is created: function reduce_fn().",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "map_fn",
+       "function map_fn()"
+      ],
+      [
+       "reduce_fn",
+       "function reduce_fn()"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "reduce_fn"
+  },
+  {
+   "line": 8,
+   "phase": "Python",
+   "note": "<code>sales<\/code> is created: → list #1. A new list object (#1) is created: [&#x27;Kharghar,chai,20&#x27;, &#x27;Vashi,samosa,15&#x27;, &#x27;Kharghar,samosa,15&#x27;, &#x27;Vashi,chai,20&#x27;, &#x27;Kharghar,…",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "map_fn",
+       "function map_fn()"
+      ],
+      [
+       "reduce_fn",
+       "function reduce_fn()"
+      ],
+      [
+       "sales",
+       "→ list #1"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (5)<\/b> [&#x27;Kharghar,chai,20&#x27;, &#x27;Vashi,samosa,15&#x27;, &#x27;Kharghar,samosa,15&#x27;, &#x27;Vashi,chai,20&#x27;, &#x27;Kharghar,…"
+   ],
+   "newVar": "sales"
+  },
+  {
+   "line": 10,
+   "phase": "Shuffle",
+   "note": "This loop is what Hadoop does for you between map and reduce. <code>groups<\/code> is created: → dict #2. A new dict object (#2) is created: {}",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "map_fn",
+       "function map_fn()"
+      ],
+      [
+       "reduce_fn",
+       "function reduce_fn()"
+      ],
+      [
+       "sales",
+       "→ list #1"
+      ],
+      [
+       "groups",
+       "→ dict #2"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (5)<\/b> [&#x27;Kharghar,chai,20&#x27;, &#x27;Vashi,samosa,15&#x27;, &#x27;Kharghar,samosa,15&#x27;, &#x27;Vashi,chai,20&#x27;, &#x27;Kharghar,…",
+    "<b>#2 dict (0)<\/b> {}"
+   ],
+   "newVar": "groups"
+  },
+  {
+   "line": 11,
+   "phase": "Python",
+   "note": "<code>map_fn()<\/code> is called: a new frame is pushed with <code>line<\/code> = &#x27;Kharghar,chai,20&#x27;.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "map_fn",
+       "function map_fn()"
+      ],
+      [
+       "reduce_fn",
+       "function reduce_fn()"
+      ],
+      [
+       "sales",
+       "→ list #1"
+      ],
+      [
+       "groups",
+       "→ dict #2"
+      ]
+     ]
+    },
+    {
+     "frame": "map_fn()",
+     "vars": [
+      [
+       "line",
+       "'Kharghar,chai,20'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (5)<\/b> [&#x27;Kharghar,chai,20&#x27;, &#x27;Vashi,samosa,15&#x27;, &#x27;Kharghar,samosa,15&#x27;, &#x27;Vashi,chai,20&#x27;, &#x27;Kharghar,…",
+    "<b>#2 dict (0)<\/b> {}"
+   ],
+   "newVar": "line"
+  },
+  {
+   "line": 2,
+   "phase": "Python",
+   "note": "<code>store<\/code> is created: &#x27;Kharghar&#x27;. <code>item<\/code> is created: &#x27;chai&#x27;. <code>amount<\/code> is created: &#x27;20&#x27;.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "map_fn",
+       "function map_fn()"
+      ],
+      [
+       "reduce_fn",
+       "function reduce_fn()"
+      ],
+      [
+       "sales",
+       "→ list #1"
+      ],
+      [
+       "groups",
+       "→ dict #2"
+      ]
+     ]
+    },
+    {
+     "frame": "map_fn()",
+     "vars": [
+      [
+       "line",
+       "'Kharghar,chai,20'"
+      ],
+      [
+       "store",
+       "'Kharghar'"
+      ],
+      [
+       "item",
+       "'chai'"
+      ],
+      [
+       "amount",
+       "'20'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (5)<\/b> [&#x27;Kharghar,chai,20&#x27;, &#x27;Vashi,samosa,15&#x27;, &#x27;Kharghar,samosa,15&#x27;, &#x27;Vashi,chai,20&#x27;, &#x27;Kharghar,…",
+    "<b>#2 dict (0)<\/b> {}"
+   ],
+   "newVar": "amount"
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "The return value is worked out and handed back to the caller.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "map_fn",
+       "function map_fn()"
+      ],
+      [
+       "reduce_fn",
+       "function reduce_fn()"
+      ],
+      [
+       "sales",
+       "→ list #1"
+      ],
+      [
+       "groups",
+       "→ dict #2"
+      ]
+     ]
+    },
+    {
+     "frame": "map_fn()",
+     "vars": [
+      [
+       "line",
+       "'Kharghar,chai,20'"
+      ],
+      [
+       "store",
+       "'Kharghar'"
+      ],
+      [
+       "item",
+       "'chai'"
+      ],
+      [
+       "amount",
+       "'20'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (5)<\/b> [&#x27;Kharghar,chai,20&#x27;, &#x27;Vashi,samosa,15&#x27;, &#x27;Kharghar,samosa,15&#x27;, &#x27;Vashi,chai,20&#x27;, &#x27;Kharghar,…",
+    "<b>#2 dict (0)<\/b> {}"
+   ]
+  },
+  {
+   "line": 11,
+   "phase": "Return",
+   "note": "<code>map_fn()<\/code> returns <b>→ tuple #3<\/b> and its frame is popped. The caller continues on this line with that value.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "map_fn",
+       "function map_fn()"
+      ],
+      [
+       "reduce_fn",
+       "function reduce_fn()"
+      ],
+      [
+       "sales",
+       "→ list #1"
+      ],
+      [
+       "groups",
+       "→ dict #2"
+      ]
+     ]
+    },
+    {
+     "frame": "map_fn()",
+     "vars": [
+      [
+       "line",
+       "'Vashi,samosa,15'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (5)<\/b> [&#x27;Kharghar,chai,20&#x27;, &#x27;Vashi,samosa,15&#x27;, &#x27;Kharghar,samosa,15&#x27;, &#x27;Vashi,chai,20&#x27;, &#x27;Kharghar,…",
+    "<b>#2 dict (0)<\/b> {}"
+   ]
+  },
+  {
+   "line": 2,
+   "phase": "Python",
+   "note": "<code>store<\/code> is created: &#x27;Vashi&#x27;. <code>item<\/code> is created: &#x27;samosa&#x27;. <code>amount<\/code> is created: &#x27;15&#x27;.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "map_fn",
+       "function map_fn()"
+      ],
+      [
+       "reduce_fn",
+       "function reduce_fn()"
+      ],
+      [
+       "sales",
+       "→ list #1"
+      ],
+      [
+       "groups",
+       "→ dict #2"
+      ]
+     ]
+    },
+    {
+     "frame": "map_fn()",
+     "vars": [
+      [
+       "line",
+       "'Vashi,samosa,15'"
+      ],
+      [
+       "store",
+       "'Vashi'"
+      ],
+      [
+       "item",
+       "'samosa'"
+      ],
+      [
+       "amount",
+       "'15'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (5)<\/b> [&#x27;Kharghar,chai,20&#x27;, &#x27;Vashi,samosa,15&#x27;, &#x27;Kharghar,samosa,15&#x27;, &#x27;Vashi,chai,20&#x27;, &#x27;Kharghar,…",
+    "<b>#2 dict (0)<\/b> {}"
+   ],
+   "newVar": "amount"
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "The return value is worked out and handed back to the caller.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "map_fn",
+       "function map_fn()"
+      ],
+      [
+       "reduce_fn",
+       "function reduce_fn()"
+      ],
+      [
+       "sales",
+       "→ list #1"
+      ],
+      [
+       "groups",
+       "→ dict #2"
+      ]
+     ]
+    },
+    {
+     "frame": "map_fn()",
+     "vars": [
+      [
+       "line",
+       "'Vashi,samosa,15'"
+      ],
+      [
+       "store",
+       "'Vashi'"
+      ],
+      [
+       "item",
+       "'samosa'"
+      ],
+      [
+       "amount",
+       "'15'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (5)<\/b> [&#x27;Kharghar,chai,20&#x27;, &#x27;Vashi,samosa,15&#x27;, &#x27;Kharghar,samosa,15&#x27;, &#x27;Vashi,chai,20&#x27;, &#x27;Kharghar,…",
+    "<b>#2 dict (0)<\/b> {}"
+   ]
+  },
+  {
+   "line": 11,
+   "phase": "Return",
+   "note": "<code>map_fn()<\/code> returns <b>→ tuple #4<\/b> and its frame is popped. The caller continues on this line with that value.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "map_fn",
+       "function map_fn()"
+      ],
+      [
+       "reduce_fn",
+       "function reduce_fn()"
+      ],
+      [
+       "sales",
+       "→ list #1"
+      ],
+      [
+       "groups",
+       "→ dict #2"
+      ]
+     ]
+    },
+    {
+     "frame": "map_fn()",
+     "vars": [
+      [
+       "line",
+       "'Kharghar,samosa,15'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (5)<\/b> [&#x27;Kharghar,chai,20&#x27;, &#x27;Vashi,samosa,15&#x27;, &#x27;Kharghar,samosa,15&#x27;, &#x27;Vashi,chai,20&#x27;, &#x27;Kharghar,…",
+    "<b>#2 dict (0)<\/b> {}"
+   ]
+  },
+  {
+   "line": 2,
+   "phase": "Python",
+   "note": "<code>store<\/code> is created: &#x27;Kharghar&#x27;. <code>item<\/code> is created: &#x27;samosa&#x27;. <code>amount<\/code> is created: &#x27;15&#x27;.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "map_fn",
+       "function map_fn()"
+      ],
+      [
+       "reduce_fn",
+       "function reduce_fn()"
+      ],
+      [
+       "sales",
+       "→ list #1"
+      ],
+      [
+       "groups",
+       "→ dict #2"
+      ]
+     ]
+    },
+    {
+     "frame": "map_fn()",
+     "vars": [
+      [
+       "line",
+       "'Kharghar,samosa,15'"
+      ],
+      [
+       "store",
+       "'Kharghar'"
+      ],
+      [
+       "item",
+       "'samosa'"
+      ],
+      [
+       "amount",
+       "'15'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (5)<\/b> [&#x27;Kharghar,chai,20&#x27;, &#x27;Vashi,samosa,15&#x27;, &#x27;Kharghar,samosa,15&#x27;, &#x27;Vashi,chai,20&#x27;, &#x27;Kharghar,…",
+    "<b>#2 dict (0)<\/b> {}"
+   ],
+   "newVar": "amount"
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "The return value is worked out and handed back to the caller.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "map_fn",
+       "function map_fn()"
+      ],
+      [
+       "reduce_fn",
+       "function reduce_fn()"
+      ],
+      [
+       "sales",
+       "→ list #1"
+      ],
+      [
+       "groups",
+       "→ dict #2"
+      ]
+     ]
+    },
+    {
+     "frame": "map_fn()",
+     "vars": [
+      [
+       "line",
+       "'Kharghar,samosa,15'"
+      ],
+      [
+       "store",
+       "'Kharghar'"
+      ],
+      [
+       "item",
+       "'samosa'"
+      ],
+      [
+       "amount",
+       "'15'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (5)<\/b> [&#x27;Kharghar,chai,20&#x27;, &#x27;Vashi,samosa,15&#x27;, &#x27;Kharghar,samosa,15&#x27;, &#x27;Vashi,chai,20&#x27;, &#x27;Kharghar,…",
+    "<b>#2 dict (0)<\/b> {}"
+   ]
+  },
+  {
+   "line": 11,
+   "phase": "Return",
+   "note": "<code>map_fn()<\/code> returns <b>→ tuple #5<\/b> and its frame is popped. The caller continues on this line with that value.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "map_fn",
+       "function map_fn()"
+      ],
+      [
+       "reduce_fn",
+       "function reduce_fn()"
+      ],
+      [
+       "sales",
+       "→ list #1"
+      ],
+      [
+       "groups",
+       "→ dict #2"
+      ]
+     ]
+    },
+    {
+     "frame": "map_fn()",
+     "vars": [
+      [
+       "line",
+       "'Vashi,chai,20'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (5)<\/b> [&#x27;Kharghar,chai,20&#x27;, &#x27;Vashi,samosa,15&#x27;, &#x27;Kharghar,samosa,15&#x27;, &#x27;Vashi,chai,20&#x27;, &#x27;Kharghar,…",
+    "<b>#2 dict (0)<\/b> {}"
+   ]
+  },
+  {
+   "line": 2,
+   "phase": "Python",
+   "note": "<code>store<\/code> is created: &#x27;Vashi&#x27;. <code>item<\/code> is created: &#x27;chai&#x27;. <code>amount<\/code> is created: &#x27;20&#x27;.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "map_fn",
+       "function map_fn()"
+      ],
+      [
+       "reduce_fn",
+       "function reduce_fn()"
+      ],
+      [
+       "sales",
+       "→ list #1"
+      ],
+      [
+       "groups",
+       "→ dict #2"
+      ]
+     ]
+    },
+    {
+     "frame": "map_fn()",
+     "vars": [
+      [
+       "line",
+       "'Vashi,chai,20'"
+      ],
+      [
+       "store",
+       "'Vashi'"
+      ],
+      [
+       "item",
+       "'chai'"
+      ],
+      [
+       "amount",
+       "'20'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (5)<\/b> [&#x27;Kharghar,chai,20&#x27;, &#x27;Vashi,samosa,15&#x27;, &#x27;Kharghar,samosa,15&#x27;, &#x27;Vashi,chai,20&#x27;, &#x27;Kharghar,…",
+    "<b>#2 dict (0)<\/b> {}"
+   ],
+   "newVar": "amount"
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "The return value is worked out and handed back to the caller.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "map_fn",
+       "function map_fn()"
+      ],
+      [
+       "reduce_fn",
+       "function reduce_fn()"
+      ],
+      [
+       "sales",
+       "→ list #1"
+      ],
+      [
+       "groups",
+       "→ dict #2"
+      ]
+     ]
+    },
+    {
+     "frame": "map_fn()",
+     "vars": [
+      [
+       "line",
+       "'Vashi,chai,20'"
+      ],
+      [
+       "store",
+       "'Vashi'"
+      ],
+      [
+       "item",
+       "'chai'"
+      ],
+      [
+       "amount",
+       "'20'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (5)<\/b> [&#x27;Kharghar,chai,20&#x27;, &#x27;Vashi,samosa,15&#x27;, &#x27;Kharghar,samosa,15&#x27;, &#x27;Vashi,chai,20&#x27;, &#x27;Kharghar,…",
+    "<b>#2 dict (0)<\/b> {}"
+   ]
+  },
+  {
+   "line": 11,
+   "phase": "Return",
+   "note": "<code>map_fn()<\/code> returns <b>→ tuple #6<\/b> and its frame is popped. The caller continues on this line with that value.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "map_fn",
+       "function map_fn()"
+      ],
+      [
+       "reduce_fn",
+       "function reduce_fn()"
+      ],
+      [
+       "sales",
+       "→ list #1"
+      ],
+      [
+       "groups",
+       "→ dict #2"
+      ]
+     ]
+    },
+    {
+     "frame": "map_fn()",
+     "vars": [
+      [
+       "line",
+       "'Kharghar,chai,20'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (5)<\/b> [&#x27;Kharghar,chai,20&#x27;, &#x27;Vashi,samosa,15&#x27;, &#x27;Kharghar,samosa,15&#x27;, &#x27;Vashi,chai,20&#x27;, &#x27;Kharghar,…",
+    "<b>#2 dict (0)<\/b> {}"
+   ]
+  },
+  {
+   "line": 2,
+   "phase": "Python",
+   "note": "<code>store<\/code> is created: &#x27;Kharghar&#x27;. <code>item<\/code> is created: &#x27;chai&#x27;. <code>amount<\/code> is created: &#x27;20&#x27;.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "map_fn",
+       "function map_fn()"
+      ],
+      [
+       "reduce_fn",
+       "function reduce_fn()"
+      ],
+      [
+       "sales",
+       "→ list #1"
+      ],
+      [
+       "groups",
+       "→ dict #2"
+      ]
+     ]
+    },
+    {
+     "frame": "map_fn()",
+     "vars": [
+      [
+       "line",
+       "'Kharghar,chai,20'"
+      ],
+      [
+       "store",
+       "'Kharghar'"
+      ],
+      [
+       "item",
+       "'chai'"
+      ],
+      [
+       "amount",
+       "'20'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (5)<\/b> [&#x27;Kharghar,chai,20&#x27;, &#x27;Vashi,samosa,15&#x27;, &#x27;Kharghar,samosa,15&#x27;, &#x27;Vashi,chai,20&#x27;, &#x27;Kharghar,…",
+    "<b>#2 dict (0)<\/b> {}"
+   ],
+   "newVar": "amount"
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "The return value is worked out and handed back to the caller.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "map_fn",
+       "function map_fn()"
+      ],
+      [
+       "reduce_fn",
+       "function reduce_fn()"
+      ],
+      [
+       "sales",
+       "→ list #1"
+      ],
+      [
+       "groups",
+       "→ dict #2"
+      ]
+     ]
+    },
+    {
+     "frame": "map_fn()",
+     "vars": [
+      [
+       "line",
+       "'Kharghar,chai,20'"
+      ],
+      [
+       "store",
+       "'Kharghar'"
+      ],
+      [
+       "item",
+       "'chai'"
+      ],
+      [
+       "amount",
+       "'20'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (5)<\/b> [&#x27;Kharghar,chai,20&#x27;, &#x27;Vashi,samosa,15&#x27;, &#x27;Kharghar,samosa,15&#x27;, &#x27;Vashi,chai,20&#x27;, &#x27;Kharghar,…",
+    "<b>#2 dict (0)<\/b> {}"
+   ]
+  },
+  {
+   "line": 11,
+   "phase": "Return",
+   "note": "<code>map_fn()<\/code> returns <b>→ tuple #7<\/b> and its frame is popped. The caller continues on this line with that value.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "map_fn",
+       "function map_fn()"
+      ],
+      [
+       "reduce_fn",
+       "function reduce_fn()"
+      ],
+      [
+       "sales",
+       "→ list #1"
+      ],
+      [
+       "groups",
+       "→ dict #2"
+      ],
+      [
+       "store",
+       "'Kharghar'"
+      ],
+      [
+       "amt",
+       "15"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (5)<\/b> [&#x27;Kharghar,chai,20&#x27;, &#x27;Vashi,samosa,15&#x27;, &#x27;Kharghar,samosa,15&#x27;, &#x27;Vashi,chai,20&#x27;, &#x27;Kharghar,…",
+    "<b>#2 dict (0)<\/b> {}"
+   ]
+  },
+  {
+   "line": 12,
+   "phase": "Python",
+   "note": "Object #2 dict now holds {&#x27;Kharghar&#x27;: → list #8} A new list object (#8) is created: [15]",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "map_fn",
+       "function map_fn()"
+      ],
+      [
+       "reduce_fn",
+       "function reduce_fn()"
+      ],
+      [
+       "sales",
+       "→ list #1"
+      ],
+      [
+       "groups",
+       "→ dict #2"
+      ],
+      [
+       "store",
+       "'Kharghar'"
+      ],
+      [
+       "amt",
+       "15"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (5)<\/b> [&#x27;Kharghar,chai,20&#x27;, &#x27;Vashi,samosa,15&#x27;, &#x27;Kharghar,samosa,15&#x27;, &#x27;Vashi,chai,20&#x27;, &#x27;Kharghar,…",
+    "<b>#2 dict (1)<\/b> {&#x27;Kharghar&#x27;: → list #8}",
+    "<b>#8 list (1)<\/b> [15]"
+   ]
+  },
+  {
+   "line": 11,
+   "phase": "Python",
+   "note": "<code>amt<\/code> changes to 20.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "map_fn",
+       "function map_fn()"
+      ],
+      [
+       "reduce_fn",
+       "function reduce_fn()"
+      ],
+      [
+       "sales",
+       "→ list #1"
+      ],
+      [
+       "groups",
+       "→ dict #2"
+      ],
+      [
+       "store",
+       "'Kharghar'"
+      ],
+      [
+       "amt",
+       "20"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (5)<\/b> [&#x27;Kharghar,chai,20&#x27;, &#x27;Vashi,samosa,15&#x27;, &#x27;Kharghar,samosa,15&#x27;, &#x27;Vashi,chai,20&#x27;, &#x27;Kharghar,…",
+    "<b>#2 dict (1)<\/b> {&#x27;Kharghar&#x27;: → list #8}",
+    "<b>#8 list (1)<\/b> [15]"
+   ],
+   "newVar": "amt"
+  },
+  {
+   "line": 12,
+   "phase": "Python",
+   "note": "Object #8 list now holds [15, 20]",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "map_fn",
+       "function map_fn()"
+      ],
+      [
+       "reduce_fn",
+       "function reduce_fn()"
+      ],
+      [
+       "sales",
+       "→ list #1"
+      ],
+      [
+       "groups",
+       "→ dict #2"
+      ],
+      [
+       "store",
+       "'Kharghar'"
+      ],
+      [
+       "amt",
+       "20"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (5)<\/b> [&#x27;Kharghar,chai,20&#x27;, &#x27;Vashi,samosa,15&#x27;, &#x27;Kharghar,samosa,15&#x27;, &#x27;Vashi,chai,20&#x27;, &#x27;Kharghar,…",
+    "<b>#2 dict (1)<\/b> {&#x27;Kharghar&#x27;: → list #8}",
+    "<b>#8 list (2)<\/b> [15, 20]"
+   ]
+  },
+  {
+   "line": 11,
+   "phase": "Python",
+   "note": "The loop takes the next item (it has the same value as the previous one).",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "map_fn",
+       "function map_fn()"
+      ],
+      [
+       "reduce_fn",
+       "function reduce_fn()"
+      ],
+      [
+       "sales",
+       "→ list #1"
+      ],
+      [
+       "groups",
+       "→ dict #2"
+      ],
+      [
+       "store",
+       "'Kharghar'"
+      ],
+      [
+       "amt",
+       "20"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (5)<\/b> [&#x27;Kharghar,chai,20&#x27;, &#x27;Vashi,samosa,15&#x27;, &#x27;Kharghar,samosa,15&#x27;, &#x27;Vashi,chai,20&#x27;, &#x27;Kharghar,…",
+    "<b>#2 dict (1)<\/b> {&#x27;Kharghar&#x27;: → list #8}",
+    "<b>#8 list (2)<\/b> [15, 20]"
+   ]
+  },
+  {
+   "line": 12,
+   "phase": "Python",
+   "note": "Object #8 list now holds [15, 20, 20]",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "map_fn",
+       "function map_fn()"
+      ],
+      [
+       "reduce_fn",
+       "function reduce_fn()"
+      ],
+      [
+       "sales",
+       "→ list #1"
+      ],
+      [
+       "groups",
+       "→ dict #2"
+      ],
+      [
+       "store",
+       "'Kharghar'"
+      ],
+      [
+       "amt",
+       "20"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (5)<\/b> [&#x27;Kharghar,chai,20&#x27;, &#x27;Vashi,samosa,15&#x27;, &#x27;Kharghar,samosa,15&#x27;, &#x27;Vashi,chai,20&#x27;, &#x27;Kharghar,…",
+    "<b>#2 dict (1)<\/b> {&#x27;Kharghar&#x27;: → list #8}",
+    "<b>#8 list (3)<\/b> [15, 20, 20]"
+   ]
+  },
+  {
+   "line": 11,
+   "phase": "Python",
+   "note": "<code>store<\/code> changes to &#x27;Vashi&#x27;. <code>amt<\/code> changes to 15.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "map_fn",
+       "function map_fn()"
+      ],
+      [
+       "reduce_fn",
+       "function reduce_fn()"
+      ],
+      [
+       "sales",
+       "→ list #1"
+      ],
+      [
+       "groups",
+       "→ dict #2"
+      ],
+      [
+       "store",
+       "'Vashi'"
+      ],
+      [
+       "amt",
+       "15"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (5)<\/b> [&#x27;Kharghar,chai,20&#x27;, &#x27;Vashi,samosa,15&#x27;, &#x27;Kharghar,samosa,15&#x27;, &#x27;Vashi,chai,20&#x27;, &#x27;Kharghar,…",
+    "<b>#2 dict (1)<\/b> {&#x27;Kharghar&#x27;: → list #8}",
+    "<b>#8 list (3)<\/b> [15, 20, 20]"
+   ],
+   "newVar": "amt"
+  },
+  {
+   "line": 12,
+   "phase": "Python",
+   "note": "Object #2 dict now holds {&#x27;Kharghar&#x27;: → list #8, &#x27;Vashi&#x27;: → list #9} A new list object (#9) is created: [15]",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "map_fn",
+       "function map_fn()"
+      ],
+      [
+       "reduce_fn",
+       "function reduce_fn()"
+      ],
+      [
+       "sales",
+       "→ list #1"
+      ],
+      [
+       "groups",
+       "→ dict #2"
+      ],
+      [
+       "store",
+       "'Vashi'"
+      ],
+      [
+       "amt",
+       "15"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (5)<\/b> [&#x27;Kharghar,chai,20&#x27;, &#x27;Vashi,samosa,15&#x27;, &#x27;Kharghar,samosa,15&#x27;, &#x27;Vashi,chai,20&#x27;, &#x27;Kharghar,…",
+    "<b>#2 dict (2)<\/b> {&#x27;Kharghar&#x27;: → list #8, &#x27;Vashi&#x27;: → list #9}",
+    "<b>#8 list (3)<\/b> [15, 20, 20]",
+    "<b>#9 list (1)<\/b> [15]"
+   ]
+  },
+  {
+   "line": 11,
+   "phase": "Python",
+   "note": "<code>amt<\/code> changes to 20.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "map_fn",
+       "function map_fn()"
+      ],
+      [
+       "reduce_fn",
+       "function reduce_fn()"
+      ],
+      [
+       "sales",
+       "→ list #1"
+      ],
+      [
+       "groups",
+       "→ dict #2"
+      ],
+      [
+       "store",
+       "'Vashi'"
+      ],
+      [
+       "amt",
+       "20"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (5)<\/b> [&#x27;Kharghar,chai,20&#x27;, &#x27;Vashi,samosa,15&#x27;, &#x27;Kharghar,samosa,15&#x27;, &#x27;Vashi,chai,20&#x27;, &#x27;Kharghar,…",
+    "<b>#2 dict (2)<\/b> {&#x27;Kharghar&#x27;: → list #8, &#x27;Vashi&#x27;: → list #9}",
+    "<b>#8 list (3)<\/b> [15, 20, 20]",
+    "<b>#9 list (1)<\/b> [15]"
+   ],
+   "newVar": "amt"
+  },
+  {
+   "line": 12,
+   "phase": "Python",
+   "note": "Object #9 list now holds [15, 20]",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "map_fn",
+       "function map_fn()"
+      ],
+      [
+       "reduce_fn",
+       "function reduce_fn()"
+      ],
+      [
+       "sales",
+       "→ list #1"
+      ],
+      [
+       "groups",
+       "→ dict #2"
+      ],
+      [
+       "store",
+       "'Vashi'"
+      ],
+      [
+       "amt",
+       "20"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (5)<\/b> [&#x27;Kharghar,chai,20&#x27;, &#x27;Vashi,samosa,15&#x27;, &#x27;Kharghar,samosa,15&#x27;, &#x27;Vashi,chai,20&#x27;, &#x27;Kharghar,…",
+    "<b>#2 dict (2)<\/b> {&#x27;Kharghar&#x27;: → list #8, &#x27;Vashi&#x27;: → list #9}",
+    "<b>#8 list (3)<\/b> [15, 20, 20]",
+    "<b>#9 list (2)<\/b> [15, 20]"
+   ]
+  },
+  {
+   "line": 11,
+   "phase": "Python",
+   "note": "Nothing is left to loop over, so the loop ends and Python moves on.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "map_fn",
+       "function map_fn()"
+      ],
+      [
+       "reduce_fn",
+       "function reduce_fn()"
+      ],
+      [
+       "sales",
+       "→ list #1"
+      ],
+      [
+       "groups",
+       "→ dict #2"
+      ],
+      [
+       "store",
+       "'Vashi'"
+      ],
+      [
+       "amt",
+       "20"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (5)<\/b> [&#x27;Kharghar,chai,20&#x27;, &#x27;Vashi,samosa,15&#x27;, &#x27;Kharghar,samosa,15&#x27;, &#x27;Vashi,chai,20&#x27;, &#x27;Kharghar,…",
+    "<b>#2 dict (2)<\/b> {&#x27;Kharghar&#x27;: → list #8, &#x27;Vashi&#x27;: → list #9}",
+    "<b>#8 list (3)<\/b> [15, 20, 20]",
+    "<b>#9 list (2)<\/b> [15, 20]"
+   ]
+  },
+  {
+   "line": 13,
+   "phase": "Python",
+   "note": "<code>store<\/code> changes to &#x27;Kharghar&#x27;. <code>amts<\/code> is created: → list #8.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "map_fn",
+       "function map_fn()"
+      ],
+      [
+       "reduce_fn",
+       "function reduce_fn()"
+      ],
+      [
+       "sales",
+       "→ list #1"
+      ],
+      [
+       "groups",
+       "→ dict #2"
+      ],
+      [
+       "store",
+       "'Kharghar'"
+      ],
+      [
+       "amt",
+       "20"
+      ],
+      [
+       "amts",
+       "→ list #8"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (5)<\/b> [&#x27;Kharghar,chai,20&#x27;, &#x27;Vashi,samosa,15&#x27;, &#x27;Kharghar,samosa,15&#x27;, &#x27;Vashi,chai,20&#x27;, &#x27;Kharghar,…",
+    "<b>#2 dict (2)<\/b> {&#x27;Kharghar&#x27;: → list #8, &#x27;Vashi&#x27;: → list #9}",
+    "<b>#8 list (3)<\/b> [15, 20, 20]",
+    "<b>#9 list (2)<\/b> [15, 20]"
+   ],
+   "newVar": "amts"
+  },
+  {
+   "line": 14,
+   "phase": "Python",
+   "note": "<code>reduce_fn()<\/code> is called: a new frame is pushed with <code>store<\/code> = &#x27;Kharghar&#x27;, <code>amounts<\/code> = → list #8.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "map_fn",
+       "function map_fn()"
+      ],
+      [
+       "reduce_fn",
+       "function reduce_fn()"
+      ],
+      [
+       "sales",
+       "→ list #1"
+      ],
+      [
+       "groups",
+       "→ dict #2"
+      ],
+      [
+       "store",
+       "'Kharghar'"
+      ],
+      [
+       "amt",
+       "20"
+      ],
+      [
+       "amts",
+       "→ list #8"
+      ]
+     ]
+    },
+    {
+     "frame": "reduce_fn()",
+     "vars": [
+      [
+       "store",
+       "'Kharghar'"
+      ],
+      [
+       "amounts",
+       "→ list #8"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (5)<\/b> [&#x27;Kharghar,chai,20&#x27;, &#x27;Vashi,samosa,15&#x27;, &#x27;Kharghar,samosa,15&#x27;, &#x27;Vashi,chai,20&#x27;, &#x27;Kharghar,…",
+    "<b>#2 dict (2)<\/b> {&#x27;Kharghar&#x27;: → list #8, &#x27;Vashi&#x27;: → list #9}",
+    "<b>#8 list (3)<\/b> [15, 20, 20]",
+    "<b>#9 list (2)<\/b> [15, 20]"
+   ],
+   "newVar": "amounts"
+  },
+  {
+   "line": 6,
+   "phase": "Python",
+   "note": "The return value is worked out and handed back to the caller.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "map_fn",
+       "function map_fn()"
+      ],
+      [
+       "reduce_fn",
+       "function reduce_fn()"
+      ],
+      [
+       "sales",
+       "→ list #1"
+      ],
+      [
+       "groups",
+       "→ dict #2"
+      ],
+      [
+       "store",
+       "'Kharghar'"
+      ],
+      [
+       "amt",
+       "20"
+      ],
+      [
+       "amts",
+       "→ list #8"
+      ]
+     ]
+    },
+    {
+     "frame": "reduce_fn()",
+     "vars": [
+      [
+       "store",
+       "'Kharghar'"
+      ],
+      [
+       "amounts",
+       "→ list #8"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (5)<\/b> [&#x27;Kharghar,chai,20&#x27;, &#x27;Vashi,samosa,15&#x27;, &#x27;Kharghar,samosa,15&#x27;, &#x27;Vashi,chai,20&#x27;, &#x27;Kharghar,…",
+    "<b>#2 dict (2)<\/b> {&#x27;Kharghar&#x27;: → list #8, &#x27;Vashi&#x27;: → list #9}",
+    "<b>#8 list (3)<\/b> [15, 20, 20]",
+    "<b>#9 list (2)<\/b> [15, 20]"
+   ]
+  },
+  {
+   "line": 14,
+   "phase": "Return",
+   "note": "<code>reduce_fn()<\/code> returns <b>→ tuple #10<\/b> and its frame is popped. The caller continues on this line with that value.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "map_fn",
+       "function map_fn()"
+      ],
+      [
+       "reduce_fn",
+       "function reduce_fn()"
+      ],
+      [
+       "sales",
+       "→ list #1"
+      ],
+      [
+       "groups",
+       "→ dict #2"
+      ],
+      [
+       "store",
+       "'Kharghar'"
+      ],
+      [
+       "amt",
+       "20"
+      ],
+      [
+       "amts",
+       "→ list #8"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (5)<\/b> [&#x27;Kharghar,chai,20&#x27;, &#x27;Vashi,samosa,15&#x27;, &#x27;Kharghar,samosa,15&#x27;, &#x27;Vashi,chai,20&#x27;, &#x27;Kharghar,…",
+    "<b>#2 dict (2)<\/b> {&#x27;Kharghar&#x27;: → list #8, &#x27;Vashi&#x27;: → list #9}",
+    "<b>#8 list (3)<\/b> [15, 20, 20]",
+    "<b>#9 list (2)<\/b> [15, 20]"
+   ],
+   "out": "('Kharghar', 55)\n"
+  },
+  {
+   "line": 13,
+   "phase": "Python",
+   "note": "<code>store<\/code> changes to &#x27;Vashi&#x27;. <code>amts<\/code> changes to → list #9.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "map_fn",
+       "function map_fn()"
+      ],
+      [
+       "reduce_fn",
+       "function reduce_fn()"
+      ],
+      [
+       "sales",
+       "→ list #1"
+      ],
+      [
+       "groups",
+       "→ dict #2"
+      ],
+      [
+       "store",
+       "'Vashi'"
+      ],
+      [
+       "amt",
+       "20"
+      ],
+      [
+       "amts",
+       "→ list #9"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (5)<\/b> [&#x27;Kharghar,chai,20&#x27;, &#x27;Vashi,samosa,15&#x27;, &#x27;Kharghar,samosa,15&#x27;, &#x27;Vashi,chai,20&#x27;, &#x27;Kharghar,…",
+    "<b>#2 dict (2)<\/b> {&#x27;Kharghar&#x27;: → list #8, &#x27;Vashi&#x27;: → list #9}",
+    "<b>#8 list (3)<\/b> [15, 20, 20]",
+    "<b>#9 list (2)<\/b> [15, 20]"
+   ],
+   "newVar": "amts"
+  },
+  {
+   "line": 14,
+   "phase": "Python",
+   "note": "<code>reduce_fn()<\/code> is called: a new frame is pushed with <code>store<\/code> = &#x27;Vashi&#x27;, <code>amounts<\/code> = → list #9.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "map_fn",
+       "function map_fn()"
+      ],
+      [
+       "reduce_fn",
+       "function reduce_fn()"
+      ],
+      [
+       "sales",
+       "→ list #1"
+      ],
+      [
+       "groups",
+       "→ dict #2"
+      ],
+      [
+       "store",
+       "'Vashi'"
+      ],
+      [
+       "amt",
+       "20"
+      ],
+      [
+       "amts",
+       "→ list #9"
+      ]
+     ]
+    },
+    {
+     "frame": "reduce_fn()",
+     "vars": [
+      [
+       "store",
+       "'Vashi'"
+      ],
+      [
+       "amounts",
+       "→ list #9"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (5)<\/b> [&#x27;Kharghar,chai,20&#x27;, &#x27;Vashi,samosa,15&#x27;, &#x27;Kharghar,samosa,15&#x27;, &#x27;Vashi,chai,20&#x27;, &#x27;Kharghar,…",
+    "<b>#2 dict (2)<\/b> {&#x27;Kharghar&#x27;: → list #8, &#x27;Vashi&#x27;: → list #9}",
+    "<b>#8 list (3)<\/b> [15, 20, 20]",
+    "<b>#9 list (2)<\/b> [15, 20]"
+   ],
+   "newVar": "amounts"
+  },
+  {
+   "line": 6,
+   "phase": "Python",
+   "note": "The return value is worked out and handed back to the caller.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "map_fn",
+       "function map_fn()"
+      ],
+      [
+       "reduce_fn",
+       "function reduce_fn()"
+      ],
+      [
+       "sales",
+       "→ list #1"
+      ],
+      [
+       "groups",
+       "→ dict #2"
+      ],
+      [
+       "store",
+       "'Vashi'"
+      ],
+      [
+       "amt",
+       "20"
+      ],
+      [
+       "amts",
+       "→ list #9"
+      ]
+     ]
+    },
+    {
+     "frame": "reduce_fn()",
+     "vars": [
+      [
+       "store",
+       "'Vashi'"
+      ],
+      [
+       "amounts",
+       "→ list #9"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (5)<\/b> [&#x27;Kharghar,chai,20&#x27;, &#x27;Vashi,samosa,15&#x27;, &#x27;Kharghar,samosa,15&#x27;, &#x27;Vashi,chai,20&#x27;, &#x27;Kharghar,…",
+    "<b>#2 dict (2)<\/b> {&#x27;Kharghar&#x27;: → list #8, &#x27;Vashi&#x27;: → list #9}",
+    "<b>#8 list (3)<\/b> [15, 20, 20]",
+    "<b>#9 list (2)<\/b> [15, 20]"
+   ]
+  },
+  {
+   "line": 14,
+   "phase": "Return",
+   "note": "<code>reduce_fn()<\/code> returns <b>→ tuple #11<\/b> and its frame is popped. The caller continues on this line with that value.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "map_fn",
+       "function map_fn()"
+      ],
+      [
+       "reduce_fn",
+       "function reduce_fn()"
+      ],
+      [
+       "sales",
+       "→ list #1"
+      ],
+      [
+       "groups",
+       "→ dict #2"
+      ],
+      [
+       "store",
+       "'Vashi'"
+      ],
+      [
+       "amt",
+       "20"
+      ],
+      [
+       "amts",
+       "→ list #9"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (5)<\/b> [&#x27;Kharghar,chai,20&#x27;, &#x27;Vashi,samosa,15&#x27;, &#x27;Kharghar,samosa,15&#x27;, &#x27;Vashi,chai,20&#x27;, &#x27;Kharghar,…",
+    "<b>#2 dict (2)<\/b> {&#x27;Kharghar&#x27;: → list #8, &#x27;Vashi&#x27;: → list #9}",
+    "<b>#8 list (3)<\/b> [15, 20, 20]",
+    "<b>#9 list (2)<\/b> [15, 20]"
+   ],
+   "out": "('Vashi', 35)\n"
+  },
+  {
+   "line": 13,
+   "phase": "Python",
+   "note": "Nothing is left to loop over, so the loop ends and Python moves on.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "map_fn",
+       "function map_fn()"
+      ],
+      [
+       "reduce_fn",
+       "function reduce_fn()"
+      ],
+      [
+       "sales",
+       "→ list #1"
+      ],
+      [
+       "groups",
+       "→ dict #2"
+      ],
+      [
+       "store",
+       "'Vashi'"
+      ],
+      [
+       "amt",
+       "20"
+      ],
+      [
+       "amts",
+       "→ list #9"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (5)<\/b> [&#x27;Kharghar,chai,20&#x27;, &#x27;Vashi,samosa,15&#x27;, &#x27;Kharghar,samosa,15&#x27;, &#x27;Vashi,chai,20&#x27;, &#x27;Kharghar,…",
+    "<b>#2 dict (2)<\/b> {&#x27;Kharghar&#x27;: → list #8, &#x27;Vashi&#x27;: → list #9}",
+    "<b>#8 list (3)<\/b> [15, 20, 20]",
+    "<b>#9 list (2)<\/b> [15, 20]"
+   ]
+  }
+ ]
+}</script>
+    </div>
+  </article>
+  <article class="wx">
+    <div class="wx__head"><span class="wx__num">Example 2</span><span class="lvl lvl--i">Intermediate</span><span class="wx__tag">Storage · cost</span></div>
+    <h4>Replication or erasure coding for old data?</h4>
+    <div class="wx__problem"><p class="wx__label">Problem statement</p><p>A telecom keeps <b>600 TB</b> of call records. The last 3 months (<b>60 TB</b>) are hot; the rest is cold. Compare raw disk needed if everything uses 3× replication, versus hot data at 3× and cold data with erasure coding (RS-6-3, 1.5×).</p></div>
+    <div class="prob__io"><div><small>Input</small><pre>600 TB total · 60 TB hot · replication 3× · erasure coding 1.5×</pre></div><div><small>Expected output</small><pre>All 3x replication: 1800 TB raw
+Hot 3x + cold EC   : 990.0 TB raw
+Saving: 810 TB (45%)</pre></div></div>
+    <div class="wx__approach"><p class="wx__label">Approach</p><ol><li>All replicated: 600 × 3.</li><li>Mixed: 60 × 3 + 540 × 1.5.</li><li>Print the saving.</li></ol></div>
+    <p class="wx__label">Solution: run it live</p>
+    <div class="runner">
+    <script type="application/json">{
+ "lang": "python",
+ "file": "main.py",
+ "tasks": [
+  {
+   "label": "Solution",
+   "hint": "Erasure coding costs CPU and network to rebuild lost data, and reads of small files get slower. That is why it suits cold data only.",
+   "code": "total, hot = 600, 60\ncold = total - hot\nall_rep = total * 3\nmixed = hot * 3 + cold * 1.5\nprint(\"All 3x replication:\", all_rep, \"TB raw\")\nprint(\"Hot 3x + cold EC   :\", mixed, \"TB raw\")\nprint(f\"Saving: {all_rep - mixed:.0f} TB ({1 - mixed / all_rep:.0%})\")\n"
+  }
+ ]
+}</script>
+    </div>
+    <p class="wx__label">What happens in memory, step by step</p>
+    <p class="wx__how">Recorded from a real Python run: press <b>Next</b> to execute one line at a time. Watch variables change in each frame, and lists and dictionaries (numbered #1, #2 …) fill up as objects.</p>
+    <div class="tracer">
+    <script type="application/json">{
+ "lang": "python",
+ "code": [
+  "total, hot = 600, 60",
+  "cold = total - hot",
+  "all_rep = total * 3",
+  "mixed = hot * 3 + cold * 1.5",
+  "print(\"All 3x replication:\", all_rep, \"TB raw\")",
+  "print(\"Hot 3x + cold EC   :\", mixed, \"TB raw\")",
+  "print(f\"Saving: {all_rep - mixed:.0f} TB ({1 - mixed / all_rep:.0%})\")"
+ ],
+ "steps": [
+  {
+   "line": 1,
+   "phase": "Python",
+   "note": "<code>total<\/code> is created: 600. <code>hot<\/code> is created: 60.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "total",
+       "600"
+      ],
+      [
+       "hot",
+       "60"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "hot"
+  },
+  {
+   "line": 2,
+   "phase": "Python",
+   "note": "<code>cold<\/code> is created: 540.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "total",
+       "600"
+      ],
+      [
+       "hot",
+       "60"
+      ],
+      [
+       "cold",
+       "540"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "cold"
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "<code>all_rep<\/code> is created: 1800.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "total",
+       "600"
+      ],
+      [
+       "hot",
+       "60"
+      ],
+      [
+       "cold",
+       "540"
+      ],
+      [
+       "all_rep",
+       "1800"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "all_rep"
+  },
+  {
+   "line": 4,
+   "phase": "RS-6-3",
+   "note": "6 data cells + 3 parity cells = 9 for every 6, so 1.5×. <code>mixed<\/code> is created: 990.0.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "total",
+       "600"
+      ],
+      [
+       "hot",
+       "60"
+      ],
+      [
+       "cold",
+       "540"
+      ],
+      [
+       "all_rep",
+       "1800"
+      ],
+      [
+       "mixed",
+       "990.0"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "mixed"
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "total",
+       "600"
+      ],
+      [
+       "hot",
+       "60"
+      ],
+      [
+       "cold",
+       "540"
+      ],
+      [
+       "all_rep",
+       "1800"
+      ],
+      [
+       "mixed",
+       "990.0"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "out": "All 3x replication: 1800 TB raw\n"
+  },
+  {
+   "line": 6,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "total",
+       "600"
+      ],
+      [
+       "hot",
+       "60"
+      ],
+      [
+       "cold",
+       "540"
+      ],
+      [
+       "all_rep",
+       "1800"
+      ],
+      [
+       "mixed",
+       "990.0"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "out": "Hot 3x + cold EC   : 990.0 TB raw\n"
+  },
+  {
+   "line": 7,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "total",
+       "600"
+      ],
+      [
+       "hot",
+       "60"
+      ],
+      [
+       "cold",
+       "540"
+      ],
+      [
+       "all_rep",
+       "1800"
+      ],
+      [
+       "mixed",
+       "990.0"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "out": "Saving: 810 TB (45%)\n"
+  }
+ ]
+}</script>
+    </div>
+  </article>
+  <article class="wx">
+    <div class="wx__head"><span class="wx__num">Example 3</span><span class="lvl lvl--a">Advanced</span><span class="wx__tag">YARN · utilisation</span></div>
+    <h4>Why sharing one cluster with YARN beats separate clusters</h4>
+    <div class="wx__problem"><p class="wx__label">Problem statement</p><p>Three teams each have their own 20-node cluster. Their busy hours differ: each cluster is 90% busy for 6 hours a day and 10% busy for the rest. Compare average utilisation with separate clusters, and the number of nodes a shared YARN cluster would need to give every team its peak.</p></div>
+    <div class="prob__io"><div><small>Input</small><pre>3 teams × 20 nodes · 90% busy 6 h, 10% busy 18 h · peaks at different times</pre></div><div><small>Expected output</small><pre>Separate clusters: 30% average utilisation, 60 nodes
+Shared YARN cluster: about 22 nodes busy at worst
+With 25% spare: 28 nodes instead of 60</pre></div></div>
+    <div class="wx__approach"><p class="wx__label">Approach</p><ol><li>Average utilisation of one cluster = (0.9 × 6 + 0.1 × 18) ÷ 24.</li><li>Shared cluster: at any hour, at most one team is at peak (18 nodes busy) and two are quiet (2 each).</li><li>Nodes needed = 18 + 2 + 2, plus some spare.</li></ol></div>
+    <p class="wx__label">Solution: run it live</p>
+    <div class="runner">
+    <script type="application/json">{
+ "lang": "python",
+ "file": "main.py",
+ "tasks": [
+  {
+   "label": "Solution",
+   "hint": "What if all three teams peak at the same hour? Then sharing saves nothing at peak, which is why YARN queues have guaranteed minimums (Module 11).",
+   "code": "peak, quiet = 0.9, 0.1\navg = (peak * 6 + quiet * 18) / 24\nprint(f\"Separate clusters: {avg:.0%} average utilisation, 60 nodes\")\n\nshared_needed = 20 * peak + 2 * 20 * quiet\nprint(f\"Shared YARN cluster: about {shared_needed:.0f} nodes busy at worst\")\nprint(f\"With 25% spare: {shared_needed * 1.25:.0f} nodes instead of 60\")\n"
+  }
+ ]
+}</script>
+    </div>
+    <p class="wx__label">What happens in memory, step by step</p>
+    <p class="wx__how">Recorded from a real Python run: press <b>Next</b> to execute one line at a time. Watch variables change in each frame, and lists and dictionaries (numbered #1, #2 …) fill up as objects.</p>
+    <div class="tracer">
+    <script type="application/json">{
+ "lang": "python",
+ "code": [
+  "peak, quiet = 0.9, 0.1",
+  "avg = (peak * 6 + quiet * 18) / 24",
+  "print(f\"Separate clusters: {avg:.0%} average utilisation, 60 nodes\")",
+  "",
+  "shared_needed = 20 * peak + 2 * 20 * quiet",
+  "print(f\"Shared YARN cluster: about {shared_needed:.0f} nodes busy at worst\")",
+  "print(f\"With 25% spare: {shared_needed * 1.25:.0f} nodes instead of 60\")"
+ ],
+ "steps": [
+  {
+   "line": 1,
+   "phase": "Python",
+   "note": "<code>peak<\/code> is created: 0.9. <code>quiet<\/code> is created: 0.1.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "peak",
+       "0.9"
+      ],
+      [
+       "quiet",
+       "0.1"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "quiet"
+  },
+  {
+   "line": 2,
+   "phase": "Python",
+   "note": "<code>avg<\/code> is created: 0.3.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "peak",
+       "0.9"
+      ],
+      [
+       "quiet",
+       "0.1"
+      ],
+      [
+       "avg",
+       "0.3"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "avg"
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "peak",
+       "0.9"
+      ],
+      [
+       "quiet",
+       "0.1"
+      ],
+      [
+       "avg",
+       "0.3"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "out": "Separate clusters: 30% average utilisation, 60 nodes\n"
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "<code>shared_needed<\/code> is created: 22.0.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "peak",
+       "0.9"
+      ],
+      [
+       "quiet",
+       "0.1"
+      ],
+      [
+       "avg",
+       "0.3"
+      ],
+      [
+       "shared_needed",
+       "22.0"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "shared_needed"
+  },
+  {
+   "line": 6,
+   "phase": "Shared",
+   "note": "One team at peak + two quiet teams. The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "peak",
+       "0.9"
+      ],
+      [
+       "quiet",
+       "0.1"
+      ],
+      [
+       "avg",
+       "0.3"
+      ],
+      [
+       "shared_needed",
+       "22.0"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "out": "Shared YARN cluster: about 22 nodes busy at worst\n"
+  },
+  {
+   "line": 7,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "peak",
+       "0.9"
+      ],
+      [
+       "quiet",
+       "0.1"
+      ],
+      [
+       "avg",
+       "0.3"
+      ],
+      [
+       "shared_needed",
+       "22.0"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "out": "With 25% spare: 28 nodes instead of 60\n"
+  }
+ ]
+}</script>
+    </div>
+  </article>
+</section>
+
+<section class="part" id="quiz">
+  <span class="part-label"><b>9</b> Quiz and revision</span>
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <script type="application/json">[
+ {
+  "q": "Which Hadoop module solves “the data doesn't fit on one machine”?",
+  "options": [
+   "YARN",
+   "Hadoop Common",
+   "HDFS",
+   "ZooKeeper"
+  ],
+  "answer": 2,
+  "why": "<b>HDFS<\/b> splits files into blocks spread over many DataNodes."
+ },
+ {
+  "q": "In MapReduce, which parts does the programmer normally write?",
+  "options": [
+   "The scheduler and the shuffle",
+   "The map and reduce functions (plus a small driver)",
+   "The NameNode",
+   "The network protocol"
+  ],
+  "answer": 1,
+  "why": "You write the map and reduce logic; splitting, scheduling, shuffling, sorting and retries are done by the framework."
+ },
+ {
+  "q": "What does the shuffle phase do?",
+  "options": [
+   "Moves map outputs to reducers, grouped and sorted by key",
+   "Deletes duplicate files",
+   "Randomly reorders input lines",
+   "Compresses blocks"
+  ],
+  "answer": 0,
+  "why": "The shuffle sends each key's values from all mappers to the reducer responsible for that key, sorted by key."
+ },
+ {
+  "q": "Which problem did YARN (Hadoop 2) solve?",
+  "options": [
+   "Disks failing",
+   "Files were too big",
+   "Java was too slow",
+   "Only MapReduce could use the cluster, and one JobTracker limited scale"
+  ],
+  "answer": 3,
+  "why": "YARN separated resource management from MapReduce, so many engines (Spark, Tez…) can share one cluster, and scaling improved."
+ },
+ {
+  "q": "What does erasure coding in Hadoop 3 mainly save?",
+  "options": [
+   "CPU time",
+   "Network ports",
+   "Storage: about 1.5× overhead instead of 3× for cold data",
+   "NameNode RAM"
+  ],
+  "answer": 2,
+  "why": "Erasure coding stores parity instead of full copies, cutting raw storage for rarely read data."
+ },
+ {
+  "q": "Which of these did classic Hadoop MapReduce NOT handle well?",
+  "options": [
+   "Scanning a whole 100 TB data set",
+   "Iterative machine-learning algorithms that reread data many times",
+   "Surviving node failures",
+   "Storing raw log files"
+  ],
+  "answer": 1,
+  "why": "MapReduce writes intermediate data to disk and restarts tasks each pass, so iterative jobs are slow. Spark addressed this with in-memory processing."
+ },
+ {
+  "q": "What is “schema-on-read”?",
+  "options": [
+   "Raw data is stored as it is, and structure is applied when it is read",
+   "Data must match a table schema before it can be stored",
+   "Schemas are read from ZooKeeper",
+   "Only CSV files can be read"
+  ],
+  "answer": 0,
+  "why": "Hadoop stores any bytes; tools like Hive or Spark apply a schema when querying."
+ },
+ {
+  "q": "Hadoop's four core modules are:",
+  "options": [
+   "HDFS, Hive, Pig, HBase",
+   "NameNode, DataNode, Spark, Kafka",
+   "Java, Linux, SSH, XML",
+   "Common, HDFS, YARN, MapReduce"
+  ],
+  "answer": 3,
+  "why": "<b>Hadoop Common, HDFS, YARN and MapReduce<\/b>. Hive, Pig, HBase and Spark are ecosystem projects."
+ }
+]</script>
+  </div>
+
+  <h3>Quick revision</h3>
+  <div class="revision">
+    <h3>Lesson 2.3 in one screen</h3>
+    <ul><li>Four core modules: <b>Common</b> (shared code), <b>HDFS</b> (storage), <b>YARN</b> (resources), <b>MapReduce</b> (processing).</li><li>Doesn't fit → HDFS blocks. Disks die → 3 replicas, re-replication, checksums.</li><li>Too slow → parallel map tasks. Network → data locality.</li><li>Plumbing → you write <b>map</b> + <b>reduce</b>; framework does splits, scheduling, <b>shuffle and sort</b>, retries.</li><li>Growth → add nodes; NameNode tracks each block; balancer spreads data.</li><li>Hadoop 2: <b>YARN</b> (many engines, better scale) + <b>NameNode HA</b>. Hadoop 3: <b>erasure coding</b>, multiple standbys.</li><li>Schema-on-read: store raw, structure at query time.</li><li>Not solved by MapReduce: low latency, iterative ML, streaming, small files, in-place updates → Spark, Flink, Trino, Iceberg/Delta/Hudi.</li></ul>
+  </div>
+
+  <h3>Interview and viva questions</h3>
+  <div class="faq">
+    <details><summary>What are the core components of Hadoop?</summary><p>Hadoop Common (shared libraries, configuration and utilities), HDFS (distributed storage with a NameNode for metadata and DataNodes for blocks), YARN (resource management with a ResourceManager, NodeManagers and per-application ApplicationMasters) and MapReduce (the batch processing model and engine that runs on YARN).</p></details>
+    <details><summary>How does Hadoop achieve scalability?</summary><p>By scaling out: HDFS spreads blocks over any number of DataNodes and the NameNode tracks each block individually, so adding nodes adds capacity without re-sharding. MapReduce creates one task per input split, so more nodes means more tasks run in parallel. YARN schedules resources across all nodes.</p></details>
+    <details><summary>Which part of a MapReduce job is handled by the framework?</summary><p>Computing input splits, scheduling map tasks near their data, running the map tasks, partitioning, spilling, sorting and shuffling map outputs to reducers, merging them, running reduce tasks, writing output to HDFS, tracking progress and counters, and retrying failed or slow tasks. The developer supplies the map and reduce functions and job configuration.</p></details>
+    <details><summary>What problems does Hadoop not solve well?</summary><p>Low-latency queries and point lookups, iterative and interactive workloads with MapReduce, real-time streaming, very large numbers of small files, and in-place updates of records. Other tools fill these gaps: HBase for lookups, Spark for iterative and in-memory work, Flink/Kafka for streaming, Trino/Impala for interactive SQL, and table formats such as Iceberg, Delta Lake and Hudi for updates.</p></details>
+    <details><summary>Why was YARN introduced?</summary><p>In Hadoop 1 the JobTracker handled both resource management and job tracking, which limited cluster size and allowed only MapReduce jobs. YARN separated these: the ResourceManager manages resources for the whole cluster, and each application has its own ApplicationMaster. This improved scalability and let other engines like Spark and Tez share the same cluster.</p></details>
+    
+  </div>
+
+  <h3 id="practice">Practice problems</h3>
+  <p class="prob-intro">Practise the MapReduce way of thinking (map → shuffle → reduce) and the arithmetic behind Hadoop's storage choices.</p>
+  <div class="probs">
+    <article class="prob"><div class="prob__head"><span class="prob__num">P1</span><span class="prob__tag prob__tag--easy">Easy</span><h4>Map one line</h4></div>
+      <p>Write a map function that turns "Pune,UPI,450" into ("UPI", 450), and test it.</p>
+      <div class="prob__io"><div><small>Input</small><pre>&quot;Pune,UPI,450&quot;</pre></div><div><small>Expected output</small><pre>(&#x27;UPI&#x27;, 450)</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>def map_fn(line):
+    city, mode, amount = line.split(&quot;,&quot;)
+    return (mode, int(amount))
+print(map_fn(&quot;Pune,UPI,450&quot;))</code></pre><div class="output">(&#x27;UPI&#x27;, 450)</div></div>
+        <p><b>How it works:</b> The key you emit decides how data is grouped. Here the key is the payment mode.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P2</span><span class="prob__tag prob__tag--easy">Easy</span><h4>Group pairs by key</h4></div>
+      <p>Group these pairs by key into a dictionary of lists: [("a",1),("b",2),("a",3)].</p>
+      <div class="prob__io"><div><small>Input</small><pre>[(&quot;a&quot;,1),(&quot;b&quot;,2),(&quot;a&quot;,3)]</pre></div><div><small>Expected output</small><pre>{&#x27;a&#x27;: [1, 3], &#x27;b&#x27;: [2]}</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>pairs = [(&quot;a&quot;, 1), (&quot;b&quot;, 2), (&quot;a&quot;, 3)]
+groups = {}
+for k, v in pairs:
+    groups.setdefault(k, []).append(v)
+print(groups)</code></pre><div class="output">{&#x27;a&#x27;: [1, 3], &#x27;b&#x27;: [2]}</div></div>
+        <p><b>How it works:</b> This is the shuffle in one loop. In Hadoop it happens across the network between thousands of tasks.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P3</span><span class="prob__tag prob__tag--easy">Easy</span><h4>Raw disk for replication 3</h4></div>
+      <p>How much raw disk does 250 TB of data need with replication 3, and with erasure coding at 1.5×?</p>
+      <div class="prob__io"><div><small>Input</small><pre>250 TB</pre></div><div><small>Expected output</small><pre>Replication: 750 TB | EC: 375.0 TB</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>print(&quot;Replication:&quot;, 250 * 3, &quot;TB | EC:&quot;, 250 * 1.5, &quot;TB&quot;)</code></pre><div class="output">Replication: 750 TB | EC: 375.0 TB</div></div>
+        <p><b>How it works:</b> 750 TB vs 375 TB. EC halves raw storage for data that is rarely read.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P4</span><span class="prob__tag prob__tag--medium">Medium</span><h4>Average order per city</h4></div>
+      <p>Using map and reduce, compute the average order amount per city.</p>
+      <div class="prob__io"><div><small>Input</small><pre>[&quot;Pune,240&quot;, &quot;Delhi,120&quot;, &quot;Pune,60&quot;, &quot;Delhi,80&quot;, &quot;Goa,300&quot;]</pre></div><div><small>Expected output</small><pre>Delhi 100.0
+Goa 300.0
+Pune 150.0</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>orders = [&quot;Pune,240&quot;, &quot;Delhi,120&quot;, &quot;Pune,60&quot;, &quot;Delhi,80&quot;, &quot;Goa,300&quot;]
+groups = {}
+for city, amt in sorted((o.split(&quot;,&quot;)[0], int(o.split(&quot;,&quot;)[1])) for o in orders):
+    groups.setdefault(city, []).append(amt)
+for city, amts in groups.items():
+    print(city, sum(amts) / len(amts))</code></pre><div class="output">Delhi 100.0
+Goa 300.0
+Pune 150.0</div></div>
+        <p><b>How it works:</b> Average must be computed in the reducer from all values. Averaging partial averages from different mappers would give wrong answers.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P5</span><span class="prob__tag prob__tag--medium">Medium</span><h4>Count words longer than 4 letters</h4></div>
+      <p>Write map and reduce logic that counts only words longer than 4 letters.</p>
+      <div class="prob__io"><div><small>Input</small><pre>[&quot;Hadoop stores data&quot;, &quot;Spark caches data in memory&quot;]</pre></div><div><small>Expected output</small><pre>{&#x27;caches&#x27;: 1, &#x27;hadoop&#x27;: 1, &#x27;memory&#x27;: 1, &#x27;spark&#x27;: 1, &#x27;stores&#x27;: 1}</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>lines = [&quot;Hadoop stores data&quot;, &quot;Spark caches data in memory&quot;]
+pairs = [(w.lower(), 1) for l in lines for w in l.split() if len(w) &gt; 4]
+counts = {}
+for w, one in sorted(pairs):
+    counts[w] = counts.get(w, 0) + one
+print(counts)</code></pre><div class="output">{&#x27;caches&#x27;: 1, &#x27;hadoop&#x27;: 1, &#x27;memory&#x27;: 1, &#x27;spark&#x27;: 1, &#x27;stores&#x27;: 1}</div></div>
+        <p><b>How it works:</b> Filtering in the map step means fewer pairs are shuffled. Doing work early, before the network, is a key MapReduce habit.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P6</span><span class="prob__tag prob__tag--medium">Medium</span><h4>Which tool for the job?</h4></div>
+      <p>For each workload, print whether batch Hadoop fits ("yes") or not ("no").</p>
+      <div class="prob__io"><div><small>Input</small><pre>scan 2 years of logs · show one user profile in 50 ms · nightly sales report · live fraud alert in 1 s</pre></div><div><small>Expected output</small><pre>scan 2 years of logs            : yes
+show one user profile in 50 ms  : no
+nightly sales report            : yes
+live fraud alert in 1 s         : no</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>workloads = {&quot;scan 2 years of logs&quot;: &quot;batch&quot;, &quot;show one user profile in 50 ms&quot;: &quot;lookup&quot;,
+             &quot;nightly sales report&quot;: &quot;batch&quot;, &quot;live fraud alert in 1 s&quot;: &quot;stream&quot;}
+for w, kind in workloads.items():
+    print(f&quot;{w:32}: {&#x27;yes&#x27; if kind == &#x27;batch&#x27; else &#x27;no&#x27;}&quot;)</code></pre><div class="output">scan 2 years of logs            : yes
+show one user profile in 50 ms  : no
+nightly sales report            : yes
+live fraud alert in 1 s         : no</div></div>
+        <p><b>How it works:</b> Batch fits Hadoop. Lookups need a database or HBase; streams need Kafka with Flink or Spark Streaming.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P7</span><span class="prob__tag prob__tag--business">Business problem</span><h4>NameNode memory for small files</h4></div>
+      <p>A team stores 40 crore small files of 200 KB each (one block per file). Using about 150 bytes per file object and 150 per block object, estimate the NameNode memory. Then estimate it if the same data were packed into 256 MB files.</p>
+      <div class="prob__io"><div><small>Input</small><pre>40 crore files × 200 KB · 150 B per object</pre></div><div><small>Expected output</small><pre>Small files : ~112 GB of NameNode heap
+Packed files: ~0.09 GB</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>files = 40_00_00_000
+small_gb = files * 2 * 150 / 1024**3
+data_mb = files * 200 / 1024
+big_files = data_mb / 256
+big_gb = big_files * 2 * 150 / 1024**3
+print(f&quot;Small files : ~{small_gb:.0f} GB of NameNode heap&quot;)
+print(f&quot;Packed files: ~{big_gb:.2f} GB&quot;)</code></pre><div class="output">Small files : ~112 GB of NameNode heap
+Packed files: ~0.09 GB</div></div>
+        <p><b>How it works:</b> About 112 GB versus well under 1 GB for the same bytes. The small-files problem is one of the main things Hadoop did not solve by itself (Module 7).</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P8</span><span class="prob__tag prob__tag--business">Business problem</span><h4>Cost of keeping cold data replicated</h4></div>
+      <p>Cold data of 900 TB is kept at 3× replication. Switching it to erasure coding (1.5×) frees raw disk. At Rs 2,500 per TB of raw disk, how much hardware does the switch save?</p>
+      <div class="prob__io"><div><small>Input</small><pre>900 TB · 3× → 1.5× · Rs 2,500/TB</pre></div><div><small>Expected output</small><pre>Saved 1350 TB raw = Rs 33.8 lakh</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>saved_tb = 900 * (3 - 1.5)
+print(f&quot;Saved {saved_tb:.0f} TB raw = Rs {saved_tb * 2500 / 1e5:.1f} lakh&quot;)</code></pre><div class="output">Saved 1350 TB raw = Rs 33.8 lakh</div></div>
+        <p><b>How it works:</b> 1,350 TB of raw disk, about Rs 33.8 lakh of hardware (illustrative price), plus the power and rack space for it.</p>
+      </details>
+    </article>
+  </div>
+
+  <h3 id="scenarios">Real-world scenario questions (asked in company interviews)</h3>
+  <p class="scn-intro">Interviewers often test architecture knowledge by giving you a problem and asking which part of Hadoop handles it.</p>
+  <div class="scenarios">
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Any company · architecture</span><span class="scn__tag scn__tag--level">Fresher</span></div>
+      <h4>“Walk me through what happens when I run a Hadoop job.”</h4>
+      <p class="scn__situation">The interviewer wants the end-to-end flow, naming which component does what, for a job that reads a file in HDFS and writes results.</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> can you connect HDFS, YARN and MapReduce into one story?</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ol>
+          <li>The file is already in <b>HDFS</b>: blocks on DataNodes, metadata on the NameNode.</li>
+          <li>The client submits the job to the <b>ResourceManager</b>, which starts an <b>ApplicationMaster</b> in a container.</li>
+          <li>The AM computes input splits from block locations and asks YARN for containers on (or near) those nodes.</li>
+          <li><b>NodeManagers</b> launch map tasks; each reads its block locally and writes partitioned, sorted output to local disk.</li>
+          <li>Reducers <b>shuffle</b> (fetch) their partitions from all mappers, merge them and run reduce, writing output to HDFS.</li>
+          <li>The AM tracks progress and re-runs failed tasks; when done, it reports success and exits.</li>
+        </ol>
+        <p class="scn__avoid"><b>Avoid:</b> mentioning the JobTracker for a modern cluster (that was Hadoop 1).</p>
+      </div></details>
+    </article>
+
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">ML team · architecture</span><span class="scn__tag scn__tag--level">1–3 years</span></div>
+      <h4>The ML training job takes 14 hours in MapReduce</h4>
+      <p class="scn__situation">A data scientist implemented a training algorithm with 30 iterations as 30 chained MapReduce jobs over the same 2 TB data set. It takes 14 hours.</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> do you know which problems MapReduce did not solve, and what replaced it?</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>Each MapReduce job rereads the 2 TB from HDFS and writes its results back to HDFS, so 30 iterations mean about 60 full passes over disk, plus job start-up each time.</li>
+          <li>Move it to <b>Spark</b> on the same YARN cluster: load the data once, <code>cache()</code> it in executor memory, and iterate in memory. Spark MLlib already has many algorithms.</li>
+          <li>Keep HDFS as the storage; only the engine changes.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> “Add more nodes.” The waste is in the repeated I/O, not the lack of machines.</p>
+      </div></details>
+    </article>
+
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Platform team · capacity</span><span class="scn__tag scn__tag--level">1–3 years</span></div>
+      <h4>Each team wants its own cluster</h4>
+      <p class="scn__situation">Three departments each ask for a separate 30-node Hadoop cluster so that “others don't slow us down”. Finance asks whether that is necessary.</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> do you understand what YARN was built for?</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>Separate clusters sit idle outside each team's busy hours, and data must be copied between them.</li>
+          <li>One shared cluster with <b>YARN queues</b> (Capacity or Fair Scheduler) gives each team a guaranteed share, lets them borrow idle capacity, and keeps one copy of shared data.</li>
+          <li>Isolation concerns are handled with queue limits, pre-emption, and per-team security (Kerberos, Ranger policies).</li>
+          <li>Separate clusters can still make sense for strict regulatory isolation or very different software versions.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> dismissing the teams' concern; explain how queues address it.</p>
+      </div></details>
+    </article>
+
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Banking · data correction</span><span class="scn__tag scn__tag--level">1–3 years</span></div>
+      <h4>“Just update the wrong rows in HDFS”</h4>
+      <p class="scn__situation">A bug wrote wrong interest amounts into 5,000 rows of a 2 TB table stored as files in HDFS. A manager asks you to “run an UPDATE on those rows”.</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> do you know HDFS is write-once, and how updates are handled in practice?</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>HDFS files can't be edited in the middle. Plain Hive tables on files are corrected by <b>rewriting</b> the affected partitions (for example only the dates involved).</li>
+          <li>Modern table formats (Apache Iceberg, Delta Lake, Hudi) or Hive ACID tables support <code>UPDATE</code>/<code>MERGE</code> by writing new files and tracking which rows are current.</li>
+          <li>Fix the bug first, then reprocess from raw data if possible, keeping the raw layer unchanged.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> suggesting editing HDFS blocks directly.</p>
+      </div></details>
+    </article>
+  </div>
+</section>
+
+<nav class="lesson-nav" id="lesson-nav" aria-label="Lesson navigation"></nav>
+<div class="ad-slot" data-slot="bottom"></div>
+</article>
+
+<aside class="lesson-side">
+  <nav class="toc" aria-label="In this lesson">
+    <h4>In this lesson</h4>
+    <ol>
+      <li><a href="#story">The story</a></li>
+      <li><a href="#definition">Definition</a></li><li><a href="#levels">Beginner → Advanced</a></li>
+      <li><a href="#types">Types and ways to use it</a></li>
+      <li><a href="#steps">Step by step</a></li>
+      <li><a href="#animation">See it happen</a></li>
+      <li><a href="#real-world">Real-world use</a></li>
+      <li><a href="#run">Run the code</a></li>
+      <li><a href="#tracer">Line by line</a></li>
+      <li><a href="#worked">Worked examples</a></li>
+      <li><a href="#quiz">Quiz and revision</a></li>
+      <li><a href="#practice">Practice problems</a></li>
+      <li><a href="#scenarios">Industry scenarios</a></li>
+    </ol>
+  </nav>
+  <div class="ad-slot" data-slot="side"></div>
+  <div class="outline" id="outline"></div>
+</aside>
+</div>
+</main>
+
+<footer class="site-footer">
+  <div class="wrap">
+    <div><h4>MyPhatshala</h4><p>Free programming and IT lessons that show what happens behind the screen.</p></div>
+    <div><h4>Learn</h4><a href="../../../../#tracks">All courses</a><a href="../../">Apache Hadoop syllabus</a></div>
+    <div><h4>Site</h4><a href="../../../../about.html">About</a><a href="../../../../contact.html">Contact</a><a href="../../../../privacy.html">Privacy policy</a><a href="../../../../disclaimer.html">Disclaimer</a></div>
+    <div class="copyright">© MyPhatshala. All lesson content, diagrams and animations are original. Please do not copy without permission.</div>
+  </div>
+</footer>
+
+<script src="../../../../data/courses/hadoop.js"></script>
+<script src="../../../../assets/js/lesson.js"></script>
+<script src="../../../../assets/js/cluster-sim.js"></script>
+<script src="../../../../assets/js/ads.js"></script>
+<script src="../../../../assets/js/site.js"></script>
+</body>
+</html>

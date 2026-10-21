@@ -1,0 +1,1845 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Configuration files and web UIs | MyPhatshala</title>
+<meta name="description" content="How Hadoop configuration works: built-in *-default.xml files, the four *-site.xml files, env scripts and workers, per-command -D overrides, what “final” really protects, and how to see the value a daemon is using with hdfs getconf and the /conf page. The web UIs and ports (9870, 9864, 8088, 8042, 19888), /jmx metrics, real outputs and screenshots from a running Hadoop 3.5.0 cluster, a playground, quiz and interview scenarios.">
+<meta name="mp:minutes" content="28">
+<link rel="canonical" href="https://myphatshala.in/courses/hadoop/04-setup/04-configuration-files-and-web-uis/">
+<meta property="og:title" content="Configuration files and web UIs · MyPhatshala">
+<meta property="og:description" content="Defaults, site files, -D and final: which value wins, and how to check it on a live cluster. Plus the web UIs you will use every day.">
+<link rel="icon" href="../../../../assets/img/logo.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Fraunces:ital,opsz,wght@0,9..144,600;0,9..144,700;1,9..144,600&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../../../../assets/css/style.css">
+<link rel="stylesheet" href="../../../../assets/css/lesson.css">
+<link rel="stylesheet" href="../../../../assets/css/cluster-sim.css">
+<script src="../../../../assets/js/config.js"></script>
+<script>try { const t = localStorage.getItem("mp-theme"); if (t) document.documentElement.dataset.theme = t; } catch (e) {}</script>
+<script type="application/ld+json">{"@context": "https://schema.org", "@type": "LearningResource", "name": "Configuration files and web UIs", "learningResourceType": "Lesson", "educationalLevel": "Beginner → Intermediate", "isAccessibleForFree": true, "inLanguage": "en", "isPartOf": {"@type": "Course", "name": "Apache Hadoop", "provider": {"@type": "Organization", "name": "MyPhatshala"}}}</script>
+</head>
+<body style="--track:#B45309" data-lesson="04-setup/04-configuration-files-and-web-uis" data-course-root="../../">
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="site-header">
+  <div class="wrap">
+    <a class="brand" href="../../../../" aria-label="MyPhatshala home"><img src="../../../../assets/img/logo.svg" width="34" height="34" alt=""><span>My<b>Phatshala</b></span></a>
+    <nav class="nav" aria-label="Main">
+      <a href="../../../../#tracks">All courses</a>
+      <a href="../../">Apache Hadoop syllabus</a>
+      <button class="theme-btn" id="theme-btn" aria-label="Toggle dark mode"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg></button>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+<section class="lesson-hero">
+  <div class="wrap">
+    <nav class="crumbs" aria-label="Breadcrumb"><a href="../../../../">Home</a><span>›</span><a href="../../../../#track-big-data">Big Data Engineering</a><span>›</span><a href="../../">Apache Hadoop</a><span>›</span><b>Lesson 4.4</b></nav>
+    <h1>Configuration files and web UIs</h1>
+    <p class="lead">Every Hadoop behaviour you will tune later, from replication to task memory, is a configuration property. This lesson explains the layers those properties come from, which value wins, and how to ask a running daemon what it is really using. It also tours the web UIs and the /conf and /jmx endpoints that engineers open first when something looks wrong. All outputs and screenshots are from a real Hadoop 3.5.0 cluster.</p>
+    <div class="lesson-meta"><span>Module 4 · Setup</span><span>⏱ 28 min</span><span>Beginner → Intermediate</span><span>Real cluster output</span><span>Cluster Playground</span><span>Runs in your browser (Python)</span><span>8 practice problems</span></div>
+  </div>
+</section>
+
+<div class="wrap lesson-layout">
+<article class="lesson-main">
+<!-- ======================= PART 1: THE STORY ======================= -->
+<section class="part" id="story">
+  <span class="part-label"><b>1</b> The story</span>
+  <h2>Who decides the value: the jar, the file, or you?</h2>
+  <div class="story">
+    <p class="narration">Kabir's Docker cluster has <code>dfs.replication=3</code> in its settings. He uploads a file with <code>-D dfs.replication=2</code> and gets 2 copies. Then he marks the setting <code>final</code>, sure it can't be changed now, uploads again with <code>-D dfs.replication=2</code>, and still gets 2. Riya asks: “If a <i>final</i> setting can be changed, what does final even mean?”</p>
+
+    <div class="scene">
+      <svg viewBox="0 0 640 190" role="img" aria-label="Configuration layers: built-in defaults inside the jars, site files in etc/hadoop that override them, and values set by a client or job that override both.">
+        <g font-size="10">
+          <rect x="120" y="128" width="400" height="34" rx="8" class="s-card2"/><text x="320" y="149" text-anchor="middle" font-weight="700" class="s-ink">1. Built-in defaults: *-default.xml inside the jars (about 1,700 settings)</text>
+          <rect x="150" y="86" width="340" height="34" rx="8" class="s-soft-blue" style="stroke:var(--blue)"/><text x="320" y="107" text-anchor="middle" font-weight="700" class="s-blue">2. Your site files: etc/hadoop/*-site.xml</text>
+          <rect x="180" y="44" width="280" height="34" rx="8" class="s-soft-acc" style="stroke:var(--track)"/><text x="320" y="65" text-anchor="middle" font-weight="700" class="s-acc">3. Client / job: -D name=value</text>
+          <text x="320" y="28" text-anchor="middle" font-size="9" class="s-ink2">the value on top wins</text>
+          <path d="M540 150V60" style="stroke:var(--track);stroke-width:2"/><path d="M534 68l6-10 6 10" style="fill:var(--track)"/><text x="552" y="108" font-size="9" class="s-ink2">overrides</text>
+        </g>
+        <text x="320" y="182" text-anchor="middle" font-size="10" class="s-ink2">Most problems with a setting come down to “which layer did this value come from?”</text>
+        <text x="632" y="182" text-anchor="end" class="s-wm">myphatshala.in</text>
+      </svg>
+    </div>
+
+    <div class="panel panel--right"><div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#DDEFE6"/><path d="M12 64c2-12 10-18 20-18s18 6 20 18z" fill="#F4F1EA"/><path d="M28 46l4 8 4-8" fill="#2F7D5B"/><circle cx="32" cy="28" r="12" fill="#B57A50"/><path d="M20 26c0-8 5-13 12-13s12 5 12 13c-2-3-6-5-12-5s-10 2-12 5z" fill="#5A5A5A"/><path d="M22 32c1 8 5 11 10 11s9-3 10-11c-2 3-6 4-10 4s-8-1-10-4z" fill="#5A5A5A"/><circle cx="27" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><circle cx="37" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><path d="M30.4 29h3.2" stroke="#1B2433" stroke-width="1.4"/><circle cx="27" cy="29" r="1.1" fill="#1B2433"/><circle cx="37" cy="29" r="1.1" fill="#1B2433"/></svg></div><div class="bubble"><b class="who">Arjun Sir</b><p>Think of it in layers. Hadoop ships with a default for every one of its settings, inside its jar files. Your <code>*-site.xml</code> files override those defaults. And a client or job can set a value on top, for its own work, with <code>-D</code>.</p></div></div>
+    <div class="panel"><div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#E1E9F7"/><path d="M12 64c2-12 10-18 20-18s18 6 20 18z" fill="#B45309"/><circle cx="32" cy="29" r="12" fill="#A9714A"/><path d="M19 27c0-9 6-14 13-14s13 5 13 14c-2-4-5-6-8-6-3 3-9 4-13 3-2 1-4 2-5 3z" fill="#1E1A17"/><circle cx="27.5" cy="30" r="1.5" fill="#1E1A17"/><circle cx="36.5" cy="30" r="1.5" fill="#1E1A17"/><path d="M27 35.5q5 3.5 10 0" stroke="#1E1A17" stroke-width="1.6" fill="none" stroke-linecap="round"/><rect x="41" y="40" width="10" height="7" rx="1.5" fill="#2E5AAC"/></svg></div><div class="bubble"><b class="who">Kabir</b><p>And <code>final</code>?</p></div></div>
+    <div class="panel panel--right"><div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#DDEFE6"/><path d="M12 64c2-12 10-18 20-18s18 6 20 18z" fill="#F4F1EA"/><path d="M28 46l4 8 4-8" fill="#2F7D5B"/><circle cx="32" cy="28" r="12" fill="#B57A50"/><path d="M20 26c0-8 5-13 12-13s12 5 12 13c-2-3-6-5-12-5s-10 2-12 5z" fill="#5A5A5A"/><path d="M22 32c1 8 5 11 10 11s9-3 10-11c-2 3-6 4-10 4s-8-1-10-4z" fill="#5A5A5A"/><circle cx="27" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><circle cx="37" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><path d="M30.4 29h3.2" stroke="#1B2433" stroke-width="1.4"/><circle cx="27" cy="29" r="1.1" fill="#1B2433"/><circle cx="37" cy="29" r="1.1" fill="#1B2433"/></svg></div><div class="bubble"><b class="who">Arjun Sir</b><p><code>final</code> protects a value against configuration <i>files</i> loaded later, for example the <code>job.xml</code> that comes with every submitted job. Your <code>-D</code> didn't load a file; it set the value directly in your own client, so it still won. That's exactly what we saw: 2 copies.</p></div></div>
+    <div class="panel"><div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#FCE6D6"/><path d="M14 64c2-12 9-18 18-18s16 6 18 18z" fill="#2E5AAC"/><circle cx="32" cy="29" r="12" fill="#C68B5E"/><path d="M19 29c0-10 6-15 13-15s13 5 13 15c-3-5-7-8-13-8s-10 3-13 8z" fill="#2A1B14"/><path d="M43 27c3 6 3 14 0 20" stroke="#2A1B14" stroke-width="4" fill="none" stroke-linecap="round"/><circle cx="27.5" cy="30" r="1.5" fill="#2A1B14"/><circle cx="36.5" cy="30" r="1.5" fill="#2A1B14"/><path d="M28 35q4 3 8 0" stroke="#2A1B14" stroke-width="1.6" fill="none" stroke-linecap="round"/><circle cx="32" cy="24" r="1.2" fill="#D64545"/></svg></div><div class="bubble"><b class="who">Riya</b><p>So how do I know which value a daemon is really using?</p></div></div>
+    <div class="panel panel--right"><div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#DDEFE6"/><path d="M12 64c2-12 10-18 20-18s18 6 20 18z" fill="#F4F1EA"/><path d="M28 46l4 8 4-8" fill="#2F7D5B"/><circle cx="32" cy="28" r="12" fill="#B57A50"/><path d="M20 26c0-8 5-13 12-13s12 5 12 13c-2-3-6-5-12-5s-10 2-12 5z" fill="#5A5A5A"/><path d="M22 32c1 8 5 11 10 11s9-3 10-11c-2 3-6 4-10 4s-8-1-10-4z" fill="#5A5A5A"/><circle cx="27" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><circle cx="37" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><path d="M30.4 29h3.2" stroke="#1B2433" stroke-width="1.4"/><circle cx="27" cy="29" r="1.1" fill="#1B2433"/><circle cx="37" cy="29" r="1.1" fill="#1B2433"/></svg></div><div class="bubble"><b class="who">Arjun Sir</b><p>Ask it. Each daemon's web UI has a <code>/conf</code> page that lists every setting <i>and</i> which file it came from. Today: the files in <code>etc/hadoop</code>, the layers, the settings you'll change most, and the web UIs you'll open every day.</p></div></div>
+  </div>
+</section>
+
+<!-- ======================= PART 2: DEFINITION ======================= -->
+<section class="part" id="definition">
+  <span class="part-label"><b>2</b> Definition</span>
+  <h2>Hadoop configuration and web UIs</h2>
+  <div class="def">
+    <div class="def__formal"><small>Formal definition (write this in exams)</small>
+      <p>Hadoop configuration is a set of <b>name–value properties</b> loaded in layers by the <code>Configuration</code> class: read-only defaults (<code>core-default.xml</code>, <code>hdfs-default.xml</code>, <code>yarn-default.xml</code>, <code>mapred-default.xml</code>, packaged in the jars), then <b>site files</b> in <code>$HADOOP_CONF_DIR</code> (by default <code>$HADOOP_HOME/etc/hadoop</code>: <code>core-site.xml</code>, <code>hdfs-site.xml</code>, <code>yarn-site.xml</code>, <code>mapred-site.xml</code>), then values set by programs or on the command line (<code>-D</code>). A later resource overrides an earlier one unless the earlier one marked the property <code>&lt;final&gt;true&lt;/final&gt;</code>. Shell scripts (<code>hadoop-env.sh</code>, <code>yarn-env.sh</code>, <code>mapred-env.sh</code>) set environment variables such as <code>JAVA_HOME</code> and heap sizes; <code>workers</code> lists worker hosts. Each daemon also runs an embedded <b>web server</b> (NameNode 9870, DataNode 9864, ResourceManager 8088, NodeManager 8042, JobHistory Server 19888) with status pages and the <code>/conf</code>, <code>/jmx</code> and <code>/logs</code> endpoints.</p></div>
+    <div class="def__simple"><small>In simple words</small>
+      <p>Hadoop has a default for everything. You change what you need in four XML files. A single command can change a setting just for itself. And every daemon has a web page where you can see its state and the settings it is really using.</p></div>
+  </div>
+
+  <h3>Words you'll meet in this lesson</h3>
+  <div class="terms">
+    <div class="term"><b>Property</b><span>One setting: a <code>&lt;name&gt;</code> and a <code>&lt;value&gt;</code> inside <code>&lt;property&gt;</code>.</span></div>
+    <div class="term"><b>*-default.xml</b><span>Hadoop's built-in defaults, inside the jars. Read them, never edit them.</span></div>
+    <div class="term"><b>*-site.xml</b><span>Your overrides, in <code>etc/hadoop</code>.</span></div>
+    <div class="term"><b>HADOOP_CONF_DIR</b><span>The folder Hadoop reads site files from. Point it elsewhere to use another configuration.</span></div>
+    <div class="term"><b>final</b><span><code>&lt;final&gt;true&lt;/final&gt;</code>: later configuration files cannot override this property.</span></div>
+    <div class="term"><b>-D name=value</b><span>Sets a property for one command or job only.</span></div>
+    <div class="term"><b>/conf</b><span>A daemon's web page listing every property, its value and its source file.</span></div>
+    <div class="term"><b>/jmx</b><span>A daemon's metrics as JSON, used by monitoring tools.</span></div>
+  </div>
+
+  <h3>Defaults checked in Hadoop 3.5.0's *-default.xml</h3>
+  <table class="facts" style="table-layout:fixed;overflow-wrap:anywhere">
+    <tr><th>fs.defaultFS</th><td><code>file:///</code> (core-default.xml)</td></tr>
+    <tr><th>hadoop.tmp.dir</th><td><code>/tmp/hadoop-${user.name}</code>; <code>dfs.namenode.name.dir</code> defaults to <code style="word-break:break-all">file://${hadoop.tmp.dir}/dfs/name</code></td></tr>
+    <tr><th>dfs.replication · dfs.blocksize</th><td><code>3</code> · <code>134217728</code> (128 MB)</td></tr>
+    <tr><th>dfs.heartbeat.interval</th><td><code>3</code> seconds</td></tr>
+    <tr><th>mapreduce.framework.name</th><td><code>local</code> (mapred-default.xml)</td></tr>
+    <tr><th>NodeManager disk limit</th><td><code>90.0</code>% (<code style="word-break:break-all">yarn.nodemanager.disk-health-checker.max-disk-utilization-per-disk-percentage</code>)</td></tr>
+    <tr><th>Web UI ports</th><td>NameNode <code>9870</code> · SecondaryNameNode <code>9868</code> · DataNode <code>9864</code> · ResourceManager <code>8088</code> · NodeManager <code>8042</code> · JobHistory <code>19888</code></td></tr>
+    <tr><th>Other DataNode ports</th><td>data transfer <code>9866</code> · IPC <code>9867</code>; NameNode RPC <code>8020</code>; ResourceManager RPC <code>8032</code></td></tr>
+  </table>
+
+  <h3 id="levels">Configuration at three levels</h3>
+  <div class="modlab levels"><div class="modlab__bar"><b>Pick your level. New to this? Start at Beginner and climb.</b><button type="button" data-mod="b">Beginner</button><button type="button" data-mod="i">Intermediate</button><button type="button" data-mod="a">Advanced</button></div>
+    <div class="modlab__panel" data-mod="b"><h4><span class="lvl lvl--b">Beginner</span> School rules, class rules, today's rule</h4>
+      <ul>
+        <li>The <b>school rulebook</b> (defaults) covers everything: “uniform every day”.</li>
+        <li>Your <b>class teacher</b> (site files) can change some rules for the class: “sports shoes on Friday”.</li>
+        <li>For <b>one event</b> (<code>-D</code>), a rule can change for that day only.</li>
+        <li>A rule marked <b>final</b> by the principal can't be changed by a later notice from a teacher.</li>
+      </ul>
+
+    </div>
+    <div class="modlab__panel" data-mod="i"><h4><span class="lvl lvl--i">Intermediate</span> The files in etc/hadoop</h4>
+      <ul>
+        <li><code>core-site.xml</code>: settings shared by everything (default file system, I/O, security).</li>
+        <li><code>hdfs-site.xml</code>: NameNode and DataNode (replication, block size, storage folders, addresses).</li>
+        <li><code>yarn-site.xml</code>: ResourceManager and NodeManagers (hosts, memory and cores per node, shuffle service).</li>
+        <li><code>mapred-site.xml</code>: MapReduce jobs (framework, task memory, history server).</li>
+        <li><code>hadoop-env.sh</code> / <code>yarn-env.sh</code> / <code>mapred-env.sh</code>: environment (Java, heap sizes, log and PID folders).</li>
+        <li><code>workers</code> (hosts), <code>capacity-scheduler.xml</code> (YARN queues), <code>log4j.properties</code> (logging).</li>
+      </ul>
+
+    </div>
+    <div class="modlab__panel" data-mod="a"><h4><span class="lvl lvl--a">Advanced</span> Rules that matter in production</h4>
+      <ul>
+        <li><b>Server vs client settings</b>: <code>dfs.replication</code> and <code>dfs.blocksize</code> are applied by the <i>client</i> that writes a file; changing the NameNode's file does not change existing files or other clients.</li>
+        <li><b>Restart to apply</b>: daemons read their site files at start-up. Some settings can be refreshed (<code>hdfs dfsadmin -refreshNodes</code>, <code>yarn rmadmin -refreshQueues</code>); most need a restart.</li>
+        <li><b>Same files everywhere</b>: every node must have the same configuration; cluster managers push it and track versions.</li>
+        <li><b>final</b> is for administrators protecting cluster-wide values from job configurations (<code>job.xml</code>), not a lock against code running in the same client.</li>
+        <li>Values can use <code>${other.property}</code> and <code>${env.VAR}</code>; units such as <code>256m</code> or <code>30s</code> are accepted by many properties.</li>
+      </ul>
+
+    </div>
+  </div>
+  <div class="callout callout--exam"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19V5a2 2 0 0 1 2-2h12v18H6a2 2 0 0 1-2-2zm0 0a2 2 0 0 1 2-2h12"/></svg><p><b>Exam tip:</b> For “Explain Hadoop configuration files”, list the four site files with one example property each (<code>fs.defaultFS</code>, <code>dfs.replication</code>, <code>yarn.resourcemanager.hostname</code>, <code>mapreduce.framework.name</code>), mention <code>hadoop-env.sh</code> (<code>JAVA_HOME</code>) and <code>workers</code>, and state the rule: <b>site files override the defaults</b>, and <b>final</b> properties cannot be overridden by later resources.</p></div>
+</section>
+
+<!-- ======================= PART 3: TYPES AND WAYS TO USE IT ======================= -->
+<section class="part" id="types">
+  <span class="part-label"><b>3</b> Types and ways to use it</span>
+  <h2>Kinds of settings, and the UIs that show them</h2>
+  <div class="table-wrap">
+  <table class="compare" style="min-width:640px">
+    <thead><tr><th>Where</th><th>Format</th><th>Read by</th><th>Typical settings</th></tr></thead>
+    <tbody>
+      <tr><td><b>*-default.xml</b> (in jars)</td><td>XML</td><td>everything</td><td>Every property with its default; documented online</td></tr>
+      <tr><td><b>*-site.xml</b></td><td>XML</td><td>daemons and clients</td><td>Addresses, replication, memory, folders</td></tr>
+      <tr><td><b>*-env.sh</b></td><td>Shell script</td><td>start scripts and commands</td><td><code>JAVA_HOME</code>, <code>HADOOP_HEAPSIZE_MAX</code>, log and PID folders</td></tr>
+      <tr><td><b>workers</b></td><td>One host per line</td><td>start-dfs.sh, start-yarn.sh</td><td>Worker host names</td></tr>
+      <tr><td><b>-D on a command</b></td><td><code>-D name=value</code></td><td>that client or job only</td><td>Replication, block size, job memory, queue</td></tr>
+      <tr><td><b>In code</b></td><td><code>conf.set(…)</code></td><td>that program</td><td>Job-specific settings</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <h3>The web UIs you'll use</h3>
+  <div class="cards">
+    <div class="card"><h4>NameNode · 9870</h4><p>Overview (capacity, live/dead DataNodes, safe mode), Datanodes tab, file browser (Utilities → Browse the file system), logs.</p><span class="tag">HDFS</span></div>
+    <div class="card"><h4>ResourceManager · 8088</h4><p>Applications and their state, nodes, queues and scheduler, links to each job's logs.</p><span class="tag">YARN</span></div>
+    <div class="card"><h4>DataNode · 9864, NodeManager · 8042</h4><p>One worker's own view: its volumes, blocks, containers and logs.</p><span class="tag">Workers</span></div>
+    <div class="card"><h4>JobHistory · 19888</h4><p>Finished MapReduce jobs: counters, tasks, timings. Start it with <code>mapred --daemon start historyserver</code>.</p><span class="tag">History</span></div>
+  </div>
+  <div class="callout callout--tip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18h6M10 22h4M12 2a7 7 0 0 0-4 12.7V17h8v-2.3A7 7 0 0 0 12 2z"/></svg><p>Add <code>/conf</code>, <code>/jmx</code> or <code>/logs</code> to any daemon's web address: <code>http://localhost:9870/conf</code> shows every setting the NameNode is using and the file it came from.</p></div>
+</section>
+
+<!-- ======================= PART 4: STEP BY STEP ======================= -->
+<section class="part" id="steps">
+  <span class="part-label"><b>4</b> Step by step</span>
+  <h2>Inspect and change configuration on a running cluster</h2>
+  <p>All outputs are from the Docker practice cluster of Lesson 4.3 (Hadoop 3.5.0, 3 DataNodes). On the Path A install, drop the <code>docker compose exec namenode</code> prefix.</p>
+  <ol class="stepper">
+    <li><h4>See the files</h4>
+      <div class="code" data-lang="bash" data-file="Terminal"><pre><code>ls $HADOOP_HOME/etc/hadoop</code></pre><div class="output">capacity-scheduler.xml            kms-log4j.properties
+configuration.xsl                 kms-site.xml
+container-executor.cfg            log4j.properties
+core-site.xml                     mapred-env.cmd
+hadoop-env.cmd                    mapred-env.sh
+hadoop-env.sh                     mapred-queues.xml.template
+hadoop-metrics2.properties        mapred-site.xml
+hadoop-policy.xml                 shellprofile.d
+hadoop-user-functions.sh.example  ssl-client.xml.example
+hdfs-rbf-site.xml                 ssl-server.xml.example
+hdfs-site.xml                     user_ec_policies.xml.template
+httpfs-env.sh                     workers
+httpfs-log4j.properties           yarn-env.cmd
+httpfs-site.xml                   yarn-env.sh
+kms-acls.xml                      yarn-site.xml
+kms-env.sh                        yarnservice-log4j.properties</div></div>
+      <span class="behind">32 entries ship in <code>etc/hadoop</code>. The four site files, the env scripts and <code>workers</code> are the ones you'll edit; the rest configure optional services (KMS, HttpFS, router-based federation).</span></li>
+    <li><h4>Ask for the value Hadoop really uses</h4>
+      <div class="code" data-lang="bash" data-file="Terminal"><pre><code>docker compose exec namenode hdfs getconf -confKey fs.defaultFS
+docker compose exec namenode hdfs getconf -confKey dfs.replication
+docker compose exec namenode hdfs getconf -confKey dfs.blocksize
+docker compose exec namenode hdfs getconf -confKey dfs.namenode.http-address
+docker compose exec namenode hdfs getconf -confKey dfs.heartbeat.interval</code></pre><div class="output">hdfs://namenode
+3
+134217728
+0.0.0.0:9870
+3</div></div>
+      <span class="behind"><code>getconf</code> prints the final, merged value: from your site file if set (<code>fs.defaultFS</code>, <code>dfs.replication</code>), otherwise the default (block size, address, heartbeat).</span></li>
+    <li><h4>See where each value came from</h4>
+      <div class="code" data-lang="bash" data-file="Terminal"><pre><code>curl -s http://localhost:9870/conf | grep -o "&lt;source&gt;[^&lt;]*&lt;/source&gt;" | sort | uniq -c | sort -rn
+curl -s http://localhost:9870/conf | grep -o "&lt;property&gt;&lt;name&gt;dfs.replication&lt;/name&gt;[^/]*&lt;/value&gt;&lt;final&gt;[a-z]*&lt;/final&gt;&lt;source&gt;[^&lt;]*&lt;/source&gt;"</code></pre><div class="output">    542 &lt;source&gt;hdfs-default.xml&lt;/source&gt;
+    523 &lt;source&gt;yarn-default.xml&lt;/source&gt;
+    376 &lt;source&gt;core-default.xml&lt;/source&gt;
+    194 &lt;source&gt;mapred-default.xml&lt;/source&gt;
+     89 &lt;source&gt;hdfs-rbf-default.xml&lt;/source&gt;
+     17 &lt;source&gt;programmatically&lt;/source&gt;
+      5 &lt;source&gt;yarn-site.xml&lt;/source&gt;
+      4 &lt;source&gt;mapred-site.xml&lt;/source&gt;
+      2 &lt;source&gt;hdfs-site.xml&lt;/source&gt;
+&lt;property&gt;&lt;name&gt;dfs.replication&lt;/name&gt;&lt;value&gt;3&lt;/value&gt;&lt;final&gt;false&lt;/final&gt;&lt;source&gt;hdfs-site.xml&lt;/source&gt;</div></div>
+      <span class="behind">The running NameNode knows about 1,750 settings. All but a handful are defaults; only a few come from our site files. “programmatically” means the daemon set the value itself at start-up.</span></li>
+    <li><h4>Override for one command with -D</h4>
+      <div class="code" data-lang="bash" data-file="Terminal (inside the namenode container)"><pre><code>hdfs dfs -D dfs.replication=2 -put canteen_orders.csv data/copy2.csv
+hdfs dfs -D dfs.blocksize=1048576 -put canteen_orders.csv data/small_blocks.csv
+hdfs dfs -stat "%r %o %b %n" data/*
+hdfs fsck /user/hadoop/data/small_blocks.csv | grep "Total blocks"</code></pre><div class="output">3 134217728 4692009 canteen_orders.csv
+2 134217728 4692009 copy2.csv
+3 1048576 4692009 small_blocks.csv
+ Total blocks (validated):	5 (avg. block size 938401 B)</div></div>
+      <span class="behind"><code>%r</code> = replication, <code>%o</code> = block size, <code>%b</code> = bytes. Same file, three different storage layouts: replication and block size are chosen by the writing client, per file. With 1 MB blocks the 4.5 MB file becomes 5 blocks. (Open a shell with <code>docker compose exec namenode bash</code>; the CSV was copied to <code>/tmp</code> in Lesson 4.3.)</span></li>
+    <li><h4>Change an existing file, and test “final”</h4>
+      <div class="code" data-lang="bash" data-file="Terminal (inside the namenode container)"><pre><code>hdfs dfs -setrep -w 3 data/copy2.csv
+# a copy of the configuration with dfs.replication marked final
+cp -r /opt/hadoop/etc/hadoop /tmp/fconf
+#   in /tmp/fconf/hdfs-site.xml: &lt;value&gt;3&lt;/value&gt;&lt;final&gt;true&lt;/final&gt;
+HADOOP_CONF_DIR=/tmp/fconf hdfs dfs -D dfs.replication=2 -put canteen_orders.csv data/final_test.csv
+hdfs dfs -stat "%r %n" data/copy2.csv data/final_test.csv</code></pre><div class="output">Replication 3 set: data/copy2.csv
+Waiting for data/copy2.csv .... done
+3 copy2.csv
+2 final_test.csv</div></div>
+      <span class="behind"><code>-setrep -w</code> changes an existing file and waits until the new copies exist. The second line is the surprise from the story, tested for real: <code>final</code> blocks later configuration <i>files</i>, but <code>-D</code> sets the value directly in the client, so 2 still wins.</span></li>
+    <li><h4>Open the web UIs</h4>
+      <p>In a browser on your PC: <code>http://localhost:9870</code> (NameNode) and <code>http://localhost:8088</code> (ResourceManager). Below are the real pages of the practice cluster, cropped.</p>
+      <figure class="shot"><a href="../../../../assets/img/hadoop/namenode-ui-overview.webp" target="_blank" rel="noopener"><img src="../../../../assets/img/hadoop/namenode-ui-overview.webp" width="980" height="885" loading="lazy" alt="NameNode web UI overview of the practice cluster: version 3.5.0, cluster ID, safe mode off, 8 files and blocks, 3 live nodes, 0 dead nodes, 0 under-replicated blocks." style="max-width:100%;height:auto;border:1px solid var(--line);border-radius:8px"></a><figcaption class="muted">NameNode UI, Overview tab: version, cluster ID, safe mode, files and blocks, <b>Live Nodes 3</b>, <b>Dead Nodes 0</b>, under-replicated blocks.</figcaption></figure>
+      <figure class="shot"><a href="../../../../assets/img/hadoop/resourcemanager-ui-nodes.webp" target="_blank" rel="noopener"><img src="../../../../assets/img/hadoop/resourcemanager-ui-nodes.webp" width="1680" height="425" loading="lazy" alt="ResourceManager web UI, Nodes page: one active node, Capacity Scheduler, minimum allocation 1024 MB and 1 vcore, maximum 8192 MB and 4 vcores, the node RUNNING with 8 GB and 8 vcores." style="max-width:100%;height:auto;border:1px solid var(--line);border-radius:8px"></a><figcaption class="muted">ResourceManager UI, Nodes page: 1 active node offering <b>8 GB and 8 vcores</b> (YARN's defaults when nothing is configured), Capacity Scheduler, container sizes from 1 GB / 1 vcore up to 8 GB / 4 vcores.</figcaption></figure>
+      <span class="behind">Screenshots show only the parts used in this course. The same data is available as JSON from <code>/jmx</code> (next step).</span></li>
+    <li><h4>Read the same facts as JSON</h4>
+      <div class="code" data-lang="bash" data-file="Terminal"><pre><code>curl -s "http://localhost:9870/jmx?qry=Hadoop:service=NameNode,name=FSNamesystemState" \
+  | python3 -c "import sys,json; b=json.load(sys.stdin)['beans'][0]; [print(k,'=',b[k]) for k in ['FSState','NumLiveDataNodes','NumDeadDataNodes','FilesTotal','BlocksTotal','UnderReplicatedBlocks']]"</code></pre><div class="output">FSState = Operational
+NumLiveDataNodes = 3
+NumDeadDataNodes = 0
+FilesTotal = 8
+BlocksTotal = 8
+UnderReplicatedBlocks = 0</div></div>
+      <span class="behind">This is how monitoring systems watch a cluster: they poll <code>/jmx</code> and raise alerts when, for example, dead DataNodes or under-replicated blocks appear.</span></li>
+  </ol>
+  <div class="callout callout--warn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3 2 21h20L12 3z"/><path d="M12 10v5M12 18v.5"/></svg><p>After editing a <code>*-site.xml</code> file, restart the daemons that read it (and copy the file to every node). Editing the file alone changes nothing in a running daemon, which is the most common “my setting doesn't work” mistake.</p></div>
+</section>
+
+<!-- ======================= PART 5: SEE IT HAPPEN ======================= -->
+<section class="part" id="animation">
+  <span class="part-label"><b>5</b> See it happen</span>
+  <h2>One property, four layers</h2>
+  <p>Follow <code>dfs.replication</code> through Kabir's experiments. Each terminal line is from the real run in Part 4.</p>
+  <div class="anim" data-frames="6">
+    <div class="anim__title">Where does dfs.replication come from? <span>6 steps</span></div>
+    <div class="anim__views">
+      <div class="view view--see">
+        <span class="view__tag">What you see</span>
+        <svg viewBox="0 0 360 250" role="img" aria-label="Kabir's terminal">
+          <rect x="14" y="14" width="332" height="206" rx="8" class="s-board"/>
+          <text x="26" y="32" font-size="9" class="mono" style="fill:#7F8C86">hadoop@namenode : /tmp</text>
+          <g data-on="1"><text x="26" y="56" font-size="8.6" class="mono" style="fill:#7F8C86">hdfs-default.xml (inside the jar):</text><text x="26" y="74" font-size="8.6" class="mono" style="fill:#F5C77E">&lt;name&gt;dfs.replication&lt;/name&gt;</text><text x="26" y="88" font-size="8.6" class="mono" style="fill:#F5C77E">&lt;value&gt;3&lt;/value&gt;</text></g>
+          <g data-on="2"><text x="26" y="56" font-size="8.6" class="mono" style="fill:#7F8C86">$ curl -s localhost:9870/conf | grep …</text><text x="26" y="74" font-size="8.6" class="mono" style="fill:#9FD3B8">name dfs.replication  value 3</text><text x="26" y="88" font-size="8.6" class="mono" style="fill:#9FD3B8">final false  source hdfs-site.xml</text></g>
+          <g data-on="3"><text x="26" y="56" font-size="8.6" class="mono" style="fill:#7F8C86">$ hdfs dfs -D dfs.replication=2 -put \</text><text x="26" y="70" font-size="8.6" class="mono" style="fill:#7F8C86">    canteen_orders.csv data/copy2.csv</text><text x="26" y="88" font-size="8.6" class="mono" style="fill:#7F8C86">$ hdfs dfs -stat "%r %n" data/copy2.csv</text><text x="26" y="104" font-size="9" class="mono" style="fill:#9FD3B8">2 copy2.csv</text></g>
+          <g data-on="4"><text x="26" y="56" font-size="8.6" class="mono" style="fill:#7F8C86">$ hdfs dfs -setrep -w 3 data/copy2.csv</text><text x="26" y="72" font-size="8.6" class="mono" style="fill:#9FD3B8">Replication 3 set: data/copy2.csv</text><text x="26" y="86" font-size="8.6" class="mono" style="fill:#9FD3B8">Waiting for data/copy2.csv .... done</text></g>
+          <g data-on="5"><text x="26" y="56" font-size="8.6" class="mono" style="fill:#7F8C86">/tmp/fconf/hdfs-site.xml:</text><text x="26" y="72" font-size="8.6" class="mono" style="fill:#F5C77E">&lt;value&gt;3&lt;/value&gt;&lt;final&gt;true&lt;/final&gt;</text><text x="26" y="90" font-size="8.6" class="mono" style="fill:#7F8C86">$ HADOOP_CONF_DIR=/tmp/fconf hdfs dfs \</text><text x="26" y="104" font-size="8.6" class="mono" style="fill:#7F8C86">    -D dfs.replication=2 -put … final_test.csv</text><text x="26" y="122" font-size="9" class="mono" style="fill:#9FD3B8">2 final_test.csv</text></g>
+          <g data-on="6"><text x="26" y="56" font-size="8.6" class="mono" style="fill:#7F8C86">$ hdfs dfs -stat "%r %o %n" data/*</text><text x="26" y="72" font-size="8.6" class="mono" style="fill:#9FD3B8">3 134217728 canteen_orders.csv</text><text x="26" y="86" font-size="8.6" class="mono" style="fill:#9FD3B8">3 134217728 copy2.csv</text><text x="26" y="100" font-size="8.6" class="mono" style="fill:#9FD3B8">2 134217728 final_test.csv</text><text x="26" y="114" font-size="8.6" class="mono" style="fill:#9FD3B8">3 1048576 small_blocks.csv</text><text x="180" y="190" text-anchor="middle" font-size="10" class="s-chalk">Each file keeps its own setting.</text></g>
+          <text x="352" y="244" text-anchor="end" class="s-wm">myphatshala.in</text>
+        </svg>
+        <ol class="caps" hidden>
+          <li>Inside Hadoop's jar, <code>hdfs-default.xml</code> says replication is 3.</li>
+          <li>The running NameNode's <code>/conf</code> page shows the value 3 and its source: <code>hdfs-site.xml</code> (the cluster's own setting, also 3).</li>
+          <li>Kabir writes one file with <code>-D dfs.replication=2</code>: that file gets 2 copies.</li>
+          <li><code>-setrep</code> changes the existing file to 3 copies and waits until the NameNode has made them.</li>
+          <li>With <code>final=true</code> in the site file, <code>-D</code> still sets 2: final protects against later files, not a direct setting.</li>
+          <li>Every file remembers the replication and block size it was written with.</li>
+        </ol>
+      </div>
+
+      <div class="view view--behind">
+        <span class="view__tag">Behind the screen</span>
+        <svg viewBox="0 0 360 250" role="img" aria-label="The configuration layers and the value that wins">
+          <rect x="40" y="170" width="240" height="30" rx="6" class="s-card2"/><text x="160" y="189" text-anchor="middle" font-size="9" font-weight="700" class="s-ink">defaults: hdfs-default.xml = 3</text>
+          <g data-on="2-6"><rect x="60" y="130" width="200" height="30" rx="6" class="s-soft-blue" style="stroke:var(--blue)"/><text x="160" y="149" text-anchor="middle" font-size="9" font-weight="700" class="s-blue">site: hdfs-site.xml = 3</text></g>
+          <g data-on="3-6"><rect x="80" y="90" width="160" height="30" rx="6" class="s-soft-acc" style="stroke:var(--track)"/><text x="160" y="109" text-anchor="middle" font-size="9" font-weight="700" class="s-acc">client: -D … = 2</text></g>
+          <g data-on="1"><path d="M296 185h-12" class="s-line"/><text x="300" y="189" font-size="9" font-weight="700" class="s-green">wins</text><text x="180" y="60" text-anchor="middle" font-size="9" class="s-ink2">only the default exists</text></g>
+          <g data-on="2"><path d="M276 145h-12" class="s-line"/><text x="280" y="149" font-size="9" font-weight="700" class="s-green">wins</text><text x="180" y="60" text-anchor="middle" font-size="9" class="s-ink2">the site file overrides the default</text><text x="180" y="74" text-anchor="middle" font-size="8.6" class="s-ink2">(same number here, different source)</text></g>
+          <g data-on="3"><path d="M256 105h-12" class="s-line"/><text x="260" y="109" font-size="9" font-weight="700" class="s-green">wins</text><text x="180" y="60" text-anchor="middle" font-size="9" class="s-ink2">the client sets 2 for its own write</text></g>
+          <g data-on="4"><rect x="100" y="30" width="160" height="44" rx="6" class="s-board"/><text x="180" y="48" text-anchor="middle" font-size="8.6" font-weight="700" class="s-chalk">NameNode</text><text x="180" y="64" text-anchor="middle" font-size="8" class="s-chalk">copy2.csv: 2 → 3 replicas</text><text x="180" y="226" text-anchor="middle" font-size="8.6" class="s-ink2">setrep changes the file, not the configuration</text></g>
+          <g data-on="5"><text x="290" y="149" font-size="9" font-weight="700" class="s-red">final</text><path d="M256 105h-12" class="s-line"/><text x="260" y="109" font-size="9" font-weight="700" class="s-green">wins</text><text x="180" y="52" text-anchor="middle" font-size="8.6" class="s-ink2">final blocks later <tspan font-weight="700">files</tspan> (e.g. a job.xml),</text><text x="180" y="66" text-anchor="middle" font-size="8.6" class="s-ink2">not a value set directly with -D</text></g>
+          <g data-on="6"><g font-size="8" class="s-ink"><text x="70" y="36">canteen_orders.csv</text><text x="180" y="36" font-weight="700">r3 · 128 MB</text><text x="70" y="50">copy2.csv</text><text x="180" y="50" font-weight="700">r3 · 128 MB</text><text x="70" y="64">final_test.csv</text><text x="180" y="64" font-weight="700">r2 · 128 MB</text><text x="70" y="78">small_blocks.csv</text><text x="180" y="78" font-weight="700">r3 · 1 MB</text></g><text x="180" y="226" text-anchor="middle" font-size="8.6" class="s-ink2">stored per file by the NameNode</text></g>
+          <text x="352" y="246" text-anchor="end" class="s-wm">myphatshala.in</text>
+        </svg>
+        <ol class="caps" hidden>
+          <li>The bottom layer always exists: every property has a default in the jars.</li>
+          <li>Site files sit on top. Here the cluster's own file says 3 as well, so only the source changes.</li>
+          <li>A client's <code>-D</code> sits on top of both, for that client's own work only.</li>
+          <li>Replication of an <b>existing</b> file is changed with <code>setrep</code>, which tells the NameNode to add or remove copies.</li>
+          <li><code>final</code> stops later configuration files from overriding the value. A value set directly with <code>-D</code> or in code is not a file, so it still applies.</li>
+          <li>The result is stored per file: four files, each with the settings it was written with.</li>
+        </ol>
+      </div>
+    </div>
+  </div>
+
+  <h3 id="playground">Try it yourself: settings in the playground</h3>
+  <p>The upload controls are settings a client sends: <b>Block</b> is <code>dfs.blocksize</code> and <b>Replication</b> is <code>dfs.replication</code>. Change them per upload and compare the files in the NameNode metadata tab.</p>
+  <div class="csim"><script type="application/json">{"title": "Block size and replication are per file", "intro": "<p>Each upload uses the <b>Block<\/b> and <b>Replication<\/b> values chosen next to the button, like <code>-D dfs.blocksize=…<\/code> and <code>-D dfs.replication=…<\/code> on <code>hdfs dfs -put<\/code>. Compare files in the <b>NameNode metadata<\/b> tab.<\/p>", "racks": 2, "nodes": 3, "features": ["upload", "fail", "fsck"], "try": [{"text": "Upload a <b>1 GB<\/b> file with <b>128 MB<\/b> blocks and replication <b>3<\/b>: count its blocks.", "on": "upload-done"}, {"text": "Upload another 1 GB file with <b>256 MB<\/b> blocks: half as many blocks for the NameNode to track.", "on": "upload-done"}, {"text": "Upload one with <b>Replication 1<\/b>, then stop the node holding one of its blocks.", "on": "node-stop"}, {"text": "Run <b>hdfs fsck /<\/b>: only the replication-1 file is damaged.", "on": "fsck"}]}</script></div>
+</section>
+
+<!-- ======================= PART 6: REAL-WORLD USE ======================= -->
+<section class="part" id="real-world">
+  <span class="part-label"><b>6</b> Real-world use</span>
+  <h2>Configuration and UIs at work</h2>
+
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="20" y="20" width="80" height="50" rx="6" class="s-soft-blue" style="stroke:var(--blue)"/><text x="60" y="42" text-anchor="middle" font-size="8.6" font-weight="700" class="s-blue">config v42</text><text x="60" y="58" text-anchor="middle" font-size="8.6" class="s-ink">→ all nodes</text></svg></div>
+    <div><h4>1. Configuration under version control</h4>
+      <p>Site files live in Git or in the cluster manager, with a history of every change. A change is reviewed, pushed to all nodes, and followed by a rolling restart, one node at a time.</p>
+      <div class="uc-flow"><span>Change + review</span><i>→</i><span class="java">Push to all nodes</span><i>→</i><span>Rolling restart</span></div></div>
+  </div>
+
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="20" y="20" width="80" height="50" rx="6" class="s-soft-acc" style="stroke:var(--track)"/><text x="60" y="42" text-anchor="middle" font-size="8.6" font-weight="700" class="s-acc">-D per job</text><text x="60" y="58" text-anchor="middle" font-size="8.6" class="s-ink">memory · queue</text></svg></div>
+    <div><h4>2. Per-job tuning without touching the cluster</h4>
+      <p>A heavy nightly job asks for more memory per task and a specific queue with <code>-D</code> options, while every other job keeps the cluster defaults.</p>
+      <div class="uc-flow"><span>Cluster defaults</span><i>→</i><span class="java">Job overrides</span><i>→</i><span>Only that job changes</span></div></div>
+  </div>
+
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="20" y="20" width="80" height="50" rx="6" class="s-board"/><text x="60" y="42" text-anchor="middle" font-size="8.6" class="mono" style="fill:#9FD3B8">/jmx</text><text x="60" y="58" text-anchor="middle" font-size="8.6" class="mono" style="fill:#F5C77E">alerts</text></svg></div>
+    <div><h4>3. Monitoring from /jmx</h4>
+      <p>Monitoring systems (Prometheus exporters, Grafana dashboards, cluster managers) poll the daemons' <code>/jmx</code> endpoints for live DataNodes, capacity, missing blocks and queue usage, and page the on-call engineer when thresholds are crossed.</p>
+      <div class="uc-flow"><span>/jmx</span><i>→</i><span class="java">Dashboards</span><i>→</i><span>Alerts</span></div></div>
+  </div>
+
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="16" y="20" width="88" height="50" rx="6" class="s-card2"/><text x="60" y="42" text-anchor="middle" font-size="8.6" font-weight="700" class="s-ink">:9870 · :8088</text><text x="60" y="58" text-anchor="middle" font-size="8.6" class="s-ink2">first look</text></svg></div>
+    <div><h4>4. The UIs are the first stop in an incident</h4>
+      <p>When users say “jobs are slow”, engineers open the ResourceManager UI (queues full? nodes lost?) and the NameNode UI (dead DataNodes? safe mode? disk full?) before reading any log.</p>
+      <div class="uc-flow"><span>Complaint</span><i>→</i><span class="java">RM + NN UIs</span><i>→</i><span>Then logs</span></div></div>
+  </div>
+  <p class="muted">Simplified; organisations differ in tools and policies.</p>
+</section>
+
+
+<div class="ad-slot" data-slot="mid"></div>
+
+<section class="part" id="run">
+  <span class="part-label"><b>7</b> Run the code</span>
+  <h2>Merge configuration layers like Hadoop does</h2>
+  <p>This program loads three layers in order (defaults, site file, command line) and keeps the last value for each property, unless an earlier layer marked it <i>final</i> and the later layer is a file. It also records the source, like the <code>/conf</code> page.</p>
+  <div class="code" data-lang="python" data-file="main.py"><pre><code>layers = [
+    (&quot;hdfs-default.xml&quot;, &quot;file&quot;, {&quot;dfs.replication&quot;: &quot;3&quot;, &quot;dfs.blocksize&quot;: &quot;134217728&quot;}, set()),
+    (&quot;hdfs-site.xml&quot;, &quot;file&quot;, {&quot;dfs.replication&quot;: &quot;1&quot;}, {&quot;dfs.replication&quot;}),
+    (&quot;job.xml&quot;, &quot;file&quot;, {&quot;dfs.replication&quot;: &quot;5&quot;, &quot;dfs.blocksize&quot;: &quot;268435456&quot;}, set()),
+]
+
+conf, source, final = {}, {}, set()
+for name, kind, props, finals in layers:
+    for key, value in props.items():
+        if key in final and kind == &quot;file&quot;:
+            print(f&quot;ignored {key}={value} from {name} (final)&quot;)
+            continue
+        conf[key], source[key] = value, name
+    final |= finals
+
+for key in conf:
+    print(f&quot;{key:16} = {conf[key]:&gt;10}  [{source[key]}]&quot;)</code></pre><div class="output">ignored dfs.replication=5 from job.xml (final)
+dfs.replication  =          1  [hdfs-site.xml]
+dfs.blocksize    =  268435456  [job.xml]</div></div>
+  <ul class="anno"><li><code>(&quot;hdfs-site.xml&quot;, &quot;file&quot;, {&quot;dfs.replication&quot;: &quot;1&quot;}, {&quot;dfs.replication&quot;}),</code><span>The site file sets replication to 1 and marks it final (the last item is the set of final names).</span></li><li><code>if key in final and kind == &quot;file&quot;:</code><span>A later <b>file</b> cannot override a final property. (Values set directly, like <code>-D</code>, are not files: try challenge 2.)</span></li><li><code>final |= finals</code><span>Finals are added only after the layer is loaded, so they protect against <i>later</i> layers.</span></li></ul>
+  <div class="runner">
+    <script type="application/json">{
+ "lang": "python",
+ "file": "main.py",
+ "tasks": [
+  {
+   "label": "1 · Merge the layers",
+   "hint": "Press <b>Run<\/b>. Why is the job's block size accepted but its replication ignored?",
+   "code": "layers = [\n    (\"hdfs-default.xml\", \"file\", {\"dfs.replication\": \"3\", \"dfs.blocksize\": \"134217728\"}, set()),\n    (\"hdfs-site.xml\", \"file\", {\"dfs.replication\": \"1\"}, {\"dfs.replication\"}),\n    (\"job.xml\", \"file\", {\"dfs.replication\": \"5\", \"dfs.blocksize\": \"268435456\"}, set()),\n]\n\nconf, source, final = {}, {}, set()\nfor name, kind, props, finals in layers:\n    for key, value in props.items():\n        if key in final and kind == \"file\":\n            print(f\"ignored {key}={value} from {name} (final)\")\n            continue\n        conf[key], source[key] = value, name\n    final |= finals\n\nfor key in conf:\n    print(f\"{key:16} = {conf[key]:>10}  [{source[key]}]\")\n"
+  },
+  {
+   "label": "2 · A direct -D setting",
+   "hint": "<b>Predict first:<\/b> a direct setting (<code>kind=\"set\"<\/code>) arrives after the final site file. Which replication wins? This matches the real test in Part 4.",
+   "code": "conf, final = {\"dfs.replication\": \"3\"}, {\"dfs.replication\"}\nfor kind, key, value in [(\"file\", \"dfs.replication\", \"4\"), (\"set\", \"dfs.replication\", \"2\")]:\n    if key in final and kind == \"file\":\n        print(\"ignored\", value, \"from a file (final)\")\n    else:\n        conf[key] = value\n        print(\"now\", conf[key], \"via\", kind)\n"
+  },
+  {
+   "label": "3 · Expand ${…} variables",
+   "hint": "Defaults refer to other properties, like <code>file://${hadoop.tmp.dir}/dfs/name<\/code>. Expand them as Hadoop does when the value is used.",
+   "code": "import re\nconf = {\"user.name\": \"riya\", \"hadoop.tmp.dir\": \"/tmp/hadoop-${user.name}\",\n        \"dfs.namenode.name.dir\": \"file://${hadoop.tmp.dir}/dfs/name\"}\ndef get(key):\n    return re.sub(r\"\\$\\{([^}]+)\\}\", lambda m: get(m.group(1)), conf[key])\nprint(get(\"dfs.namenode.name.dir\"))\n"
+  },
+  {
+   "label": "4 · Bytes to MB",
+   "hint": "<code>getconf<\/code> prints <code>134217728<\/code> for the block size. Convert block sizes in bytes to MB.",
+   "code": "for b in [134217728, 268435456, 1048576]:\n    print(f\"{b:>10} bytes = {b // (1024 * 1024)} MB\")\n"
+  },
+  {
+   "label": "5 · Spot the error",
+   "hint": "This merge should let the site file override the default, but the default wins. Fix the order.",
+   "code": "defaults = {\"dfs.replication\": \"3\"}\nsite = {\"dfs.replication\": \"1\"}\nconf = {}\nfor layer in [site, defaults]:\n    conf.update(layer)\nprint(\"dfs.replication =\", conf[\"dfs.replication\"])\n"
+  }
+ ]
+}</script>
+  </div>
+  <h3 id="pc">Run it on your PC: a configuration report from a live NameNode</h3>
+  <p>With your cluster from Lesson 4.3 running, this program reads the NameNode's <code>/conf</code> page and reports how many settings come from each file, plus the value and source of four important ones. Save it as <code>conf_report.py</code> and run it on the same computer.</p>
+  <div class="pcrun"><h4>Where do the NameNode's 1,752 settings come from?</h4>
+  <div class="code" data-lang="bash" data-file="conf_report.py"><pre><code># conf_report.py: which settings is the NameNode really using, and from which file?
+import urllib.request
+import xml.etree.ElementTree as ET
+from collections import Counter
+
+URL = &quot;http://localhost:9870/conf&quot;           # NameNode web UI
+root = ET.fromstring(urllib.request.urlopen(URL).read())
+
+props = {}
+for p in root.iter(&quot;property&quot;):
+    props[p.findtext(&quot;name&quot;)] = (p.findtext(&quot;value&quot;), p.findtext(&quot;source&quot;))
+
+print(f&quot;{len(props)} properties loaded&quot;)
+for source, n in Counter(src for _, src in props.values()).most_common():
+    print(f&quot;{n:&gt;5}  {source}&quot;)
+
+print()
+for key in [&quot;fs.defaultFS&quot;, &quot;dfs.replication&quot;, &quot;dfs.blocksize&quot;, &quot;dfs.namenode.name.dir&quot;]:
+    value, source = props.get(key, (&quot;(not set)&quot;, &quot;-&quot;))
+    print(f&quot;{key:24} = {value}   [{source}]&quot;)
+
+# In a terminal:
+#   python3 conf_report.py</code></pre><div class="output">1752 properties loaded
+  542  hdfs-default.xml
+  523  yarn-default.xml
+  376  core-default.xml
+  194  mapred-default.xml
+   89  hdfs-rbf-default.xml
+   17  programmatically
+    5  yarn-site.xml
+    4  mapred-site.xml
+    2  hdfs-site.xml
+
+fs.defaultFS             = hdfs://namenode   [programmatically]
+dfs.replication          = 3   [hdfs-site.xml]
+dfs.blocksize            = 134217728   [hdfs-default.xml]
+dfs.namenode.name.dir    = file://${hadoop.tmp.dir}/dfs/name   [hdfs-default.xml]</div></div>
+  <p class="muted">Real output from the Docker practice cluster. Two surprises worth knowing: <code>fs.defaultFS</code> shows “programmatically” because the NameNode sets it itself at start-up from its own address, and <code>/conf</code> shows <code>${…}</code> variables unexpanded. On Path A your numbers and sources will differ slightly.</p></div>
+</section>
+
+<section class="part" id="tracer">
+  <span class="part-label"><b>8</b> Line by line</span>
+  <h2>Which value wins, one line at a time</h2>
+  <p>Follow <code>dfs.replication</code> through three layers and watch <code>conf</code> and <code>src</code> change in memory.</p>
+  <div class="tracer">
+    <script type="application/json">{
+ "lang": "python",
+ "code": [
+  "conf, src = {}, {}",
+  "conf[\"dfs.replication\"], src[\"dfs.replication\"] = \"3\", \"hdfs-default.xml\"",
+  "conf[\"dfs.replication\"], src[\"dfs.replication\"] = \"3\", \"hdfs-site.xml\"",
+  "conf[\"dfs.replication\"], src[\"dfs.replication\"] = \"2\", \"-D (client)\"",
+  "print(conf[\"dfs.replication\"], \"from\", src[\"dfs.replication\"])"
+ ],
+ "steps": [
+  {
+   "line": 1,
+   "phase": "Python",
+   "note": "<code>conf<\/code> is created: → dict #1. <code>src<\/code> is created: → dict #2.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "conf",
+       "→ dict #1"
+      ],
+      [
+       "src",
+       "→ dict #2"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (0)<\/b> {}",
+    "<b>#2 dict (0)<\/b> {}"
+   ],
+   "newVar": "src"
+  },
+  {
+   "line": 2,
+   "phase": "Default",
+   "note": "Always loaded first, from inside the jar. Object #1 dict now holds {&#x27;dfs.replication&#x27;: &#x27;3&#x27;} Object #2 dict now holds {&#x27;dfs.replication&#x27;: &#x27;hdfs-default.xml&#x27;}",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "conf",
+       "→ dict #1"
+      ],
+      [
+       "src",
+       "→ dict #2"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (1)<\/b> {&#x27;dfs.replication&#x27;: &#x27;3&#x27;}",
+    "<b>#2 dict (1)<\/b> {&#x27;dfs.replication&#x27;: &#x27;hdfs-default.xml&#x27;}"
+   ]
+  },
+  {
+   "line": 3,
+   "phase": "Site",
+   "note": "Same number, but now the source is the site file. Object #2 dict now holds {&#x27;dfs.replication&#x27;: &#x27;hdfs-site.xml&#x27;}",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "conf",
+       "→ dict #1"
+      ],
+      [
+       "src",
+       "→ dict #2"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (1)<\/b> {&#x27;dfs.replication&#x27;: &#x27;3&#x27;}",
+    "<b>#2 dict (1)<\/b> {&#x27;dfs.replication&#x27;: &#x27;hdfs-site.xml&#x27;}"
+   ]
+  },
+  {
+   "line": 4,
+   "phase": "Client",
+   "note": "The command-line value is applied last, so it wins. Object #1 dict now holds {&#x27;dfs.replication&#x27;: &#x27;2&#x27;} Object #2 dict now holds {&#x27;dfs.replication&#x27;: &#x27;-D (client)&#x27;}",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "conf",
+       "→ dict #1"
+      ],
+      [
+       "src",
+       "→ dict #2"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (1)<\/b> {&#x27;dfs.replication&#x27;: &#x27;2&#x27;}",
+    "<b>#2 dict (1)<\/b> {&#x27;dfs.replication&#x27;: &#x27;-D (client)&#x27;}"
+   ]
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "conf",
+       "→ dict #1"
+      ],
+      [
+       "src",
+       "→ dict #2"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (1)<\/b> {&#x27;dfs.replication&#x27;: &#x27;2&#x27;}",
+    "<b>#2 dict (1)<\/b> {&#x27;dfs.replication&#x27;: &#x27;-D (client)&#x27;}"
+   ],
+   "out": "2 from -D (client)\n"
+  }
+ ]
+}</script>
+  </div>
+
+<h3 id="worked">Worked examples: real problems, solved and traced in memory</h3>
+  <p class="wx-intro">Three everyday configuration tasks: turning human-friendly sizes into the bytes Hadoop expects, finding differences between two nodes' configurations, and sizing YARN memory for a worker. Each runs live and is traced in memory.</p>
+  <article class="wx">
+    <div class="wx__head"><span class="wx__num">Example 1</span><span class="lvl lvl--b">Beginner</span><span class="wx__tag">Admin · units</span></div>
+    <h4>Write block sizes the way Hadoop stores them</h4>
+    <div class="wx__problem"><p class="wx__label">Problem statement</p><p>A team wants 64 MB, 128 MB and 256 MB block sizes for three data sets. Print the byte values to put in <code>dfs.blocksize</code>, and how many blocks a 10 GB file would have with each.</p></div>
+    <div class="prob__io"><div><small>Input</small><pre>64, 128, 256 MB · 10 GB file</pre></div><div><small>Expected output</small><pre> 64 MB =  67108864 bytes -&gt; 160 blocks
+128 MB = 134217728 bytes -&gt; 80 blocks
+256 MB = 268435456 bytes -&gt; 40 blocks</pre></div></div>
+    <div class="wx__approach"><p class="wx__label">Approach</p><ol><li>1 MB = 1024 × 1024 bytes.</li><li>Blocks = ceil(file size / block size).</li><li>Print both.</li></ol></div>
+    <p class="wx__label">Solution: run it live</p>
+    <div class="runner">
+    <script type="application/json">{
+ "lang": "python",
+ "file": "main.py",
+ "tasks": [
+  {
+   "label": "Solution",
+   "hint": "Fewer, bigger blocks mean less NameNode memory and fewer map tasks, but less parallelism. Module 5 returns to this trade-off.",
+   "code": "import math\nfile_mb = 10 * 1024\nfor mb in [64, 128, 256]:\n    print(f\"{mb:>3} MB = {mb * 1024 * 1024:>9} bytes -> {math.ceil(file_mb / mb)} blocks\")\n"
+  }
+ ]
+}</script>
+    </div>
+    <p class="wx__label">What happens in memory, step by step</p>
+    <p class="wx__how">Recorded from a real Python run: press <b>Next</b> to execute one line at a time. Watch variables change in each frame, and lists and dictionaries (numbered #1, #2 …) fill up as objects.</p>
+    <div class="tracer">
+    <script type="application/json">{
+ "lang": "python",
+ "code": [
+  "import math",
+  "file_mb = 10 * 1024",
+  "for mb in [64, 128, 256]:",
+  "    print(f\"{mb:>3} MB = {mb * 1024 * 1024:>9} bytes -> {math.ceil(file_mb / mb)} blocks\")"
+ ],
+ "steps": [
+  {
+   "line": 1,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": []
+    }
+   ],
+   "heap": []
+  },
+  {
+   "line": 2,
+   "phase": "Python",
+   "note": "<code>file_mb<\/code> is created: 10240.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "file_mb",
+       "10240"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "file_mb"
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "<code>mb<\/code> is created: 64.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "file_mb",
+       "10240"
+      ],
+      [
+       "mb",
+       "64"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "mb"
+  },
+  {
+   "line": 4,
+   "phase": "Bytes",
+   "note": "<code>dfs.blocksize<\/code> also accepts <code>128m<\/code>, but getconf and fsck show bytes. The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "file_mb",
+       "10240"
+      ],
+      [
+       "mb",
+       "64"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "out": " 64 MB =  67108864 bytes -> 160 blocks\n"
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "<code>mb<\/code> changes to 128.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "file_mb",
+       "10240"
+      ],
+      [
+       "mb",
+       "128"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "mb"
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "file_mb",
+       "10240"
+      ],
+      [
+       "mb",
+       "128"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "out": "128 MB = 134217728 bytes -> 80 blocks\n"
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "<code>mb<\/code> changes to 256.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "file_mb",
+       "10240"
+      ],
+      [
+       "mb",
+       "256"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "mb"
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "file_mb",
+       "10240"
+      ],
+      [
+       "mb",
+       "256"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "out": "256 MB = 268435456 bytes -> 40 blocks\n"
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "Nothing is left to loop over, so the loop ends and Python moves on.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "file_mb",
+       "10240"
+      ],
+      [
+       "mb",
+       "256"
+      ]
+     ]
+    }
+   ],
+   "heap": []
+  }
+ ]
+}</script>
+    </div>
+  </article>
+  <article class="wx">
+    <div class="wx__head"><span class="wx__num">Example 2</span><span class="lvl lvl--i">Intermediate</span><span class="wx__tag">Admin · drift</span></div>
+    <h4>Find configuration drift between two nodes</h4>
+    <div class="wx__problem"><p class="wx__label">Problem statement</p><p>Jobs fail only on one worker. Compare the settings collected from a good node and the bad node and print every property whose value differs or exists on only one side.</p></div>
+    <div class="prob__io"><div><small>Input</small><pre>good: replication 3, NM memory 8192, aux mapreduce_shuffle · bad: replication 3, NM memory 2048, no aux</pre></div><div><small>Expected output</small><pre>yarn.nodemanager.aux-services          good=mapreduce_shuffle  bad=(missing)
+yarn.nodemanager.resource.memory-mb    good=8192               bad=2048</pre></div></div>
+    <div class="wx__approach"><p class="wx__label">Approach</p><ol><li>Take the union of property names.</li><li>For each, compare values (missing counts as a difference).</li><li>Print the differences in a table.</li></ol></div>
+    <p class="wx__label">Solution: run it live</p>
+    <div class="runner">
+    <script type="application/json">{
+ "lang": "python",
+ "file": "main.py",
+ "tasks": [
+  {
+   "label": "Solution",
+   "hint": "The missing shuffle service alone makes every reduce on that node fail. This is why identical configuration on all nodes matters.",
+   "code": "good = {\"dfs.replication\": \"3\", \"yarn.nodemanager.resource.memory-mb\": \"8192\",\n        \"yarn.nodemanager.aux-services\": \"mapreduce_shuffle\"}\nbad = {\"dfs.replication\": \"3\", \"yarn.nodemanager.resource.memory-mb\": \"2048\"}\nfor key in sorted(good.keys() | bad.keys()):\n    g, b = good.get(key, \"(missing)\"), bad.get(key, \"(missing)\")\n    if g != b:\n        print(f\"{key:38} good={g:18} bad={b}\")\n"
+  }
+ ]
+}</script>
+    </div>
+    <p class="wx__label">What happens in memory, step by step</p>
+    <p class="wx__how">Recorded from a real Python run: press <b>Next</b> to execute one line at a time. Watch variables change in each frame, and lists and dictionaries (numbered #1, #2 …) fill up as objects.</p>
+    <div class="tracer">
+    <script type="application/json">{
+ "lang": "python",
+ "code": [
+  "good = {\"dfs.replication\": \"3\", \"yarn.nodemanager.resource.memory-mb\": \"8192\",",
+  "        \"yarn.nodemanager.aux-services\": \"mapreduce_shuffle\"}",
+  "bad = {\"dfs.replication\": \"3\", \"yarn.nodemanager.resource.memory-mb\": \"2048\"}",
+  "for key in sorted(good.keys() | bad.keys()):",
+  "    g, b = good.get(key, \"(missing)\"), bad.get(key, \"(missing)\")",
+  "    if g != b:",
+  "        print(f\"{key:38} good={g:18} bad={b}\")"
+ ],
+ "steps": [
+  {
+   "line": 1,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": []
+    }
+   ],
+   "heap": []
+  },
+  {
+   "line": 2,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": []
+    }
+   ],
+   "heap": []
+  },
+  {
+   "line": 1,
+   "phase": "Python",
+   "note": "<code>good<\/code> is created: → dict #1. A new dict object (#1) is created: {&#x27;dfs.replication&#x27;: &#x27;3&#x27;, &#x27;yarn.nodemanager.r…: &#x27;8192&#x27;, &#x27;yarn.nodemanager.a…: &#x27;mapreduce_s…",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "good",
+       "→ dict #1"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;dfs.replication&#x27;: &#x27;3&#x27;, &#x27;yarn.nodemanager.r…: &#x27;8192&#x27;, &#x27;yarn.nodemanager.a…: &#x27;mapreduce_s…"
+   ],
+   "newVar": "good"
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "<code>bad<\/code> is created: → dict #2. A new dict object (#2) is created: {&#x27;dfs.replication&#x27;: &#x27;3&#x27;, &#x27;yarn.nodemanager.r…: &#x27;2048&#x27;}",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "good",
+       "→ dict #1"
+      ],
+      [
+       "bad",
+       "→ dict #2"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;dfs.replication&#x27;: &#x27;3&#x27;, &#x27;yarn.nodemanager.r…: &#x27;8192&#x27;, &#x27;yarn.nodemanager.a…: &#x27;mapreduce_s…",
+    "<b>#2 dict (2)<\/b> {&#x27;dfs.replication&#x27;: &#x27;3&#x27;, &#x27;yarn.nodemanager.r…: &#x27;2048&#x27;}"
+   ],
+   "newVar": "bad"
+  },
+  {
+   "line": 4,
+   "phase": "Union",
+   "note": "<code>|<\/code> on key views gives every name that appears on either side. <code>key<\/code> is created: &#x27;dfs.replication&#x27;.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "good",
+       "→ dict #1"
+      ],
+      [
+       "bad",
+       "→ dict #2"
+      ],
+      [
+       "key",
+       "'dfs.replication'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;dfs.replication&#x27;: &#x27;3&#x27;, &#x27;yarn.nodemanager.r…: &#x27;8192&#x27;, &#x27;yarn.nodemanager.a…: &#x27;mapreduce_s…",
+    "<b>#2 dict (2)<\/b> {&#x27;dfs.replication&#x27;: &#x27;3&#x27;, &#x27;yarn.nodemanager.r…: &#x27;2048&#x27;}"
+   ],
+   "newVar": "key"
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "<code>g<\/code> is created: &#x27;3&#x27;. <code>b<\/code> is created: &#x27;3&#x27;.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "good",
+       "→ dict #1"
+      ],
+      [
+       "bad",
+       "→ dict #2"
+      ],
+      [
+       "key",
+       "'dfs.replication'"
+      ],
+      [
+       "g",
+       "'3'"
+      ],
+      [
+       "b",
+       "'3'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;dfs.replication&#x27;: &#x27;3&#x27;, &#x27;yarn.nodemanager.r…: &#x27;8192&#x27;, &#x27;yarn.nodemanager.a…: &#x27;mapreduce_s…",
+    "<b>#2 dict (2)<\/b> {&#x27;dfs.replication&#x27;: &#x27;3&#x27;, &#x27;yarn.nodemanager.r…: &#x27;2048&#x27;}"
+   ],
+   "newVar": "b"
+  },
+  {
+   "line": 6,
+   "phase": "Python",
+   "note": "The condition is <b>False<\/b>, so the indented block is skipped.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "good",
+       "→ dict #1"
+      ],
+      [
+       "bad",
+       "→ dict #2"
+      ],
+      [
+       "key",
+       "'dfs.replication'"
+      ],
+      [
+       "g",
+       "'3'"
+      ],
+      [
+       "b",
+       "'3'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;dfs.replication&#x27;: &#x27;3&#x27;, &#x27;yarn.nodemanager.r…: &#x27;8192&#x27;, &#x27;yarn.nodemanager.a…: &#x27;mapreduce_s…",
+    "<b>#2 dict (2)<\/b> {&#x27;dfs.replication&#x27;: &#x27;3&#x27;, &#x27;yarn.nodemanager.r…: &#x27;2048&#x27;}"
+   ]
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "<code>key<\/code> changes to &#x27;yarn.nodemanager.aux-services&#x27;.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "good",
+       "→ dict #1"
+      ],
+      [
+       "bad",
+       "→ dict #2"
+      ],
+      [
+       "key",
+       "'yarn.nodemanager.aux-services'"
+      ],
+      [
+       "g",
+       "'3'"
+      ],
+      [
+       "b",
+       "'3'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;dfs.replication&#x27;: &#x27;3&#x27;, &#x27;yarn.nodemanager.r…: &#x27;8192&#x27;, &#x27;yarn.nodemanager.a…: &#x27;mapreduce_s…",
+    "<b>#2 dict (2)<\/b> {&#x27;dfs.replication&#x27;: &#x27;3&#x27;, &#x27;yarn.nodemanager.r…: &#x27;2048&#x27;}"
+   ],
+   "newVar": "key"
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "<code>g<\/code> changes to &#x27;mapreduce_shuffle&#x27;. <code>b<\/code> changes to &#x27;(missing)&#x27;.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "good",
+       "→ dict #1"
+      ],
+      [
+       "bad",
+       "→ dict #2"
+      ],
+      [
+       "key",
+       "'yarn.nodemanager.aux-services'"
+      ],
+      [
+       "g",
+       "'mapreduce_shuffle'"
+      ],
+      [
+       "b",
+       "'(missing)'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;dfs.replication&#x27;: &#x27;3&#x27;, &#x27;yarn.nodemanager.r…: &#x27;8192&#x27;, &#x27;yarn.nodemanager.a…: &#x27;mapreduce_s…",
+    "<b>#2 dict (2)<\/b> {&#x27;dfs.replication&#x27;: &#x27;3&#x27;, &#x27;yarn.nodemanager.r…: &#x27;2048&#x27;}"
+   ],
+   "newVar": "b"
+  },
+  {
+   "line": 6,
+   "phase": "Python",
+   "note": "The condition is <b>True<\/b>, so the indented block runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "good",
+       "→ dict #1"
+      ],
+      [
+       "bad",
+       "→ dict #2"
+      ],
+      [
+       "key",
+       "'yarn.nodemanager.aux-services'"
+      ],
+      [
+       "g",
+       "'mapreduce_shuffle'"
+      ],
+      [
+       "b",
+       "'(missing)'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;dfs.replication&#x27;: &#x27;3&#x27;, &#x27;yarn.nodemanager.r…: &#x27;8192&#x27;, &#x27;yarn.nodemanager.a…: &#x27;mapreduce_s…",
+    "<b>#2 dict (2)<\/b> {&#x27;dfs.replication&#x27;: &#x27;3&#x27;, &#x27;yarn.nodemanager.r…: &#x27;2048&#x27;}"
+   ]
+  },
+  {
+   "line": 7,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "good",
+       "→ dict #1"
+      ],
+      [
+       "bad",
+       "→ dict #2"
+      ],
+      [
+       "key",
+       "'yarn.nodemanager.aux-services'"
+      ],
+      [
+       "g",
+       "'mapreduce_shuffle'"
+      ],
+      [
+       "b",
+       "'(missing)'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;dfs.replication&#x27;: &#x27;3&#x27;, &#x27;yarn.nodemanager.r…: &#x27;8192&#x27;, &#x27;yarn.nodemanager.a…: &#x27;mapreduce_s…",
+    "<b>#2 dict (2)<\/b> {&#x27;dfs.replication&#x27;: &#x27;3&#x27;, &#x27;yarn.nodemanager.r…: &#x27;2048&#x27;}"
+   ],
+   "out": "yarn.nodemanager.aux-services          good=mapreduce_shuffle  bad=(missing)\n"
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "<code>key<\/code> changes to &#x27;yarn.nodemanager.resource.memory-mb&#x27;.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "good",
+       "→ dict #1"
+      ],
+      [
+       "bad",
+       "→ dict #2"
+      ],
+      [
+       "key",
+       "'yarn.nodemanager.resource.memory-mb'"
+      ],
+      [
+       "g",
+       "'mapreduce_shuffle'"
+      ],
+      [
+       "b",
+       "'(missing)'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;dfs.replication&#x27;: &#x27;3&#x27;, &#x27;yarn.nodemanager.r…: &#x27;8192&#x27;, &#x27;yarn.nodemanager.a…: &#x27;mapreduce_s…",
+    "<b>#2 dict (2)<\/b> {&#x27;dfs.replication&#x27;: &#x27;3&#x27;, &#x27;yarn.nodemanager.r…: &#x27;2048&#x27;}"
+   ],
+   "newVar": "key"
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "<code>g<\/code> changes to &#x27;8192&#x27;. <code>b<\/code> changes to &#x27;2048&#x27;.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "good",
+       "→ dict #1"
+      ],
+      [
+       "bad",
+       "→ dict #2"
+      ],
+      [
+       "key",
+       "'yarn.nodemanager.resource.memory-mb'"
+      ],
+      [
+       "g",
+       "'8192'"
+      ],
+      [
+       "b",
+       "'2048'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;dfs.replication&#x27;: &#x27;3&#x27;, &#x27;yarn.nodemanager.r…: &#x27;8192&#x27;, &#x27;yarn.nodemanager.a…: &#x27;mapreduce_s…",
+    "<b>#2 dict (2)<\/b> {&#x27;dfs.replication&#x27;: &#x27;3&#x27;, &#x27;yarn.nodemanager.r…: &#x27;2048&#x27;}"
+   ],
+   "newVar": "b"
+  },
+  {
+   "line": 6,
+   "phase": "Python",
+   "note": "The condition is <b>True<\/b>, so the indented block runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "good",
+       "→ dict #1"
+      ],
+      [
+       "bad",
+       "→ dict #2"
+      ],
+      [
+       "key",
+       "'yarn.nodemanager.resource.memory-mb'"
+      ],
+      [
+       "g",
+       "'8192'"
+      ],
+      [
+       "b",
+       "'2048'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;dfs.replication&#x27;: &#x27;3&#x27;, &#x27;yarn.nodemanager.r…: &#x27;8192&#x27;, &#x27;yarn.nodemanager.a…: &#x27;mapreduce_s…",
+    "<b>#2 dict (2)<\/b> {&#x27;dfs.replication&#x27;: &#x27;3&#x27;, &#x27;yarn.nodemanager.r…: &#x27;2048&#x27;}"
+   ]
+  },
+  {
+   "line": 7,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "good",
+       "→ dict #1"
+      ],
+      [
+       "bad",
+       "→ dict #2"
+      ],
+      [
+       "key",
+       "'yarn.nodemanager.resource.memory-mb'"
+      ],
+      [
+       "g",
+       "'8192'"
+      ],
+      [
+       "b",
+       "'2048'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;dfs.replication&#x27;: &#x27;3&#x27;, &#x27;yarn.nodemanager.r…: &#x27;8192&#x27;, &#x27;yarn.nodemanager.a…: &#x27;mapreduce_s…",
+    "<b>#2 dict (2)<\/b> {&#x27;dfs.replication&#x27;: &#x27;3&#x27;, &#x27;yarn.nodemanager.r…: &#x27;2048&#x27;}"
+   ],
+   "out": "yarn.nodemanager.resource.memory-mb    good=8192               bad=2048\n"
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "Nothing is left to loop over, so the loop ends and Python moves on.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "good",
+       "→ dict #1"
+      ],
+      [
+       "bad",
+       "→ dict #2"
+      ],
+      [
+       "key",
+       "'yarn.nodemanager.resource.memory-mb'"
+      ],
+      [
+       "g",
+       "'8192'"
+      ],
+      [
+       "b",
+       "'2048'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;dfs.replication&#x27;: &#x27;3&#x27;, &#x27;yarn.nodemanager.r…: &#x27;8192&#x27;, &#x27;yarn.nodemanager.a…: &#x27;mapreduce_s…",
+    "<b>#2 dict (2)<\/b> {&#x27;dfs.replication&#x27;: &#x27;3&#x27;, &#x27;yarn.nodemanager.r…: &#x27;2048&#x27;}"
+   ]
+  }
+ ]
+}</script>
+    </div>
+  </article>
+  <article class="wx">
+    <div class="wx__head"><span class="wx__num">Example 3</span><span class="lvl lvl--a">Advanced</span><span class="wx__tag">Capacity · YARN memory</span></div>
+    <h4>How much memory should YARN offer on a worker?</h4>
+    <div class="wx__problem"><p class="wx__label">Problem statement</p><p>A worker has 128 GB RAM. Reserve 8 GB for the operating system, 4 GB for the DataNode and 2 GB for the NodeManager. Set <code>yarn.nodemanager.resource.memory-mb</code> to the rest, and work out how many 4 GB containers fit. (The practice cluster's UI showed the default of 8 GB per node.)</p></div>
+    <div class="prob__io"><div><small>Input</small><pre>128 GB RAM · OS 8 · DataNode 4 · NodeManager 2 · 4 GB containers</pre></div><div><small>Expected output</small><pre>yarn.nodemanager.resource.memory-mb = 116736
+4 GB containers per node: 28</pre></div></div>
+    <div class="wx__approach"><p class="wx__label">Approach</p><ol><li>Subtract the reserved memory.</li><li>Convert to MB for the property.</li><li>Containers = YARN memory // container size.</li></ol></div>
+    <p class="wx__label">Solution: run it live</p>
+    <div class="runner">
+    <script type="application/json">{
+ "lang": "python",
+ "file": "main.py",
+ "tasks": [
+  {
+   "label": "Solution",
+   "hint": "Leave the property unset and YARN uses its default (8 GB in the practice cluster UI): a 128 GB server would run only 2 containers of 4 GB. Untuned defaults waste most of the hardware.",
+   "code": "ram_gb, reserved = 128, {\"OS\": 8, \"DataNode\": 4, \"NodeManager\": 2}\nyarn_gb = ram_gb - sum(reserved.values())\nprint(\"yarn.nodemanager.resource.memory-mb =\", yarn_gb * 1024)\nprint(\"4 GB containers per node:\", yarn_gb // 4)\n"
+  }
+ ]
+}</script>
+    </div>
+    <p class="wx__label">What happens in memory, step by step</p>
+    <p class="wx__how">Recorded from a real Python run: press <b>Next</b> to execute one line at a time. Watch variables change in each frame, and lists and dictionaries (numbered #1, #2 …) fill up as objects.</p>
+    <div class="tracer">
+    <script type="application/json">{
+ "lang": "python",
+ "code": [
+  "ram_gb, reserved = 128, {\"OS\": 8, \"DataNode\": 4, \"NodeManager\": 2}",
+  "yarn_gb = ram_gb - sum(reserved.values())",
+  "print(\"yarn.nodemanager.resource.memory-mb =\", yarn_gb * 1024)",
+  "print(\"4 GB containers per node:\", yarn_gb // 4)"
+ ],
+ "steps": [
+  {
+   "line": 1,
+   "phase": "Python",
+   "note": "<code>ram_gb<\/code> is created: 128. <code>reserved<\/code> is created: → dict #1.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "ram_gb",
+       "128"
+      ],
+      [
+       "reserved",
+       "→ dict #1"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;OS&#x27;: 8, &#x27;DataNode&#x27;: 4, &#x27;NodeManager&#x27;: 2}"
+   ],
+   "newVar": "reserved"
+  },
+  {
+   "line": 2,
+   "phase": "Reserve",
+   "note": "Memory YARN must not hand out to containers. <code>yarn_gb<\/code> is created: 114.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "ram_gb",
+       "128"
+      ],
+      [
+       "reserved",
+       "→ dict #1"
+      ],
+      [
+       "yarn_gb",
+       "114"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;OS&#x27;: 8, &#x27;DataNode&#x27;: 4, &#x27;NodeManager&#x27;: 2}"
+   ],
+   "newVar": "yarn_gb"
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "ram_gb",
+       "128"
+      ],
+      [
+       "reserved",
+       "→ dict #1"
+      ],
+      [
+       "yarn_gb",
+       "114"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;OS&#x27;: 8, &#x27;DataNode&#x27;: 4, &#x27;NodeManager&#x27;: 2}"
+   ],
+   "out": "yarn.nodemanager.resource.memory-mb = 116736\n"
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "ram_gb",
+       "128"
+      ],
+      [
+       "reserved",
+       "→ dict #1"
+      ],
+      [
+       "yarn_gb",
+       "114"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;OS&#x27;: 8, &#x27;DataNode&#x27;: 4, &#x27;NodeManager&#x27;: 2}"
+   ],
+   "out": "4 GB containers per node: 28\n"
+  }
+ ]
+}</script>
+    </div>
+  </article>
+</section>
+
+<section class="part" id="quiz">
+  <span class="part-label"><b>9</b> Quiz and revision</span>
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <script type="application/json">[
+ {
+  "q": "Which file normally overrides hdfs-default.xml?",
+  "options": [
+   "core-default.xml",
+   "workers",
+   "hdfs-site.xml",
+   "log4j.properties"
+  ],
+  "answer": 2,
+  "why": "Site files are loaded after the defaults, so their values win."
+ },
+ {
+  "q": "Where is fs.defaultFS normally set?",
+  "options": [
+   "hdfs-site.xml",
+   "core-site.xml",
+   "yarn-site.xml",
+   "workers"
+  ],
+  "answer": 1,
+  "why": "core-site.xml holds settings shared by all components, including the default file system."
+ },
+ {
+  "q": "What does hdfs getconf -confKey dfs.blocksize print on a default install?",
+  "options": [
+   "134217728",
+   "128",
+   "128 MB",
+   "64m"
+  ],
+  "answer": 0,
+  "why": "The default is 134217728 bytes, i.e. 128 MB."
+ },
+ {
+  "q": "A client runs hdfs dfs -D dfs.replication=2 -put a.csv /data/. What happens?",
+  "options": [
+   "The cluster default changes to 2",
+   "The command fails because the site file says 3",
+   "All existing files change to 2",
+   "Only a.csv is written with 2 replicas"
+  ],
+  "answer": 3,
+  "why": "-D applies to that command only. Replication is a per-file setting chosen by the writing client."
+ },
+ {
+  "q": "What does <final>true<\/final> on a property in a site file do?",
+  "options": [
+   "Makes the property impossible to change in any way",
+   "Encrypts the value",
+   "Stops later configuration files (e.g. a job.xml) from overriding it",
+   "Deletes the default"
+  ],
+  "answer": 2,
+  "why": "Final protects against later resources. In the real test, a direct -D setting still applied."
+ },
+ {
+  "q": "Which port is the ResourceManager web UI by default?",
+  "options": [
+   "9870",
+   "8088",
+   "8042",
+   "19888"
+  ],
+  "answer": 1,
+  "why": "NameNode 9870, ResourceManager 8088, NodeManager 8042, JobHistory 19888."
+ },
+ {
+  "q": "You add a property to yarn-site.xml but nothing changes. Most likely:",
+  "options": [
+   "The daemons were not restarted (or the file was not copied to every node)",
+   "XML is case-insensitive",
+   "YARN ignores site files",
+   "You must reformat the NameNode"
+  ],
+  "answer": 0,
+  "why": "Daemons read configuration at start-up. Change, distribute, then restart."
+ },
+ {
+  "q": "Which endpoint shows the settings a running daemon uses, with their source file?",
+  "options": [
+   "/logs",
+   "/stacks",
+   "/static",
+   "/conf"
+  ],
+  "answer": 3,
+  "why": "/conf lists every property, its value, whether it is final, and its source."
+ }
+]</script>
+  </div>
+
+  <h3>Quick revision</h3>
+  <div class="revision">
+    <h3>Lesson 4.4 in one screen</h3>
+    <ul><li>Layers: <b>*-default.xml</b> (in jars) → <b>*-site.xml</b> (etc/hadoop) → <b>-D / code</b>. Later wins.</li><li><b>final</b>: later configuration <i>files</i> cannot override it (e.g. job.xml). A direct <code>-D</code> still applied in our test.</li><li>core-site: <code>fs.defaultFS</code> · hdfs-site: replication, block size, dirs · yarn-site: RM host, NM memory, shuffle · mapred-site: framework.</li><li><code>hadoop-env.sh</code>: <code>JAVA_HOME</code>, heap · <code>workers</code>: worker hosts · <code>capacity-scheduler.xml</code>: queues.</li><li>Check values: <code>hdfs getconf -confKey &lt;name&gt;</code> and the daemon's <code>/conf</code> page (shows source).</li><li>Replication and block size are <b>per file</b>, chosen by the writer; change existing files with <code>hdfs dfs -setrep</code>.</li><li>UIs: NN <b>9870</b> · DN <b>9864</b> · SNN 9868 · RM <b>8088</b> · NM <b>8042</b> · JHS <b>19888</b>. Endpoints: <code>/conf</code>, <code>/jmx</code>, <code>/logs</code>.</li><li>Edit → copy to all nodes → restart. Editing alone changes nothing in running daemons.</li></ul>
+  </div>
+
+  <h3>Interview and viva questions</h3>
+  <div class="faq">
+    <details><summary>What are the main configuration files in Hadoop?</summary><p>core-site.xml (common settings such as fs.defaultFS), hdfs-site.xml (HDFS: replication, block size, storage folders, addresses), yarn-site.xml (YARN: ResourceManager host, NodeManager resources, auxiliary services), mapred-site.xml (MapReduce: framework, task memory, history server), plus hadoop-env.sh, yarn-env.sh and mapred-env.sh for environment variables, and workers for the list of worker hosts.</p></details>
+    <details><summary>What is the difference between core-default.xml and core-site.xml?</summary><p>core-default.xml ships inside Hadoop's jars and holds the default for every core property; it is read-only reference. core-site.xml is your file in etc/hadoop that overrides the defaults you want to change.</p></details>
+    <details><summary>What is a final property in Hadoop?</summary><p>A property marked &lt;final&gt;true&lt;/final&gt; cannot be overridden by configuration resources loaded later, for example the job.xml of a submitted job. Administrators use it to protect cluster-wide values. It does not stop a program from setting the value directly in its own configuration object.</p></details>
+    <details><summary>How do I check the value of a configuration property?</summary><p>Use hdfs getconf -confKey &lt;name&gt; for the merged value seen by the client, or open http://&lt;daemon-host&gt;:&lt;port&gt;/conf to see what a running daemon uses, including the source file.</p></details>
+    <details><summary>What are the default web UI ports in Hadoop 3?</summary><p>NameNode 9870, SecondaryNameNode 9868, DataNode 9864, ResourceManager 8088, NodeManager 8042, MapReduce JobHistory Server 19888. (Hadoop 2 used 50070 for the NameNode and 50075 for DataNodes.)</p></details>
+    <details><summary>Do I need to restart Hadoop after changing configuration?</summary><p>Usually yes: daemons read site files at start-up. Some changes can be refreshed without a restart, for example hdfs dfsadmin -refreshNodes for include/exclude lists and yarn rmadmin -refreshQueues for scheduler queues. Client-side settings take effect on the next command.</p></details>
+    <details><summary>Can I change the replication of an existing file?</summary><p>Yes, with hdfs dfs -setrep &lt;n&gt; &lt;path&gt; (-w waits for completion). Changing dfs.replication in hdfs-site.xml only affects files written afterwards by clients that use that file.</p></details>
+    
+  </div>
+
+  <h3 id="practice">Practice problems</h3>
+  <p class="prob-intro">Exercises on reading, converting and checking configuration values. Each one runs in the browser.</p>
+  <div class="probs">
+    <article class="prob"><div class="prob__head"><span class="prob__num">P1</span><span class="prob__tag prob__tag--easy">Easy</span><h4>Which file?</h4></div>
+      <p>Print which site file each property belongs in.</p>
+      <div class="prob__io"><div><small>Input</small><pre>fs.defaultFS · dfs.replication · yarn.resourcemanager.hostname · mapreduce.framework.name</pre></div><div><small>Expected output</small><pre>fs.defaultFS -&gt; core-site.xml
+dfs.replication -&gt; hdfs-site.xml
+yarn.resourcemanager.hostname -&gt; yarn-site.xml
+mapreduce.framework.name -&gt; mapred-site.xml</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>prefix = {&quot;fs.&quot;: &quot;core-site.xml&quot;, &quot;dfs.&quot;: &quot;hdfs-site.xml&quot;,
+          &quot;yarn.&quot;: &quot;yarn-site.xml&quot;, &quot;mapreduce.&quot;: &quot;mapred-site.xml&quot;}
+for key in [&quot;fs.defaultFS&quot;, &quot;dfs.replication&quot;, &quot;yarn.resourcemanager.hostname&quot;, &quot;mapreduce.framework.name&quot;]:
+    print(key, &quot;-&gt;&quot;, next(f for p, f in prefix.items() if key.startswith(p)))</code></pre><div class="output">fs.defaultFS -&gt; core-site.xml
+dfs.replication -&gt; hdfs-site.xml
+yarn.resourcemanager.hostname -&gt; yarn-site.xml
+mapreduce.framework.name -&gt; mapred-site.xml</div></div>
+        <p><b>How it works:</b> The prefix usually tells you the file: fs → core, dfs → hdfs, yarn → yarn, mapreduce → mapred. (A few exceptions exist, such as hadoop.* in core-site.)</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P2</span><span class="prob__tag prob__tag--easy">Easy</span><h4>Port lookup</h4></div>
+      <p>Print the web UI URL of each daemon on host nn1 (masters) or w1 (workers).</p>
+      <div class="prob__io"><div><small>Input</small><pre>NameNode, ResourceManager on nn1 · DataNode, NodeManager on w1</pre></div><div><small>Expected output</small><pre>NameNode         http://nn1:9870
+ResourceManager  http://nn1:8088
+DataNode         http://w1:9864
+NodeManager      http://w1:8042</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>uis = [(&quot;NameNode&quot;, &quot;nn1&quot;, 9870), (&quot;ResourceManager&quot;, &quot;nn1&quot;, 8088),
+       (&quot;DataNode&quot;, &quot;w1&quot;, 9864), (&quot;NodeManager&quot;, &quot;w1&quot;, 8042)]
+for name, host, port in uis:
+    print(f&quot;{name:16} http://{host}:{port}&quot;)</code></pre><div class="output">NameNode         http://nn1:9870
+ResourceManager  http://nn1:8088
+DataNode         http://w1:9864
+NodeManager      http://w1:8042</div></div>
+        <p><b>How it works:</b> Four URLs you will open often; the JobHistory Server adds 19888 when it is running.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P3</span><span class="prob__tag prob__tag--easy">Easy</span><h4>Read a stat line</h4></div>
+      <p>Parse the real line "2 134217728 4692009 copy2.csv" (replication, block size, bytes, name).</p>
+      <div class="prob__io"><div><small>Input</small><pre>2 134217728 4692009 copy2.csv</pre></div><div><small>Expected output</small><pre>copy2.csv: 2 replicas, 128 MB blocks, 4.5 MB</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>r, block, size, name = &quot;2 134217728 4692009 copy2.csv&quot;.split()
+print(f&quot;{name}: {r} replicas, {int(block) // 2**20} MB blocks, {int(size) / 2**20:.1f} MB&quot;)</code></pre><div class="output">copy2.csv: 2 replicas, 128 MB blocks, 4.5 MB</div></div>
+        <p><b>How it works:</b> copy2.csv: 2 replicas, 128 MB blocks, 4.5 MB of data.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P4</span><span class="prob__tag prob__tag--medium">Medium</span><h4>Blocks for each block size</h4></div>
+      <p>The 4,692,009-byte canteen file was written with 128 MB and 1 MB blocks. How many blocks in each case? (fsck reported 5 for 1 MB.)</p>
+      <div class="prob__io"><div><small>Input</small><pre>4,692,009 bytes · 134217728 and 1048576</pre></div><div><small>Expected output</small><pre>134217728 -&gt; 1 block(s)
+1048576 -&gt; 5 block(s)</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>import math
+for block in [134217728, 1048576]:
+    print(block, &quot;-&gt;&quot;, math.ceil(4692009 / block), &quot;block(s)&quot;)</code></pre><div class="output">134217728 -&gt; 1 block(s)
+1048576 -&gt; 5 block(s)</div></div>
+        <p><b>How it works:</b> 1 block with 128 MB and 5 blocks with 1 MB, matching the real fsck output.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P5</span><span class="prob__tag prob__tag--medium">Medium</span><h4>Override order</h4></div>
+      <p>Apply defaults, then site, then -D options, and print the final values.</p>
+      <div class="prob__io"><div><small>Input</small><pre>defaults {replication 3, blocksize 128m} · site {replication 2} · -D {blocksize 256m}</pre></div><div><small>Expected output</small><pre>{&#x27;dfs.replication&#x27;: &#x27;2&#x27;, &#x27;dfs.blocksize&#x27;: &#x27;256m&#x27;}</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>conf = {}
+for layer in [{&quot;dfs.replication&quot;: &quot;3&quot;, &quot;dfs.blocksize&quot;: &quot;128m&quot;},
+              {&quot;dfs.replication&quot;: &quot;2&quot;},
+              {&quot;dfs.blocksize&quot;: &quot;256m&quot;}]:
+    conf.update(layer)
+print(conf)</code></pre><div class="output">{&#x27;dfs.replication&#x27;: &#x27;2&#x27;, &#x27;dfs.blocksize&#x27;: &#x27;256m&#x27;}</div></div>
+        <p><b>How it works:</b> Replication 2 (from the site file) and block size 256m (from -D). Each property is decided separately.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P6</span><span class="prob__tag prob__tag--medium">Medium</span><h4>Parse a property line</h4></div>
+      <p>Extract the name, value and source from a real /conf line.</p>
+      <div class="prob__io"><div><small>Input</small><pre>&amp;lt;property&amp;gt;&amp;lt;name&amp;gt;dfs.replication&amp;lt;/name&amp;gt;&amp;lt;value&amp;gt;3&amp;lt;/value&amp;gt;…&amp;lt;source&amp;gt;hdfs-site.xml&amp;lt;/source&amp;gt;</pre></div><div><small>Expected output</small><pre>{&#x27;name&#x27;: &#x27;dfs.replication&#x27;, &#x27;value&#x27;: &#x27;3&#x27;, &#x27;final&#x27;: &#x27;false&#x27;, &#x27;source&#x27;: &#x27;hdfs-site.xml&#x27;}</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>import re
+line = &quot;&lt;property&gt;&lt;name&gt;dfs.replication&lt;/name&gt;&lt;value&gt;3&lt;/value&gt;&lt;final&gt;false&lt;/final&gt;&lt;source&gt;hdfs-site.xml&lt;/source&gt;&quot;
+fields = dict(re.findall(r&quot;&lt;(name|value|final|source)&gt;([^&lt;]*)&lt;/&quot;, line))
+print(fields)</code></pre><div class="output">{&#x27;name&#x27;: &#x27;dfs.replication&#x27;, &#x27;value&#x27;: &#x27;3&#x27;, &#x27;final&#x27;: &#x27;false&#x27;, &#x27;source&#x27;: &#x27;hdfs-site.xml&#x27;}</div></div>
+        <p><b>How it works:</b> name dfs.replication, value 3, final false, source hdfs-site.xml: the same fields conf_report.py reads.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P7</span><span class="prob__tag prob__tag--business">Business problem</span><h4>Cost of the 90% disk rule</h4></div>
+      <p>A 20-node cluster has 12 disks of 4 TB per node. The NodeManager disk check marks a disk bad above 90% use. How much raw capacity (TB) sits in that last 10% across the cluster?</p>
+      <div class="prob__io"><div><small>Input</small><pre>20 nodes × 12 × 4 TB · 10%</pre></div><div><small>Expected output</small><pre>raw 960 TB, top 10% = 96 TB</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>raw_tb = 20 * 12 * 4
+print(f&quot;raw {raw_tb} TB, top 10% = {raw_tb * 0.10:.0f} TB&quot;)</code></pre><div class="output">raw 960 TB, top 10% = 96 TB</div></div>
+        <p><b>How it works:</b> 96 TB of 960 TB. That headroom is deliberate: full disks cause failed tasks and slow writes, so admins alert well before 90%.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P8</span><span class="prob__tag prob__tag--advanced">Advanced</span><h4>Unit-aware sizes</h4></div>
+      <p>Many properties accept units (k, m, g, t). Convert "128m", "1g", "512k" and "134217728" to bytes.</p>
+      <div class="prob__io"><div><small>Input</small><pre>128m · 1g · 512k · 134217728</pre></div><div><small>Expected output</small><pre>      128m -&gt; 134,217,728 bytes
+        1g -&gt; 1,073,741,824 bytes
+      512k -&gt; 524,288 bytes
+ 134217728 -&gt; 134,217,728 bytes</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>def to_bytes(v):
+    units = {&quot;k&quot;: 1, &quot;m&quot;: 2, &quot;g&quot;: 3, &quot;t&quot;: 4}
+    if v[-1].lower() in units:
+        return int(v[:-1]) * 1024 ** units[v[-1].lower()]
+    return int(v)
+for v in [&quot;128m&quot;, &quot;1g&quot;, &quot;512k&quot;, &quot;134217728&quot;]:
+    print(f&quot;{v:&gt;10} -&gt; {to_bytes(v):,} bytes&quot;)</code></pre><div class="output">      128m -&gt; 134,217,728 bytes
+        1g -&gt; 1,073,741,824 bytes
+      512k -&gt; 524,288 bytes
+ 134217728 -&gt; 134,217,728 bytes</div></div>
+        <p><b>How it works:</b> 128m = 134,217,728; 1g = 1,073,741,824; 512k = 524,288; and a plain number is already bytes.</p>
+      </details>
+    </article>
+  </div>
+
+  <h3 id="scenarios">Real-world scenario questions (asked in company interviews)</h3>
+  <p class="scn-intro">Configuration questions are about reasoning: where does a value come from, and how do you prove it?</p>
+  <div class="scenarios">
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Admin · config</span><span class="scn__tag scn__tag--level">Fresher</span></div>
+      <h4>“I changed dfs.replication to 2 but files still have 3 copies”</h4>
+      <p class="scn__situation">An admin edited hdfs-site.xml on the NameNode host. New uploads from the edge node still show replication 3 and old files are unchanged.</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> client-side vs server-side settings.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>Replication is chosen by the <b>writing client</b> per file. The edge node still has its own hdfs-site.xml with 3.</li>
+          <li>Update and distribute the configuration to clients (and all nodes); verify with <code>hdfs getconf -confKey dfs.replication</code> on the edge node.</li>
+          <li>Existing files keep their replication; change them with <code>hdfs dfs -setrep -w 2 /path</code> if needed.</li>
+        </ul>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Admin · troubleshooting</span><span class="scn__tag scn__tag--level">Fresher</span></div>
+      <h4>“How do you know which value a daemon is using?”</h4>
+      <p class="scn__situation">Two engineers disagree about the NodeManager memory setting on a worker.</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> do you know how to check instead of guessing?</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>Open <code>http://&lt;worker&gt;:8042/conf</code>: it shows the value the running NodeManager loaded, and its source file.</li>
+          <li>Compare with the file on disk; if they differ, the daemon was not restarted after the change.</li>
+          <li>The ResourceManager Nodes page also shows each node's total memory and vcores.</li>
+        </ul>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Platform · governance</span><span class="scn__tag scn__tag--level">Experienced</span></div>
+      <h4>Users keep overriding a cluster setting in their jobs</h4>
+      <p class="scn__situation">Some teams submit jobs with very large task memory, starving others. The platform team wants to stop job configurations from overriding certain values.</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> what final does and does not do, and the right tools for limits.</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>Mark cluster-wide values <code>final</code> in the site files on the nodes, so a job's <code>job.xml</code> cannot override them there.</li>
+          <li>Know its limit: a client can still set a value directly in its own process, so final is not a security control.</li>
+          <li>Enforce limits on the server side: YARN's maximum allocation (<code>yarn.scheduler.maximum-allocation-mb</code>) and queue capacities in the scheduler.</li>
+          <li>Monitor usage per queue and review exceptions.</li>
+        </ul>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Operations · monitoring</span><span class="scn__tag scn__tag--level">Experienced</span></div>
+      <h4>Set up basic monitoring for a new cluster</h4>
+      <p class="scn__situation">A small company has just built a Hadoop cluster and has no monitoring yet.</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> do you know where the metrics come from and what matters?</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>Collect metrics from each daemon's <code>/jmx</code> endpoint (or a Prometheus exporter that reads it).</li>
+          <li>Alert on: dead DataNodes, missing or under-replicated blocks, HDFS capacity, safe mode, NodeManagers lost or unhealthy, queue usage and failed applications.</li>
+          <li>Dashboards for trends (capacity growth, job durations) and links to the NameNode and ResourceManager UIs for investigation.</li>
+        </ul>
+      </div></details>
+    </article>
+
+  </div>
+</section>
+
+<nav class="lesson-nav" id="lesson-nav" aria-label="Lesson navigation"></nav>
+<div class="ad-slot" data-slot="bottom"></div>
+</article>
+
+<aside class="lesson-side">
+  <nav class="toc" aria-label="In this lesson">
+    <h4>In this lesson</h4>
+    <ol>
+      <li><a href="#story">The story</a></li>
+      <li><a href="#definition">Definition</a></li><li><a href="#levels">Beginner → Advanced</a></li>
+      <li><a href="#types">Types and ways to use it</a></li>
+      <li><a href="#steps">Step by step</a></li>
+      <li><a href="#animation">See it happen</a></li>
+      <li><a href="#real-world">Real-world use</a></li>
+      <li><a href="#run">Run the code</a></li><li><a href="#pc">Run on your PC</a></li>
+      <li><a href="#tracer">Line by line</a></li>
+      <li><a href="#worked">Worked examples</a></li>
+      <li><a href="#quiz">Quiz and revision</a></li>
+      <li><a href="#practice">Practice problems</a></li>
+      <li><a href="#scenarios">Industry scenarios</a></li>
+    </ol>
+  </nav>
+  <div class="ad-slot" data-slot="side"></div>
+  <div class="outline" id="outline"></div>
+</aside>
+</div>
+</main>
+
+<footer class="site-footer">
+  <div class="wrap">
+    <div><h4>MyPhatshala</h4><p>Free programming and IT lessons that show what happens behind the screen.</p></div>
+    <div><h4>Learn</h4><a href="../../../../#tracks">All courses</a><a href="../../">Apache Hadoop syllabus</a></div>
+    <div><h4>Site</h4><a href="../../../../about.html">About</a><a href="../../../../contact.html">Contact</a><a href="../../../../privacy.html">Privacy policy</a><a href="../../../../disclaimer.html">Disclaimer</a></div>
+    <div class="copyright">© MyPhatshala. All lesson content, diagrams and animations are original. Please do not copy without permission.</div>
+  </div>
+</footer>
+
+<script src="../../../../data/courses/hadoop.js"></script>
+<script src="../../../../assets/js/lesson.js"></script>
+<script src="../../../../assets/js/cluster-sim.js"></script>
+<script src="../../../../assets/js/ads.js"></script>
+<script src="../../../../assets/js/site.js"></script>
+</body>
+</html>

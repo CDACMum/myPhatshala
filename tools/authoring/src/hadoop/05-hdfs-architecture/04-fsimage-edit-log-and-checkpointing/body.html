@@ -1,0 +1,315 @@
+<!-- ======================= PART 1: THE STORY ======================= -->
+<section class="part" id="story">
+  <span class="part-label"><b>1</b> The story</span>
+  <h2>A photo and a diary</h2>
+  <div class="story">
+    <p class="narration">Kabir lists the NameNode's metadata folder and frowns: <code>fsimage_0000000000000000064</code>, <code>edits_0000000000000000065-0000000000000000066</code>, <code>edits_inprogress_0000000000000000067</code>… “Why so many files with long numbers? And why does it keep changing every two minutes?” Riya has heard that a NameNode once took hours to restart at a big company because “the edits were too big”. Arjun Sir draws two pictures on the board: a photograph, and a diary.</p>
+
+    <div class="scene">
+      <svg viewBox="0 0 640 190" role="img" aria-label="fsimage is a snapshot of the namespace at a transaction ID. The edit log records every change after it. A checkpoint merges them into a new fsimage.">
+        <g font-size="10">
+          <rect x="20" y="24" width="150" height="100" rx="10" class="s-soft-blue" style="stroke:var(--blue)"/>
+          <text x="95" y="48" text-anchor="middle" font-weight="700" class="s-blue">fsimage_…066</text>
+          <text x="95" y="70" text-anchor="middle" font-size="8.6" class="s-ink">photo of the whole</text><text x="95" y="84" text-anchor="middle" font-size="8.6" class="s-ink">namespace after</text><text x="95" y="98" text-anchor="middle" font-size="8.6" class="s-ink">transaction 66</text>
+          <text x="196" y="78" text-anchor="middle" font-size="18" class="s-ink2">+</text>
+          <rect x="222" y="24" width="190" height="100" rx="10" class="s-soft-acc" style="stroke:var(--track)"/>
+          <text x="317" y="48" text-anchor="middle" font-weight="700" class="s-acc">edits 67 … 73</text>
+          <g font-size="8.6" class="mono s-ink"><text x="236" y="70">68 OP_MKDIR …/edits_demo</text><text x="236" y="84">69 OP_ADD …/hello.txt</text><text x="236" y="98">71 OP_RENAME_OLD …</text></g>
+          <text x="438" y="78" text-anchor="middle" font-size="18" class="s-ink2">=</text>
+          <rect x="464" y="24" width="156" height="100" rx="10" class="s-board"/>
+          <text x="542" y="48" text-anchor="middle" font-weight="700" class="s-chalk">namespace now</text>
+          <text x="542" y="74" text-anchor="middle" font-size="8.6" class="s-chalk">in NameNode memory</text>
+          <text x="542" y="96" text-anchor="middle" font-size="8.6" style="fill:#F5C77E">checkpoint = new photo</text>
+        </g>
+        <text x="320" y="160" text-anchor="middle" font-size="10" class="s-ink2">Restart = load the newest photo, then replay the diary. A short diary means a fast restart.</text>
+        <text x="632" y="182" text-anchor="end" class="s-wm">myphatshala.in</text>
+      </svg>
+    </div>
+
+A> The NameNode keeps the whole namespace in memory. To survive a restart it writes two things to disk. The <b>fsimage</b> is a photograph of the entire namespace at one moment. The <b>edit log</b> is a diary: every single change after that moment, each with a transaction number.
+K> Why not just update the photo every time something changes?
+A> Because the photo can be gigabytes. Rewriting it for every <code>mkdir</code> would be far too slow. Appending one line to the diary is cheap. But the diary grows for ever, and on restart the NameNode must replay all of it. So every so often someone takes a <b>new photo</b>: loads the old photo, applies the diary, saves the result. That's a <b>checkpoint</b>, and it's the SecondaryNameNode's whole job.
+R> So the SecondaryNameNode isn't a backup NameNode?
+A> No. Its name is the most misleading in Hadoop. Today we'll read the diary entries of our own commands and watch a real checkpoint happen.
+  </div>
+</section>
+
+<!-- ======================= PART 2: DEFINITION ======================= -->
+<section class="part" id="definition">
+  <span class="part-label"><b>2</b> Definition</span>
+  <h2>fsimage, edit log and checkpointing</h2>
+  <div class="def">
+    <div class="def__formal"><small>Formal definition (write this in exams)</small>
+      <p>The NameNode persists its namespace in two kinds of files in <code>dfs.namenode.name.dir</code>. The <b>fsimage</b> (<code>fsimage_&lt;txid&gt;</code>) is a complete, checkpointed image of the namespace (inodes, directories, permissions, file-to-block lists) as of a given <b>transaction ID</b>. The <b>edit log</b> (<code>edits_&lt;start&gt;-&lt;end&gt;</code> segments and one <code>edits_inprogress_&lt;start&gt;</code>) is a write-ahead log recording every namespace-changing operation (e.g. <code>OP_MKDIR</code>, <code>OP_ADD</code>, <code>OP_CLOSE</code>, <code>OP_RENAME</code>, <code>OP_DELETE</code>) with a transaction ID; an operation is acknowledged only after it is logged. At start-up the NameNode loads the latest fsimage and replays the edits that follow it. <b>Checkpointing</b> merges the fsimage with subsequent edits into a new fsimage, keeping restart time short; it is done by the <b>SecondaryNameNode</b> (non-HA), or the <b>Standby NameNode</b> (HA), or manually with <code>hdfs dfsadmin -saveNamespace</code>. It is triggered every <code>dfs.namenode.checkpoint.period</code> (3600 s) or after <code>dfs.namenode.checkpoint.txns</code> (1,000,000) uncheckpointed transactions, whichever comes first.</p></div>
+    <div class="def__simple"><small>In simple words</small>
+      <p>fsimage = a full photo of all folders and files. Edit log = a diary of every change since that photo. Checkpoint = take a fresh photo so the diary can start again, which makes restarts fast.</p></div>
+  </div>
+
+  <h3>Words you'll meet in this lesson</h3>
+  <div class="terms">
+    <div class="term"><b>Transaction ID (txid)</b><span>A number given to every namespace change, increasing by 1 each time.</span></div>
+    <div class="term"><b>Edit log segment</b><span>A finished edits file covering a range, e.g. <code>edits_…065-…066</code>.</span></div>
+    <div class="term"><b>edits_inprogress</b><span>The segment currently being written. Exactly one at a time.</span></div>
+    <div class="term"><b>seen_txid</b><span>Start of the current segment; lets the NameNode check no edits are missing at restart.</span></div>
+    <div class="term"><b>Checkpoint</b><span>fsimage + edits → new fsimage. Old images and edits are then removed.</span></div>
+    <div class="term"><b>Roll</b><span>Closing the in-progress segment and starting a new one (done before each checkpoint).</span></div>
+    <div class="term"><b>oiv / oev</b><span>Offline Image Viewer and Offline Edits Viewer: tools to read fsimage and edits files.</span></div>
+    <div class="term"><b>saveNamespace</b><span>Manual checkpoint by the NameNode itself; requires safe mode.</span></div>
+  </div>
+
+  <h3>Checkpoint settings (Hadoop 3.5.0 defaults)</h3>
+  <table class="facts" style="table-layout:fixed;overflow-wrap:anywhere">
+    <tr><th>checkpoint.period</th><td>3600 s: at least one checkpoint per hour (our lab: 120 s)</td></tr>
+    <tr><th>checkpoint.txns</th><td>1,000,000 uncheckpointed transactions also trigger one</td></tr>
+    <tr><th>checkpoint.check.period</th><td>60 s: how often the checker looks at the transaction count</td></tr>
+    <tr><th>num.checkpoints.retained</th><td>2 fsimage files are kept (we saw the oldest removed)</td></tr>
+    <tr><th>Where</th><td><code>dfs.namenode.name.dir</code> (NameNode), <code>dfs.namenode.checkpoint.dir</code> (SecondaryNameNode: <code>…/dfs/namesecondary</code>)</td></tr>
+    <tr><th>Web UI</th><td>SecondaryNameNode 9868; the NameNode UI shows “Last Checkpoint Time”</td></tr>
+  </table>
+
+LEVELS> Checkpointing at three levels
+L1> A bank passbook
+      <ul>
+        <li>The bank's yearly statement is the <b>fsimage</b>: your full balance on 31 March.</li>
+        <li>Every deposit and withdrawal after that is a line in the passbook: the <b>edit log</b>.</li>
+        <li>To know today's balance, start from the statement and add every line. If the passbook has 10 lakh lines, that takes long.</li>
+        <li>So the bank prints a fresh statement now and then (a <b>checkpoint</b>) and starts a new passbook.</li>
+      </ul>
+L2> How a checkpoint works (non-HA)
+      <ul>
+        <li>The SecondaryNameNode asks the NameNode to <b>roll</b> its edit log: the current segment is closed, a new one starts.</li>
+        <li>It downloads the latest fsimage and the closed edit segments over HTTP.</li>
+        <li>It loads the fsimage into memory, applies the edits, and writes a new fsimage.</li>
+        <li>It uploads the new fsimage to the NameNode, which keeps it and deletes older images and edits beyond the retention limit.</li>
+        <li>The NameNode never stops serving clients during this.</li>
+      </ul>
+L3> Production details
+      <ul>
+        <li>The SecondaryNameNode needs about as much memory as the NameNode, because it loads the whole namespace.</li>
+        <li>With HA there is no SecondaryNameNode: the Standby NameNode checkpoints, and edits go to JournalNodes (Lesson 7.1).</li>
+        <li>Write metadata to several directories (comma-separated <code>dfs.namenode.name.dir</code>) on different disks; losing all copies of the fsimage and edits loses the file system.</li>
+        <li>If checkpoints silently fail for weeks, edits pile up and the next restart can take hours. Monitor “Last Checkpoint Time” / transactions since checkpoint.</li>
+        <li>Back up the fsimage regularly (it can be fetched with <code>hdfs dfsadmin -fetchImage</code>).</li>
+      </ul>
+/LEVELS
+EXAM> “Explain the role of the SecondaryNameNode”: it is <b>not</b> a standby or backup NameNode. It performs <b>periodic checkpoints</b>: rolls the edit log, downloads fsimage + edits, merges them, and uploads a new fsimage, so that the edit log stays small and the NameNode restarts quickly. Mention the defaults: every 1 hour or 10 lakh transactions.
+</section>
+
+<!-- ======================= PART 3: TYPES AND WAYS TO USE IT ======================= -->
+<section class="part" id="types">
+  <span class="part-label"><b>3</b> Types and ways to use it</span>
+  <h2>Who can make a checkpoint?</h2>
+  <div class="table-wrap">
+  <table class="compare" style="min-width:600px">
+    <thead><tr><th></th><th>SecondaryNameNode</th><th>Standby NameNode (HA)</th><th>saveNamespace</th><th>Checkpoint / Backup node</th></tr></thead>
+    <tbody>
+      <tr><td><b>When used</b></td><td>Clusters without HA</td><td>HA clusters</td><td>Manually, e.g. before maintenance</td><td>Rarely; older alternatives</td></tr>
+      <tr><td><b>How</b></td><td>Downloads image + edits, merges, uploads</td><td>Already has the namespace; saves and uploads</td><td>The NameNode saves its own memory to a new fsimage</td><td>Similar to Secondary</td></tr>
+      <tr><td><b>Needs</b></td><td>RAM like the NameNode</td><td>Is a full NameNode</td><td>Safe mode during the save</td><td>—</td></tr>
+      <tr><td><b>Can take over?</b></td><td>No</td><td>Yes (failover)</td><td>—</td><td>No</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <h3>Tools for metadata files</h3>
+  <div class="cards">
+    <div class="card"><h4>hdfs oiv</h4><p>Offline Image Viewer: turns an fsimage into text, XML or a delimited table of every path.</p><span class="tag">fsimage</span></div>
+    <div class="card"><h4>hdfs oev</h4><p>Offline Edits Viewer: turns an edits file into XML, one record per operation.</p><span class="tag">edits</span></div>
+    <div class="card"><h4>dfsadmin -fetchImage</h4><p>Downloads the latest fsimage from the NameNode: a simple metadata backup.</p><span class="tag">Backup</span></div>
+    <div class="card"><h4>dfsadmin -saveNamespace</h4><p>Forces a checkpoint on the NameNode (in safe mode).</p><span class="tag">Manual</span></div>
+  </div>
+TIP> Data teams often analyse an <code>oiv</code> dump of a copy of the fsimage (offline, so the NameNode isn't touched) to find who owns the most files, which folders hold millions of small files, and which data hasn't been read for years.
+</section>
+
+<!-- ======================= PART 4: STEP BY STEP ======================= -->
+<section class="part" id="steps">
+  <span class="part-label"><b>4</b> Step by step</span>
+  <h2>Read the diary and watch the photos being taken</h2>
+  <p>The Module 5 lab cluster runs a SecondaryNameNode with <code>dfs.namenode.checkpoint.period=120</code>, so a checkpoint happens every 2 minutes instead of every hour.</p>
+  <ol class="stepper">
+    <li><h4>List the NameNode's metadata files</h4>
+      <div class="code" data-lang="bash" data-file="Terminal"><pre><code>docker compose exec namenode ls -l /tmp/hadoop-hadoop/dfs/name/current
+docker compose exec namenode cat /tmp/hadoop-hadoop/dfs/name/current/seen_txid</code></pre><div class="output">-rw-r--r-- 1 hadoop users    4003 Oct 21 06:49 edits_0000000000000000001-0000000000000000044
+-rw-r--r-- 1 hadoop users    1920 Oct 21 06:51 edits_0000000000000000045-0000000000000000062
+-rw-r--r-- 1 hadoop users      42 Oct 21 06:53 edits_0000000000000000063-0000000000000000064
+-rw-r--r-- 1 hadoop users      42 Oct 21 06:55 edits_0000000000000000065-0000000000000000066
+-rw-r--r-- 1 hadoop users 1048576 Oct 21 06:55 edits_inprogress_0000000000000000067
+-rw-r--r-- 1 hadoop users    1298 Oct 21 06:53 fsimage_0000000000000000064
+-rw-r--r-- 1 hadoop users      62 Oct 21 06:53 fsimage_0000000000000000064.md5
+-rw-r--r-- 1 hadoop users    1298 Oct 21 06:55 fsimage_0000000000000000066
+-rw-r--r-- 1 hadoop users      62 Oct 21 06:55 fsimage_0000000000000000066.md5
+-rw-r--r-- 1 hadoop users       3 Oct 21 06:55 seen_txid
+-rw-r--r-- 1 hadoop users     215 Oct 21 06:48 VERSION
+67</div></div>
+      <span class="behind">Read the numbers as a timeline: transactions 1–44 (our uploads and jobs), 45–62, … The newest photo is <code>fsimage_…066</code>; everything after transaction 66 is in <code>edits_inprogress_…067</code>, which is pre-allocated as a 1 MB file. A 42-byte segment holds just the start and end markers of an empty segment.</span></li>
+    <li><h4>See a checkpoint in the SecondaryNameNode log</h4>
+      <div class="code" data-lang="bash" data-file="Terminal"><pre><code>docker compose logs secondarynamenode | grep -iE "checkpoint|Downloaded file|Uploaded image"</code></pre><div class="output">INFO  TransferFsImage:177 - Downloaded file edits_tmp_0000000000000000065-0000000000000000066_0000000000000550729 size 0 bytes.
+INFO  Checkpointer:324 - Checkpointer about to load edits from 1 stream(s).
+INFO  Storage:475 - setMostRecentCheckpointInfo txid is 66, time is 1792565757250
+INFO  TransferFsImage:260 - Uploaded image with txid 66 to namenode at http://namenode:9870 in 0.014 seconds
+WARN  SecondaryNameNode:586 - Checkpoint done. New Image Size: 1298</div></div>
+      <span class="behind">Download edits → load → merge → upload <code>fsimage_…066</code> to the NameNode. (It is logged at WARN level, but it's a normal success message.)</span></li>
+    <li><h4>Make some changes, then read the edit log</h4>
+      <div class="code" data-lang="bash" data-file="Terminal"><pre><code>docker compose exec namenode hdfs dfs -mkdir data/edits_demo
+docker compose exec namenode hdfs dfs -touchz data/edits_demo/hello.txt
+docker compose exec namenode hdfs dfs -mv data/edits_demo/hello.txt data/edits_demo/namaste.txt
+docker compose exec namenode hdfs dfs -rm -r -skipTrash data/edits_demo
+docker compose exec namenode bash -c 'f=$(ls /tmp/hadoop-hadoop/dfs/name/current/edits_inprogress_*); hdfs oev -i $f -o /tmp/edits.xml; grep -o "&lt;OPCODE&gt;[A-Z_]*&lt;/OPCODE&gt;" /tmp/edits.xml | sort | uniq -c'</code></pre><div class="output">      1 &lt;OPCODE&gt;OP_ADD&lt;/OPCODE&gt;
+      1 &lt;OPCODE&gt;OP_CLOSE&lt;/OPCODE&gt;
+      1 &lt;OPCODE&gt;OP_DELETE&lt;/OPCODE&gt;
+      1 &lt;OPCODE&gt;OP_MKDIR&lt;/OPCODE&gt;
+      1 &lt;OPCODE&gt;OP_RENAME_OLD&lt;/OPCODE&gt;
+      1 &lt;OPCODE&gt;OP_START_LOG_SEGMENT&lt;/OPCODE&gt;</div></div>
+      <span class="behind">Four commands, five operations: creating a file is <code>OP_ADD</code> (open) plus <code>OP_CLOSE</code> (finished). The segment always starts with <code>OP_START_LOG_SEGMENT</code>.</span></li>
+    <li><h4>Look at one record</h4>
+      <div class="code" data-lang="bash" data-file="Terminal"><pre><code>docker compose exec namenode bash -c 'grep -A9 "OP_RENAME" /tmp/edits.xml'</code></pre><div class="output">    &lt;OPCODE&gt;OP_RENAME_OLD&lt;/OPCODE&gt;
+    &lt;DATA&gt;
+      &lt;TXID&gt;71&lt;/TXID&gt;
+      &lt;LENGTH&gt;0&lt;/LENGTH&gt;
+      &lt;SRC&gt;/user/hadoop/data/edits_demo/hello.txt&lt;/SRC&gt;
+      &lt;DST&gt;/user/hadoop/data/edits_demo/namaste.txt&lt;/DST&gt;
+      &lt;TIMESTAMP&gt;1792565829164&lt;/TIMESTAMP&gt;
+      &lt;RPC_CLIENTID&gt;52ec91db-a945-4573-8c04-3475b16572cf&lt;/RPC_CLIENTID&gt;
+      &lt;RPC_CALLID&gt;3&lt;/RPC_CALLID&gt;
+    &lt;/DATA&gt;</div></div>
+      <span class="behind">Transaction 71: rename hello.txt to namaste.txt. The client ID and call ID let the NameNode recognise a retried request after a failover and not apply it twice.</span></li>
+    <li><h4>Force a checkpoint with saveNamespace</h4>
+      <div class="code" data-lang="bash" data-file="Terminal"><pre><code>docker compose exec namenode hdfs dfsadmin -safemode enter
+docker compose exec namenode hdfs dfsadmin -saveNamespace
+docker compose exec namenode hdfs dfsadmin -safemode leave
+docker compose exec namenode ls -l /tmp/hadoop-hadoop/dfs/name/current</code></pre><div class="output">Safe mode is ON
+Save namespace successful
+Safe mode is OFF
+-rw-r--r-- 1 hadoop users    4003 Oct 21 06:49 edits_0000000000000000001-0000000000000000044
+-rw-r--r-- 1 hadoop users    1920 Oct 21 06:51 edits_0000000000000000045-0000000000000000062
+-rw-r--r-- 1 hadoop users      42 Oct 21 06:53 edits_0000000000000000063-0000000000000000064
+-rw-r--r-- 1 hadoop users      42 Oct 21 06:55 edits_0000000000000000065-0000000000000000066
+-rw-r--r-- 1 hadoop users     652 Oct 21 06:57 edits_0000000000000000067-0000000000000000073
+-rw-r--r-- 1 hadoop users 1048576 Oct 21 06:57 edits_inprogress_0000000000000000074
+-rw-r--r-- 1 hadoop users    1298 Oct 21 06:55 fsimage_0000000000000000066
+-rw-r--r-- 1 hadoop users      62 Oct 21 06:55 fsimage_0000000000000000066.md5
+-rw-r--r-- 1 hadoop users    1298 Oct 21 06:57 fsimage_0000000000000000073
+-rw-r--r-- 1 hadoop users      62 Oct 21 06:57 fsimage_0000000000000000073.md5
+-rw-r--r-- 1 hadoop users       3 Oct 21 06:57 seen_txid
+-rw-r--r-- 1 hadoop users     215 Oct 21 06:57 VERSION</div></div>
+      <span class="behind">Our 5 operations (plus segment markers) became segment 67–73, a new photo <code>fsimage_…073</code> was written, and <code>fsimage_…064</code> was deleted: only 2 images are retained. The in-progress segment restarted at 74.</span></li>
+    <li><h4>Read the photo</h4>
+      <div class="code" data-lang="bash" data-file="Terminal"><pre><code>docker compose exec namenode bash -c 'hdfs oiv -p Delimited -i /tmp/hadoop-hadoop/dfs/name/current/fsimage_0000000000000000073 -o /tmp/fsimage.tsv; cut -f1,2,4,7 /tmp/fsimage.tsv'</code></pre><div class="output">Path	Replication	AccessTime	FileSize
+/	0	1970-01-01 00:00	0
+/user	0	1970-01-01 00:00	0
+/user/hadoop	0	1970-01-01 00:00	0
+/user/hadoop/data	0	1970-01-01 00:00	0
+/user/hadoop/data/canteen_orders.csv	3	2026-10-21 06:49	4692009
+/user/hadoop/data/canteen_1mb.csv	3	2026-10-21 06:49	4692009
+/user/hadoop/out	0	1970-01-01 00:00	0
+/user/hadoop/out/wc1	0	1970-01-01 00:00	0
+/user/hadoop/out/wc1/part-r-00000	3	2026-10-21 06:49	4942122
+/user/hadoop/out/wc1/_SUCCESS	3	2026-10-21 06:49	0
+/user/hadoop/out/wc128	0	1970-01-01 00:00	0
+/user/hadoop/out/wc128/part-r-00000	3	2026-10-21 06:49	4942122
+/user/hadoop/out/wc128/_SUCCESS	3	2026-10-21 06:49	0</div></div>
+      <span class="behind">The whole namespace: 13 inodes in a 1,298-byte file. <code>edits_demo</code> is not there: it was created and deleted before the photo, so it exists only in the diary. Directories show replication 0. (The column header comes from the tool; the selected columns are path, replication, access time and size.)</span></li>
+  </ol>
+WARN> Never delete files from the NameNode's metadata folder to “save space”. The NameNode cleans up old images and edits itself. Missing edits make the namespace impossible to rebuild.
+</section>
+
+<!-- ======================= PART 5: SEE IT HAPPEN ======================= -->
+<section class="part" id="animation">
+  <span class="part-label"><b>5</b> See it happen</span>
+  <h2>One checkpoint, step by step</h2>
+  <p>The real file names from the lab, around the checkpoint at transaction 66.</p>
+  <div class="anim" data-frames="6">
+    <div class="anim__title">SecondaryNameNode checkpoint <span>6 steps</span></div>
+    <div class="anim__views">
+      <div class="view view--see">
+        <span class="view__tag">What you see</span>
+        <svg viewBox="0 0 360 250" role="img" aria-label="Files in the NameNode folder and SecondaryNameNode log">
+          <rect x="14" y="14" width="332" height="206" rx="8" class="s-board"/>
+          <text x="26" y="32" font-size="9" class="mono" style="fill:#7F8C86">namenode : dfs/name/current</text>
+          <g font-size="8.6" class="mono">
+            <g data-on="1-2"><text x="26" y="56" style="fill:#9FD3B8">fsimage_…064</text><text x="26" y="72" style="fill:#F5C77E">edits_inprogress_…065</text><text x="200" y="72" style="fill:#7F8C86">← 65, 66 …</text></g>
+            <g data-on="2"><text x="26" y="100" style="fill:#7F8C86">(no changes in these 2 minutes:</text><text x="26" y="114" style="fill:#7F8C86"> txid 65 = start, 66 = end of segment)</text></g>
+            <g data-on="3-6"><text x="26" y="56" style="fill:#9FD3B8">fsimage_…064</text><text x="26" y="72" style="fill:#9FD3B8">edits_…065-…066</text><text x="26" y="88" style="fill:#F5C77E">edits_inprogress_…067</text></g>
+            <g data-on="3"><text x="26" y="118" style="fill:#7F8C86">2NN: rollEditLog</text></g>
+            <g data-on="4"><text x="26" y="118" style="fill:#7F8C86">2NN: Downloaded file edits_tmp_…065-…066</text><text x="26" y="134" style="fill:#7F8C86">2NN: about to load edits from 1 stream</text></g>
+            <g data-on="5-6"><text x="26" y="104" style="fill:#9FD3B8">fsimage_…066</text></g>
+            <g data-on="5"><text x="26" y="132" style="fill:#7F8C86">Uploaded image with txid 66 to namenode</text><text x="26" y="148" style="fill:#9FD3B8">Checkpoint done. New Image Size: 1298</text></g>
+            <g data-on="6"><text x="26" y="132" style="fill:#7F8C86">restart: load fsimage_…066</text><text x="26" y="148" style="fill:#7F8C86">         + replay edits from 67</text></g>
+          </g>
+          <text x="352" y="244" text-anchor="end" class="s-wm">myphatshala.in</text>
+        </svg>
+        <ol class="caps" hidden>
+          <li>The latest photo is fsimage_…064. New changes go into the in-progress segment.</li>
+          <li>Every segment begins and ends with a marker transaction. Nobody changed anything in these two minutes, so 65 and 66 are just the markers (the 42-byte file in step 1).</li>
+          <li>Checkpoint time: the SecondaryNameNode asks the NameNode to roll the log. Segment 65–66 is closed; new changes go to edits_inprogress_…067.</li>
+          <li>The SecondaryNameNode downloads the closed segment (and the fsimage if it doesn't already have it) and loads them.</li>
+          <li>It writes fsimage_…066 and uploads it. The NameNode now has a newer photo.</li>
+          <li>If the NameNode restarts now, it loads fsimage_…066 and replays only the edits from 67 onwards.</li>
+        </ol>
+      </div>
+
+      <div class="view view--behind">
+        <span class="view__tag">Behind the screen</span>
+        <svg viewBox="0 0 360 250" role="img" aria-label="NameNode and SecondaryNameNode exchanging files">
+          <rect x="14" y="20" width="150" height="150" rx="8" class="s-board"/><text x="89" y="38" text-anchor="middle" font-size="9" font-weight="700" class="s-chalk">NameNode</text>
+          <rect x="196" y="20" width="150" height="150" rx="8" class="s-card2"/><text x="271" y="38" text-anchor="middle" font-size="9" font-weight="700" class="s-ink">SecondaryNameNode</text>
+          <rect x="24" y="50" width="130" height="30" rx="5" class="s-soft-blue" style="stroke:var(--blue)"/><text x="89" y="69" text-anchor="middle" font-size="8" class="s-blue">memory: namespace</text>
+          <g data-on="1-2"><rect x="24" y="90" width="130" height="22" rx="4" class="s-soft-acc" style="stroke:var(--track)"/><text x="89" y="105" text-anchor="middle" font-size="7.6" class="s-acc">edits_inprogress 65…</text></g>
+          <g data-on="2"><text x="89" y="190" text-anchor="middle" font-size="8.6" class="s-ink2">changes (if any) logged first, then applied</text></g>
+          <g data-on="3-"><rect x="24" y="90" width="130" height="22" rx="4" class="s-card2"/><text x="89" y="105" text-anchor="middle" font-size="7.6" class="s-ink">edits 65–66 (closed)</text><rect x="24" y="118" width="130" height="22" rx="4" class="s-soft-acc" style="stroke:var(--track)"/><text x="89" y="133" text-anchor="middle" font-size="7.6" class="s-acc">edits_inprogress 67…</text></g>
+          <g data-on="3"><path d="M196 70h-32" style="stroke:var(--track);stroke-width:2"/><text x="180" y="200" text-anchor="middle" font-size="8.6" class="s-ink2">1. “roll your edit log”</text></g>
+          <g data-on="4"><path d="M164 100h32" style="stroke:var(--blue);stroke-width:2"/><rect x="206" y="50" width="130" height="22" rx="4" class="s-soft-blue" style="stroke:var(--blue)"/><text x="271" y="65" text-anchor="middle" font-size="7.6" class="s-blue">fsimage_064 + edits 65–66</text><text x="180" y="200" text-anchor="middle" font-size="8.6" class="s-ink2">2. download over HTTP, load, merge in memory</text></g>
+          <g data-on="5-"><rect x="206" y="80" width="130" height="22" rx="4" class="s-soft-green" style="stroke:var(--green)"/><text x="271" y="95" text-anchor="middle" font-size="7.6" class="s-green">fsimage_066 (new)</text></g>
+          <g data-on="5"><path d="M206 91h-42" style="stroke:var(--green);stroke-width:2"/><text x="180" y="200" text-anchor="middle" font-size="8.6" class="s-ink2">3. upload the new image to the NameNode</text></g>
+          <g data-on="5-"><rect x="24" y="146" width="130" height="18" rx="4" class="s-soft-green" style="stroke:var(--green)"/><text x="89" y="159" text-anchor="middle" font-size="7.6" class="s-green">fsimage_066</text></g>
+          <g data-on="6"><text x="180" y="200" text-anchor="middle" font-size="9" font-weight="700" class="s-green">restart = fsimage_066 + edits from 67</text><text x="180" y="216" text-anchor="middle" font-size="8.6" class="s-ink2">the diary to replay stays short</text></g>
+          <g data-on="1"><text x="180" y="200" text-anchor="middle" font-size="8.6" class="s-ink2">the SecondaryNameNode waits for its next turn</text></g>
+          <text x="352" y="246" text-anchor="end" class="s-wm">myphatshala.in</text>
+        </svg>
+        <ol class="caps" hidden>
+          <li>The NameNode serves clients from memory and appends every change to the in-progress edits.</li>
+          <li>Each operation is written to the edit log before the client gets its answer: that's what makes it durable.</li>
+          <li>The SecondaryNameNode triggers a checkpoint: the NameNode rolls the edit log.</li>
+          <li>The SecondaryNameNode fetches the fsimage and closed edits and replays them in its own memory.</li>
+          <li>It saves the result as a new fsimage and sends it back. Clients were never interrupted.</li>
+          <li>Restart now needs only the new image plus the few edits written since.</li>
+        </ol>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ======================= PART 6: REAL-WORLD USE ======================= -->
+<section class="part" id="real-world">
+  <span class="part-label"><b>6</b> Real-world use</span>
+  <h2>Metadata files in production</h2>
+
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="20" y="20" width="80" height="50" rx="6" class="s-board"/><text x="60" y="42" text-anchor="middle" font-size="8.6" class="mono" style="fill:#FF8A80">no checkpoint</text><text x="60" y="58" text-anchor="middle" font-size="8.6" class="mono" style="fill:#F5C77E">for 3 weeks</text></svg></div>
+    <div><h4>1. The slow-restart incident</h4>
+      <p>A classic outage: checkpoints fail silently (a misconfigured or dead SecondaryNameNode), edits grow to crores of transactions, and the next NameNode restart takes hours of replay. Monitoring the time since the last checkpoint prevents it.</p>
+      <div class="uc-flow"><span>Checkpoint fails</span><i>→</i><span class="java">Edits pile up</span><i>→</i><span>Hours to restart</span></div></div>
+  </div>
+
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="20" y="20" width="80" height="50" rx="6" class="s-soft-blue" style="stroke:var(--blue)"/><text x="60" y="42" text-anchor="middle" font-size="8.6" font-weight="700" class="s-blue">oiv dump</text><text x="60" y="58" text-anchor="middle" font-size="8.6" class="s-ink">who uses what</text></svg></div>
+    <div><h4>2. Storage reports from the fsimage</h4>
+      <p>Platform teams fetch the fsimage daily, convert it with <code>oiv</code>, and load it into Hive or Spark to report file counts and sizes per team, small-file hotspots and stale data, all without querying the live NameNode.</p>
+      <div class="uc-flow"><span>fetchImage</span><i>→</i><span class="java">oiv → table</span><i>→</i><span>Usage dashboard</span></div></div>
+  </div>
+
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="20" y="20" width="80" height="50" rx="6" class="s-soft-green" style="stroke:var(--green)"/><text x="60" y="42" text-anchor="middle" font-size="8.6" font-weight="700" class="s-green">2 disks + NFS</text><text x="60" y="58" text-anchor="middle" font-size="8.6" class="s-ink">name.dir</text></svg></div>
+    <div><h4>3. Several copies of the metadata</h4>
+      <p>Before HA was common, admins listed two local disks and an NFS mount in <code>dfs.namenode.name.dir</code>, so a disk failure couldn't destroy the only fsimage and edits. With HA, JournalNodes keep the edit log on several machines.</p>
+      <div class="uc-flow"><span>Every edit</span><i>→</i><span class="java">Written to all dirs</span><i>→</i><span>Survives a disk</span></div></div>
+  </div>
+
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="20" y="20" width="80" height="50" rx="6" class="s-card2"/><text x="60" y="42" text-anchor="middle" font-size="8.6" font-weight="700" class="s-ink">saveNamespace</text><text x="60" y="58" text-anchor="middle" font-size="8.6" class="s-ink2">before upgrade</text></svg></div>
+    <div><h4>4. Clean checkpoint before maintenance</h4>
+      <p>Before a planned restart or upgrade, admins enter safe mode and run <code>saveNamespace</code> so the NameNode comes back with almost nothing to replay, and they keep a copy of that fsimage as a rollback point.</p>
+      <div class="uc-flow"><span>Safe mode</span><i>→</i><span class="java">saveNamespace</span><i>→</i><span>Fast, safe restart</span></div></div>
+  </div>
+  <p class="muted">Simplified; organisations differ in tools and policies.</p>
+</section>

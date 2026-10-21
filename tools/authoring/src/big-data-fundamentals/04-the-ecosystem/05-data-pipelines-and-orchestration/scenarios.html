@@ -1,0 +1,40 @@
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Pipeline design</span><span class="scn__tag scn__tag--level">Fresher</span></div>
+      <h4>Design a daily sales pipeline</h4>
+      <p class="scn__situation">Orders live in a PostgreSQL database. Finance wants yesterday’s revenue by city on a dashboard by 8 am every day.</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> can you design a simple, reliable, orchestrated pipeline?</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ol><li>Airflow DAG scheduled at 1 am, parameterised by the logical date.</li><li><b>Extract</b> yesterday’s orders (by <code>updated_at</code>) to the lake as <code>bronze/orders/date=…</code>.</li><li><b>Validate</b>: row count vs the source, no negative amounts, no null cities.</li><li><b>Transform</b> to a gold table <code>revenue_by_city</code>, overwriting that date’s partition.</li><li><b>Publish</b> to the dashboard; on failure, retries then an alert and a “delayed” banner.</li><li>Add an SLA alert if not done by 7 am.</li></ol>
+        <p class="scn__avoid"><b>Avoid:</b> a cron job per script with no dependencies or checks.</p>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Reliability · idempotency</span><span class="scn__tag scn__tag--level">1–3 years</span></div>
+      <h4>Re-running a job doubled the numbers</h4>
+      <p class="scn__situation">A failed job was re-run manually and the monthly revenue report now shows twice the real amount for that day.</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> do you understand idempotency and how to make pipelines safe to re-run?</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <p>The load step appends rows, so each run adds the day again. Make the task idempotent: write to a date partition and overwrite it (<code>INSERT OVERWRITE</code> or replace the folder), or use <code>MERGE</code> on a unique key. Deduplicate the affected day, then re-run once more to prove nothing changes. Add a check that compares row counts with the source.</p>
+        <p class="scn__avoid"><b>Avoid:</b> asking people to “be careful not to run it twice”.</p>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Airflow · concepts</span><span class="scn__tag scn__tag--level">1–3 years</span></div>
+      <h4>Why does the 19 Oct run happen on 20 Oct?</h4>
+      <p class="scn__situation">A new teammate is confused: the DAG run labelled 2026-10-19 started at 1 am on 20 October, and their task that uses <code>datetime.now()</code> processed the wrong day.</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> do you understand logical dates and data intervals?</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <p>In Airflow, a run’s logical date marks the start of the data interval it processes. A daily run for 19 October can only start after the interval ends, so it runs on 20 October. Tasks must use the run’s logical date (<code>ds</code>, <code>data_interval_start</code>) rather than <code>now()</code>, so that retries and backfills process the intended day.</p>
+        <p class="scn__avoid"><b>Avoid:</b> changing the schedule to run “earlier” or hard-coding yesterday’s date.</p>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Architecture · tools</span><span class="scn__tag scn__tag--level">Fresher</span></div>
+      <h4>“Should Spark run inside Airflow?”</h4>
+      <p class="scn__situation">A teammate wants to load a 200 GB dataset into a Python task inside Airflow because “Airflow already runs Python”.</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> do you know what an orchestrator is for?</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <p>No. Airflow should coordinate work, not do heavy processing. Its workers are sized for many small tasks, and big in-memory work there will crash workers and slow the scheduler. Use Airflow to submit a Spark job (on Databricks, EMR, Dataproc or Kubernetes), a warehouse SQL statement or a dbt run, wait for it, check the result and move on.</p>
+        <p class="scn__avoid"><b>Avoid:</b> scaling Airflow workers to hundreds of GB of RAM to process data in tasks.</p>
+      </div></details>
+    </article>

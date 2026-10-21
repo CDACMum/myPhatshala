@@ -1,0 +1,268 @@
+<!-- ======================= PART 1: THE STORY ======================= -->
+<section class="part" id="story">
+  <span class="part-label"><b>1</b> The story</span>
+  <h2>“Present, sir!” every three seconds</h2>
+  <div class="story">
+    <p class="narration">Kabir freezes datanode-4 with <code>docker pause</code>: the process is still there, but it can't do anything. He keeps asking the NameNode about it. “Live, last contact 10 seconds ago… 27 seconds… 43… 51…” Still live. Then at 57 seconds: <b>dead</b>. He unpauses it, and six seconds later the NameNode says “live, last contact 0 seconds”. Riya: “How does the NameNode know any of this? It never looks at the DataNodes.”</p>
+
+    <div class="scene">
+      <svg viewBox="0 0 640 180" role="img" aria-label="DataNodes send a heartbeat every 3 seconds and a full block report every 6 hours. The NameNode replies to heartbeats with commands.">
+        <g font-size="10">
+          <rect x="250" y="20" width="140" height="70" rx="10" class="s-board"/><text x="320" y="48" text-anchor="middle" font-weight="700" class="s-chalk">NameNode</text><text x="320" y="68" text-anchor="middle" font-size="8.6" class="s-chalk">listens, never calls</text>
+          <rect x="20" y="110" width="130" height="50" rx="8" class="s-soft-green" style="stroke:var(--green)"/><text x="85" y="140" text-anchor="middle" font-size="9" font-weight="700" class="s-green">datanode-1</text>
+          <rect x="255" y="110" width="130" height="50" rx="8" class="s-soft-green" style="stroke:var(--green)"/><text x="320" y="140" text-anchor="middle" font-size="9" font-weight="700" class="s-green">datanode-2</text>
+          <rect x="490" y="110" width="130" height="50" rx="8" class="s-card2" style="stroke:var(--red);stroke-dasharray:5 4"/><text x="555" y="134" text-anchor="middle" font-size="9" font-weight="700" class="s-ink">datanode-4</text><text x="555" y="150" text-anchor="middle" font-size="8" class="s-red">silent…</text>
+          <path d="M85 110L270 90M320 110V90" style="stroke:var(--green);stroke-width:2;stroke-dasharray:4 3"/><text x="150" y="92" font-size="8.6" class="s-green">♥ every 3 s</text>
+          <path d="M555 110L370 90" style="stroke:var(--red);stroke-width:1.4;stroke-dasharray:2 5"/><text x="480" y="92" font-size="8.6" class="s-red">no heartbeat</text>
+        </g>
+        <text x="320" y="176" text-anchor="middle" font-size="10" class="s-ink2">Silence is the signal: stale after 30 s, dead after 10 min 30 s (our lab: about 60 s).</text>
+        <text x="632" y="176" text-anchor="end" class="s-wm">myphatshala.in</text>
+      </svg>
+    </div>
+
+A> Like a class register. Every DataNode calls out “present” to the NameNode every 3 seconds: that's a <b>heartbeat</b>, with a few numbers about its disks and load. The NameNode just notes the time. If a DataNode goes quiet, the NameNode doesn't phone it; silence itself is the information.
+K> And how did it know what blocks datanode-4 has, after it came back?
+A> That's the second message: the <b>block report</b>. A DataNode lists every block it holds when it registers, then again every 6 hours, plus small updates whenever it gets or deletes a block. Heartbeats say “I'm alive”; block reports say “here's what I have”. And the NameNode's replies to heartbeats are how it gives orders: “copy this block”, “delete that one”.
+  </div>
+</section>
+
+<!-- ======================= PART 2: DEFINITION ======================= -->
+<section class="part" id="definition">
+  <span class="part-label"><b>2</b> Definition</span>
+  <h2>Heartbeats and block reports</h2>
+  <div class="def">
+    <div class="def__formal"><small>Formal definition (write this in exams)</small>
+      <p>A <b>heartbeat</b> is a periodic RPC from each DataNode to the NameNode (every <code>dfs.heartbeat.interval</code> = <b>3 s</b>) carrying the DataNode's capacity, used and remaining space, number of active transfers and other load figures. It tells the NameNode the DataNode is alive, and the NameNode's <b>reply</b> carries commands for the DataNode, such as replicating a block to another node, deleting (invalidating) blocks, or re-registering. A DataNode not heard from for <code>dfs.namenode.stale.datanode.interval</code> (30 s) is <b>stale</b>; after 2 × <code>dfs.namenode.heartbeat.recheck-interval</code> + 10 × heartbeat interval (<b>10 min 30 s</b> by default) it is declared <b>dead</b> and its replicas are re-replicated. A <b>block report</b> is a list of all block replicas a DataNode stores (ID, length, generation stamp) sent at registration and then every <code>dfs.blockreport.intervalMsec</code> (<b>6 hours</b>); between full reports, <b>incremental block reports</b> announce replicas received or deleted. The NameNode builds and corrects its block map from these reports.</p></div>
+    <div class="def__simple"><small>In simple words</small>
+      <p>Heartbeat: “I'm alive, and here's how full I am” every 3 seconds. Block report: “Here is every block I hold”, when starting and every 6 hours, with small updates in between. The NameNode answers heartbeats with jobs to do.</p></div>
+  </div>
+
+  <h3>Words you'll meet in this lesson</h3>
+  <div class="terms">
+    <div class="term"><b>Heartbeat</b><span>Small RPC every 3 s: alive + capacity and load numbers.</span></div>
+    <div class="term"><b>Heartbeat reply</b><span>The NameNode's answer, carrying commands: replicate, invalidate (delete), etc.</span></div>
+    <div class="term"><b>Last contact</b><span>Seconds since the last heartbeat, shown in <code>dfsadmin -report</code> and the UI.</span></div>
+    <div class="term"><b>Stale node</b><span>No heartbeat for 30 s. Still “live”, but can be avoided for reads/writes.</span></div>
+    <div class="term"><b>Dead node</b><span>No heartbeat for 10 min 30 s (default). Its replicas are re-created elsewhere.</span></div>
+    <div class="term"><b>Full block report</b><span>Every replica on the DataNode. At start-up and every 6 hours.</span></div>
+    <div class="term"><b>Incremental block report</b><span>Only changes: replicas received or deleted since the last report.</span></div>
+    <div class="term"><b>Registration</b><span>A DataNode's first contact: it identifies itself, then sends a full block report.</span></div>
+  </div>
+
+  <h3>Timers checked on Hadoop 3.5.0</h3>
+  <table class="facts" style="table-layout:fixed;overflow-wrap:anywhere">
+    <tr><th>dfs.heartbeat.interval</th><td>3 s</td></tr>
+    <tr><th>dfs.namenode.stale.datanode.interval</th><td>30,000 ms (30 s); in our lab the node was counted stale at about 38 s</td></tr>
+    <tr><th>dfs.namenode.heartbeat.recheck-interval</th><td>300,000 ms (5 min) → dead after 10 min 30 s. Lab: 15,000 ms → dead after about 60 s (seen at 57 s)</td></tr>
+    <tr><th>dfs.blockreport.intervalMsec</th><td>21,600,000 ms (6 hours)</td></tr>
+    <tr><th>dfs.blockreport.initialDelay</th><td>0 s (first report sent right after registration)</td></tr>
+    <tr><th>Avoid stale nodes</th><td><code>dfs.namenode.avoid.read.stale.datanode</code> / <code>…avoid.write…</code>: false by default</td></tr>
+  </table>
+
+LEVELS> Heartbeats at three levels
+L1> Attendance and inventory
+      <ul>
+        <li>Heartbeat = roll call: every 3 seconds each shelf-keeper says “present”, and how much space their shelf has left.</li>
+        <li>Block report = stock-taking: the shelf-keeper lists every book on the shelf. Done when they join, then every 6 hours.</li>
+        <li>The head librarian answers the roll call with tasks: “photocopy book 25 for shelf 3”, “throw away the extra copy of book 7”.</li>
+      </ul>
+L2> What the NameNode does with them
+      <ul>
+        <li>Updates each DataNode's “last contact” and capacity, which <code>dfsadmin -report</code> shows.</li>
+        <li>Chooses targets for new blocks using reported free space and load.</li>
+        <li>Marks nodes stale, then dead, purely from missing heartbeats.</li>
+        <li>Rebuilds the block map after a restart from full block reports (Lesson 5.6).</li>
+        <li>Finds lost, extra or corrupt replicas by comparing reports with what it expects.</li>
+      </ul>
+L3> Large-cluster details
+      <ul>
+        <li>The NameNode never initiates calls to DataNodes; all commands travel in heartbeat replies. This keeps one NameNode able to manage thousands of nodes.</li>
+        <li>Full block reports from big DataNodes (millions of blocks) are expensive; they are spread out over time and can be split per disk.</li>
+        <li>A busy NameNode may process heartbeats late; the optional <b>lifeline</b> RPC (<code>dfs.namenode.lifeline.rpc-address</code>) keeps busy-but-healthy nodes from being declared dead.</li>
+        <li><code>hdfs dfsadmin -triggerBlockReport host:9867</code> forces a full report, useful after disk repairs.</li>
+      </ul>
+/LEVELS
+EXAM> “Explain heartbeat and block report”: heartbeat = DataNode → NameNode every <b>3 s</b>, liveness + storage stats; reply carries commands; no heartbeat for <b>10 min 30 s</b> → dead → re-replication. Block report = list of all blocks on a DataNode, at start-up and every <b>6 h</b> (plus incremental reports); used to build the block map.
+</section>
+
+<!-- ======================= PART 3: TYPES AND WAYS TO USE IT ======================= -->
+<section class="part" id="types">
+  <span class="part-label"><b>3</b> Types and ways to use it</span>
+  <h2>The messages between DataNodes and the NameNode</h2>
+  <div class="table-wrap">
+  <table class="compare" style="min-width:600px">
+    <thead><tr><th>Message</th><th>When</th><th>Carries</th><th>NameNode uses it to</th></tr></thead>
+    <tbody>
+      <tr><td><b>Registration</b></td><td>DataNode start, or when asked to re-register</td><td>Identity, storage IDs, cluster ID</td><td>Add the node to the topology</td></tr>
+      <tr><td><b>Heartbeat</b></td><td>Every 3 s</td><td>Capacity, used, remaining, transfers in progress</td><td>Track liveness and load; send commands back</td></tr>
+      <tr><td><b>Full block report</b></td><td>After registration; every 6 h</td><td>Every replica: ID, length, generation stamp</td><td>Build/correct the block map</td></tr>
+      <tr><td><b>Incremental block report</b></td><td>When replicas are received or deleted</td><td>Only the changes</td><td>Keep the block map current between full reports</td></tr>
+      <tr><td><b>Cache report</b></td><td>Periodically, if caching is used</td><td>Blocks cached in memory</td><td>Centralised cache management</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <h3>Commands the NameNode sends back</h3>
+  <div class="cards">
+    <div class="card"><h4>Transfer</h4><p>“Copy block X to DataNode Y”: how re-replication happens.</p><span class="tag">Replicate</span></div>
+    <div class="card"><h4>Invalidate</h4><p>“Delete these replicas”: for deleted files or over-replicated blocks.</p><span class="tag">Delete</span></div>
+    <div class="card"><h4>Recover</h4><p>“Recover this block”: finish or repair a block whose writer died.</p><span class="tag">Recovery</span></div>
+    <div class="card"><h4>Register / shut down</h4><p>Ask the node to re-register, or tell it to stop.</p><span class="tag">Control</span></div>
+  </div>
+TIP> When a DataNode looks “dead” but its process is running, check the network to the NameNode and the DataNode's log for long GC pauses or disk hangs. A frozen process, like our paused container, is exactly as dead as a stopped one from the NameNode's point of view.
+</section>
+
+<!-- ======================= PART 4: STEP BY STEP ======================= -->
+<section class="part" id="steps">
+  <span class="part-label"><b>4</b> Step by step</span>
+  <h2>Watch heartbeats and block reports on the real cluster</h2>
+  <p>Module 5 lab cluster: <code>dfs.namenode.heartbeat.recheck-interval</code> is 15 s, so dead detection takes about 60 s instead of 10 min 30 s. Everything else uses defaults.</p>
+  <ol class="stepper">
+    <li><h4>Read the timers</h4>
+      <div class="code" data-lang="bash" data-file="Terminal"><pre><code>for k in dfs.heartbeat.interval dfs.namenode.heartbeat.recheck-interval \
+         dfs.namenode.stale.datanode.interval dfs.blockreport.intervalMsec; do
+  echo "$k = $(docker compose exec namenode hdfs getconf -confKey $k)"
+done</code></pre><div class="output">dfs.heartbeat.interval = 3
+dfs.namenode.heartbeat.recheck-interval = 15000
+dfs.namenode.stale.datanode.interval = 30000
+dfs.blockreport.intervalMsec = 21600000</div></div>
+      <span class="behind">Seconds for the heartbeat; milliseconds for the others. 21,600,000 ms = 6 hours.</span></li>
+    <li><h4>See each DataNode's last contact</h4>
+      <div class="code" data-lang="bash" data-file="Terminal"><pre><code>docker compose exec namenode bash -c 'curl -s "http://namenode:9870/jmx?qry=Hadoop:service=NameNode,name=NameNodeInfo"' \
+  | python3 -c "import sys,json; b=json.load(sys.stdin)['beans'][0]; [print(n, v['lastContact'], v['numBlocks']) for n,v in json.loads(b['LiveNodes']).items()]"</code></pre><div class="output">ab3b1bedf98a:9866 2 8
+46201bb62e68:9866 1 8
+729c51a07ee2:9866 0 8
+264eb9c0f8e2:9866 0 0</div></div>
+      <span class="behind">Columns: node, seconds since last heartbeat, blocks held. Every DataNode was heard from within the last 3 seconds. The names are the containers' host names (container IDs); <code>729c51a07ee2</code> is datanode-4. One node holds 0 blocks after our earlier experiments: being alive and holding data are separate facts.</span></li>
+    <li><h4>Freeze a DataNode and watch</h4>
+      <div class="code" data-lang="bash" data-file="Terminal"><pre><code>docker pause lab5-datanode-4
+# every few seconds, ask the NameNode about 729c51a07ee2
+# (or run heartbeat_watch.py from Part 4b)</code></pre><div class="output">t=  8s  NameNode says: live  lastContact=10s
+t= 16s  NameNode says: live  lastContact=19s
+t= 25s  NameNode says: live  lastContact=27s
+t= 33s  NameNode says: live  lastContact=35s
+t= 41s  NameNode says: live  lastContact=43s
+t= 49s  NameNode says: live  lastContact=51s
+t= 57s  NameNode says: dead  lastContact=60s
+t= 65s  NameNode says: dead  lastContact=68s
+t= 82s  NameNode says: dead  lastContact=84s</div></div>
+      <span class="behind">“Last contact” simply grows. At 60 s (2 × 15 s + 10 × 3 s) the node moves to the dead list. In another run we also read the NameNode's counters: <code>stale 0</code> up to 32 s, <code>stale 1</code> from 38 s, then <code>dead 1</code> at 64 s.</span></li>
+    <li><h4>Unfreeze it: re-registration and a block report</h4>
+      <div class="code" data-lang="bash" data-file="Terminal"><pre><code>docker unpause lab5-datanode-4
+docker compose logs namenode | grep -E "registerDatanode|processReport" | tail -3</code></pre><div class="output">BLOCK* registerDatanode: from DatanodeRegistration(172.19.0.7:9866, datanodeUuid=1a7e1105-…, infoPort=9864, infoSecurePort=0, ipcPort=9867, …
+BLOCK* processReport 0x283bca9221d1422b with lease ID 0x7921c25a0ab90066: Processing first storage report for DS-e40699e9-… from datanode DatanodeRegistration(172.19.0.7:9866, …
+BLOCK* processReport 0x283bca9221d1422b with lease ID 0x7921c25a0ab90066: from storage DS-e40699e9-… node DatanodeRegistration(172.19.0.7:9866, …</div></div>
+      <span class="behind">The NameNode had forgotten this node, so on its next heartbeat it was told to re-register; then it sent a full block report, and its replicas were back in the block map within seconds (“lastContact 0”).</span></li>
+    <li><h4>Check and trigger a full block report</h4>
+      <div class="code" data-lang="bash" data-file="Terminal"><pre><code>docker compose exec namenode bash -c 'hdfs dfsadmin -report | grep -E "^Name|Last Block Report" | head -2'
+docker compose exec namenode hdfs dfsadmin -triggerBlockReport lab5-datanode-2:9867
+docker compose exec namenode bash -c 'hdfs dfsadmin -report | grep -E "^Name|Last Block Report" | head -2'</code></pre><div class="output">Name: 172.19.0.4:9866 (lab5-datanode-2.lab5_default)
+Last Block Report: Wed Oct 21 06:49:03 UTC 2026
+Triggering a full block report on lab5-datanode-2:9867.
+Name: 172.19.0.4:9866 (lab5-datanode-2.lab5_default)
+Last Block Report: Wed Oct 21 06:59:19 UTC 2026</div></div>
+      <span class="behind">datanode-2's last full report was from its start at 06:49 (the next one was due 6 hours later). The trigger made it report at once. The command uses the DataNode's IPC port, 9867.</span></li>
+  </ol>
+WARN> Don't lower heartbeat and dead-node intervals on real clusters just to “detect failures faster”. Short timers turn GC pauses and network blips into false deaths, which trigger mass re-replication and can overload the cluster. The lab uses short values only so you can watch.
+</section>
+
+<!-- ======================= PART 5: SEE IT HAPPEN ======================= -->
+<section class="part" id="animation">
+  <span class="part-label"><b>5</b> See it happen</span>
+  <h2>From live to dead and back</h2>
+  <p>The real readings from step 3 and step 4, alongside what the NameNode is thinking.</p>
+  <div class="anim" data-frames="6">
+    <div class="anim__title">datanode-4 goes silent <span>6 steps</span></div>
+    <div class="anim__views">
+      <div class="view view--see">
+        <span class="view__tag">What you see</span>
+        <svg viewBox="0 0 360 250" role="img" aria-label="NameNode readings over time">
+          <rect x="14" y="14" width="332" height="206" rx="8" class="s-board"/>
+          <text x="26" y="32" font-size="9" class="mono" style="fill:#7F8C86">NameNode view of datanode-4</text>
+          <g data-on="1"><text x="26" y="58" font-size="9" class="mono" style="fill:#9FD3B8">live  lastContact=2s  blocks=8</text><text x="26" y="76" font-size="8.6" class="mono" style="fill:#7F8C86">(heartbeat every 3 s)</text></g>
+          <g data-on="2"><text x="26" y="58" font-size="9" class="mono" style="fill:#7F8C86">$ docker pause lab5-datanode-4</text><text x="26" y="76" font-size="9" class="mono" style="fill:#9FD3B8">t=16s live lastContact=19s</text><text x="26" y="92" font-size="9" class="mono" style="fill:#9FD3B8">t=25s live lastContact=27s</text></g>
+          <g data-on="3"><text x="26" y="58" font-size="9" class="mono" style="fill:#F5C77E">t=38s live 4 · stale 1 · dead 0</text><text x="26" y="76" font-size="9" class="mono" style="fill:#F5C77E">t=49s live lastContact=51s</text></g>
+          <g data-on="4"><text x="26" y="58" font-size="9" class="mono" style="fill:#FF8A80">t=57s dead lastContact=60s</text><text x="26" y="76" font-size="9" class="mono" style="fill:#FF8A80">live 3 · dead 1</text></g>
+          <g data-on="5"><text x="26" y="58" font-size="9" class="mono" style="fill:#7F8C86">$ docker unpause lab5-datanode-4</text><text x="26" y="76" font-size="8.6" class="mono" style="fill:#9FD3B8">registerDatanode: from …172.19.0.7</text><text x="26" y="92" font-size="8.6" class="mono" style="fill:#9FD3B8">processReport: first storage report</text></g>
+          <g data-on="6"><text x="26" y="58" font-size="9" class="mono" style="fill:#9FD3B8">live  lastContact=0s  blocks=8</text><text x="26" y="80" font-size="8.6" class="mono" style="fill:#7F8C86">$ dfsadmin -triggerBlockReport …:9867</text><text x="26" y="96" font-size="8.6" class="mono" style="fill:#9FD3B8">Last Block Report: … 06:59:19</text></g>
+          <text x="352" y="244" text-anchor="end" class="s-wm">myphatshala.in</text>
+        </svg>
+        <ol class="caps" hidden>
+          <li>Normal state: datanode-4 checks in every 3 seconds and holds 8 blocks.</li>
+          <li>The container is frozen. “Last contact” starts growing, but the node is still listed as live.</li>
+          <li>After 30 s of silence it is counted as <b>stale</b>: still live, but suspicious.</li>
+          <li>At about 60 s (lab settings) it is declared <b>dead</b> and drops out of the live count.</li>
+          <li>Unfrozen, it heartbeats again, is told to re-register, and sends a full block report.</li>
+          <li>Live again with all 8 blocks known. Block reports can also be triggered by hand.</li>
+        </ol>
+      </div>
+
+      <div class="view view--behind">
+        <span class="view__tag">Behind the screen</span>
+        <svg viewBox="0 0 360 250" role="img" aria-label="NameNode state machine for a DataNode">
+          <g font-size="9" font-weight="700">
+            <rect x="20" y="40" width="90" height="40" rx="20" class="s-soft-green" style="stroke:var(--green)"/><text x="65" y="64" text-anchor="middle" class="s-green">LIVE</text>
+            <rect x="135" y="40" width="90" height="40" rx="20" class="s-soft-acc" style="stroke:var(--track)"/><text x="180" y="64" text-anchor="middle" class="s-acc">STALE</text>
+            <rect x="250" y="40" width="90" height="40" rx="20" class="s-card2" style="stroke:var(--red)"/><text x="295" y="64" text-anchor="middle" class="s-red">DEAD</text>
+          </g>
+          <path d="M110 60h25M225 60h25" class="s-line"/>
+          <text x="122" y="34" text-anchor="middle" font-size="7.6" class="s-ink2">30 s</text><text x="238" y="34" text-anchor="middle" font-size="7.6" class="s-ink2">10m30s</text>
+          <g data-on="1"><rect x="16" y="36" width="98" height="48" rx="24" style="fill:none;stroke:var(--green);stroke-width:3"/><text x="180" y="130" text-anchor="middle" font-size="9" class="s-ink2">each heartbeat resets the clock</text><text x="180" y="146" text-anchor="middle" font-size="8.6" class="s-ink2">reply may carry commands (copy, delete)</text></g>
+          <g data-on="2"><rect x="16" y="36" width="98" height="48" rx="24" style="fill:none;stroke:var(--green);stroke-width:3"/><text x="180" y="130" text-anchor="middle" font-size="9" class="s-ink2">silence… the clock keeps running</text></g>
+          <g data-on="3"><rect x="131" y="36" width="98" height="48" rx="24" style="fill:none;stroke:var(--track);stroke-width:3"/><text x="180" y="130" text-anchor="middle" font-size="9" class="s-ink2">stale: can be skipped for reads/writes</text><text x="180" y="146" text-anchor="middle" font-size="8.6" class="s-ink2">(if avoid.*.stale.datanode is on)</text></g>
+          <g data-on="4"><rect x="246" y="36" width="98" height="48" rx="24" style="fill:none;stroke:var(--red);stroke-width:3"/><text x="180" y="130" text-anchor="middle" font-size="9" font-weight="700" class="s-red">dead: replicas removed from block map</text><text x="180" y="146" text-anchor="middle" font-size="8.6" class="s-ink2">under-replicated blocks get copied (Lesson 5.3)</text></g>
+          <g data-on="5"><path d="M295 80c0 40-230 40-230 0" style="fill:none;stroke:var(--green);stroke-width:2"/><text x="180" y="138" text-anchor="middle" font-size="9" class="s-ink2">heartbeat → “please re-register”</text><text x="180" y="154" text-anchor="middle" font-size="9" class="s-ink2">→ register → full block report</text></g>
+          <g data-on="6"><rect x="16" y="36" width="98" height="48" rx="24" style="fill:none;stroke:var(--green);stroke-width:3"/><rect x="60" y="176" width="240" height="40" rx="6" class="s-soft-blue" style="stroke:var(--blue)"/><text x="180" y="194" text-anchor="middle" font-size="8.6" class="s-blue">block reports: at start-up, every 6 h,</text><text x="180" y="208" text-anchor="middle" font-size="8.6" class="s-blue">incremental on changes, or on demand</text></g>
+          <text x="352" y="246" text-anchor="end" class="s-wm">myphatshala.in</text>
+        </svg>
+        <ol class="caps" hidden>
+          <li>While heartbeats arrive, the node is LIVE. Each heartbeat is also the NameNode's chance to send it work.</li>
+          <li>The NameNode only measures time since the last heartbeat; it never pings the DataNode.</li>
+          <li>After 30 s the node is STALE. Clients can be steered away from it if the avoid-stale options are enabled.</li>
+          <li>After the dead interval it is DEAD: its replicas no longer count, and re-replication starts.</li>
+          <li>When it speaks again, the NameNode asks it to register again, and its block report restores its replicas to the map.</li>
+          <li>Back to LIVE. Block reports keep the map correct: full ones at start-up and every 6 hours, small incremental ones in between.</li>
+        </ol>
+      </div>
+    </div>
+  </div>
+
+  <h3 id="playground">Try it yourself: heartbeats in the playground</h3>
+  <p>Pink dots are heartbeats. Stop a node and use <b>Skip to timeout</b> to jump to the 10 min 30 s dead-node limit.</p>
+  {{PLAYGROUND}}
+</section>
+
+<!-- ======================= PART 6: REAL-WORLD USE ======================= -->
+<section class="part" id="real-world">
+  <span class="part-label"><b>6</b> Real-world use</span>
+  <h2>Heartbeats and reports at work</h2>
+
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="20" y="20" width="80" height="50" rx="6" class="s-board"/><text x="60" y="42" text-anchor="middle" font-size="8.6" class="mono" style="fill:#FF8A80">dead nodes: 1</text><text x="60" y="58" text-anchor="middle" font-size="8.6" class="mono" style="fill:#F5C77E">page on-call</text></svg></div>
+    <div><h4>1. Alerts on dead and stale nodes</h4>
+      <p>Monitoring reads <code>NumDeadDataNodes</code> and <code>NumStaleDataNodes</code> from the NameNode's <code>/jmx</code>. One dead node is routine; several at once usually means a rack or network problem worth waking someone up for.</p>
+      <div class="uc-flow"><span>/jmx</span><i>→</i><span class="java">Dead/stale counts</span><i>→</i><span>Alert</span></div></div>
+  </div>
+
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="20" y="20" width="80" height="50" rx="6" class="s-soft-acc" style="stroke:var(--track)"/><text x="60" y="42" text-anchor="middle" font-size="8.6" font-weight="700" class="s-acc">GC pause 40 s</text><text x="60" y="58" text-anchor="middle" font-size="8.6" class="s-ink">“flapping” node</text></svg></div>
+    <div><h4>2. Diagnosing flapping DataNodes</h4>
+      <p>A DataNode that keeps going stale and coming back often has long Java garbage-collection pauses, a hung disk or network drops. Engineers compare its “last contact” history with GC and kernel logs.</p>
+      <div class="uc-flow"><span>Stale again and again</span><i>→</i><span class="java">GC / disk / network</span><i>→</i><span>Fix the node</span></div></div>
+  </div>
+
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="20" y="20" width="80" height="50" rx="6" class="s-soft-blue" style="stroke:var(--blue)"/><text x="60" y="42" text-anchor="middle" font-size="8.6" font-weight="700" class="s-blue">report storm</text><text x="60" y="58" text-anchor="middle" font-size="8.6" class="s-ink">after restart</text></svg></div>
+    <div><h4>3. Block report storms</h4>
+      <p>After a full cluster restart, thousands of DataNodes send full block reports at once. Big clusters tune report leases and splitting so the NameNode isn't overwhelmed, which shortens safe mode (Lesson 5.6).</p>
+      <div class="uc-flow"><span>Restart</span><i>→</i><span class="java">Reports in waves</span><i>→</i><span>NameNode stays responsive</span></div></div>
+  </div>
+
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="20" y="20" width="80" height="50" rx="6" class="s-soft-green" style="stroke:var(--green)"/><text x="60" y="42" text-anchor="middle" font-size="8.6" font-weight="700" class="s-green">disk replaced</text><text x="60" y="58" text-anchor="middle" font-size="8.6" class="s-ink">trigger report</text></svg></div>
+    <div><h4>4. After disk repairs</h4>
+      <p>When a failed disk is replaced or a data folder restored, admins run <code>dfsadmin -triggerBlockReport</code> so the NameNode learns the node's real contents now instead of in up to 6 hours.</p>
+      <div class="uc-flow"><span>Repair</span><i>→</i><span class="java">Trigger report</span><i>→</i><span>Block map correct</span></div></div>
+  </div>
+  <p class="muted">Simplified; organisations differ in tools and policies.</p>
+</section>

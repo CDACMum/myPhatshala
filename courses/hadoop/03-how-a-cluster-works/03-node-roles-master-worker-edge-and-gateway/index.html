@@ -1,0 +1,4694 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Node roles: master, worker, edge and gateway | MyPhatshala</title>
+<meta name="description" content="The roles of nodes in a Hadoop cluster: master nodes (NameNode, ResourceManager, JournalNodes, ZooKeeper), worker nodes (DataNode + NodeManager), edge/gateway nodes for users and clients, and utility nodes (Hive Metastore, HiveServer2, managers). Hardware per role, example layouts from 1 to 200+ nodes, cloud equivalents, with animations, a playground, Python, quiz and interview scenarios.">
+<meta name="mp:minutes" content="24">
+<link rel="canonical" href="https://myphatshala.in/courses/hadoop/03-how-a-cluster-works/03-node-roles-master-worker-edge-and-gateway/">
+<meta property="og:title" content="Node roles: master, worker, edge and gateway · MyPhatshala">
+<meta property="og:description" content="Masters coordinate, workers work, edge nodes are the front door. Learn every role and how real clusters are laid out.">
+<link rel="icon" href="../../../../assets/img/logo.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Fraunces:ital,opsz,wght@0,9..144,600;0,9..144,700;1,9..144,600&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../../../../assets/css/style.css">
+<link rel="stylesheet" href="../../../../assets/css/lesson.css">
+<link rel="stylesheet" href="../../../../assets/css/cluster-sim.css">
+<script src="../../../../assets/js/config.js"></script>
+<script>try { const t = localStorage.getItem("mp-theme"); if (t) document.documentElement.dataset.theme = t; } catch (e) {}</script>
+<script type="application/ld+json">{"@context": "https://schema.org", "@type": "LearningResource", "name": "Node roles: master, worker, edge and gateway", "learningResourceType": "Lesson", "educationalLevel": "Beginner → Intermediate", "isAccessibleForFree": true, "inLanguage": "en", "isPartOf": {"@type": "Course", "name": "Apache Hadoop", "provider": {"@type": "Organization", "name": "MyPhatshala"}}}</script>
+</head>
+<body style="--track:#B45309" data-lesson="03-how-a-cluster-works/03-node-roles-master-worker-edge-and-gateway" data-course-root="../../">
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="site-header">
+  <div class="wrap">
+    <a class="brand" href="../../../../" aria-label="MyPhatshala home"><img src="../../../../assets/img/logo.svg" width="34" height="34" alt=""><span>My<b>Phatshala</b></span></a>
+    <nav class="nav" aria-label="Main">
+      <a href="../../../../#tracks">All courses</a>
+      <a href="../../">Apache Hadoop syllabus</a>
+      <button class="theme-btn" id="theme-btn" aria-label="Toggle dark mode"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg></button>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+<section class="lesson-hero">
+  <div class="wrap">
+    <nav class="crumbs" aria-label="Breadcrumb"><a href="../../../../">Home</a><span>›</span><a href="../../../../#track-big-data">Big Data Engineering</a><span>›</span><a href="../../">Apache Hadoop</a><span>›</span><b>Lesson 3.3</b></nav>
+    <h1>Node roles: master, worker, edge and gateway</h1>
+    <p class="lead">Every machine in a Hadoop cluster has a role, and respecting the roles is what keeps a cluster healthy. This lesson explains master nodes (protected coordinators), worker nodes (storage and compute managed by YARN), edge or gateway nodes (where users and tools connect) and utility nodes (supporting services), what runs on each, what hardware they need, and how companies lay them out for clusters of 5, 50 and 500 machines.</p>
+    <div class="lesson-meta"><span>Module 3 · How one Hadoop cluster works</span><span>⏱ 24 min</span><span>Beginner → Intermediate</span><span>Role layouts by size</span><span>Cluster Playground</span><span>Runs in your browser (Python)</span><span>8 practice problems</span></div>
+  </div>
+</section>
+
+<div class="wrap lesson-layout">
+<article class="lesson-main">
+<!-- ======================= PART 1: THE STORY ======================= -->
+<section class="part" id="story">
+  <span class="part-label"><b>1</b> The story</span>
+  <h2>“Don't log in to the NameNode!”</h2>
+  <div class="story">
+    <p class="narration">On his third day, Kabir needs to run a quick script on the cluster. He finds the host name of the biggest, most powerful server, the NameNode, logs in to it, and starts a Python job that reads a large file into memory. Five minutes later the whole team's chat lights up: “HDFS is slow!”, “NameNode GC pauses!”, “Who is on nn1?” His lead calls him over, calm but firm.</p>
+
+    <div class="scene">
+      <svg viewBox="0 0 640 190" role="img" aria-label="Users connect only to edge nodes. Edge nodes talk to master nodes and worker nodes. Masters coordinate; workers store and compute; utility nodes run supporting services.">
+        <g font-size="10">
+          <rect x="10" y="68" width="110" height="64" rx="8" class="s-soft-blue" style="stroke:var(--blue)"/><text x="65" y="92" text-anchor="middle" font-weight="700" class="s-blue">Users</text><text x="65" y="110" text-anchor="middle" font-size="8.6" class="s-ink">laptops, BI tools,</text><text x="65" y="122" text-anchor="middle" font-size="8.6" class="s-ink">schedulers</text>
+          <path d="M120 100h26" class="s-line"/><path d="M142 96l6 4-6 4" class="s-line"/>
+          <rect x="152" y="60" width="110" height="80" rx="8" class="s-soft-acc" style="stroke:var(--track);stroke-width:1.5"/><text x="207" y="84" text-anchor="middle" font-weight="700" class="s-acc">Edge nodes</text><text x="207" y="102" text-anchor="middle" font-size="8.6" class="s-ink">the front door:</text><text x="207" y="116" text-anchor="middle" font-size="8.6" class="s-ink">clients, configs,</text><text x="207" y="128" text-anchor="middle" font-size="8.6" class="s-ink">user logins</text>
+          <path d="M262 100h26" class="s-line"/><path d="M284 96l6 4-6 4" class="s-line"/>
+          <rect x="296" y="12" width="160" height="56" rx="8" class="s-board"/><text x="376" y="34" text-anchor="middle" font-weight="700" class="s-chalk">Master nodes</text><text x="376" y="52" text-anchor="middle" font-size="8.6" style="fill:#9FD3B8">NameNode · ResourceManager · …</text>
+          <rect x="296" y="76" width="160" height="48" rx="8" class="s-card2"/><text x="376" y="96" text-anchor="middle" font-weight="700" class="s-ink">Utility nodes</text><text x="376" y="112" text-anchor="middle" font-size="8.6" class="s-ink2">ZooKeeper · Metastore · managers</text>
+          <rect x="296" y="132" width="160" height="40" rx="8" class="s-soft-green" style="stroke:var(--green)"/><text x="376" y="157" text-anchor="middle" font-weight="700" class="s-green">Worker nodes ×40</text>
+          <rect x="476" y="40" width="154" height="110" rx="8" class="s-soft-acc" style="stroke:#D64545"/>
+          <text x="553" y="62" text-anchor="middle" font-weight="700" class="s-red">Never for users</text>
+          <text x="553" y="84" text-anchor="middle" font-size="8.6" class="s-ink">masters: protect them</text>
+          <text x="553" y="100" text-anchor="middle" font-size="8.6" class="s-ink">workers: YARN owns them</text>
+          <text x="553" y="122" text-anchor="middle" font-size="8.6" class="s-ink">users: edge nodes only</text>
+        </g>
+        <text x="320" y="186" text-anchor="middle" font-size="10" class="s-ink2">Every machine in a cluster has a <tspan font-weight="700" class="s-acc">role</tspan>. Respecting roles keeps the cluster healthy.</text>
+        <text x="632" y="186" text-anchor="end" class="s-wm">myphatshala.in</text>
+      </svg>
+    </div>
+
+    <div class="panel panel--right"><div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#DDEFE6"/><path d="M12 64c2-12 10-18 20-18s18 6 20 18z" fill="#F4F1EA"/><path d="M28 46l4 8 4-8" fill="#2F7D5B"/><circle cx="32" cy="28" r="12" fill="#B57A50"/><path d="M20 26c0-8 5-13 12-13s12 5 12 13c-2-3-6-5-12-5s-10 2-12 5z" fill="#5A5A5A"/><path d="M22 32c1 8 5 11 10 11s9-3 10-11c-2 3-6 4-10 4s-8-1-10-4z" fill="#5A5A5A"/><circle cx="27" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><circle cx="37" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><path d="M30.4 29h3.2" stroke="#1B2433" stroke-width="1.4"/><circle cx="27" cy="29" r="1.1" fill="#1B2433"/><circle cx="37" cy="29" r="1.1" fill="#1B2433"/></svg></div><div class="bubble"><b class="who">Arjun Sir</b><p>Kabir, which machine did you use?</p></div></div>
+    <div class="panel"><div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#E1E9F7"/><path d="M12 64c2-12 10-18 20-18s18 6 20 18z" fill="#B45309"/><circle cx="32" cy="29" r="12" fill="#A9714A"/><path d="M19 27c0-9 6-14 13-14s13 5 13 14c-2-4-5-6-8-6-3 3-9 4-13 3-2 1-4 2-5 3z" fill="#1E1A17"/><circle cx="27.5" cy="30" r="1.5" fill="#1E1A17"/><circle cx="36.5" cy="30" r="1.5" fill="#1E1A17"/><path d="M27 35.5q5 3.5 10 0" stroke="#1E1A17" stroke-width="1.6" fill="none" stroke-linecap="round"/><rect x="41" y="40" width="10" height="7" rx="1.5" fill="#2E5AAC"/></svg></div><div class="bubble"><b class="who">Kabir</b><p>The one with the most RAM… nn1. I thought it would be fastest.</p></div></div>
+    <div class="panel panel--right"><div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#DDEFE6"/><path d="M12 64c2-12 10-18 20-18s18 6 20 18z" fill="#F4F1EA"/><path d="M28 46l4 8 4-8" fill="#2F7D5B"/><circle cx="32" cy="28" r="12" fill="#B57A50"/><path d="M20 26c0-8 5-13 12-13s12 5 12 13c-2-3-6-5-12-5s-10 2-12 5z" fill="#5A5A5A"/><path d="M22 32c1 8 5 11 10 11s9-3 10-11c-2 3-6 4-10 4s-8-1-10-4z" fill="#5A5A5A"/><circle cx="27" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><circle cx="37" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><path d="M30.4 29h3.2" stroke="#1B2433" stroke-width="1.4"/><circle cx="27" cy="29" r="1.1" fill="#1B2433"/><circle cx="37" cy="29" r="1.1" fill="#1B2433"/></svg></div><div class="bubble"><b class="who">Arjun Sir</b><p>It is the most important machine in the cluster. The NameNode keeps all of HDFS's metadata in its memory. Your script took memory and CPU from it, so it paused, and every user's reads and writes waited.</p></div></div>
+    <div class="panel"><div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#FCE6D6"/><path d="M14 64c2-12 9-18 18-18s16 6 18 18z" fill="#2E5AAC"/><circle cx="32" cy="29" r="12" fill="#C68B5E"/><path d="M19 29c0-10 6-15 13-15s13 5 13 15c-3-5-7-8-13-8s-10 3-13 8z" fill="#2A1B14"/><path d="M43 27c3 6 3 14 0 20" stroke="#2A1B14" stroke-width="4" fill="none" stroke-linecap="round"/><circle cx="27.5" cy="30" r="1.5" fill="#2A1B14"/><circle cx="36.5" cy="30" r="1.5" fill="#2A1B14"/><path d="M28 35q4 3 8 0" stroke="#2A1B14" stroke-width="1.6" fill="none" stroke-linecap="round"/><circle cx="32" cy="24" r="1.2" fill="#D64545"/></svg></div><div class="bubble"><b class="who">Riya</b><p>So where should he have run it?</p></div></div>
+    <div class="panel panel--right"><div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#DDEFE6"/><path d="M12 64c2-12 10-18 20-18s18 6 20 18z" fill="#F4F1EA"/><path d="M28 46l4 8 4-8" fill="#2F7D5B"/><circle cx="32" cy="28" r="12" fill="#B57A50"/><path d="M20 26c0-8 5-13 12-13s12 5 12 13c-2-3-6-5-12-5s-10 2-12 5z" fill="#5A5A5A"/><path d="M22 32c1 8 5 11 10 11s9-3 10-11c-2 3-6 4-10 4s-8-1-10-4z" fill="#5A5A5A"/><circle cx="27" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><circle cx="37" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><path d="M30.4 29h3.2" stroke="#1B2433" stroke-width="1.4"/><circle cx="27" cy="29" r="1.1" fill="#1B2433"/><circle cx="37" cy="29" r="1.1" fill="#1B2433"/></svg></div><div class="bubble"><b class="who">Arjun Sir</b><p>On an <b>edge node</b>, the machine built for people. Every cluster has roles: <b>masters</b> that coordinate and must be protected, <b>workers</b> that store and compute and are managed by YARN, <b>utility</b> nodes for supporting services, and <b>edge</b> nodes where users and tools connect. Today you'll learn each role, what runs on it, and how companies lay them out for small and large clusters.</p></div></div>
+    <div class="panel"><div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#E1E9F7"/><path d="M12 64c2-12 10-18 20-18s18 6 20 18z" fill="#B45309"/><circle cx="32" cy="29" r="12" fill="#A9714A"/><path d="M19 27c0-9 6-14 13-14s13 5 13 14c-2-4-5-6-8-6-3 3-9 4-13 3-2 1-4 2-5 3z" fill="#1E1A17"/><circle cx="27.5" cy="30" r="1.5" fill="#1E1A17"/><circle cx="36.5" cy="30" r="1.5" fill="#1E1A17"/><path d="M27 35.5q5 3.5 10 0" stroke="#1E1A17" stroke-width="1.6" fill="none" stroke-linecap="round"/><rect x="41" y="40" width="10" height="7" rx="1.5" fill="#2E5AAC"/></svg></div><div class="bubble"><b class="who">Kabir</b><p>And I'll never touch nn1 again.</p></div></div>
+  </div>
+</section>
+
+<!-- ======================= PART 2: DEFINITION ======================= -->
+<section class="part" id="definition">
+  <span class="part-label"><b>2</b> Definition</span>
+  <h2>Node roles in a Hadoop cluster</h2>
+  <div class="def">
+    <div class="def__formal"><small>Formal definition (write this in exams)</small>
+      <p>Nodes in a Hadoop cluster are assigned <b>roles</b> according to the services they run. <b>Master nodes</b> host the coordinating daemons (NameNode and its standby, ResourceManager, JobHistory Server, and in HA setups JournalNodes and ZKFCs) and are provisioned for reliability. <b>Worker nodes</b> (historically “slave” nodes) host DataNodes and NodeManagers and provide the cluster's storage and compute capacity. <b>Edge nodes</b> (also called <b>gateway</b> or client nodes) host client libraries, configuration and tools, and are the controlled entry point for users and applications; they run no core daemons. <b>Utility</b> (management) nodes host supporting services such as ZooKeeper, the Hive Metastore and its database, HiveServer2, Oozie, security and cluster-management servers.</p></div>
+    <div class="def__simple"><small>In simple words</small>
+      <p>Masters are the managers: few, important, protected. Workers are the staff: many, doing the storage and processing. Edge nodes are the reception desk where people come in to submit work. Utility nodes run the helper services everyone else depends on. Users only ever log in at reception.</p></div>
+  </div>
+
+  <h3>Words you'll meet in this lesson</h3>
+  <div class="terms">
+    <div class="term"><b>Master node</b><span>Runs coordinating daemons (NameNode, ResourceManager…). Few, reliable, protected.</span></div>
+    <div class="term"><b>Worker node</b><span>Runs DataNode + NodeManager. Many, identical, replaceable.</span></div>
+    <div class="term"><b>Edge / gateway node</b><span>Has Hadoop client tools and configuration but no core daemons. Where users log in and jobs are submitted.</span></div>
+    <div class="term"><b>Utility node</b><span>Runs supporting services: ZooKeeper, Hive Metastore, HiveServer2, Oozie, Ranger, cluster manager.</span></div>
+    <div class="term"><b>Role</b><span>A service assigned to a host. Cluster managers show a cluster as hosts × roles.</span></div>
+    <div class="term"><b>Hive Metastore</b><span>Service (plus a relational database) storing table definitions for Hive and Spark SQL.</span></div>
+    <div class="term"><b>Quorum</b><span>A majority. ZooKeeper and JournalNodes run on an odd number of nodes (3 or 5) so a majority can always decide.</span></div>
+    <div class="term"><b>Client configuration</b><span>The cluster's <code>*-site.xml</code> files copied to an edge node so tools know where the masters are.</span></div>
+  </div>
+
+  <h3>Typical hardware by role (2026, approximate)</h3>
+  <table class="facts">
+    <tr><th>Master</th><td>64–512 GB RAM (NameNode heap grows with files), mirrored (RAID 1) disks for OS and metadata, dual power supplies, 25 Gbps network</td></tr>
+    <tr><th>Worker</th><td>32–64 cores, 128–512 GB RAM, 8–24 plain data disks (JBOD), 10–25 Gbps network</td></tr>
+    <tr><th>Edge</th><td>Moderate CPU/RAM, space for user home directories and tools, connected to both the cluster network and the corporate network</td></tr>
+    <tr><th>Utility</th><td>Moderate; reliable disks for ZooKeeper and the metastore database</td></tr>
+    <tr><th>Counts</th><td>Masters: 2–5 · Utility: 1–3 · Edge: 1 per few dozen users · Workers: everything else</td></tr>
+  </table>
+
+  <h3 id="levels">Roles at three levels</h3>
+  <div class="modlab levels"><div class="modlab__bar"><b>Pick your level. New to this? Start at Beginner and climb.</b><button type="button" data-mod="b">Beginner</button><button type="button" data-mod="i">Intermediate</button><button type="button" data-mod="a">Advanced</button></div>
+    <div class="modlab__panel" data-mod="b"><h4><span class="lvl lvl--b">Beginner</span> A hospital again</h4>
+      <ul>
+        <li><b>Masters</b> = the records office and the bed manager. If they stop, everyone stops, so nobody else is allowed to use their desks.</li>
+        <li><b>Workers</b> = the wards, where the actual work happens. There are many, and one can close for repairs.</li>
+        <li><b>Edge node</b> = reception. Visitors come here, not into the records office or the operating theatre.</li>
+        <li><b>Utility</b> = the pharmacy and the IT room: support services the whole hospital relies on.</li>
+      </ul>
+
+    </div>
+    <div class="modlab__panel" data-mod="i"><h4><span class="lvl lvl--i">Intermediate</span> What runs where in a typical medium cluster</h4>
+      <ul>
+        <li><b>master1:</b> active NameNode, ZKFC, JournalNode, ZooKeeper.</li>
+        <li><b>master2:</b> standby NameNode, ZKFC, JournalNode, ZooKeeper, ResourceManager.</li>
+        <li><b>master3 / utility:</b> JournalNode, ZooKeeper, standby ResourceManager, JobHistory Server, Hive Metastore + database, HiveServer2.</li>
+        <li><b>edge1–2:</b> HDFS/YARN/Hive/Spark clients, Hue or Jupyter, scheduler workers; user logins.</li>
+        <li><b>worker1–N:</b> DataNode + NodeManager (and, for HBase, a RegionServer).</li>
+        <li>The three JournalNodes and three ZooKeeper servers sit on three different machines so the cluster survives losing any one of them.</li>
+      </ul>
+
+    </div>
+    <div class="modlab__panel" data-mod="a"><h4><span class="lvl lvl--a">Advanced</span> Why roles are kept separate</h4>
+      <ul>
+        <li><b>Blast radius:</b> a user's runaway process on a master can pause the NameNode (long Java garbage-collection pauses) and stall the whole cluster.</li>
+        <li><b>Resource accounting:</b> work on workers must go through YARN so it is counted, queued and limited. A script started by hand on a worker steals memory YARN thinks is free, and containers get killed.</li>
+        <li><b>Security:</b> only edge nodes are reachable from the corporate network; masters and workers sit on a private cluster network. Users get Kerberos tickets on the edge node.</li>
+        <li><b>Upgrades and failures:</b> workers are replaced like identical parts; masters are changed carefully, one at a time, with failover.</li>
+        <li><b>Cloud versions:</b> managed services keep the same roles: Amazon EMR has a primary node, core nodes (HDFS + YARN) and task nodes (YARN only); Google Dataproc has master and worker nodes plus optional secondary workers.</li>
+      </ul>
+
+    </div>
+  </div>
+  <div class="callout callout--exam"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19V5a2 2 0 0 1 2-2h12v18H6a2 2 0 0 1-2-2zm0 0a2 2 0 0 1 2-2h12"/></svg><p><b>Exam tip:</b> For “Explain the types of nodes in a Hadoop cluster”, list <b>master, worker (slave), edge/gateway</b> and <b>utility</b>, the daemons on each, and one reason each is separated (masters protected, workers managed by YARN, edge as the controlled entry point). A small layout diagram earns full marks.</p></div>
+</section>
+
+<!-- ======================= PART 3: TYPES AND WAYS TO USE IT ======================= -->
+<section class="part" id="types">
+  <span class="part-label"><b>3</b> Types and ways to use it</span>
+  <h2>The roles, side by side</h2>
+  <div class="table-wrap">
+  <table class="compare" style="min-width:640px">
+    <thead><tr><th></th><th>Master</th><th>Worker</th><th>Edge / gateway</th><th>Utility</th></tr></thead>
+    <tbody>
+      <tr><td><b>Runs</b></td><td>NameNode(s), ResourceManager(s), JobHistory, JournalNodes, ZKFC</td><td>DataNode, NodeManager</td><td>Client tools and configs, notebooks, schedulers</td><td>ZooKeeper, Hive Metastore + DB, HiveServer2, Oozie, Ranger, manager</td></tr>
+      <tr><td><b>How many</b></td><td>2–5</td><td>Most of the cluster</td><td>1–several</td><td>1–3</td></tr>
+      <tr><td><b>Users log in?</b></td><td>No (admins only)</td><td>No</td><td><b>Yes</b></td><td>No (admins only)</td></tr>
+      <tr><td><b>If one fails</b></td><td>Failover to standby; serious</td><td>Re-replicate, re-run tasks; routine</td><td>Users move to another edge node</td><td>Depends on the service; usually HA</td></tr>
+      <tr><td><b>Hardware focus</b></td><td>RAM, reliability</td><td>Disks, cores</td><td>Network, user space</td><td>Reliability</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <h3>Example layouts by cluster size</h3>
+  <div class="cards">
+    <div class="card"><h4>Learning / test (1 machine)</h4><p>Pseudo-distributed: every daemon on one machine. Fine for practice, never for production. You'll build this in Module 4.</p><span class="tag">1 node</span></div>
+    <div class="card"><h4>Small (5–20 nodes)</h4><p>1 master (NameNode, RM, JobHistory), 1 edge node, workers. Optional second master for HA.</p><span class="tag">Start-up, department</span></div>
+    <div class="card"><h4>Medium (20–200 nodes)</h4><p>3 masters (HA NameNodes and RMs, 3 JournalNodes, 3 ZooKeepers), 1–2 utility, 2+ edge nodes, workers.</p><span class="tag">Most enterprises</span></div>
+    <div class="card"><h4>Large (200+ nodes)</h4><p>Dedicated machines per master service, 5 ZooKeepers, federated NameNodes, many edge nodes behind a load balancer.</p><span class="tag">Banks, telecoms, web</span></div>
+  </div>
+  <div class="callout callout--tip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18h6M10 22h4M12 2a7 7 0 0 0-4 12.7V17h8v-2.3A7 7 0 0 0 12 2z"/></svg><p>When someone gives you access to a cluster, first ask: “Which host is the edge node?” Run every command, notebook and script there. If you ever need to look at a master or worker, it should be an admin task with a clear reason.</p></div>
+</section>
+
+<!-- ======================= PART 4: STEP BY STEP ======================= -->
+<section class="part" id="steps">
+  <span class="part-label"><b>4</b> Step by step</span>
+  <h2>Designing the roles for a 30-node cluster</h2>
+  <ol class="stepper">
+    <li><h4>Decide what must be highly available</h4>
+      <p>TiffinGo's dashboards depend on HDFS all day, so they want NameNode and ResourceManager HA.</p>
+      <span class="behind">HA means two NameNodes, two ResourceManagers, three JournalNodes and three ZooKeeper servers, spread over three machines so any one can fail.</span></li>
+    <li><h4>Place the masters</h4>
+      <div class="code" data-lang="python" data-file="masters.py"><pre><code>masters = {
+    "m1": ["NameNode (active)", "ZKFC", "JournalNode", "ZooKeeper"],
+    "m2": ["NameNode (standby)", "ZKFC", "JournalNode", "ZooKeeper", "ResourceManager"],
+    "m3": ["JournalNode", "ZooKeeper", "ResourceManager (standby)", "JobHistoryServer"],
+}
+print(sum(1 for roles in masters.values() if "JournalNode" in roles), "JournalNodes")</code></pre><div class="output">3 JournalNodes</div></div>
+      <span class="behind">Put m1, m2 and m3 on different racks and power feeds. The active NameNode gets the lightest load of other services.</span></li>
+    <li><h4>Add utility services</h4>
+      <p>Hive Metastore with its database and HiveServer2 go on a utility node (or on m3 in a small cluster).</p>
+      <span class="behind">The metastore database holds every table definition: back it up and give it a standby, or every Hive and Spark SQL query stops.</span></li>
+    <li><h4>Add edge nodes</h4>
+      <p>Two edge nodes with the client configuration, Hive Beeline, spark-submit, Jupyter and the Airflow workers.</p>
+      <span class="behind">Two, so users can keep working while one is patched. Only these two are reachable from the office network.</span></li>
+    <li><h4>Everything else is a worker</h4>
+      <div class="code" data-lang="python" data-file="workers.py"><pre><code>total, masters, utility, edge = 30, 3, 1, 2
+print(total - masters - utility - edge, "workers (DataNode + NodeManager)")</code></pre><div class="output">24 workers (DataNode + NodeManager)</div></div>
+      <span class="behind">The workers provide all storage and compute, so capacity planning (Lesson 1.3) is done on these 24, not on all 30.</span></li>
+  </ol>
+</section>
+
+<!-- ======================= PART 5: SEE IT HAPPEN ======================= -->
+<section class="part" id="animation">
+  <span class="part-label"><b>5</b> See it happen</span>
+  <h2>One Hive query: what Riya does on the edge node, and which role does what</h2>
+  <p>Riya runs a SQL query from the edge node. Left: her screen. Right: the request travelling through each kind of node.</p>
+  <div class="anim" data-frames="6">
+    <div class="anim__title">A query through every role <span>6 steps</span></div>
+    <div class="anim__views">
+      <div class="view view--see">
+        <span class="view__tag">What you see</span>
+        <svg viewBox="0 0 360 250" role="img" aria-label="Riya's terminal on the edge node">
+          <rect x="14" y="14" width="332" height="206" rx="8" class="s-board"/>
+          <text x="26" y="32" font-size="9" class="mono" style="fill:#7F8C86">riya@edge1 : ~  (illustrative)</text>
+          <g data-on="1-"><text x="26" y="54" font-size="9" class="mono" style="fill:#7F8C86">$ beeline -u jdbc:hive2://util1:10000</text></g>
+          <g data-on="2-"><text x="26" y="72" font-size="9" class="mono" style="fill:#9FD3B8">0: jdbc:hive2://util1:10000&gt;</text><text x="26" y="88" font-size="9" class="mono" style="fill:#F5C77E">SELECT item, SUM(amount)</text><text x="26" y="102" font-size="9" class="mono" style="fill:#F5C77E">FROM orders GROUP BY item;</text></g>
+          <g data-on="3-4"><text x="26" y="124" font-size="9" class="mono" style="fill:#9FD3B8">Query running…</text></g>
+          <g data-on="4"><text x="26" y="140" font-size="9" class="mono" style="fill:#9FD3B8">Map 1: 12/12  Reducer 2: 1/2</text></g>
+          <g data-on="5-"><text x="26" y="124" font-size="9" class="mono" style="fill:#9FD3B8">+-----------+-------+</text><text x="26" y="138" font-size="9" class="mono" style="fill:#9FD3B8">| item      | total |</text><text x="26" y="152" font-size="9" class="mono" style="fill:#9FD3B8">| chai      | 41250 |</text><text x="26" y="166" font-size="9" class="mono" style="fill:#9FD3B8">| vada pav  | 38820 |</text></g>
+          <g data-on="6"><text x="180" y="200" text-anchor="middle" font-size="10" class="s-chalk">Riya only ever touched the edge node.</text></g>
+          <text x="352" y="244" text-anchor="end" class="s-wm">myphatshala.in</text>
+        </svg>
+        <ol class="caps" hidden>
+          <li>Riya logs in to <b>edge1</b> and connects Beeline (the Hive client) to HiveServer2.</li>
+          <li>She types a GROUP BY query on the <code>orders</code> table.</li>
+          <li>The query is running. She sees only a progress message.</li>
+          <li>Progress shows map and reduce tasks. They run somewhere on the cluster, not on her machine.</li>
+          <li>The result table appears.</li>
+          <li>From start to finish, Riya used only the edge node. Every other role worked on her behalf.</li>
+        </ol>
+      </div>
+
+      <div class="view view--behind">
+        <span class="view__tag">Behind the screen</span>
+        <svg viewBox="0 0 360 250" role="img" aria-label="Edge, utility, master and worker nodes handling the query">
+          <rect x="10" y="14" width="80" height="44" rx="6" class="s-soft-acc" style="stroke:var(--track)"/><text x="50" y="34" text-anchor="middle" font-size="8.6" font-weight="700" class="s-acc">edge1</text><text x="50" y="48" text-anchor="middle" font-size="7.6" class="s-ink">beeline</text>
+          <rect x="110" y="14" width="110" height="44" rx="6" class="s-card2"/><text x="165" y="30" text-anchor="middle" font-size="8.6" font-weight="700" class="s-ink">util1</text><text x="165" y="42" text-anchor="middle" font-size="7.6" class="s-ink2">HiveServer2</text><text x="165" y="52" text-anchor="middle" font-size="7.6" class="s-ink2">Metastore + DB</text>
+          <rect x="240" y="14" width="110" height="44" rx="6" class="s-board"/><text x="295" y="30" text-anchor="middle" font-size="8.6" font-weight="700" class="s-chalk">masters</text><text x="295" y="42" text-anchor="middle" font-size="7.6" style="fill:#9FD3B8">NameNode</text><text x="295" y="52" text-anchor="middle" font-size="7.6" style="fill:#9FD3B8">ResourceManager</text>
+          <g><rect x="10" y="130" width="104" height="70" rx="6" class="s-soft-green" style="stroke:var(--green)"/><rect x="128" y="130" width="104" height="70" rx="6" class="s-soft-green" style="stroke:var(--green)"/><rect x="246" y="130" width="104" height="70" rx="6" class="s-soft-green" style="stroke:var(--green)"/>
+            <text x="62" y="146" text-anchor="middle" font-size="8.6" font-weight="700" class="s-green">worker1</text><text x="180" y="146" text-anchor="middle" font-size="8.6" font-weight="700" class="s-green">worker2</text><text x="298" y="146" text-anchor="middle" font-size="8.6" font-weight="700" class="s-green">worker3</text>
+            <text x="62" y="160" text-anchor="middle" font-size="7.6" class="s-ink2">DN + NM</text><text x="180" y="160" text-anchor="middle" font-size="7.6" class="s-ink2">DN + NM</text><text x="298" y="160" text-anchor="middle" font-size="7.6" class="s-ink2">DN + NM</text></g>
+          <g data-on="1"><path d="M90 36h18" style="stroke:var(--track);stroke-width:3"/><text x="180" y="96" text-anchor="middle" font-size="9" font-weight="700" class="s-acc">edge → HiveServer2 (JDBC, port 10000)</text></g>
+          <g data-on="2"><text x="180" y="88" text-anchor="middle" font-size="9" font-weight="700" class="s-ink">HiveServer2 asks the Metastore:</text><text x="180" y="102" text-anchor="middle" font-size="9" class="s-ink">“orders” = which HDFS folder, which columns?</text></g>
+          <g data-on="3"><path d="M220 36h18" style="stroke:var(--blue);stroke-width:3"/><text x="180" y="88" text-anchor="middle" font-size="9" font-weight="700" class="s-blue">NameNode: block locations of /warehouse/orders</text><text x="180" y="102" text-anchor="middle" font-size="9" font-weight="700" class="s-acc">ResourceManager: start the query's AM</text></g>
+          <g data-on="4"><path d="M295 58v68M295 92H62v38M180 92v38" style="fill:none;stroke:var(--green);stroke-width:2;stroke-dasharray:4 3"/>
+            <rect x="22" y="168" width="38" height="14" rx="3" class="s-green"/><rect x="64" y="168" width="38" height="14" rx="3" class="s-green"/><rect x="140" y="168" width="38" height="14" rx="3" class="s-green"/><rect x="182" y="168" width="38" height="14" rx="3" style="fill:#8B5CF6"/><rect x="258" y="168" width="38" height="14" rx="3" class="s-green"/><rect x="300" y="168" width="38" height="14" rx="3" style="fill:#8B5CF6"/>
+            <text x="180" y="222" text-anchor="middle" font-size="9" font-weight="700" class="s-green">tasks run in containers on the workers, next to the data</text></g>
+          <g data-on="5"><path d="M165 58v24M165 82H62" style="fill:none;stroke:#8B5CF6;stroke-width:2"/><text x="180" y="222" text-anchor="middle" font-size="9" font-weight="700" style="fill:#8B5CF6">results → HiveServer2 → edge1</text></g>
+          <g data-on="6"><text x="180" y="96" text-anchor="middle" font-size="9" class="s-ink">edge: entry · utility: SQL + table catalogue</text><text x="180" y="110" text-anchor="middle" font-size="9" class="s-ink">masters: metadata + resources · workers: the work</text></g>
+          <text x="352" y="246" text-anchor="end" class="s-wm">myphatshala.in</text>
+        </svg>
+        <ol class="caps" hidden>
+          <li>The <b>edge node</b> runs only the client (Beeline). It sends the query to <b>HiveServer2</b> on the utility node over JDBC (port 10000 by default).</li>
+          <li>HiveServer2 asks the <b>Hive Metastore</b> (also on the utility node, backed by a database) where the <code>orders</code> table lives in HDFS and what its columns are.</li>
+          <li>It then talks to the <b>masters</b>: the NameNode for the files' block locations, the ResourceManager to start an ApplicationMaster for the query.</li>
+          <li>Map and reduce tasks run in containers on the <b>workers</b>, mostly on the nodes holding the table's blocks.</li>
+          <li>Results flow back through HiveServer2 to Riya's Beeline session on the edge node.</li>
+          <li>Every role did one job. None of the work ran on the edge node or on a master.</li>
+        </ol>
+      </div>
+    </div>
+  </div>
+
+  <h3 id="playground">Try it yourself: roles in the playground</h3>
+  <p>The playground's <b>Client</b> box is the edge node, the dark boxes are masters, and every DataNode box is a worker. Use it to see why each role matters.</p>
+  <div class="csim"><script type="application/json">{"title": "Which role matters how much?", "intro": "<p><b>Client<\/b> = edge node, dark boxes = masters (two NameNodes for HA), DataNode boxes = workers. Break each kind and compare what happens.<\/p>", "racks": 3, "nodes": 3, "features": ["job", "fail", "ha", "fsck"], "preload": [{"name": "orders.parquet", "sizeMB": 1024}], "try": [{"text": "Run the job from the edge node (the Client box). Watch which boxes do the work.", "on": "job-done"}, {"text": "Stop a <b>worker<\/b> during a job: routine. Tasks re-run, data stays available.", "on": "node-stop"}, {"text": "Stop the active <b>master<\/b> (NameNode): only HA saves you.", "on": "nn-failover"}, {"text": "Run <b>hdfs fsck /<\/b>: losing one worker never loses data.", "on": "fsck"}]}</script></div>
+</section>
+
+<!-- ======================= PART 6: REAL-WORLD USE ======================= -->
+<section class="part" id="real-world">
+  <span class="part-label"><b>6</b> Real-world use</span>
+  <h2>Roles in real platforms</h2>
+
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="16" y="20" width="88" height="50" rx="6" class="s-soft-blue" style="stroke:var(--blue)"/><text x="60" y="42" text-anchor="middle" font-size="8.6" font-weight="700" class="s-blue">hosts × roles</text><text x="60" y="58" text-anchor="middle" font-size="8.6" class="s-ink">assign · start · watch</text></svg></div>
+    <div><h4>1. Cluster managers assign roles</h4>
+      <p>In Cloudera Manager or Apache Ambari, an admin builds a cluster by assigning roles to hosts (“NameNode on m1”, “DataNode on all workers”, “Gateway on edge1”). The tool installs, configures and monitors each role.</p>
+      <div class="uc-flow"><span>Host list</span><i>→</i><span class="java">Role assignment</span><i>→</i><span>Running cluster</span></div></div>
+  </div>
+
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="20" y="16" width="34" height="58" rx="5" class="s-board"/><rect x="66" y="16" width="34" height="26" rx="5" class="s-soft-green" style="stroke:var(--green)"/><rect x="66" y="48" width="34" height="26" rx="5" class="s-soft-acc" style="stroke:var(--track)"/><text x="37" y="50" text-anchor="middle" font-size="7.6" style="fill:#fff" font-weight="700">primary</text><text x="83" y="33" text-anchor="middle" font-size="7.6" class="s-green" font-weight="700">core</text><text x="83" y="65" text-anchor="middle" font-size="7.6" class="s-acc" font-weight="700">task</text></svg></div>
+    <div><h4>2. Cloud clusters keep the same roles</h4>
+      <p>Amazon EMR has a <b>primary</b> node (masters), <b>core</b> nodes (HDFS + YARN) and <b>task</b> nodes (YARN only, safe to remove). Google Dataproc has master and worker nodes, with optional secondary (preemptible) workers that add compute only.</p>
+      <div class="uc-flow"><span>Primary</span><i>→</i><span class="java">Core (data + compute)</span><i>→</i><span>Task (compute only)</span></div></div>
+  </div>
+
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="18" y="22" width="84" height="46" rx="6" class="s-soft-acc" style="stroke:var(--track)"/><text x="60" y="44" text-anchor="middle" font-size="9" font-weight="700" class="s-acc">edge1 · edge2</text><text x="60" y="58" text-anchor="middle" font-size="8.6" class="s-ink">Jupyter · Airflow</text></svg></div>
+    <div><h4>3. Data science on edge nodes</h4>
+      <p>Analysts open Jupyter or Hue on an edge node and submit Spark or Hive work to YARN. Their notebooks never run heavy processing on the edge itself; the cluster does it.</p>
+      <div class="uc-flow"><span>Notebook on edge</span><i>→</i><span class="java">spark-submit / Hive</span><i>→</i><span>Workers compute</span></div></div>
+  </div>
+
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="22" y="18" width="76" height="54" rx="6" class="s-board"/><path d="M40 52l12-14 10 8 16-18" style="fill:none;stroke:#FF8A80;stroke-width:3"/><text x="60" y="66" text-anchor="middle" font-size="7.6" style="fill:#9FD3B8">GC pause!</text></svg></div>
+    <div><h4>4. Incident reviews</h4>
+      <p>A common root cause in incident reports: “a user ran a script on a master” or “a manual process on workers exhausted memory, so YARN killed containers”. The fix is usually access control: logins only on edge nodes.</p>
+      <div class="uc-flow"><span>Outage</span><i>→</i><span class="java">Root cause: wrong role</span><i>→</i><span>Restrict logins</span></div></div>
+  </div>
+
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="16" y="28" width="26" height="34" rx="4" class="s-card2"/><rect x="47" y="28" width="26" height="34" rx="4" class="s-card2"/><rect x="78" y="28" width="26" height="34" rx="4" class="s-card2"/><text x="60" y="80" text-anchor="middle" font-size="8.6" class="s-ink">ZooKeeper ×3</text></svg></div>
+    <div><h4>5. Quorum services on separate machines</h4>
+      <p>ZooKeeper and JournalNodes are always placed on three (or five) different machines and racks, so the majority survives a failure. Putting all three on one host is a classic design-review mistake.</p>
+      <div class="uc-flow"><span>3 hosts</span><i>→</i><span class="java">Majority of 2</span><i>→</i><span>Survives 1 failure</span></div></div>
+  </div>
+  <p class="muted">Simplified. Exact role layouts differ by distribution and company.</p>
+</section>
+
+
+<div class="ad-slot" data-slot="mid"></div>
+
+<section class="part" id="run">
+  <span class="part-label"><b>7</b> Run the code</span>
+  <h2>Plan the roles for a cluster</h2>
+  <p>This program assigns roles to the machines of a cluster: three masters for HA, one utility node, two edge nodes, and workers for the rest. Then it prints the plan. Try the challenges to check a layout for mistakes.</p>
+  <div class="code" data-lang="python" data-file="main.py"><pre><code>def plan(total, ha=True):
+    masters = 3 if ha else 1
+    utility, edge = 1, 2 if total &gt;= 20 else 1
+    workers = total - masters - utility - edge
+    roles = {}
+    for i in range(1, masters + 1):
+        roles[f&quot;master{i}&quot;] = &quot;master&quot;
+    roles[&quot;util1&quot;] = &quot;utility&quot;
+    for i in range(1, edge + 1):
+        roles[f&quot;edge{i}&quot;] = &quot;edge&quot;
+    for i in range(1, workers + 1):
+        roles[f&quot;worker{i}&quot;] = &quot;worker&quot;
+    return roles
+
+roles = plan(30)
+summary = {}
+for host, role in roles.items():
+    summary[role] = summary.get(role, 0) + 1
+print(summary)</code></pre><div class="output">{&#x27;master&#x27;: 3, &#x27;utility&#x27;: 1, &#x27;edge&#x27;: 2, &#x27;worker&#x27;: 24}</div></div>
+  <ul class="anno"><li><code>masters = 3 if ha else 1</code><span>High availability needs three machines for the JournalNode and ZooKeeper majorities; without HA, one master.</span></li><li><code>utility, edge = 1, 2 if total &gt;= 20 else 1</code><span>Tuple assignment: <code>utility = 1</code>, and <code>edge</code> is 2 for bigger clusters, 1 for small ones.</span></li><li><code>workers = total - masters - utility - edge</code><span>Every remaining machine is a worker: storage and compute.</span></li></ul>
+  <div class="runner">
+    <script type="application/json">{
+ "lang": "python",
+ "file": "main.py",
+ "tasks": [
+  {
+   "label": "1 · Plan 30 nodes",
+   "hint": "Press <b>Run<\/b>. Then try <code>plan(8, ha=False)<\/code> for a small cluster.",
+   "code": "def plan(total, ha=True):\n    masters = 3 if ha else 1\n    utility, edge = 1, 2 if total >= 20 else 1\n    workers = total - masters - utility - edge\n    roles = {}\n    for i in range(1, masters + 1):\n        roles[f\"master{i}\"] = \"master\"\n    roles[\"util1\"] = \"utility\"\n    for i in range(1, edge + 1):\n        roles[f\"edge{i}\"] = \"edge\"\n    for i in range(1, workers + 1):\n        roles[f\"worker{i}\"] = \"worker\"\n    return roles\n\nroles = plan(30)\nsummary = {}\nfor host, role in roles.items():\n    summary[role] = summary.get(role, 0) + 1\nprint(summary)\n"
+  },
+  {
+   "label": "2 · Daemons per role",
+   "hint": "<b>Predict first:<\/b> how many DataNode processes run in a 30-node cluster with 3 masters, 1 utility and 2 edge nodes?",
+   "code": "daemons = {\"master\": [\"NameNode\", \"ResourceManager\", \"JournalNode\", \"ZooKeeper\"],\n           \"utility\": [\"HiveMetastore\", \"HiveServer2\"], \"edge\": [],\n           \"worker\": [\"DataNode\", \"NodeManager\"]}\ncounts = {\"master\": 3, \"utility\": 1, \"edge\": 2, \"worker\": 24}\ntotal = {}\nfor role, n in counts.items():\n    for d in daemons[role]:\n        total[d] = total.get(d, 0) + n\nprint(total)\n"
+  },
+  {
+   "label": "3 · Check quorum placement",
+   "hint": "ZooKeeper must run on an odd number of <i>different<\/i> hosts. Is this layout safe? Move one ZooKeeper to m3.",
+   "code": "zookeeper_hosts = [\"m1\", \"m2\", \"m2\"]\ndistinct = set(zookeeper_hosts)\nprint(\"Servers:\", len(zookeeper_hosts), \"| distinct hosts:\", len(distinct))\nprint(\"Safe\" if len(distinct) == len(zookeeper_hosts) and len(distinct) % 2 == 1 else \"Not safe\")\n"
+  },
+  {
+   "label": "4 · Who may log in?",
+   "hint": "Filter the hosts where ordinary users may log in. Only edge nodes should appear.",
+   "code": "roles = {\"m1\": \"master\", \"m2\": \"master\", \"util1\": \"utility\",\n         \"edge1\": \"edge\", \"edge2\": \"edge\", \"w1\": \"worker\", \"w2\": \"worker\"}\nlogin_ok = [h for h, r in roles.items() if r == \"edge\"]\nprint(\"Users may log in to:\", login_ok)\n"
+  },
+  {
+   "label": "5 · Spot the error",
+   "hint": "This layout check should flag worker daemons on a master, but it crashes. Read the error and fix the dictionary key.",
+   "code": "hosts = {\"m1\": {\"role\": \"master\", \"daemons\": [\"NameNode\", \"DataNode\"]}}\nfor name, h in hosts.items():\n    if h[\"role\"] == \"master\" and \"DataNode\" in h[\"deamons\"]:\n        print(name, \": worker daemon on a master!\")\n"
+  }
+ ]
+}</script>
+  </div>
+</section>
+
+<section class="part" id="tracer">
+  <span class="part-label"><b>8</b> Line by line</span>
+  <h2>Counting roles, one line at a time</h2>
+  <p>Watch the loop turn a host-to-role map into a summary: a dictionary that counts how many hosts have each role.</p>
+  <div class="tracer">
+    <script type="application/json">{
+ "lang": "python",
+ "code": [
+  "roles = {\"m1\": \"master\", \"m2\": \"master\", \"e1\": \"edge\", \"w1\": \"worker\", \"w2\": \"worker\"}",
+  "summary = {}",
+  "for host, role in roles.items():",
+  "    summary[role] = summary.get(role, 0) + 1",
+  "print(summary)"
+ ],
+ "steps": [
+  {
+   "line": 1,
+   "phase": "Python",
+   "note": "<code>roles<\/code> is created: → dict #1.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "roles",
+       "→ dict #1"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (5)<\/b> {&#x27;m1&#x27;: &#x27;master&#x27;, &#x27;m2&#x27;: &#x27;master&#x27;, &#x27;e1&#x27;: &#x27;edge&#x27;, &#x27;w1&#x27;: &#x27;worker&#x27;, &#x27;w2&#x27;: &#x27;worker&#x27;}"
+   ],
+   "newVar": "roles"
+  },
+  {
+   "line": 2,
+   "phase": "Python",
+   "note": "<code>summary<\/code> is created: → dict #2. A new dict object (#2) is created: {}",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "roles",
+       "→ dict #1"
+      ],
+      [
+       "summary",
+       "→ dict #2"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (5)<\/b> {&#x27;m1&#x27;: &#x27;master&#x27;, &#x27;m2&#x27;: &#x27;master&#x27;, &#x27;e1&#x27;: &#x27;edge&#x27;, &#x27;w1&#x27;: &#x27;worker&#x27;, &#x27;w2&#x27;: &#x27;worker&#x27;}",
+    "<b>#2 dict (0)<\/b> {}"
+   ],
+   "newVar": "summary"
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "<code>host<\/code> is created: &#x27;m1&#x27;. <code>role<\/code> is created: &#x27;master&#x27;.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "roles",
+       "→ dict #1"
+      ],
+      [
+       "summary",
+       "→ dict #2"
+      ],
+      [
+       "host",
+       "'m1'"
+      ],
+      [
+       "role",
+       "'master'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (5)<\/b> {&#x27;m1&#x27;: &#x27;master&#x27;, &#x27;m2&#x27;: &#x27;master&#x27;, &#x27;e1&#x27;: &#x27;edge&#x27;, &#x27;w1&#x27;: &#x27;worker&#x27;, &#x27;w2&#x27;: &#x27;worker&#x27;}",
+    "<b>#2 dict (0)<\/b> {}"
+   ],
+   "newVar": "role"
+  },
+  {
+   "line": 4,
+   "phase": "Count",
+   "note": "<code>get(role, 0)<\/code> starts each new role at zero. Object #2 dict now holds {&#x27;master&#x27;: 1}",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "roles",
+       "→ dict #1"
+      ],
+      [
+       "summary",
+       "→ dict #2"
+      ],
+      [
+       "host",
+       "'m1'"
+      ],
+      [
+       "role",
+       "'master'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (5)<\/b> {&#x27;m1&#x27;: &#x27;master&#x27;, &#x27;m2&#x27;: &#x27;master&#x27;, &#x27;e1&#x27;: &#x27;edge&#x27;, &#x27;w1&#x27;: &#x27;worker&#x27;, &#x27;w2&#x27;: &#x27;worker&#x27;}",
+    "<b>#2 dict (1)<\/b> {&#x27;master&#x27;: 1}"
+   ]
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "<code>host<\/code> changes to &#x27;m2&#x27;.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "roles",
+       "→ dict #1"
+      ],
+      [
+       "summary",
+       "→ dict #2"
+      ],
+      [
+       "host",
+       "'m2'"
+      ],
+      [
+       "role",
+       "'master'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (5)<\/b> {&#x27;m1&#x27;: &#x27;master&#x27;, &#x27;m2&#x27;: &#x27;master&#x27;, &#x27;e1&#x27;: &#x27;edge&#x27;, &#x27;w1&#x27;: &#x27;worker&#x27;, &#x27;w2&#x27;: &#x27;worker&#x27;}",
+    "<b>#2 dict (1)<\/b> {&#x27;master&#x27;: 1}"
+   ],
+   "newVar": "host"
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "Object #2 dict now holds {&#x27;master&#x27;: 2}",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "roles",
+       "→ dict #1"
+      ],
+      [
+       "summary",
+       "→ dict #2"
+      ],
+      [
+       "host",
+       "'m2'"
+      ],
+      [
+       "role",
+       "'master'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (5)<\/b> {&#x27;m1&#x27;: &#x27;master&#x27;, &#x27;m2&#x27;: &#x27;master&#x27;, &#x27;e1&#x27;: &#x27;edge&#x27;, &#x27;w1&#x27;: &#x27;worker&#x27;, &#x27;w2&#x27;: &#x27;worker&#x27;}",
+    "<b>#2 dict (1)<\/b> {&#x27;master&#x27;: 2}"
+   ]
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "<code>host<\/code> changes to &#x27;e1&#x27;. <code>role<\/code> changes to &#x27;edge&#x27;.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "roles",
+       "→ dict #1"
+      ],
+      [
+       "summary",
+       "→ dict #2"
+      ],
+      [
+       "host",
+       "'e1'"
+      ],
+      [
+       "role",
+       "'edge'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (5)<\/b> {&#x27;m1&#x27;: &#x27;master&#x27;, &#x27;m2&#x27;: &#x27;master&#x27;, &#x27;e1&#x27;: &#x27;edge&#x27;, &#x27;w1&#x27;: &#x27;worker&#x27;, &#x27;w2&#x27;: &#x27;worker&#x27;}",
+    "<b>#2 dict (1)<\/b> {&#x27;master&#x27;: 2}"
+   ],
+   "newVar": "role"
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "Object #2 dict now holds {&#x27;master&#x27;: 2, &#x27;edge&#x27;: 1}",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "roles",
+       "→ dict #1"
+      ],
+      [
+       "summary",
+       "→ dict #2"
+      ],
+      [
+       "host",
+       "'e1'"
+      ],
+      [
+       "role",
+       "'edge'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (5)<\/b> {&#x27;m1&#x27;: &#x27;master&#x27;, &#x27;m2&#x27;: &#x27;master&#x27;, &#x27;e1&#x27;: &#x27;edge&#x27;, &#x27;w1&#x27;: &#x27;worker&#x27;, &#x27;w2&#x27;: &#x27;worker&#x27;}",
+    "<b>#2 dict (2)<\/b> {&#x27;master&#x27;: 2, &#x27;edge&#x27;: 1}"
+   ]
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "<code>host<\/code> changes to &#x27;w1&#x27;. <code>role<\/code> changes to &#x27;worker&#x27;.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "roles",
+       "→ dict #1"
+      ],
+      [
+       "summary",
+       "→ dict #2"
+      ],
+      [
+       "host",
+       "'w1'"
+      ],
+      [
+       "role",
+       "'worker'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (5)<\/b> {&#x27;m1&#x27;: &#x27;master&#x27;, &#x27;m2&#x27;: &#x27;master&#x27;, &#x27;e1&#x27;: &#x27;edge&#x27;, &#x27;w1&#x27;: &#x27;worker&#x27;, &#x27;w2&#x27;: &#x27;worker&#x27;}",
+    "<b>#2 dict (2)<\/b> {&#x27;master&#x27;: 2, &#x27;edge&#x27;: 1}"
+   ],
+   "newVar": "role"
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "Object #2 dict now holds {&#x27;master&#x27;: 2, &#x27;edge&#x27;: 1, &#x27;worker&#x27;: 1}",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "roles",
+       "→ dict #1"
+      ],
+      [
+       "summary",
+       "→ dict #2"
+      ],
+      [
+       "host",
+       "'w1'"
+      ],
+      [
+       "role",
+       "'worker'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (5)<\/b> {&#x27;m1&#x27;: &#x27;master&#x27;, &#x27;m2&#x27;: &#x27;master&#x27;, &#x27;e1&#x27;: &#x27;edge&#x27;, &#x27;w1&#x27;: &#x27;worker&#x27;, &#x27;w2&#x27;: &#x27;worker&#x27;}",
+    "<b>#2 dict (3)<\/b> {&#x27;master&#x27;: 2, &#x27;edge&#x27;: 1, &#x27;worker&#x27;: 1}"
+   ]
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "<code>host<\/code> changes to &#x27;w2&#x27;.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "roles",
+       "→ dict #1"
+      ],
+      [
+       "summary",
+       "→ dict #2"
+      ],
+      [
+       "host",
+       "'w2'"
+      ],
+      [
+       "role",
+       "'worker'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (5)<\/b> {&#x27;m1&#x27;: &#x27;master&#x27;, &#x27;m2&#x27;: &#x27;master&#x27;, &#x27;e1&#x27;: &#x27;edge&#x27;, &#x27;w1&#x27;: &#x27;worker&#x27;, &#x27;w2&#x27;: &#x27;worker&#x27;}",
+    "<b>#2 dict (3)<\/b> {&#x27;master&#x27;: 2, &#x27;edge&#x27;: 1, &#x27;worker&#x27;: 1}"
+   ],
+   "newVar": "host"
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "Object #2 dict now holds {&#x27;master&#x27;: 2, &#x27;edge&#x27;: 1, &#x27;worker&#x27;: 2}",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "roles",
+       "→ dict #1"
+      ],
+      [
+       "summary",
+       "→ dict #2"
+      ],
+      [
+       "host",
+       "'w2'"
+      ],
+      [
+       "role",
+       "'worker'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (5)<\/b> {&#x27;m1&#x27;: &#x27;master&#x27;, &#x27;m2&#x27;: &#x27;master&#x27;, &#x27;e1&#x27;: &#x27;edge&#x27;, &#x27;w1&#x27;: &#x27;worker&#x27;, &#x27;w2&#x27;: &#x27;worker&#x27;}",
+    "<b>#2 dict (3)<\/b> {&#x27;master&#x27;: 2, &#x27;edge&#x27;: 1, &#x27;worker&#x27;: 2}"
+   ]
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "Nothing is left to loop over, so the loop ends and Python moves on.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "roles",
+       "→ dict #1"
+      ],
+      [
+       "summary",
+       "→ dict #2"
+      ],
+      [
+       "host",
+       "'w2'"
+      ],
+      [
+       "role",
+       "'worker'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (5)<\/b> {&#x27;m1&#x27;: &#x27;master&#x27;, &#x27;m2&#x27;: &#x27;master&#x27;, &#x27;e1&#x27;: &#x27;edge&#x27;, &#x27;w1&#x27;: &#x27;worker&#x27;, &#x27;w2&#x27;: &#x27;worker&#x27;}",
+    "<b>#2 dict (3)<\/b> {&#x27;master&#x27;: 2, &#x27;edge&#x27;: 1, &#x27;worker&#x27;: 2}"
+   ]
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "roles",
+       "→ dict #1"
+      ],
+      [
+       "summary",
+       "→ dict #2"
+      ],
+      [
+       "host",
+       "'w2'"
+      ],
+      [
+       "role",
+       "'worker'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (5)<\/b> {&#x27;m1&#x27;: &#x27;master&#x27;, &#x27;m2&#x27;: &#x27;master&#x27;, &#x27;e1&#x27;: &#x27;edge&#x27;, &#x27;w1&#x27;: &#x27;worker&#x27;, &#x27;w2&#x27;: &#x27;worker&#x27;}",
+    "<b>#2 dict (3)<\/b> {&#x27;master&#x27;: 2, &#x27;edge&#x27;: 1, &#x27;worker&#x27;: 2}"
+   ],
+   "out": "{'master': 2, 'edge': 1, 'worker': 2}\n"
+  }
+ ]
+}</script>
+  </div>
+
+<h3 id="worked">Worked examples: real problems, solved and traced in memory</h3>
+  <p class="wx-intro">Three tasks from real cluster design reviews: lay out a cluster, find rule violations in someone else's layout, and cost the hardware by role. Each runs live and is traced in memory.</p>
+  <article class="wx">
+    <div class="wx__head"><span class="wx__num">Example 1</span><span class="lvl lvl--b">Beginner</span><span class="wx__tag">Design · layout</span></div>
+    <h4>Lay out a 12-node cluster without HA</h4>
+    <div class="wx__problem"><p class="wx__label">Problem statement</p><p>A college lab gets 12 servers for a Hadoop cluster. No HA is needed. Assign 1 master, 1 edge node and the rest as workers, and print the daemons each host will run.</p></div>
+    <div class="prob__io"><div><small>Input</small><pre>12 hosts · no HA</pre></div><div><small>Expected output</small><pre>lab01 [&#x27;NameNode&#x27;, &#x27;SecondaryNameNode&#x27;, &#x27;ResourceManager&#x27;, &#x27;JobHistoryServer&#x27;]
+lab02 [&#x27;(clients only)&#x27;]
+lab03 [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]
+lab12 [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]
+Workers: 10</pre></div></div>
+    <div class="wx__approach"><p class="wx__label">Approach</p><ol><li>Host 1 is the master: NameNode, SecondaryNameNode, ResourceManager, JobHistoryServer.</li><li>Host 2 is the edge node: no daemons, only clients.</li><li>Hosts 3–12 are workers: DataNode and NodeManager.</li></ol></div>
+    <p class="wx__label">Solution: run it live</p>
+    <div class="runner">
+    <script type="application/json">{
+ "lang": "python",
+ "file": "main.py",
+ "tasks": [
+  {
+   "label": "Solution",
+   "hint": "Now add HA: which three hosts become masters, and how many workers are left?",
+   "code": "hosts = [f\"lab{i:02d}\" for i in range(1, 13)]\nlayout = {hosts[0]: [\"NameNode\", \"SecondaryNameNode\", \"ResourceManager\", \"JobHistoryServer\"],\n          hosts[1]: [\"(clients only)\"]}\nfor h in hosts[2:]:\n    layout[h] = [\"DataNode\", \"NodeManager\"]\nfor h in hosts[:3] + hosts[-1:]:\n    print(h, layout[h])\nprint(\"Workers:\", len(hosts) - 2)\n"
+  }
+ ]
+}</script>
+    </div>
+    <p class="wx__label">What happens in memory, step by step</p>
+    <p class="wx__how">Recorded from a real Python run: press <b>Next</b> to execute one line at a time. Watch variables change in each frame, and lists and dictionaries (numbered #1, #2 …) fill up as objects.</p>
+    <div class="tracer">
+    <script type="application/json">{
+ "lang": "python",
+ "code": [
+  "hosts = [f\"lab{i:02d}\" for i in range(1, 13)]",
+  "layout = {hosts[0]: [\"NameNode\", \"SecondaryNameNode\", \"ResourceManager\", \"JobHistoryServer\"],",
+  "          hosts[1]: [\"(clients only)\"]}",
+  "for h in hosts[2:]:",
+  "    layout[h] = [\"DataNode\", \"NodeManager\"]",
+  "for h in hosts[:3] + hosts[-1:]:",
+  "    print(h, layout[h])",
+  "print(\"Workers:\", len(hosts) - 2)"
+ ],
+ "steps": [
+  {
+   "line": 1,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": []
+    }
+   ],
+   "heap": []
+  },
+  {
+   "line": 1,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": []
+    }
+   ],
+   "heap": []
+  },
+  {
+   "line": 1,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": []
+    }
+   ],
+   "heap": []
+  },
+  {
+   "line": 1,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": []
+    }
+   ],
+   "heap": []
+  },
+  {
+   "line": 1,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": []
+    }
+   ],
+   "heap": []
+  },
+  {
+   "line": 1,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": []
+    }
+   ],
+   "heap": []
+  },
+  {
+   "line": 1,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": []
+    }
+   ],
+   "heap": []
+  },
+  {
+   "line": 1,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": []
+    }
+   ],
+   "heap": []
+  },
+  {
+   "line": 1,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": []
+    }
+   ],
+   "heap": []
+  },
+  {
+   "line": 1,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": []
+    }
+   ],
+   "heap": []
+  },
+  {
+   "line": 1,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": []
+    }
+   ],
+   "heap": []
+  },
+  {
+   "line": 1,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": []
+    }
+   ],
+   "heap": []
+  },
+  {
+   "line": 1,
+   "phase": "Python",
+   "note": "<code>hosts<\/code> is created: → list #1. A new list object (#1) is created: [&#x27;lab01&#x27;, &#x27;lab02&#x27;, &#x27;lab03&#x27;, &#x27;lab04&#x27;, &#x27;lab05&#x27;, &#x27;lab06&#x27;, &#x27;lab07&#x27;, &#x27;lab08&#x27;, &#x27;lab09&#x27;, &#x27;lab10&#x27;…",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "hosts",
+       "→ list #1"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (12)<\/b> [&#x27;lab01&#x27;, &#x27;lab02&#x27;, &#x27;lab03&#x27;, &#x27;lab04&#x27;, &#x27;lab05&#x27;, &#x27;lab06&#x27;, &#x27;lab07&#x27;, &#x27;lab08&#x27;, &#x27;lab09&#x27;, &#x27;lab10&#x27;…"
+   ],
+   "newVar": "hosts"
+  },
+  {
+   "line": 2,
+   "phase": "Masters",
+   "note": "In a non-HA cluster, the Secondary NameNode does checkpoints.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "hosts",
+       "→ list #1"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (12)<\/b> [&#x27;lab01&#x27;, &#x27;lab02&#x27;, &#x27;lab03&#x27;, &#x27;lab04&#x27;, &#x27;lab05&#x27;, &#x27;lab06&#x27;, &#x27;lab07&#x27;, &#x27;lab08&#x27;, &#x27;lab09&#x27;, &#x27;lab10&#x27;…"
+   ]
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "hosts",
+       "→ list #1"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (12)<\/b> [&#x27;lab01&#x27;, &#x27;lab02&#x27;, &#x27;lab03&#x27;, &#x27;lab04&#x27;, &#x27;lab05&#x27;, &#x27;lab06&#x27;, &#x27;lab07&#x27;, &#x27;lab08&#x27;, &#x27;lab09&#x27;, &#x27;lab10&#x27;…"
+   ]
+  },
+  {
+   "line": 2,
+   "phase": "Python",
+   "note": "<code>layout<\/code> is created: → dict #2. A new dict object (#2) is created: {&#x27;lab01&#x27;: → list #3, &#x27;lab02&#x27;: → list #4} A new list object (#3) is created: [&#x27;NameNode&#x27;, &#x27;SecondaryNameNode&#x27;, &#x27;ResourceManager&#x27;, &#x27;JobHistoryServer&#x27;] A new list object (#4) is created: [&#x27;(clients only)&#x27;]",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "hosts",
+       "→ list #1"
+      ],
+      [
+       "layout",
+       "→ dict #2"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (12)<\/b> [&#x27;lab01&#x27;, &#x27;lab02&#x27;, &#x27;lab03&#x27;, &#x27;lab04&#x27;, &#x27;lab05&#x27;, &#x27;lab06&#x27;, &#x27;lab07&#x27;, &#x27;lab08&#x27;, &#x27;lab09&#x27;, &#x27;lab10&#x27;…",
+    "<b>#2 dict (2)<\/b> {&#x27;lab01&#x27;: → list #3, &#x27;lab02&#x27;: → list #4}",
+    "<b>#3 list (4)<\/b> [&#x27;NameNode&#x27;, &#x27;SecondaryNameNode&#x27;, &#x27;ResourceManager&#x27;, &#x27;JobHistoryServer&#x27;]",
+    "<b>#4 list (1)<\/b> [&#x27;(clients only)&#x27;]"
+   ],
+   "newVar": "layout"
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "<code>h<\/code> is created: &#x27;lab03&#x27;.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "hosts",
+       "→ list #1"
+      ],
+      [
+       "layout",
+       "→ dict #2"
+      ],
+      [
+       "h",
+       "'lab03'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (12)<\/b> [&#x27;lab01&#x27;, &#x27;lab02&#x27;, &#x27;lab03&#x27;, &#x27;lab04&#x27;, &#x27;lab05&#x27;, &#x27;lab06&#x27;, &#x27;lab07&#x27;, &#x27;lab08&#x27;, &#x27;lab09&#x27;, &#x27;lab10&#x27;…",
+    "<b>#2 dict (2)<\/b> {&#x27;lab01&#x27;: → list #3, &#x27;lab02&#x27;: → list #4}",
+    "<b>#3 list (4)<\/b> [&#x27;NameNode&#x27;, &#x27;SecondaryNameNode&#x27;, &#x27;ResourceManager&#x27;, &#x27;JobHistoryServer&#x27;]",
+    "<b>#4 list (1)<\/b> [&#x27;(clients only)&#x27;]"
+   ],
+   "newVar": "h"
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "Object #2 dict now holds {&#x27;lab01&#x27;: → list #3, &#x27;lab02&#x27;: → list #4, &#x27;lab03&#x27;: → list #5} A new list object (#5) is created: [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "hosts",
+       "→ list #1"
+      ],
+      [
+       "layout",
+       "→ dict #2"
+      ],
+      [
+       "h",
+       "'lab03'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (12)<\/b> [&#x27;lab01&#x27;, &#x27;lab02&#x27;, &#x27;lab03&#x27;, &#x27;lab04&#x27;, &#x27;lab05&#x27;, &#x27;lab06&#x27;, &#x27;lab07&#x27;, &#x27;lab08&#x27;, &#x27;lab09&#x27;, &#x27;lab10&#x27;…",
+    "<b>#2 dict (3)<\/b> {&#x27;lab01&#x27;: → list #3, &#x27;lab02&#x27;: → list #4, &#x27;lab03&#x27;: → list #5}",
+    "<b>#3 list (4)<\/b> [&#x27;NameNode&#x27;, &#x27;SecondaryNameNode&#x27;, &#x27;ResourceManager&#x27;, &#x27;JobHistoryServer&#x27;]",
+    "<b>#4 list (1)<\/b> [&#x27;(clients only)&#x27;]",
+    "<b>#5 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]"
+   ]
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "<code>h<\/code> changes to &#x27;lab04&#x27;.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "hosts",
+       "→ list #1"
+      ],
+      [
+       "layout",
+       "→ dict #2"
+      ],
+      [
+       "h",
+       "'lab04'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (12)<\/b> [&#x27;lab01&#x27;, &#x27;lab02&#x27;, &#x27;lab03&#x27;, &#x27;lab04&#x27;, &#x27;lab05&#x27;, &#x27;lab06&#x27;, &#x27;lab07&#x27;, &#x27;lab08&#x27;, &#x27;lab09&#x27;, &#x27;lab10&#x27;…",
+    "<b>#2 dict (3)<\/b> {&#x27;lab01&#x27;: → list #3, &#x27;lab02&#x27;: → list #4, &#x27;lab03&#x27;: → list #5}",
+    "<b>#3 list (4)<\/b> [&#x27;NameNode&#x27;, &#x27;SecondaryNameNode&#x27;, &#x27;ResourceManager&#x27;, &#x27;JobHistoryServer&#x27;]",
+    "<b>#4 list (1)<\/b> [&#x27;(clients only)&#x27;]",
+    "<b>#5 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]"
+   ],
+   "newVar": "h"
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "Object #2 dict now holds {&#x27;lab01&#x27;: → list #3, &#x27;lab02&#x27;: → list #4, &#x27;lab03&#x27;: → list #5, &#x27;lab04&#x27;: → list #6} A new list object (#6) is created: [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "hosts",
+       "→ list #1"
+      ],
+      [
+       "layout",
+       "→ dict #2"
+      ],
+      [
+       "h",
+       "'lab04'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (12)<\/b> [&#x27;lab01&#x27;, &#x27;lab02&#x27;, &#x27;lab03&#x27;, &#x27;lab04&#x27;, &#x27;lab05&#x27;, &#x27;lab06&#x27;, &#x27;lab07&#x27;, &#x27;lab08&#x27;, &#x27;lab09&#x27;, &#x27;lab10&#x27;…",
+    "<b>#2 dict (4)<\/b> {&#x27;lab01&#x27;: → list #3, &#x27;lab02&#x27;: → list #4, &#x27;lab03&#x27;: → list #5, &#x27;lab04&#x27;: → list #6}",
+    "<b>#3 list (4)<\/b> [&#x27;NameNode&#x27;, &#x27;SecondaryNameNode&#x27;, &#x27;ResourceManager&#x27;, &#x27;JobHistoryServer&#x27;]",
+    "<b>#4 list (1)<\/b> [&#x27;(clients only)&#x27;]",
+    "<b>#5 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#6 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]"
+   ]
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "<code>h<\/code> changes to &#x27;lab05&#x27;.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "hosts",
+       "→ list #1"
+      ],
+      [
+       "layout",
+       "→ dict #2"
+      ],
+      [
+       "h",
+       "'lab05'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (12)<\/b> [&#x27;lab01&#x27;, &#x27;lab02&#x27;, &#x27;lab03&#x27;, &#x27;lab04&#x27;, &#x27;lab05&#x27;, &#x27;lab06&#x27;, &#x27;lab07&#x27;, &#x27;lab08&#x27;, &#x27;lab09&#x27;, &#x27;lab10&#x27;…",
+    "<b>#2 dict (4)<\/b> {&#x27;lab01&#x27;: → list #3, &#x27;lab02&#x27;: → list #4, &#x27;lab03&#x27;: → list #5, &#x27;lab04&#x27;: → list #6}",
+    "<b>#3 list (4)<\/b> [&#x27;NameNode&#x27;, &#x27;SecondaryNameNode&#x27;, &#x27;ResourceManager&#x27;, &#x27;JobHistoryServer&#x27;]",
+    "<b>#4 list (1)<\/b> [&#x27;(clients only)&#x27;]",
+    "<b>#5 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#6 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]"
+   ],
+   "newVar": "h"
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "Object #2 dict now holds {&#x27;lab01&#x27;: → list #3, &#x27;lab02&#x27;: → list #4, &#x27;lab03&#x27;: → list #5, &#x27;lab04&#x27;: → list #6, &#x27;lab05&#x27;:… A new list object (#7) is created: [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "hosts",
+       "→ list #1"
+      ],
+      [
+       "layout",
+       "→ dict #2"
+      ],
+      [
+       "h",
+       "'lab05'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (12)<\/b> [&#x27;lab01&#x27;, &#x27;lab02&#x27;, &#x27;lab03&#x27;, &#x27;lab04&#x27;, &#x27;lab05&#x27;, &#x27;lab06&#x27;, &#x27;lab07&#x27;, &#x27;lab08&#x27;, &#x27;lab09&#x27;, &#x27;lab10&#x27;…",
+    "<b>#2 dict (5)<\/b> {&#x27;lab01&#x27;: → list #3, &#x27;lab02&#x27;: → list #4, &#x27;lab03&#x27;: → list #5, &#x27;lab04&#x27;: → list #6, &#x27;lab05&#x27;:…",
+    "<b>#3 list (4)<\/b> [&#x27;NameNode&#x27;, &#x27;SecondaryNameNode&#x27;, &#x27;ResourceManager&#x27;, &#x27;JobHistoryServer&#x27;]",
+    "<b>#4 list (1)<\/b> [&#x27;(clients only)&#x27;]",
+    "<b>#5 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#6 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#7 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]"
+   ]
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "<code>h<\/code> changes to &#x27;lab06&#x27;.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "hosts",
+       "→ list #1"
+      ],
+      [
+       "layout",
+       "→ dict #2"
+      ],
+      [
+       "h",
+       "'lab06'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (12)<\/b> [&#x27;lab01&#x27;, &#x27;lab02&#x27;, &#x27;lab03&#x27;, &#x27;lab04&#x27;, &#x27;lab05&#x27;, &#x27;lab06&#x27;, &#x27;lab07&#x27;, &#x27;lab08&#x27;, &#x27;lab09&#x27;, &#x27;lab10&#x27;…",
+    "<b>#2 dict (5)<\/b> {&#x27;lab01&#x27;: → list #3, &#x27;lab02&#x27;: → list #4, &#x27;lab03&#x27;: → list #5, &#x27;lab04&#x27;: → list #6, &#x27;lab05&#x27;:…",
+    "<b>#3 list (4)<\/b> [&#x27;NameNode&#x27;, &#x27;SecondaryNameNode&#x27;, &#x27;ResourceManager&#x27;, &#x27;JobHistoryServer&#x27;]",
+    "<b>#4 list (1)<\/b> [&#x27;(clients only)&#x27;]",
+    "<b>#5 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#6 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#7 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]"
+   ],
+   "newVar": "h"
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "Object #2 dict now holds {&#x27;lab01&#x27;: → list #3, &#x27;lab02&#x27;: → list #4, &#x27;lab03&#x27;: → list #5, &#x27;lab04&#x27;: → list #6, &#x27;lab05&#x27;:… A new list object (#8) is created: [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "hosts",
+       "→ list #1"
+      ],
+      [
+       "layout",
+       "→ dict #2"
+      ],
+      [
+       "h",
+       "'lab06'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (12)<\/b> [&#x27;lab01&#x27;, &#x27;lab02&#x27;, &#x27;lab03&#x27;, &#x27;lab04&#x27;, &#x27;lab05&#x27;, &#x27;lab06&#x27;, &#x27;lab07&#x27;, &#x27;lab08&#x27;, &#x27;lab09&#x27;, &#x27;lab10&#x27;…",
+    "<b>#2 dict (6)<\/b> {&#x27;lab01&#x27;: → list #3, &#x27;lab02&#x27;: → list #4, &#x27;lab03&#x27;: → list #5, &#x27;lab04&#x27;: → list #6, &#x27;lab05&#x27;:…",
+    "<b>#3 list (4)<\/b> [&#x27;NameNode&#x27;, &#x27;SecondaryNameNode&#x27;, &#x27;ResourceManager&#x27;, &#x27;JobHistoryServer&#x27;]",
+    "<b>#4 list (1)<\/b> [&#x27;(clients only)&#x27;]",
+    "<b>#5 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#6 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#7 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#8 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]"
+   ]
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "<code>h<\/code> changes to &#x27;lab07&#x27;.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "hosts",
+       "→ list #1"
+      ],
+      [
+       "layout",
+       "→ dict #2"
+      ],
+      [
+       "h",
+       "'lab07'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (12)<\/b> [&#x27;lab01&#x27;, &#x27;lab02&#x27;, &#x27;lab03&#x27;, &#x27;lab04&#x27;, &#x27;lab05&#x27;, &#x27;lab06&#x27;, &#x27;lab07&#x27;, &#x27;lab08&#x27;, &#x27;lab09&#x27;, &#x27;lab10&#x27;…",
+    "<b>#2 dict (6)<\/b> {&#x27;lab01&#x27;: → list #3, &#x27;lab02&#x27;: → list #4, &#x27;lab03&#x27;: → list #5, &#x27;lab04&#x27;: → list #6, &#x27;lab05&#x27;:…",
+    "<b>#3 list (4)<\/b> [&#x27;NameNode&#x27;, &#x27;SecondaryNameNode&#x27;, &#x27;ResourceManager&#x27;, &#x27;JobHistoryServer&#x27;]",
+    "<b>#4 list (1)<\/b> [&#x27;(clients only)&#x27;]",
+    "<b>#5 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#6 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#7 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#8 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]"
+   ],
+   "newVar": "h"
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "Object #2 dict now holds {&#x27;lab01&#x27;: → list #3, &#x27;lab02&#x27;: → list #4, &#x27;lab03&#x27;: → list #5, &#x27;lab04&#x27;: → list #6, &#x27;lab05&#x27;:… A new list object (#9) is created: [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "hosts",
+       "→ list #1"
+      ],
+      [
+       "layout",
+       "→ dict #2"
+      ],
+      [
+       "h",
+       "'lab07'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (12)<\/b> [&#x27;lab01&#x27;, &#x27;lab02&#x27;, &#x27;lab03&#x27;, &#x27;lab04&#x27;, &#x27;lab05&#x27;, &#x27;lab06&#x27;, &#x27;lab07&#x27;, &#x27;lab08&#x27;, &#x27;lab09&#x27;, &#x27;lab10&#x27;…",
+    "<b>#2 dict (7)<\/b> {&#x27;lab01&#x27;: → list #3, &#x27;lab02&#x27;: → list #4, &#x27;lab03&#x27;: → list #5, &#x27;lab04&#x27;: → list #6, &#x27;lab05&#x27;:…",
+    "<b>#3 list (4)<\/b> [&#x27;NameNode&#x27;, &#x27;SecondaryNameNode&#x27;, &#x27;ResourceManager&#x27;, &#x27;JobHistoryServer&#x27;]",
+    "<b>#4 list (1)<\/b> [&#x27;(clients only)&#x27;]",
+    "<b>#5 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#6 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#7 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#8 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#9 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]"
+   ]
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "<code>h<\/code> changes to &#x27;lab08&#x27;.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "hosts",
+       "→ list #1"
+      ],
+      [
+       "layout",
+       "→ dict #2"
+      ],
+      [
+       "h",
+       "'lab08'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (12)<\/b> [&#x27;lab01&#x27;, &#x27;lab02&#x27;, &#x27;lab03&#x27;, &#x27;lab04&#x27;, &#x27;lab05&#x27;, &#x27;lab06&#x27;, &#x27;lab07&#x27;, &#x27;lab08&#x27;, &#x27;lab09&#x27;, &#x27;lab10&#x27;…",
+    "<b>#2 dict (7)<\/b> {&#x27;lab01&#x27;: → list #3, &#x27;lab02&#x27;: → list #4, &#x27;lab03&#x27;: → list #5, &#x27;lab04&#x27;: → list #6, &#x27;lab05&#x27;:…",
+    "<b>#3 list (4)<\/b> [&#x27;NameNode&#x27;, &#x27;SecondaryNameNode&#x27;, &#x27;ResourceManager&#x27;, &#x27;JobHistoryServer&#x27;]",
+    "<b>#4 list (1)<\/b> [&#x27;(clients only)&#x27;]",
+    "<b>#5 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#6 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#7 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#8 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#9 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]"
+   ],
+   "newVar": "h"
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "Object #2 dict now holds {&#x27;lab01&#x27;: → list #3, &#x27;lab02&#x27;: → list #4, &#x27;lab03&#x27;: → list #5, &#x27;lab04&#x27;: → list #6, &#x27;lab05&#x27;:… A new list object (#10) is created: [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "hosts",
+       "→ list #1"
+      ],
+      [
+       "layout",
+       "→ dict #2"
+      ],
+      [
+       "h",
+       "'lab08'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (12)<\/b> [&#x27;lab01&#x27;, &#x27;lab02&#x27;, &#x27;lab03&#x27;, &#x27;lab04&#x27;, &#x27;lab05&#x27;, &#x27;lab06&#x27;, &#x27;lab07&#x27;, &#x27;lab08&#x27;, &#x27;lab09&#x27;, &#x27;lab10&#x27;…",
+    "<b>#2 dict (8)<\/b> {&#x27;lab01&#x27;: → list #3, &#x27;lab02&#x27;: → list #4, &#x27;lab03&#x27;: → list #5, &#x27;lab04&#x27;: → list #6, &#x27;lab05&#x27;:…",
+    "<b>#3 list (4)<\/b> [&#x27;NameNode&#x27;, &#x27;SecondaryNameNode&#x27;, &#x27;ResourceManager&#x27;, &#x27;JobHistoryServer&#x27;]",
+    "<b>#4 list (1)<\/b> [&#x27;(clients only)&#x27;]",
+    "<b>#5 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#6 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#7 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#8 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#9 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#10 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]"
+   ]
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "<code>h<\/code> changes to &#x27;lab09&#x27;.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "hosts",
+       "→ list #1"
+      ],
+      [
+       "layout",
+       "→ dict #2"
+      ],
+      [
+       "h",
+       "'lab09'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (12)<\/b> [&#x27;lab01&#x27;, &#x27;lab02&#x27;, &#x27;lab03&#x27;, &#x27;lab04&#x27;, &#x27;lab05&#x27;, &#x27;lab06&#x27;, &#x27;lab07&#x27;, &#x27;lab08&#x27;, &#x27;lab09&#x27;, &#x27;lab10&#x27;…",
+    "<b>#2 dict (8)<\/b> {&#x27;lab01&#x27;: → list #3, &#x27;lab02&#x27;: → list #4, &#x27;lab03&#x27;: → list #5, &#x27;lab04&#x27;: → list #6, &#x27;lab05&#x27;:…",
+    "<b>#3 list (4)<\/b> [&#x27;NameNode&#x27;, &#x27;SecondaryNameNode&#x27;, &#x27;ResourceManager&#x27;, &#x27;JobHistoryServer&#x27;]",
+    "<b>#4 list (1)<\/b> [&#x27;(clients only)&#x27;]",
+    "<b>#5 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#6 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#7 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#8 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#9 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#10 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]"
+   ],
+   "newVar": "h"
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "Object #2 dict now holds {&#x27;lab01&#x27;: → list #3, &#x27;lab02&#x27;: → list #4, &#x27;lab03&#x27;: → list #5, &#x27;lab04&#x27;: → list #6, &#x27;lab05&#x27;:… A new list object (#11) is created: [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "hosts",
+       "→ list #1"
+      ],
+      [
+       "layout",
+       "→ dict #2"
+      ],
+      [
+       "h",
+       "'lab09'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (12)<\/b> [&#x27;lab01&#x27;, &#x27;lab02&#x27;, &#x27;lab03&#x27;, &#x27;lab04&#x27;, &#x27;lab05&#x27;, &#x27;lab06&#x27;, &#x27;lab07&#x27;, &#x27;lab08&#x27;, &#x27;lab09&#x27;, &#x27;lab10&#x27;…",
+    "<b>#2 dict (9)<\/b> {&#x27;lab01&#x27;: → list #3, &#x27;lab02&#x27;: → list #4, &#x27;lab03&#x27;: → list #5, &#x27;lab04&#x27;: → list #6, &#x27;lab05&#x27;:…",
+    "<b>#3 list (4)<\/b> [&#x27;NameNode&#x27;, &#x27;SecondaryNameNode&#x27;, &#x27;ResourceManager&#x27;, &#x27;JobHistoryServer&#x27;]",
+    "<b>#4 list (1)<\/b> [&#x27;(clients only)&#x27;]",
+    "<b>#5 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#6 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#7 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#8 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#9 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#10 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#11 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]"
+   ]
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "<code>h<\/code> changes to &#x27;lab10&#x27;.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "hosts",
+       "→ list #1"
+      ],
+      [
+       "layout",
+       "→ dict #2"
+      ],
+      [
+       "h",
+       "'lab10'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (12)<\/b> [&#x27;lab01&#x27;, &#x27;lab02&#x27;, &#x27;lab03&#x27;, &#x27;lab04&#x27;, &#x27;lab05&#x27;, &#x27;lab06&#x27;, &#x27;lab07&#x27;, &#x27;lab08&#x27;, &#x27;lab09&#x27;, &#x27;lab10&#x27;…",
+    "<b>#2 dict (9)<\/b> {&#x27;lab01&#x27;: → list #3, &#x27;lab02&#x27;: → list #4, &#x27;lab03&#x27;: → list #5, &#x27;lab04&#x27;: → list #6, &#x27;lab05&#x27;:…",
+    "<b>#3 list (4)<\/b> [&#x27;NameNode&#x27;, &#x27;SecondaryNameNode&#x27;, &#x27;ResourceManager&#x27;, &#x27;JobHistoryServer&#x27;]",
+    "<b>#4 list (1)<\/b> [&#x27;(clients only)&#x27;]",
+    "<b>#5 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#6 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#7 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#8 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#9 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#10 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#11 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]"
+   ],
+   "newVar": "h"
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "Object #2 dict now holds {&#x27;lab01&#x27;: → list #3, &#x27;lab02&#x27;: → list #4, &#x27;lab03&#x27;: → list #5, &#x27;lab04&#x27;: → list #6, &#x27;lab05&#x27;:… A new list object (#12) is created: [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "hosts",
+       "→ list #1"
+      ],
+      [
+       "layout",
+       "→ dict #2"
+      ],
+      [
+       "h",
+       "'lab10'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (12)<\/b> [&#x27;lab01&#x27;, &#x27;lab02&#x27;, &#x27;lab03&#x27;, &#x27;lab04&#x27;, &#x27;lab05&#x27;, &#x27;lab06&#x27;, &#x27;lab07&#x27;, &#x27;lab08&#x27;, &#x27;lab09&#x27;, &#x27;lab10&#x27;…",
+    "<b>#2 dict (10)<\/b> {&#x27;lab01&#x27;: → list #3, &#x27;lab02&#x27;: → list #4, &#x27;lab03&#x27;: → list #5, &#x27;lab04&#x27;: → list #6, &#x27;lab05&#x27;:…",
+    "<b>#3 list (4)<\/b> [&#x27;NameNode&#x27;, &#x27;SecondaryNameNode&#x27;, &#x27;ResourceManager&#x27;, &#x27;JobHistoryServer&#x27;]",
+    "<b>#4 list (1)<\/b> [&#x27;(clients only)&#x27;]",
+    "<b>#5 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#6 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#7 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#8 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#9 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#10 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#11 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#12 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]"
+   ]
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "<code>h<\/code> changes to &#x27;lab11&#x27;.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "hosts",
+       "→ list #1"
+      ],
+      [
+       "layout",
+       "→ dict #2"
+      ],
+      [
+       "h",
+       "'lab11'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (12)<\/b> [&#x27;lab01&#x27;, &#x27;lab02&#x27;, &#x27;lab03&#x27;, &#x27;lab04&#x27;, &#x27;lab05&#x27;, &#x27;lab06&#x27;, &#x27;lab07&#x27;, &#x27;lab08&#x27;, &#x27;lab09&#x27;, &#x27;lab10&#x27;…",
+    "<b>#2 dict (10)<\/b> {&#x27;lab01&#x27;: → list #3, &#x27;lab02&#x27;: → list #4, &#x27;lab03&#x27;: → list #5, &#x27;lab04&#x27;: → list #6, &#x27;lab05&#x27;:…",
+    "<b>#3 list (4)<\/b> [&#x27;NameNode&#x27;, &#x27;SecondaryNameNode&#x27;, &#x27;ResourceManager&#x27;, &#x27;JobHistoryServer&#x27;]",
+    "<b>#4 list (1)<\/b> [&#x27;(clients only)&#x27;]",
+    "<b>#5 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#6 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#7 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#8 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#9 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#10 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#11 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#12 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]"
+   ],
+   "newVar": "h"
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "Object #2 dict now holds {&#x27;lab01&#x27;: → list #3, &#x27;lab02&#x27;: → list #4, &#x27;lab03&#x27;: → list #5, &#x27;lab04&#x27;: → list #6, &#x27;lab05&#x27;:… A new list object (#13) is created: [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "hosts",
+       "→ list #1"
+      ],
+      [
+       "layout",
+       "→ dict #2"
+      ],
+      [
+       "h",
+       "'lab11'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (12)<\/b> [&#x27;lab01&#x27;, &#x27;lab02&#x27;, &#x27;lab03&#x27;, &#x27;lab04&#x27;, &#x27;lab05&#x27;, &#x27;lab06&#x27;, &#x27;lab07&#x27;, &#x27;lab08&#x27;, &#x27;lab09&#x27;, &#x27;lab10&#x27;…",
+    "<b>#2 dict (11)<\/b> {&#x27;lab01&#x27;: → list #3, &#x27;lab02&#x27;: → list #4, &#x27;lab03&#x27;: → list #5, &#x27;lab04&#x27;: → list #6, &#x27;lab05&#x27;:…",
+    "<b>#3 list (4)<\/b> [&#x27;NameNode&#x27;, &#x27;SecondaryNameNode&#x27;, &#x27;ResourceManager&#x27;, &#x27;JobHistoryServer&#x27;]",
+    "<b>#4 list (1)<\/b> [&#x27;(clients only)&#x27;]",
+    "<b>#5 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#6 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#7 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#8 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#9 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#10 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#11 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#12 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#13 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]"
+   ]
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "<code>h<\/code> changes to &#x27;lab12&#x27;.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "hosts",
+       "→ list #1"
+      ],
+      [
+       "layout",
+       "→ dict #2"
+      ],
+      [
+       "h",
+       "'lab12'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (12)<\/b> [&#x27;lab01&#x27;, &#x27;lab02&#x27;, &#x27;lab03&#x27;, &#x27;lab04&#x27;, &#x27;lab05&#x27;, &#x27;lab06&#x27;, &#x27;lab07&#x27;, &#x27;lab08&#x27;, &#x27;lab09&#x27;, &#x27;lab10&#x27;…",
+    "<b>#2 dict (11)<\/b> {&#x27;lab01&#x27;: → list #3, &#x27;lab02&#x27;: → list #4, &#x27;lab03&#x27;: → list #5, &#x27;lab04&#x27;: → list #6, &#x27;lab05&#x27;:…",
+    "<b>#3 list (4)<\/b> [&#x27;NameNode&#x27;, &#x27;SecondaryNameNode&#x27;, &#x27;ResourceManager&#x27;, &#x27;JobHistoryServer&#x27;]",
+    "<b>#4 list (1)<\/b> [&#x27;(clients only)&#x27;]",
+    "<b>#5 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#6 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#7 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#8 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#9 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#10 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#11 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#12 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#13 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]"
+   ],
+   "newVar": "h"
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "Object #2 dict now holds {&#x27;lab01&#x27;: → list #3, &#x27;lab02&#x27;: → list #4, &#x27;lab03&#x27;: → list #5, &#x27;lab04&#x27;: → list #6, &#x27;lab05&#x27;:… A new list object (#14) is created: [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "hosts",
+       "→ list #1"
+      ],
+      [
+       "layout",
+       "→ dict #2"
+      ],
+      [
+       "h",
+       "'lab12'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (12)<\/b> [&#x27;lab01&#x27;, &#x27;lab02&#x27;, &#x27;lab03&#x27;, &#x27;lab04&#x27;, &#x27;lab05&#x27;, &#x27;lab06&#x27;, &#x27;lab07&#x27;, &#x27;lab08&#x27;, &#x27;lab09&#x27;, &#x27;lab10&#x27;…",
+    "<b>#2 dict (12)<\/b> {&#x27;lab01&#x27;: → list #3, &#x27;lab02&#x27;: → list #4, &#x27;lab03&#x27;: → list #5, &#x27;lab04&#x27;: → list #6, &#x27;lab05&#x27;:…",
+    "<b>#3 list (4)<\/b> [&#x27;NameNode&#x27;, &#x27;SecondaryNameNode&#x27;, &#x27;ResourceManager&#x27;, &#x27;JobHistoryServer&#x27;]",
+    "<b>#4 list (1)<\/b> [&#x27;(clients only)&#x27;]",
+    "<b>#5 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#6 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#7 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#8 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#9 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#10 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#11 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#12 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#13 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#14 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]"
+   ]
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "Nothing is left to loop over, so the loop ends and Python moves on.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "hosts",
+       "→ list #1"
+      ],
+      [
+       "layout",
+       "→ dict #2"
+      ],
+      [
+       "h",
+       "'lab12'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (12)<\/b> [&#x27;lab01&#x27;, &#x27;lab02&#x27;, &#x27;lab03&#x27;, &#x27;lab04&#x27;, &#x27;lab05&#x27;, &#x27;lab06&#x27;, &#x27;lab07&#x27;, &#x27;lab08&#x27;, &#x27;lab09&#x27;, &#x27;lab10&#x27;…",
+    "<b>#2 dict (12)<\/b> {&#x27;lab01&#x27;: → list #3, &#x27;lab02&#x27;: → list #4, &#x27;lab03&#x27;: → list #5, &#x27;lab04&#x27;: → list #6, &#x27;lab05&#x27;:…",
+    "<b>#3 list (4)<\/b> [&#x27;NameNode&#x27;, &#x27;SecondaryNameNode&#x27;, &#x27;ResourceManager&#x27;, &#x27;JobHistoryServer&#x27;]",
+    "<b>#4 list (1)<\/b> [&#x27;(clients only)&#x27;]",
+    "<b>#5 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#6 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#7 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#8 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#9 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#10 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#11 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#12 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#13 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#14 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]"
+   ]
+  },
+  {
+   "line": 6,
+   "phase": "Python",
+   "note": "<code>h<\/code> changes to &#x27;lab01&#x27;.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "hosts",
+       "→ list #1"
+      ],
+      [
+       "layout",
+       "→ dict #2"
+      ],
+      [
+       "h",
+       "'lab01'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (12)<\/b> [&#x27;lab01&#x27;, &#x27;lab02&#x27;, &#x27;lab03&#x27;, &#x27;lab04&#x27;, &#x27;lab05&#x27;, &#x27;lab06&#x27;, &#x27;lab07&#x27;, &#x27;lab08&#x27;, &#x27;lab09&#x27;, &#x27;lab10&#x27;…",
+    "<b>#2 dict (12)<\/b> {&#x27;lab01&#x27;: → list #3, &#x27;lab02&#x27;: → list #4, &#x27;lab03&#x27;: → list #5, &#x27;lab04&#x27;: → list #6, &#x27;lab05&#x27;:…",
+    "<b>#3 list (4)<\/b> [&#x27;NameNode&#x27;, &#x27;SecondaryNameNode&#x27;, &#x27;ResourceManager&#x27;, &#x27;JobHistoryServer&#x27;]",
+    "<b>#4 list (1)<\/b> [&#x27;(clients only)&#x27;]",
+    "<b>#5 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#6 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#7 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#8 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#9 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#10 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#11 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#12 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#13 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#14 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]"
+   ],
+   "newVar": "h"
+  },
+  {
+   "line": 7,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "hosts",
+       "→ list #1"
+      ],
+      [
+       "layout",
+       "→ dict #2"
+      ],
+      [
+       "h",
+       "'lab01'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (12)<\/b> [&#x27;lab01&#x27;, &#x27;lab02&#x27;, &#x27;lab03&#x27;, &#x27;lab04&#x27;, &#x27;lab05&#x27;, &#x27;lab06&#x27;, &#x27;lab07&#x27;, &#x27;lab08&#x27;, &#x27;lab09&#x27;, &#x27;lab10&#x27;…",
+    "<b>#2 dict (12)<\/b> {&#x27;lab01&#x27;: → list #3, &#x27;lab02&#x27;: → list #4, &#x27;lab03&#x27;: → list #5, &#x27;lab04&#x27;: → list #6, &#x27;lab05&#x27;:…",
+    "<b>#3 list (4)<\/b> [&#x27;NameNode&#x27;, &#x27;SecondaryNameNode&#x27;, &#x27;ResourceManager&#x27;, &#x27;JobHistoryServer&#x27;]",
+    "<b>#4 list (1)<\/b> [&#x27;(clients only)&#x27;]",
+    "<b>#5 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#6 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#7 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#8 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#9 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#10 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#11 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#12 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#13 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#14 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]"
+   ],
+   "out": "lab01 ['NameNode', 'SecondaryNameNode', 'ResourceManager', 'JobHistoryServer']\n"
+  },
+  {
+   "line": 6,
+   "phase": "Python",
+   "note": "<code>h<\/code> changes to &#x27;lab02&#x27;.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "hosts",
+       "→ list #1"
+      ],
+      [
+       "layout",
+       "→ dict #2"
+      ],
+      [
+       "h",
+       "'lab02'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (12)<\/b> [&#x27;lab01&#x27;, &#x27;lab02&#x27;, &#x27;lab03&#x27;, &#x27;lab04&#x27;, &#x27;lab05&#x27;, &#x27;lab06&#x27;, &#x27;lab07&#x27;, &#x27;lab08&#x27;, &#x27;lab09&#x27;, &#x27;lab10&#x27;…",
+    "<b>#2 dict (12)<\/b> {&#x27;lab01&#x27;: → list #3, &#x27;lab02&#x27;: → list #4, &#x27;lab03&#x27;: → list #5, &#x27;lab04&#x27;: → list #6, &#x27;lab05&#x27;:…",
+    "<b>#3 list (4)<\/b> [&#x27;NameNode&#x27;, &#x27;SecondaryNameNode&#x27;, &#x27;ResourceManager&#x27;, &#x27;JobHistoryServer&#x27;]",
+    "<b>#4 list (1)<\/b> [&#x27;(clients only)&#x27;]",
+    "<b>#5 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#6 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#7 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#8 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#9 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#10 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#11 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#12 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#13 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#14 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]"
+   ],
+   "newVar": "h"
+  },
+  {
+   "line": 7,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "hosts",
+       "→ list #1"
+      ],
+      [
+       "layout",
+       "→ dict #2"
+      ],
+      [
+       "h",
+       "'lab02'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (12)<\/b> [&#x27;lab01&#x27;, &#x27;lab02&#x27;, &#x27;lab03&#x27;, &#x27;lab04&#x27;, &#x27;lab05&#x27;, &#x27;lab06&#x27;, &#x27;lab07&#x27;, &#x27;lab08&#x27;, &#x27;lab09&#x27;, &#x27;lab10&#x27;…",
+    "<b>#2 dict (12)<\/b> {&#x27;lab01&#x27;: → list #3, &#x27;lab02&#x27;: → list #4, &#x27;lab03&#x27;: → list #5, &#x27;lab04&#x27;: → list #6, &#x27;lab05&#x27;:…",
+    "<b>#3 list (4)<\/b> [&#x27;NameNode&#x27;, &#x27;SecondaryNameNode&#x27;, &#x27;ResourceManager&#x27;, &#x27;JobHistoryServer&#x27;]",
+    "<b>#4 list (1)<\/b> [&#x27;(clients only)&#x27;]",
+    "<b>#5 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#6 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#7 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#8 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#9 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#10 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#11 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#12 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#13 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#14 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]"
+   ],
+   "out": "lab02 ['(clients only)']\n"
+  },
+  {
+   "line": 6,
+   "phase": "Python",
+   "note": "<code>h<\/code> changes to &#x27;lab03&#x27;.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "hosts",
+       "→ list #1"
+      ],
+      [
+       "layout",
+       "→ dict #2"
+      ],
+      [
+       "h",
+       "'lab03'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (12)<\/b> [&#x27;lab01&#x27;, &#x27;lab02&#x27;, &#x27;lab03&#x27;, &#x27;lab04&#x27;, &#x27;lab05&#x27;, &#x27;lab06&#x27;, &#x27;lab07&#x27;, &#x27;lab08&#x27;, &#x27;lab09&#x27;, &#x27;lab10&#x27;…",
+    "<b>#2 dict (12)<\/b> {&#x27;lab01&#x27;: → list #3, &#x27;lab02&#x27;: → list #4, &#x27;lab03&#x27;: → list #5, &#x27;lab04&#x27;: → list #6, &#x27;lab05&#x27;:…",
+    "<b>#3 list (4)<\/b> [&#x27;NameNode&#x27;, &#x27;SecondaryNameNode&#x27;, &#x27;ResourceManager&#x27;, &#x27;JobHistoryServer&#x27;]",
+    "<b>#4 list (1)<\/b> [&#x27;(clients only)&#x27;]",
+    "<b>#5 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#6 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#7 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#8 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#9 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#10 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#11 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#12 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#13 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#14 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]"
+   ],
+   "newVar": "h"
+  },
+  {
+   "line": 7,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "hosts",
+       "→ list #1"
+      ],
+      [
+       "layout",
+       "→ dict #2"
+      ],
+      [
+       "h",
+       "'lab03'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (12)<\/b> [&#x27;lab01&#x27;, &#x27;lab02&#x27;, &#x27;lab03&#x27;, &#x27;lab04&#x27;, &#x27;lab05&#x27;, &#x27;lab06&#x27;, &#x27;lab07&#x27;, &#x27;lab08&#x27;, &#x27;lab09&#x27;, &#x27;lab10&#x27;…",
+    "<b>#2 dict (12)<\/b> {&#x27;lab01&#x27;: → list #3, &#x27;lab02&#x27;: → list #4, &#x27;lab03&#x27;: → list #5, &#x27;lab04&#x27;: → list #6, &#x27;lab05&#x27;:…",
+    "<b>#3 list (4)<\/b> [&#x27;NameNode&#x27;, &#x27;SecondaryNameNode&#x27;, &#x27;ResourceManager&#x27;, &#x27;JobHistoryServer&#x27;]",
+    "<b>#4 list (1)<\/b> [&#x27;(clients only)&#x27;]",
+    "<b>#5 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#6 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#7 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#8 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#9 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#10 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#11 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#12 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#13 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#14 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]"
+   ],
+   "out": "lab03 ['DataNode', 'NodeManager']\n"
+  },
+  {
+   "line": 6,
+   "phase": "Python",
+   "note": "<code>h<\/code> changes to &#x27;lab12&#x27;.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "hosts",
+       "→ list #1"
+      ],
+      [
+       "layout",
+       "→ dict #2"
+      ],
+      [
+       "h",
+       "'lab12'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (12)<\/b> [&#x27;lab01&#x27;, &#x27;lab02&#x27;, &#x27;lab03&#x27;, &#x27;lab04&#x27;, &#x27;lab05&#x27;, &#x27;lab06&#x27;, &#x27;lab07&#x27;, &#x27;lab08&#x27;, &#x27;lab09&#x27;, &#x27;lab10&#x27;…",
+    "<b>#2 dict (12)<\/b> {&#x27;lab01&#x27;: → list #3, &#x27;lab02&#x27;: → list #4, &#x27;lab03&#x27;: → list #5, &#x27;lab04&#x27;: → list #6, &#x27;lab05&#x27;:…",
+    "<b>#3 list (4)<\/b> [&#x27;NameNode&#x27;, &#x27;SecondaryNameNode&#x27;, &#x27;ResourceManager&#x27;, &#x27;JobHistoryServer&#x27;]",
+    "<b>#4 list (1)<\/b> [&#x27;(clients only)&#x27;]",
+    "<b>#5 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#6 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#7 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#8 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#9 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#10 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#11 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#12 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#13 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#14 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]"
+   ],
+   "newVar": "h"
+  },
+  {
+   "line": 7,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "hosts",
+       "→ list #1"
+      ],
+      [
+       "layout",
+       "→ dict #2"
+      ],
+      [
+       "h",
+       "'lab12'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (12)<\/b> [&#x27;lab01&#x27;, &#x27;lab02&#x27;, &#x27;lab03&#x27;, &#x27;lab04&#x27;, &#x27;lab05&#x27;, &#x27;lab06&#x27;, &#x27;lab07&#x27;, &#x27;lab08&#x27;, &#x27;lab09&#x27;, &#x27;lab10&#x27;…",
+    "<b>#2 dict (12)<\/b> {&#x27;lab01&#x27;: → list #3, &#x27;lab02&#x27;: → list #4, &#x27;lab03&#x27;: → list #5, &#x27;lab04&#x27;: → list #6, &#x27;lab05&#x27;:…",
+    "<b>#3 list (4)<\/b> [&#x27;NameNode&#x27;, &#x27;SecondaryNameNode&#x27;, &#x27;ResourceManager&#x27;, &#x27;JobHistoryServer&#x27;]",
+    "<b>#4 list (1)<\/b> [&#x27;(clients only)&#x27;]",
+    "<b>#5 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#6 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#7 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#8 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#9 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#10 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#11 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#12 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#13 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#14 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]"
+   ],
+   "out": "lab12 ['DataNode', 'NodeManager']\n"
+  },
+  {
+   "line": 6,
+   "phase": "Python",
+   "note": "Nothing is left to loop over, so the loop ends and Python moves on.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "hosts",
+       "→ list #1"
+      ],
+      [
+       "layout",
+       "→ dict #2"
+      ],
+      [
+       "h",
+       "'lab12'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (12)<\/b> [&#x27;lab01&#x27;, &#x27;lab02&#x27;, &#x27;lab03&#x27;, &#x27;lab04&#x27;, &#x27;lab05&#x27;, &#x27;lab06&#x27;, &#x27;lab07&#x27;, &#x27;lab08&#x27;, &#x27;lab09&#x27;, &#x27;lab10&#x27;…",
+    "<b>#2 dict (12)<\/b> {&#x27;lab01&#x27;: → list #3, &#x27;lab02&#x27;: → list #4, &#x27;lab03&#x27;: → list #5, &#x27;lab04&#x27;: → list #6, &#x27;lab05&#x27;:…",
+    "<b>#3 list (4)<\/b> [&#x27;NameNode&#x27;, &#x27;SecondaryNameNode&#x27;, &#x27;ResourceManager&#x27;, &#x27;JobHistoryServer&#x27;]",
+    "<b>#4 list (1)<\/b> [&#x27;(clients only)&#x27;]",
+    "<b>#5 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#6 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#7 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#8 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#9 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#10 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#11 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#12 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#13 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#14 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]"
+   ]
+  },
+  {
+   "line": 8,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "hosts",
+       "→ list #1"
+      ],
+      [
+       "layout",
+       "→ dict #2"
+      ],
+      [
+       "h",
+       "'lab12'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (12)<\/b> [&#x27;lab01&#x27;, &#x27;lab02&#x27;, &#x27;lab03&#x27;, &#x27;lab04&#x27;, &#x27;lab05&#x27;, &#x27;lab06&#x27;, &#x27;lab07&#x27;, &#x27;lab08&#x27;, &#x27;lab09&#x27;, &#x27;lab10&#x27;…",
+    "<b>#2 dict (12)<\/b> {&#x27;lab01&#x27;: → list #3, &#x27;lab02&#x27;: → list #4, &#x27;lab03&#x27;: → list #5, &#x27;lab04&#x27;: → list #6, &#x27;lab05&#x27;:…",
+    "<b>#3 list (4)<\/b> [&#x27;NameNode&#x27;, &#x27;SecondaryNameNode&#x27;, &#x27;ResourceManager&#x27;, &#x27;JobHistoryServer&#x27;]",
+    "<b>#4 list (1)<\/b> [&#x27;(clients only)&#x27;]",
+    "<b>#5 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#6 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#7 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#8 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#9 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#10 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#11 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#12 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#13 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]",
+    "<b>#14 list (2)<\/b> [&#x27;DataNode&#x27;, &#x27;NodeManager&#x27;]"
+   ],
+   "out": "Workers: 10\n"
+  }
+ ]
+}</script>
+    </div>
+  </article>
+  <article class="wx">
+    <div class="wx__head"><span class="wx__num">Example 2</span><span class="lvl lvl--i">Intermediate</span><span class="wx__tag">Design review · rules</span></div>
+    <h4>Find the mistakes in a proposed layout</h4>
+    <div class="wx__problem"><p class="wx__label">Problem statement</p><p>A teammate proposes this layout. Check three rules: (1) no DataNode or NodeManager on a master; (2) ZooKeeper on an odd number of distinct hosts; (3) the two NameNodes on different racks. Print every violation.</p></div>
+    <div class="prob__io"><div><small>Input</small><pre>m1 (rack1): NameNode, ZooKeeper, DataNode · m2 (rack1): NameNode, ZooKeeper · m3 (rack2): ZooKeeper, ZooKeeper</pre></div><div><small>Expected output</small><pre>Rule 1: m1 runs worker daemons
+Rule 2: ZooKeeper on 4 servers but 3 hosts
+Rule 3: both NameNodes on {&#x27;rack1&#x27;}</pre></div></div>
+    <div class="wx__approach"><p class="wx__label">Approach</p><ol><li>Loop over hosts; flag worker daemons on a master.</li><li>Collect hosts running ZooKeeper; compare distinct count with total and check it is odd.</li><li>Compare the racks of the two NameNode hosts.</li></ol></div>
+    <p class="wx__label">Solution: run it live</p>
+    <div class="runner">
+    <script type="application/json">{
+ "lang": "python",
+ "file": "main.py",
+ "tasks": [
+  {
+   "label": "Solution",
+   "hint": "Fix all three problems in the dictionary until the program prints nothing.",
+   "code": "layout = {\"m1\": (\"rack1\", [\"NameNode\", \"ZooKeeper\", \"DataNode\"]),\n          \"m2\": (\"rack1\", [\"NameNode\", \"ZooKeeper\"]),\n          \"m3\": (\"rack2\", [\"ZooKeeper\", \"ZooKeeper\"])}\nfor h, (rack, ds) in layout.items():\n    if {\"DataNode\", \"NodeManager\"} & set(ds):\n        print(\"Rule 1:\", h, \"runs worker daemons\")\nzk = [h for h, (r, ds) in layout.items() for d in ds if d == \"ZooKeeper\"]\nif len(set(zk)) != len(zk) or len(set(zk)) % 2 == 0:\n    print(\"Rule 2: ZooKeeper on\", len(zk), \"servers but\", len(set(zk)), \"hosts\")\nnn_racks = {r for h, (r, ds) in layout.items() if \"NameNode\" in ds}\nif len(nn_racks) < 2:\n    print(\"Rule 3: both NameNodes on\", nn_racks)\n"
+  }
+ ]
+}</script>
+    </div>
+    <p class="wx__label">What happens in memory, step by step</p>
+    <p class="wx__how">Recorded from a real Python run: press <b>Next</b> to execute one line at a time. Watch variables change in each frame, and lists and dictionaries (numbered #1, #2 …) fill up as objects.</p>
+    <div class="tracer">
+    <script type="application/json">{
+ "lang": "python",
+ "code": [
+  "layout = {\"m1\": (\"rack1\", [\"NameNode\", \"ZooKeeper\", \"DataNode\"]),",
+  "          \"m2\": (\"rack1\", [\"NameNode\", \"ZooKeeper\"]),",
+  "          \"m3\": (\"rack2\", [\"ZooKeeper\", \"ZooKeeper\"])}",
+  "for h, (rack, ds) in layout.items():",
+  "    if {\"DataNode\", \"NodeManager\"} & set(ds):",
+  "        print(\"Rule 1:\", h, \"runs worker daemons\")",
+  "zk = [h for h, (r, ds) in layout.items() for d in ds if d == \"ZooKeeper\"]",
+  "if len(set(zk)) != len(zk) or len(set(zk)) % 2 == 0:",
+  "    print(\"Rule 2: ZooKeeper on\", len(zk), \"servers but\", len(set(zk)), \"hosts\")",
+  "nn_racks = {r for h, (r, ds) in layout.items() if \"NameNode\" in ds}",
+  "if len(nn_racks) < 2:",
+  "    print(\"Rule 3: both NameNodes on\", nn_racks)"
+ ],
+ "steps": [
+  {
+   "line": 1,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": []
+    }
+   ],
+   "heap": []
+  },
+  {
+   "line": 2,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": []
+    }
+   ],
+   "heap": []
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": []
+    }
+   ],
+   "heap": []
+  },
+  {
+   "line": 1,
+   "phase": "Python",
+   "note": "<code>layout<\/code> is created: → dict #1. A new dict object (#1) is created: {&#x27;m1&#x27;: → tuple #2, &#x27;m2&#x27;: → tuple #3, &#x27;m3&#x27;: → tuple #4} A new tuple object (#2) is created: (&#x27;rack1&#x27;, → list #5) A new tuple object (#3) is created: (&#x27;rack1&#x27;, → list #6) A new tuple object (#4) is created: (&#x27;rack2&#x27;, → list #7) A new list object (#5) is created: [&#x27;NameNode&#x27;, &#x27;ZooKeeper&#x27;, &#x27;DataNode&#x27;] A new list object (#6) is created: [&#x27;NameNode&#x27;, &#x27;ZooKeeper&#x27;] A new list object (#7) is created: [&#x27;ZooKeeper&#x27;, &#x27;ZooKeeper&#x27;]",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "layout",
+       "→ dict #1"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;m1&#x27;: → tuple #2, &#x27;m2&#x27;: → tuple #3, &#x27;m3&#x27;: → tuple #4}",
+    "<b>#2 tuple (2)<\/b> (&#x27;rack1&#x27;, → list #5)",
+    "<b>#3 tuple (2)<\/b> (&#x27;rack1&#x27;, → list #6)",
+    "<b>#4 tuple (2)<\/b> (&#x27;rack2&#x27;, → list #7)",
+    "<b>#5 list (3)<\/b> [&#x27;NameNode&#x27;, &#x27;ZooKeeper&#x27;, &#x27;DataNode&#x27;]",
+    "<b>#6 list (2)<\/b> [&#x27;NameNode&#x27;, &#x27;ZooKeeper&#x27;]",
+    "<b>#7 list (2)<\/b> [&#x27;ZooKeeper&#x27;, &#x27;ZooKeeper&#x27;]"
+   ],
+   "newVar": "layout"
+  },
+  {
+   "line": 4,
+   "phase": "Rule 1",
+   "note": "Set intersection finds any worker daemon. <code>h<\/code> is created: &#x27;m1&#x27;. <code>rack<\/code> is created: &#x27;rack1&#x27;. <code>ds<\/code> is created: → list #5.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "layout",
+       "→ dict #1"
+      ],
+      [
+       "h",
+       "'m1'"
+      ],
+      [
+       "rack",
+       "'rack1'"
+      ],
+      [
+       "ds",
+       "→ list #5"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;m1&#x27;: → tuple #2, &#x27;m2&#x27;: → tuple #3, &#x27;m3&#x27;: → tuple #4}",
+    "<b>#2 tuple (2)<\/b> (&#x27;rack1&#x27;, → list #5)",
+    "<b>#3 tuple (2)<\/b> (&#x27;rack1&#x27;, → list #6)",
+    "<b>#4 tuple (2)<\/b> (&#x27;rack2&#x27;, → list #7)",
+    "<b>#5 list (3)<\/b> [&#x27;NameNode&#x27;, &#x27;ZooKeeper&#x27;, &#x27;DataNode&#x27;]",
+    "<b>#6 list (2)<\/b> [&#x27;NameNode&#x27;, &#x27;ZooKeeper&#x27;]",
+    "<b>#7 list (2)<\/b> [&#x27;ZooKeeper&#x27;, &#x27;ZooKeeper&#x27;]"
+   ],
+   "newVar": "ds"
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "The condition is <b>True<\/b>, so the indented block runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "layout",
+       "→ dict #1"
+      ],
+      [
+       "h",
+       "'m1'"
+      ],
+      [
+       "rack",
+       "'rack1'"
+      ],
+      [
+       "ds",
+       "→ list #5"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;m1&#x27;: → tuple #2, &#x27;m2&#x27;: → tuple #3, &#x27;m3&#x27;: → tuple #4}",
+    "<b>#2 tuple (2)<\/b> (&#x27;rack1&#x27;, → list #5)",
+    "<b>#3 tuple (2)<\/b> (&#x27;rack1&#x27;, → list #6)",
+    "<b>#4 tuple (2)<\/b> (&#x27;rack2&#x27;, → list #7)",
+    "<b>#5 list (3)<\/b> [&#x27;NameNode&#x27;, &#x27;ZooKeeper&#x27;, &#x27;DataNode&#x27;]",
+    "<b>#6 list (2)<\/b> [&#x27;NameNode&#x27;, &#x27;ZooKeeper&#x27;]",
+    "<b>#7 list (2)<\/b> [&#x27;ZooKeeper&#x27;, &#x27;ZooKeeper&#x27;]"
+   ]
+  },
+  {
+   "line": 6,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "layout",
+       "→ dict #1"
+      ],
+      [
+       "h",
+       "'m1'"
+      ],
+      [
+       "rack",
+       "'rack1'"
+      ],
+      [
+       "ds",
+       "→ list #5"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;m1&#x27;: → tuple #2, &#x27;m2&#x27;: → tuple #3, &#x27;m3&#x27;: → tuple #4}",
+    "<b>#2 tuple (2)<\/b> (&#x27;rack1&#x27;, → list #5)",
+    "<b>#3 tuple (2)<\/b> (&#x27;rack1&#x27;, → list #6)",
+    "<b>#4 tuple (2)<\/b> (&#x27;rack2&#x27;, → list #7)",
+    "<b>#5 list (3)<\/b> [&#x27;NameNode&#x27;, &#x27;ZooKeeper&#x27;, &#x27;DataNode&#x27;]",
+    "<b>#6 list (2)<\/b> [&#x27;NameNode&#x27;, &#x27;ZooKeeper&#x27;]",
+    "<b>#7 list (2)<\/b> [&#x27;ZooKeeper&#x27;, &#x27;ZooKeeper&#x27;]"
+   ],
+   "out": "Rule 1: m1 runs worker daemons\n"
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "<code>h<\/code> changes to &#x27;m2&#x27;. <code>ds<\/code> changes to → list #6.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "layout",
+       "→ dict #1"
+      ],
+      [
+       "h",
+       "'m2'"
+      ],
+      [
+       "rack",
+       "'rack1'"
+      ],
+      [
+       "ds",
+       "→ list #6"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;m1&#x27;: → tuple #2, &#x27;m2&#x27;: → tuple #3, &#x27;m3&#x27;: → tuple #4}",
+    "<b>#2 tuple (2)<\/b> (&#x27;rack1&#x27;, → list #5)",
+    "<b>#3 tuple (2)<\/b> (&#x27;rack1&#x27;, → list #6)",
+    "<b>#4 tuple (2)<\/b> (&#x27;rack2&#x27;, → list #7)",
+    "<b>#5 list (3)<\/b> [&#x27;NameNode&#x27;, &#x27;ZooKeeper&#x27;, &#x27;DataNode&#x27;]",
+    "<b>#6 list (2)<\/b> [&#x27;NameNode&#x27;, &#x27;ZooKeeper&#x27;]",
+    "<b>#7 list (2)<\/b> [&#x27;ZooKeeper&#x27;, &#x27;ZooKeeper&#x27;]"
+   ],
+   "newVar": "ds"
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "The condition is <b>False<\/b>, so the indented block is skipped.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "layout",
+       "→ dict #1"
+      ],
+      [
+       "h",
+       "'m2'"
+      ],
+      [
+       "rack",
+       "'rack1'"
+      ],
+      [
+       "ds",
+       "→ list #6"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;m1&#x27;: → tuple #2, &#x27;m2&#x27;: → tuple #3, &#x27;m3&#x27;: → tuple #4}",
+    "<b>#2 tuple (2)<\/b> (&#x27;rack1&#x27;, → list #5)",
+    "<b>#3 tuple (2)<\/b> (&#x27;rack1&#x27;, → list #6)",
+    "<b>#4 tuple (2)<\/b> (&#x27;rack2&#x27;, → list #7)",
+    "<b>#5 list (3)<\/b> [&#x27;NameNode&#x27;, &#x27;ZooKeeper&#x27;, &#x27;DataNode&#x27;]",
+    "<b>#6 list (2)<\/b> [&#x27;NameNode&#x27;, &#x27;ZooKeeper&#x27;]",
+    "<b>#7 list (2)<\/b> [&#x27;ZooKeeper&#x27;, &#x27;ZooKeeper&#x27;]"
+   ]
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "<code>h<\/code> changes to &#x27;m3&#x27;. <code>rack<\/code> changes to &#x27;rack2&#x27;. <code>ds<\/code> changes to → list #7.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "layout",
+       "→ dict #1"
+      ],
+      [
+       "h",
+       "'m3'"
+      ],
+      [
+       "rack",
+       "'rack2'"
+      ],
+      [
+       "ds",
+       "→ list #7"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;m1&#x27;: → tuple #2, &#x27;m2&#x27;: → tuple #3, &#x27;m3&#x27;: → tuple #4}",
+    "<b>#2 tuple (2)<\/b> (&#x27;rack1&#x27;, → list #5)",
+    "<b>#3 tuple (2)<\/b> (&#x27;rack1&#x27;, → list #6)",
+    "<b>#4 tuple (2)<\/b> (&#x27;rack2&#x27;, → list #7)",
+    "<b>#5 list (3)<\/b> [&#x27;NameNode&#x27;, &#x27;ZooKeeper&#x27;, &#x27;DataNode&#x27;]",
+    "<b>#6 list (2)<\/b> [&#x27;NameNode&#x27;, &#x27;ZooKeeper&#x27;]",
+    "<b>#7 list (2)<\/b> [&#x27;ZooKeeper&#x27;, &#x27;ZooKeeper&#x27;]"
+   ],
+   "newVar": "ds"
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "The condition is <b>False<\/b>, so the indented block is skipped.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "layout",
+       "→ dict #1"
+      ],
+      [
+       "h",
+       "'m3'"
+      ],
+      [
+       "rack",
+       "'rack2'"
+      ],
+      [
+       "ds",
+       "→ list #7"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;m1&#x27;: → tuple #2, &#x27;m2&#x27;: → tuple #3, &#x27;m3&#x27;: → tuple #4}",
+    "<b>#2 tuple (2)<\/b> (&#x27;rack1&#x27;, → list #5)",
+    "<b>#3 tuple (2)<\/b> (&#x27;rack1&#x27;, → list #6)",
+    "<b>#4 tuple (2)<\/b> (&#x27;rack2&#x27;, → list #7)",
+    "<b>#5 list (3)<\/b> [&#x27;NameNode&#x27;, &#x27;ZooKeeper&#x27;, &#x27;DataNode&#x27;]",
+    "<b>#6 list (2)<\/b> [&#x27;NameNode&#x27;, &#x27;ZooKeeper&#x27;]",
+    "<b>#7 list (2)<\/b> [&#x27;ZooKeeper&#x27;, &#x27;ZooKeeper&#x27;]"
+   ]
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "Nothing is left to loop over, so the loop ends and Python moves on.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "layout",
+       "→ dict #1"
+      ],
+      [
+       "h",
+       "'m3'"
+      ],
+      [
+       "rack",
+       "'rack2'"
+      ],
+      [
+       "ds",
+       "→ list #7"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;m1&#x27;: → tuple #2, &#x27;m2&#x27;: → tuple #3, &#x27;m3&#x27;: → tuple #4}",
+    "<b>#2 tuple (2)<\/b> (&#x27;rack1&#x27;, → list #5)",
+    "<b>#3 tuple (2)<\/b> (&#x27;rack1&#x27;, → list #6)",
+    "<b>#4 tuple (2)<\/b> (&#x27;rack2&#x27;, → list #7)",
+    "<b>#5 list (3)<\/b> [&#x27;NameNode&#x27;, &#x27;ZooKeeper&#x27;, &#x27;DataNode&#x27;]",
+    "<b>#6 list (2)<\/b> [&#x27;NameNode&#x27;, &#x27;ZooKeeper&#x27;]",
+    "<b>#7 list (2)<\/b> [&#x27;ZooKeeper&#x27;, &#x27;ZooKeeper&#x27;]"
+   ]
+  },
+  {
+   "line": 7,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "layout",
+       "→ dict #1"
+      ],
+      [
+       "h",
+       "'m3'"
+      ],
+      [
+       "rack",
+       "'rack2'"
+      ],
+      [
+       "ds",
+       "→ list #7"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;m1&#x27;: → tuple #2, &#x27;m2&#x27;: → tuple #3, &#x27;m3&#x27;: → tuple #4}",
+    "<b>#2 tuple (2)<\/b> (&#x27;rack1&#x27;, → list #5)",
+    "<b>#3 tuple (2)<\/b> (&#x27;rack1&#x27;, → list #6)",
+    "<b>#4 tuple (2)<\/b> (&#x27;rack2&#x27;, → list #7)",
+    "<b>#5 list (3)<\/b> [&#x27;NameNode&#x27;, &#x27;ZooKeeper&#x27;, &#x27;DataNode&#x27;]",
+    "<b>#6 list (2)<\/b> [&#x27;NameNode&#x27;, &#x27;ZooKeeper&#x27;]",
+    "<b>#7 list (2)<\/b> [&#x27;ZooKeeper&#x27;, &#x27;ZooKeeper&#x27;]"
+   ]
+  },
+  {
+   "line": 7,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "layout",
+       "→ dict #1"
+      ],
+      [
+       "h",
+       "'m3'"
+      ],
+      [
+       "rack",
+       "'rack2'"
+      ],
+      [
+       "ds",
+       "→ list #7"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;m1&#x27;: → tuple #2, &#x27;m2&#x27;: → tuple #3, &#x27;m3&#x27;: → tuple #4}",
+    "<b>#2 tuple (2)<\/b> (&#x27;rack1&#x27;, → list #5)",
+    "<b>#3 tuple (2)<\/b> (&#x27;rack1&#x27;, → list #6)",
+    "<b>#4 tuple (2)<\/b> (&#x27;rack2&#x27;, → list #7)",
+    "<b>#5 list (3)<\/b> [&#x27;NameNode&#x27;, &#x27;ZooKeeper&#x27;, &#x27;DataNode&#x27;]",
+    "<b>#6 list (2)<\/b> [&#x27;NameNode&#x27;, &#x27;ZooKeeper&#x27;]",
+    "<b>#7 list (2)<\/b> [&#x27;ZooKeeper&#x27;, &#x27;ZooKeeper&#x27;]"
+   ]
+  },
+  {
+   "line": 7,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "layout",
+       "→ dict #1"
+      ],
+      [
+       "h",
+       "'m3'"
+      ],
+      [
+       "rack",
+       "'rack2'"
+      ],
+      [
+       "ds",
+       "→ list #7"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;m1&#x27;: → tuple #2, &#x27;m2&#x27;: → tuple #3, &#x27;m3&#x27;: → tuple #4}",
+    "<b>#2 tuple (2)<\/b> (&#x27;rack1&#x27;, → list #5)",
+    "<b>#3 tuple (2)<\/b> (&#x27;rack1&#x27;, → list #6)",
+    "<b>#4 tuple (2)<\/b> (&#x27;rack2&#x27;, → list #7)",
+    "<b>#5 list (3)<\/b> [&#x27;NameNode&#x27;, &#x27;ZooKeeper&#x27;, &#x27;DataNode&#x27;]",
+    "<b>#6 list (2)<\/b> [&#x27;NameNode&#x27;, &#x27;ZooKeeper&#x27;]",
+    "<b>#7 list (2)<\/b> [&#x27;ZooKeeper&#x27;, &#x27;ZooKeeper&#x27;]"
+   ]
+  },
+  {
+   "line": 7,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "layout",
+       "→ dict #1"
+      ],
+      [
+       "h",
+       "'m3'"
+      ],
+      [
+       "rack",
+       "'rack2'"
+      ],
+      [
+       "ds",
+       "→ list #7"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;m1&#x27;: → tuple #2, &#x27;m2&#x27;: → tuple #3, &#x27;m3&#x27;: → tuple #4}",
+    "<b>#2 tuple (2)<\/b> (&#x27;rack1&#x27;, → list #5)",
+    "<b>#3 tuple (2)<\/b> (&#x27;rack1&#x27;, → list #6)",
+    "<b>#4 tuple (2)<\/b> (&#x27;rack2&#x27;, → list #7)",
+    "<b>#5 list (3)<\/b> [&#x27;NameNode&#x27;, &#x27;ZooKeeper&#x27;, &#x27;DataNode&#x27;]",
+    "<b>#6 list (2)<\/b> [&#x27;NameNode&#x27;, &#x27;ZooKeeper&#x27;]",
+    "<b>#7 list (2)<\/b> [&#x27;ZooKeeper&#x27;, &#x27;ZooKeeper&#x27;]"
+   ]
+  },
+  {
+   "line": 7,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "layout",
+       "→ dict #1"
+      ],
+      [
+       "h",
+       "'m3'"
+      ],
+      [
+       "rack",
+       "'rack2'"
+      ],
+      [
+       "ds",
+       "→ list #7"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;m1&#x27;: → tuple #2, &#x27;m2&#x27;: → tuple #3, &#x27;m3&#x27;: → tuple #4}",
+    "<b>#2 tuple (2)<\/b> (&#x27;rack1&#x27;, → list #5)",
+    "<b>#3 tuple (2)<\/b> (&#x27;rack1&#x27;, → list #6)",
+    "<b>#4 tuple (2)<\/b> (&#x27;rack2&#x27;, → list #7)",
+    "<b>#5 list (3)<\/b> [&#x27;NameNode&#x27;, &#x27;ZooKeeper&#x27;, &#x27;DataNode&#x27;]",
+    "<b>#6 list (2)<\/b> [&#x27;NameNode&#x27;, &#x27;ZooKeeper&#x27;]",
+    "<b>#7 list (2)<\/b> [&#x27;ZooKeeper&#x27;, &#x27;ZooKeeper&#x27;]"
+   ]
+  },
+  {
+   "line": 7,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "layout",
+       "→ dict #1"
+      ],
+      [
+       "h",
+       "'m3'"
+      ],
+      [
+       "rack",
+       "'rack2'"
+      ],
+      [
+       "ds",
+       "→ list #7"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;m1&#x27;: → tuple #2, &#x27;m2&#x27;: → tuple #3, &#x27;m3&#x27;: → tuple #4}",
+    "<b>#2 tuple (2)<\/b> (&#x27;rack1&#x27;, → list #5)",
+    "<b>#3 tuple (2)<\/b> (&#x27;rack1&#x27;, → list #6)",
+    "<b>#4 tuple (2)<\/b> (&#x27;rack2&#x27;, → list #7)",
+    "<b>#5 list (3)<\/b> [&#x27;NameNode&#x27;, &#x27;ZooKeeper&#x27;, &#x27;DataNode&#x27;]",
+    "<b>#6 list (2)<\/b> [&#x27;NameNode&#x27;, &#x27;ZooKeeper&#x27;]",
+    "<b>#7 list (2)<\/b> [&#x27;ZooKeeper&#x27;, &#x27;ZooKeeper&#x27;]"
+   ]
+  },
+  {
+   "line": 7,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "layout",
+       "→ dict #1"
+      ],
+      [
+       "h",
+       "'m3'"
+      ],
+      [
+       "rack",
+       "'rack2'"
+      ],
+      [
+       "ds",
+       "→ list #7"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;m1&#x27;: → tuple #2, &#x27;m2&#x27;: → tuple #3, &#x27;m3&#x27;: → tuple #4}",
+    "<b>#2 tuple (2)<\/b> (&#x27;rack1&#x27;, → list #5)",
+    "<b>#3 tuple (2)<\/b> (&#x27;rack1&#x27;, → list #6)",
+    "<b>#4 tuple (2)<\/b> (&#x27;rack2&#x27;, → list #7)",
+    "<b>#5 list (3)<\/b> [&#x27;NameNode&#x27;, &#x27;ZooKeeper&#x27;, &#x27;DataNode&#x27;]",
+    "<b>#6 list (2)<\/b> [&#x27;NameNode&#x27;, &#x27;ZooKeeper&#x27;]",
+    "<b>#7 list (2)<\/b> [&#x27;ZooKeeper&#x27;, &#x27;ZooKeeper&#x27;]"
+   ]
+  },
+  {
+   "line": 7,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "layout",
+       "→ dict #1"
+      ],
+      [
+       "h",
+       "'m3'"
+      ],
+      [
+       "rack",
+       "'rack2'"
+      ],
+      [
+       "ds",
+       "→ list #7"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;m1&#x27;: → tuple #2, &#x27;m2&#x27;: → tuple #3, &#x27;m3&#x27;: → tuple #4}",
+    "<b>#2 tuple (2)<\/b> (&#x27;rack1&#x27;, → list #5)",
+    "<b>#3 tuple (2)<\/b> (&#x27;rack1&#x27;, → list #6)",
+    "<b>#4 tuple (2)<\/b> (&#x27;rack2&#x27;, → list #7)",
+    "<b>#5 list (3)<\/b> [&#x27;NameNode&#x27;, &#x27;ZooKeeper&#x27;, &#x27;DataNode&#x27;]",
+    "<b>#6 list (2)<\/b> [&#x27;NameNode&#x27;, &#x27;ZooKeeper&#x27;]",
+    "<b>#7 list (2)<\/b> [&#x27;ZooKeeper&#x27;, &#x27;ZooKeeper&#x27;]"
+   ]
+  },
+  {
+   "line": 7,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "layout",
+       "→ dict #1"
+      ],
+      [
+       "h",
+       "'m3'"
+      ],
+      [
+       "rack",
+       "'rack2'"
+      ],
+      [
+       "ds",
+       "→ list #7"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;m1&#x27;: → tuple #2, &#x27;m2&#x27;: → tuple #3, &#x27;m3&#x27;: → tuple #4}",
+    "<b>#2 tuple (2)<\/b> (&#x27;rack1&#x27;, → list #5)",
+    "<b>#3 tuple (2)<\/b> (&#x27;rack1&#x27;, → list #6)",
+    "<b>#4 tuple (2)<\/b> (&#x27;rack2&#x27;, → list #7)",
+    "<b>#5 list (3)<\/b> [&#x27;NameNode&#x27;, &#x27;ZooKeeper&#x27;, &#x27;DataNode&#x27;]",
+    "<b>#6 list (2)<\/b> [&#x27;NameNode&#x27;, &#x27;ZooKeeper&#x27;]",
+    "<b>#7 list (2)<\/b> [&#x27;ZooKeeper&#x27;, &#x27;ZooKeeper&#x27;]"
+   ]
+  },
+  {
+   "line": 7,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "layout",
+       "→ dict #1"
+      ],
+      [
+       "h",
+       "'m3'"
+      ],
+      [
+       "rack",
+       "'rack2'"
+      ],
+      [
+       "ds",
+       "→ list #7"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;m1&#x27;: → tuple #2, &#x27;m2&#x27;: → tuple #3, &#x27;m3&#x27;: → tuple #4}",
+    "<b>#2 tuple (2)<\/b> (&#x27;rack1&#x27;, → list #5)",
+    "<b>#3 tuple (2)<\/b> (&#x27;rack1&#x27;, → list #6)",
+    "<b>#4 tuple (2)<\/b> (&#x27;rack2&#x27;, → list #7)",
+    "<b>#5 list (3)<\/b> [&#x27;NameNode&#x27;, &#x27;ZooKeeper&#x27;, &#x27;DataNode&#x27;]",
+    "<b>#6 list (2)<\/b> [&#x27;NameNode&#x27;, &#x27;ZooKeeper&#x27;]",
+    "<b>#7 list (2)<\/b> [&#x27;ZooKeeper&#x27;, &#x27;ZooKeeper&#x27;]"
+   ]
+  },
+  {
+   "line": 7,
+   "phase": "Python",
+   "note": "<code>zk<\/code> is created: → list #8. A new list object (#8) is created: [&#x27;m1&#x27;, &#x27;m2&#x27;, &#x27;m3&#x27;, &#x27;m3&#x27;]",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "layout",
+       "→ dict #1"
+      ],
+      [
+       "h",
+       "'m3'"
+      ],
+      [
+       "rack",
+       "'rack2'"
+      ],
+      [
+       "ds",
+       "→ list #7"
+      ],
+      [
+       "zk",
+       "→ list #8"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;m1&#x27;: → tuple #2, &#x27;m2&#x27;: → tuple #3, &#x27;m3&#x27;: → tuple #4}",
+    "<b>#2 tuple (2)<\/b> (&#x27;rack1&#x27;, → list #5)",
+    "<b>#3 tuple (2)<\/b> (&#x27;rack1&#x27;, → list #6)",
+    "<b>#4 tuple (2)<\/b> (&#x27;rack2&#x27;, → list #7)",
+    "<b>#5 list (3)<\/b> [&#x27;NameNode&#x27;, &#x27;ZooKeeper&#x27;, &#x27;DataNode&#x27;]",
+    "<b>#6 list (2)<\/b> [&#x27;NameNode&#x27;, &#x27;ZooKeeper&#x27;]",
+    "<b>#7 list (2)<\/b> [&#x27;ZooKeeper&#x27;, &#x27;ZooKeeper&#x27;]",
+    "<b>#8 list (4)<\/b> [&#x27;m1&#x27;, &#x27;m2&#x27;, &#x27;m3&#x27;, &#x27;m3&#x27;]"
+   ],
+   "newVar": "zk"
+  },
+  {
+   "line": 8,
+   "phase": "Python",
+   "note": "The condition is <b>True<\/b>, so the indented block runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "layout",
+       "→ dict #1"
+      ],
+      [
+       "h",
+       "'m3'"
+      ],
+      [
+       "rack",
+       "'rack2'"
+      ],
+      [
+       "ds",
+       "→ list #7"
+      ],
+      [
+       "zk",
+       "→ list #8"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;m1&#x27;: → tuple #2, &#x27;m2&#x27;: → tuple #3, &#x27;m3&#x27;: → tuple #4}",
+    "<b>#2 tuple (2)<\/b> (&#x27;rack1&#x27;, → list #5)",
+    "<b>#3 tuple (2)<\/b> (&#x27;rack1&#x27;, → list #6)",
+    "<b>#4 tuple (2)<\/b> (&#x27;rack2&#x27;, → list #7)",
+    "<b>#5 list (3)<\/b> [&#x27;NameNode&#x27;, &#x27;ZooKeeper&#x27;, &#x27;DataNode&#x27;]",
+    "<b>#6 list (2)<\/b> [&#x27;NameNode&#x27;, &#x27;ZooKeeper&#x27;]",
+    "<b>#7 list (2)<\/b> [&#x27;ZooKeeper&#x27;, &#x27;ZooKeeper&#x27;]",
+    "<b>#8 list (4)<\/b> [&#x27;m1&#x27;, &#x27;m2&#x27;, &#x27;m3&#x27;, &#x27;m3&#x27;]"
+   ]
+  },
+  {
+   "line": 9,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "layout",
+       "→ dict #1"
+      ],
+      [
+       "h",
+       "'m3'"
+      ],
+      [
+       "rack",
+       "'rack2'"
+      ],
+      [
+       "ds",
+       "→ list #7"
+      ],
+      [
+       "zk",
+       "→ list #8"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;m1&#x27;: → tuple #2, &#x27;m2&#x27;: → tuple #3, &#x27;m3&#x27;: → tuple #4}",
+    "<b>#2 tuple (2)<\/b> (&#x27;rack1&#x27;, → list #5)",
+    "<b>#3 tuple (2)<\/b> (&#x27;rack1&#x27;, → list #6)",
+    "<b>#4 tuple (2)<\/b> (&#x27;rack2&#x27;, → list #7)",
+    "<b>#5 list (3)<\/b> [&#x27;NameNode&#x27;, &#x27;ZooKeeper&#x27;, &#x27;DataNode&#x27;]",
+    "<b>#6 list (2)<\/b> [&#x27;NameNode&#x27;, &#x27;ZooKeeper&#x27;]",
+    "<b>#7 list (2)<\/b> [&#x27;ZooKeeper&#x27;, &#x27;ZooKeeper&#x27;]",
+    "<b>#8 list (4)<\/b> [&#x27;m1&#x27;, &#x27;m2&#x27;, &#x27;m3&#x27;, &#x27;m3&#x27;]"
+   ],
+   "out": "Rule 2: ZooKeeper on 4 servers but 3 hosts\n"
+  },
+  {
+   "line": 10,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "layout",
+       "→ dict #1"
+      ],
+      [
+       "h",
+       "'m3'"
+      ],
+      [
+       "rack",
+       "'rack2'"
+      ],
+      [
+       "ds",
+       "→ list #7"
+      ],
+      [
+       "zk",
+       "→ list #8"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;m1&#x27;: → tuple #2, &#x27;m2&#x27;: → tuple #3, &#x27;m3&#x27;: → tuple #4}",
+    "<b>#2 tuple (2)<\/b> (&#x27;rack1&#x27;, → list #5)",
+    "<b>#3 tuple (2)<\/b> (&#x27;rack1&#x27;, → list #6)",
+    "<b>#4 tuple (2)<\/b> (&#x27;rack2&#x27;, → list #7)",
+    "<b>#5 list (3)<\/b> [&#x27;NameNode&#x27;, &#x27;ZooKeeper&#x27;, &#x27;DataNode&#x27;]",
+    "<b>#6 list (2)<\/b> [&#x27;NameNode&#x27;, &#x27;ZooKeeper&#x27;]",
+    "<b>#7 list (2)<\/b> [&#x27;ZooKeeper&#x27;, &#x27;ZooKeeper&#x27;]",
+    "<b>#8 list (4)<\/b> [&#x27;m1&#x27;, &#x27;m2&#x27;, &#x27;m3&#x27;, &#x27;m3&#x27;]"
+   ]
+  },
+  {
+   "line": 10,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "layout",
+       "→ dict #1"
+      ],
+      [
+       "h",
+       "'m3'"
+      ],
+      [
+       "rack",
+       "'rack2'"
+      ],
+      [
+       "ds",
+       "→ list #7"
+      ],
+      [
+       "zk",
+       "→ list #8"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;m1&#x27;: → tuple #2, &#x27;m2&#x27;: → tuple #3, &#x27;m3&#x27;: → tuple #4}",
+    "<b>#2 tuple (2)<\/b> (&#x27;rack1&#x27;, → list #5)",
+    "<b>#3 tuple (2)<\/b> (&#x27;rack1&#x27;, → list #6)",
+    "<b>#4 tuple (2)<\/b> (&#x27;rack2&#x27;, → list #7)",
+    "<b>#5 list (3)<\/b> [&#x27;NameNode&#x27;, &#x27;ZooKeeper&#x27;, &#x27;DataNode&#x27;]",
+    "<b>#6 list (2)<\/b> [&#x27;NameNode&#x27;, &#x27;ZooKeeper&#x27;]",
+    "<b>#7 list (2)<\/b> [&#x27;ZooKeeper&#x27;, &#x27;ZooKeeper&#x27;]",
+    "<b>#8 list (4)<\/b> [&#x27;m1&#x27;, &#x27;m2&#x27;, &#x27;m3&#x27;, &#x27;m3&#x27;]"
+   ]
+  },
+  {
+   "line": 10,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "layout",
+       "→ dict #1"
+      ],
+      [
+       "h",
+       "'m3'"
+      ],
+      [
+       "rack",
+       "'rack2'"
+      ],
+      [
+       "ds",
+       "→ list #7"
+      ],
+      [
+       "zk",
+       "→ list #8"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;m1&#x27;: → tuple #2, &#x27;m2&#x27;: → tuple #3, &#x27;m3&#x27;: → tuple #4}",
+    "<b>#2 tuple (2)<\/b> (&#x27;rack1&#x27;, → list #5)",
+    "<b>#3 tuple (2)<\/b> (&#x27;rack1&#x27;, → list #6)",
+    "<b>#4 tuple (2)<\/b> (&#x27;rack2&#x27;, → list #7)",
+    "<b>#5 list (3)<\/b> [&#x27;NameNode&#x27;, &#x27;ZooKeeper&#x27;, &#x27;DataNode&#x27;]",
+    "<b>#6 list (2)<\/b> [&#x27;NameNode&#x27;, &#x27;ZooKeeper&#x27;]",
+    "<b>#7 list (2)<\/b> [&#x27;ZooKeeper&#x27;, &#x27;ZooKeeper&#x27;]",
+    "<b>#8 list (4)<\/b> [&#x27;m1&#x27;, &#x27;m2&#x27;, &#x27;m3&#x27;, &#x27;m3&#x27;]"
+   ]
+  },
+  {
+   "line": 10,
+   "phase": "Python",
+   "note": "<code>nn_racks<\/code> is created: → set #9. A new set object (#9) is created: {&#x27;rack1&#x27;}",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "layout",
+       "→ dict #1"
+      ],
+      [
+       "h",
+       "'m3'"
+      ],
+      [
+       "rack",
+       "'rack2'"
+      ],
+      [
+       "ds",
+       "→ list #7"
+      ],
+      [
+       "zk",
+       "→ list #8"
+      ],
+      [
+       "nn_racks",
+       "→ set #9"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;m1&#x27;: → tuple #2, &#x27;m2&#x27;: → tuple #3, &#x27;m3&#x27;: → tuple #4}",
+    "<b>#2 tuple (2)<\/b> (&#x27;rack1&#x27;, → list #5)",
+    "<b>#3 tuple (2)<\/b> (&#x27;rack1&#x27;, → list #6)",
+    "<b>#4 tuple (2)<\/b> (&#x27;rack2&#x27;, → list #7)",
+    "<b>#5 list (3)<\/b> [&#x27;NameNode&#x27;, &#x27;ZooKeeper&#x27;, &#x27;DataNode&#x27;]",
+    "<b>#6 list (2)<\/b> [&#x27;NameNode&#x27;, &#x27;ZooKeeper&#x27;]",
+    "<b>#7 list (2)<\/b> [&#x27;ZooKeeper&#x27;, &#x27;ZooKeeper&#x27;]",
+    "<b>#8 list (4)<\/b> [&#x27;m1&#x27;, &#x27;m2&#x27;, &#x27;m3&#x27;, &#x27;m3&#x27;]",
+    "<b>#9 set (1)<\/b> {&#x27;rack1&#x27;}"
+   ],
+   "newVar": "nn_racks"
+  },
+  {
+   "line": 11,
+   "phase": "Python",
+   "note": "The condition is <b>True<\/b>, so the indented block runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "layout",
+       "→ dict #1"
+      ],
+      [
+       "h",
+       "'m3'"
+      ],
+      [
+       "rack",
+       "'rack2'"
+      ],
+      [
+       "ds",
+       "→ list #7"
+      ],
+      [
+       "zk",
+       "→ list #8"
+      ],
+      [
+       "nn_racks",
+       "→ set #9"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;m1&#x27;: → tuple #2, &#x27;m2&#x27;: → tuple #3, &#x27;m3&#x27;: → tuple #4}",
+    "<b>#2 tuple (2)<\/b> (&#x27;rack1&#x27;, → list #5)",
+    "<b>#3 tuple (2)<\/b> (&#x27;rack1&#x27;, → list #6)",
+    "<b>#4 tuple (2)<\/b> (&#x27;rack2&#x27;, → list #7)",
+    "<b>#5 list (3)<\/b> [&#x27;NameNode&#x27;, &#x27;ZooKeeper&#x27;, &#x27;DataNode&#x27;]",
+    "<b>#6 list (2)<\/b> [&#x27;NameNode&#x27;, &#x27;ZooKeeper&#x27;]",
+    "<b>#7 list (2)<\/b> [&#x27;ZooKeeper&#x27;, &#x27;ZooKeeper&#x27;]",
+    "<b>#8 list (4)<\/b> [&#x27;m1&#x27;, &#x27;m2&#x27;, &#x27;m3&#x27;, &#x27;m3&#x27;]",
+    "<b>#9 set (1)<\/b> {&#x27;rack1&#x27;}"
+   ]
+  },
+  {
+   "line": 12,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "layout",
+       "→ dict #1"
+      ],
+      [
+       "h",
+       "'m3'"
+      ],
+      [
+       "rack",
+       "'rack2'"
+      ],
+      [
+       "ds",
+       "→ list #7"
+      ],
+      [
+       "zk",
+       "→ list #8"
+      ],
+      [
+       "nn_racks",
+       "→ set #9"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;m1&#x27;: → tuple #2, &#x27;m2&#x27;: → tuple #3, &#x27;m3&#x27;: → tuple #4}",
+    "<b>#2 tuple (2)<\/b> (&#x27;rack1&#x27;, → list #5)",
+    "<b>#3 tuple (2)<\/b> (&#x27;rack1&#x27;, → list #6)",
+    "<b>#4 tuple (2)<\/b> (&#x27;rack2&#x27;, → list #7)",
+    "<b>#5 list (3)<\/b> [&#x27;NameNode&#x27;, &#x27;ZooKeeper&#x27;, &#x27;DataNode&#x27;]",
+    "<b>#6 list (2)<\/b> [&#x27;NameNode&#x27;, &#x27;ZooKeeper&#x27;]",
+    "<b>#7 list (2)<\/b> [&#x27;ZooKeeper&#x27;, &#x27;ZooKeeper&#x27;]",
+    "<b>#8 list (4)<\/b> [&#x27;m1&#x27;, &#x27;m2&#x27;, &#x27;m3&#x27;, &#x27;m3&#x27;]",
+    "<b>#9 set (1)<\/b> {&#x27;rack1&#x27;}"
+   ],
+   "out": "Rule 3: both NameNodes on {'rack1'}\n"
+  }
+ ]
+}</script>
+    </div>
+  </article>
+  <article class="wx">
+    <div class="wx__head"><span class="wx__num">Example 3</span><span class="lvl lvl--a">Advanced</span><span class="wx__tag">Budget · hardware</span></div>
+    <h4>What does each role cost?</h4>
+    <div class="wx__problem"><p class="wx__label">Problem statement</p><p>For a 40-node cluster with 3 masters, 1 utility, 2 edge and 34 workers, compute the hardware cost per role and the share spent on workers. Prices (illustrative): master Rs 9 lakh, utility Rs 5 lakh, edge Rs 4 lakh, worker Rs 12 lakh.</p></div>
+    <div class="prob__io"><div><small>Input</small><pre>3 × 9 L · 1 × 5 L · 2 × 4 L · 34 × 12 L</pre></div><div><small>Expected output</small><pre>master  :  3 x Rs 9 lakh = Rs 27 lakh
+utility :  1 x Rs 5 lakh = Rs 5 lakh
+edge    :  2 x Rs 4 lakh = Rs 8 lakh
+worker  : 34 x Rs 12 lakh = Rs 408 lakh
+Total Rs 448 lakh; workers are 91%</pre></div></div>
+    <div class="wx__approach"><p class="wx__label">Approach</p><ol><li>Multiply count × price for each role.</li><li>Sum for the total.</li><li>Worker share = worker cost ÷ total.</li></ol></div>
+    <p class="wx__label">Solution: run it live</p>
+    <div class="runner">
+    <script type="application/json">{
+ "lang": "python",
+ "file": "main.py",
+ "tasks": [
+  {
+   "label": "Solution",
+   "hint": "Workers are dense with disks, so they dominate. Masters are only a few per cent, which is why skimping on master reliability is a false saving.",
+   "code": "roles = {\"master\": (3, 9), \"utility\": (1, 5), \"edge\": (2, 4), \"worker\": (34, 12)}\ntotal = 0\nfor role, (n, lakh) in roles.items():\n    cost = n * lakh\n    total += cost\n    print(f\"{role:8}: {n:>2} x Rs {lakh} lakh = Rs {cost} lakh\")\nworker_cost = roles[\"worker\"][0] * roles[\"worker\"][1]\nprint(f\"Total Rs {total} lakh; workers are {worker_cost / total:.0%}\")\n"
+  }
+ ]
+}</script>
+    </div>
+    <p class="wx__label">What happens in memory, step by step</p>
+    <p class="wx__how">Recorded from a real Python run: press <b>Next</b> to execute one line at a time. Watch variables change in each frame, and lists and dictionaries (numbered #1, #2 …) fill up as objects.</p>
+    <div class="tracer">
+    <script type="application/json">{
+ "lang": "python",
+ "code": [
+  "roles = {\"master\": (3, 9), \"utility\": (1, 5), \"edge\": (2, 4), \"worker\": (34, 12)}",
+  "total = 0",
+  "for role, (n, lakh) in roles.items():",
+  "    cost = n * lakh",
+  "    total += cost",
+  "    print(f\"{role:8}: {n:>2} x Rs {lakh} lakh = Rs {cost} lakh\")",
+  "worker_cost = roles[\"worker\"][0] * roles[\"worker\"][1]",
+  "print(f\"Total Rs {total} lakh; workers are {worker_cost / total:.0%}\")"
+ ],
+ "steps": [
+  {
+   "line": 1,
+   "phase": "Python",
+   "note": "<code>roles<\/code> is created: → dict #1.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "roles",
+       "→ dict #1"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (4)<\/b> {&#x27;master&#x27;: → tuple #2, &#x27;utility&#x27;: → tuple #3, &#x27;edge&#x27;: → tuple #4, &#x27;worker&#x27;: → tuple #5}",
+    "<b>#2 tuple (2)<\/b> (3, 9)",
+    "<b>#3 tuple (2)<\/b> (1, 5)",
+    "<b>#4 tuple (2)<\/b> (2, 4)",
+    "<b>#5 tuple (2)<\/b> (34, 12)"
+   ],
+   "newVar": "roles"
+  },
+  {
+   "line": 2,
+   "phase": "Python",
+   "note": "<code>total<\/code> is created: 0.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "roles",
+       "→ dict #1"
+      ],
+      [
+       "total",
+       "0"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (4)<\/b> {&#x27;master&#x27;: → tuple #2, &#x27;utility&#x27;: → tuple #3, &#x27;edge&#x27;: → tuple #4, &#x27;worker&#x27;: → tuple #5}",
+    "<b>#2 tuple (2)<\/b> (3, 9)",
+    "<b>#3 tuple (2)<\/b> (1, 5)",
+    "<b>#4 tuple (2)<\/b> (2, 4)",
+    "<b>#5 tuple (2)<\/b> (34, 12)"
+   ],
+   "newVar": "total"
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "<code>role<\/code> is created: &#x27;master&#x27;. <code>n<\/code> is created: 3. <code>lakh<\/code> is created: 9.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "roles",
+       "→ dict #1"
+      ],
+      [
+       "total",
+       "0"
+      ],
+      [
+       "role",
+       "'master'"
+      ],
+      [
+       "n",
+       "3"
+      ],
+      [
+       "lakh",
+       "9"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (4)<\/b> {&#x27;master&#x27;: → tuple #2, &#x27;utility&#x27;: → tuple #3, &#x27;edge&#x27;: → tuple #4, &#x27;worker&#x27;: → tuple #5}",
+    "<b>#2 tuple (2)<\/b> (3, 9)",
+    "<b>#3 tuple (2)<\/b> (1, 5)",
+    "<b>#4 tuple (2)<\/b> (2, 4)",
+    "<b>#5 tuple (2)<\/b> (34, 12)"
+   ],
+   "newVar": "lakh"
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "<code>cost<\/code> is created: 27.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "roles",
+       "→ dict #1"
+      ],
+      [
+       "total",
+       "0"
+      ],
+      [
+       "role",
+       "'master'"
+      ],
+      [
+       "n",
+       "3"
+      ],
+      [
+       "lakh",
+       "9"
+      ],
+      [
+       "cost",
+       "27"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (4)<\/b> {&#x27;master&#x27;: → tuple #2, &#x27;utility&#x27;: → tuple #3, &#x27;edge&#x27;: → tuple #4, &#x27;worker&#x27;: → tuple #5}",
+    "<b>#2 tuple (2)<\/b> (3, 9)",
+    "<b>#3 tuple (2)<\/b> (1, 5)",
+    "<b>#4 tuple (2)<\/b> (2, 4)",
+    "<b>#5 tuple (2)<\/b> (34, 12)"
+   ],
+   "newVar": "cost"
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "<code>total<\/code> changes to 27.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "roles",
+       "→ dict #1"
+      ],
+      [
+       "total",
+       "27"
+      ],
+      [
+       "role",
+       "'master'"
+      ],
+      [
+       "n",
+       "3"
+      ],
+      [
+       "lakh",
+       "9"
+      ],
+      [
+       "cost",
+       "27"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (4)<\/b> {&#x27;master&#x27;: → tuple #2, &#x27;utility&#x27;: → tuple #3, &#x27;edge&#x27;: → tuple #4, &#x27;worker&#x27;: → tuple #5}",
+    "<b>#2 tuple (2)<\/b> (3, 9)",
+    "<b>#3 tuple (2)<\/b> (1, 5)",
+    "<b>#4 tuple (2)<\/b> (2, 4)",
+    "<b>#5 tuple (2)<\/b> (34, 12)"
+   ],
+   "newVar": "total"
+  },
+  {
+   "line": 6,
+   "phase": "Cost",
+   "note": "Count times price per role. The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "roles",
+       "→ dict #1"
+      ],
+      [
+       "total",
+       "27"
+      ],
+      [
+       "role",
+       "'master'"
+      ],
+      [
+       "n",
+       "3"
+      ],
+      [
+       "lakh",
+       "9"
+      ],
+      [
+       "cost",
+       "27"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (4)<\/b> {&#x27;master&#x27;: → tuple #2, &#x27;utility&#x27;: → tuple #3, &#x27;edge&#x27;: → tuple #4, &#x27;worker&#x27;: → tuple #5}",
+    "<b>#2 tuple (2)<\/b> (3, 9)",
+    "<b>#3 tuple (2)<\/b> (1, 5)",
+    "<b>#4 tuple (2)<\/b> (2, 4)",
+    "<b>#5 tuple (2)<\/b> (34, 12)"
+   ],
+   "out": "master  :  3 x Rs 9 lakh = Rs 27 lakh\n"
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "<code>role<\/code> changes to &#x27;utility&#x27;. <code>n<\/code> changes to 1. <code>lakh<\/code> changes to 5.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "roles",
+       "→ dict #1"
+      ],
+      [
+       "total",
+       "27"
+      ],
+      [
+       "role",
+       "'utility'"
+      ],
+      [
+       "n",
+       "1"
+      ],
+      [
+       "lakh",
+       "5"
+      ],
+      [
+       "cost",
+       "27"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (4)<\/b> {&#x27;master&#x27;: → tuple #2, &#x27;utility&#x27;: → tuple #3, &#x27;edge&#x27;: → tuple #4, &#x27;worker&#x27;: → tuple #5}",
+    "<b>#2 tuple (2)<\/b> (3, 9)",
+    "<b>#3 tuple (2)<\/b> (1, 5)",
+    "<b>#4 tuple (2)<\/b> (2, 4)",
+    "<b>#5 tuple (2)<\/b> (34, 12)"
+   ],
+   "newVar": "lakh"
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "<code>cost<\/code> changes to 5.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "roles",
+       "→ dict #1"
+      ],
+      [
+       "total",
+       "27"
+      ],
+      [
+       "role",
+       "'utility'"
+      ],
+      [
+       "n",
+       "1"
+      ],
+      [
+       "lakh",
+       "5"
+      ],
+      [
+       "cost",
+       "5"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (4)<\/b> {&#x27;master&#x27;: → tuple #2, &#x27;utility&#x27;: → tuple #3, &#x27;edge&#x27;: → tuple #4, &#x27;worker&#x27;: → tuple #5}",
+    "<b>#2 tuple (2)<\/b> (3, 9)",
+    "<b>#3 tuple (2)<\/b> (1, 5)",
+    "<b>#4 tuple (2)<\/b> (2, 4)",
+    "<b>#5 tuple (2)<\/b> (34, 12)"
+   ],
+   "newVar": "cost"
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "<code>total<\/code> changes to 32.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "roles",
+       "→ dict #1"
+      ],
+      [
+       "total",
+       "32"
+      ],
+      [
+       "role",
+       "'utility'"
+      ],
+      [
+       "n",
+       "1"
+      ],
+      [
+       "lakh",
+       "5"
+      ],
+      [
+       "cost",
+       "5"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (4)<\/b> {&#x27;master&#x27;: → tuple #2, &#x27;utility&#x27;: → tuple #3, &#x27;edge&#x27;: → tuple #4, &#x27;worker&#x27;: → tuple #5}",
+    "<b>#2 tuple (2)<\/b> (3, 9)",
+    "<b>#3 tuple (2)<\/b> (1, 5)",
+    "<b>#4 tuple (2)<\/b> (2, 4)",
+    "<b>#5 tuple (2)<\/b> (34, 12)"
+   ],
+   "newVar": "total"
+  },
+  {
+   "line": 6,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "roles",
+       "→ dict #1"
+      ],
+      [
+       "total",
+       "32"
+      ],
+      [
+       "role",
+       "'utility'"
+      ],
+      [
+       "n",
+       "1"
+      ],
+      [
+       "lakh",
+       "5"
+      ],
+      [
+       "cost",
+       "5"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (4)<\/b> {&#x27;master&#x27;: → tuple #2, &#x27;utility&#x27;: → tuple #3, &#x27;edge&#x27;: → tuple #4, &#x27;worker&#x27;: → tuple #5}",
+    "<b>#2 tuple (2)<\/b> (3, 9)",
+    "<b>#3 tuple (2)<\/b> (1, 5)",
+    "<b>#4 tuple (2)<\/b> (2, 4)",
+    "<b>#5 tuple (2)<\/b> (34, 12)"
+   ],
+   "out": "utility :  1 x Rs 5 lakh = Rs 5 lakh\n"
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "<code>role<\/code> changes to &#x27;edge&#x27;. <code>n<\/code> changes to 2. <code>lakh<\/code> changes to 4.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "roles",
+       "→ dict #1"
+      ],
+      [
+       "total",
+       "32"
+      ],
+      [
+       "role",
+       "'edge'"
+      ],
+      [
+       "n",
+       "2"
+      ],
+      [
+       "lakh",
+       "4"
+      ],
+      [
+       "cost",
+       "5"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (4)<\/b> {&#x27;master&#x27;: → tuple #2, &#x27;utility&#x27;: → tuple #3, &#x27;edge&#x27;: → tuple #4, &#x27;worker&#x27;: → tuple #5}",
+    "<b>#2 tuple (2)<\/b> (3, 9)",
+    "<b>#3 tuple (2)<\/b> (1, 5)",
+    "<b>#4 tuple (2)<\/b> (2, 4)",
+    "<b>#5 tuple (2)<\/b> (34, 12)"
+   ],
+   "newVar": "lakh"
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "<code>cost<\/code> changes to 8.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "roles",
+       "→ dict #1"
+      ],
+      [
+       "total",
+       "32"
+      ],
+      [
+       "role",
+       "'edge'"
+      ],
+      [
+       "n",
+       "2"
+      ],
+      [
+       "lakh",
+       "4"
+      ],
+      [
+       "cost",
+       "8"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (4)<\/b> {&#x27;master&#x27;: → tuple #2, &#x27;utility&#x27;: → tuple #3, &#x27;edge&#x27;: → tuple #4, &#x27;worker&#x27;: → tuple #5}",
+    "<b>#2 tuple (2)<\/b> (3, 9)",
+    "<b>#3 tuple (2)<\/b> (1, 5)",
+    "<b>#4 tuple (2)<\/b> (2, 4)",
+    "<b>#5 tuple (2)<\/b> (34, 12)"
+   ],
+   "newVar": "cost"
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "<code>total<\/code> changes to 40.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "roles",
+       "→ dict #1"
+      ],
+      [
+       "total",
+       "40"
+      ],
+      [
+       "role",
+       "'edge'"
+      ],
+      [
+       "n",
+       "2"
+      ],
+      [
+       "lakh",
+       "4"
+      ],
+      [
+       "cost",
+       "8"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (4)<\/b> {&#x27;master&#x27;: → tuple #2, &#x27;utility&#x27;: → tuple #3, &#x27;edge&#x27;: → tuple #4, &#x27;worker&#x27;: → tuple #5}",
+    "<b>#2 tuple (2)<\/b> (3, 9)",
+    "<b>#3 tuple (2)<\/b> (1, 5)",
+    "<b>#4 tuple (2)<\/b> (2, 4)",
+    "<b>#5 tuple (2)<\/b> (34, 12)"
+   ],
+   "newVar": "total"
+  },
+  {
+   "line": 6,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "roles",
+       "→ dict #1"
+      ],
+      [
+       "total",
+       "40"
+      ],
+      [
+       "role",
+       "'edge'"
+      ],
+      [
+       "n",
+       "2"
+      ],
+      [
+       "lakh",
+       "4"
+      ],
+      [
+       "cost",
+       "8"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (4)<\/b> {&#x27;master&#x27;: → tuple #2, &#x27;utility&#x27;: → tuple #3, &#x27;edge&#x27;: → tuple #4, &#x27;worker&#x27;: → tuple #5}",
+    "<b>#2 tuple (2)<\/b> (3, 9)",
+    "<b>#3 tuple (2)<\/b> (1, 5)",
+    "<b>#4 tuple (2)<\/b> (2, 4)",
+    "<b>#5 tuple (2)<\/b> (34, 12)"
+   ],
+   "out": "edge    :  2 x Rs 4 lakh = Rs 8 lakh\n"
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "<code>role<\/code> changes to &#x27;worker&#x27;. <code>n<\/code> changes to 34. <code>lakh<\/code> changes to 12.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "roles",
+       "→ dict #1"
+      ],
+      [
+       "total",
+       "40"
+      ],
+      [
+       "role",
+       "'worker'"
+      ],
+      [
+       "n",
+       "34"
+      ],
+      [
+       "lakh",
+       "12"
+      ],
+      [
+       "cost",
+       "8"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (4)<\/b> {&#x27;master&#x27;: → tuple #2, &#x27;utility&#x27;: → tuple #3, &#x27;edge&#x27;: → tuple #4, &#x27;worker&#x27;: → tuple #5}",
+    "<b>#2 tuple (2)<\/b> (3, 9)",
+    "<b>#3 tuple (2)<\/b> (1, 5)",
+    "<b>#4 tuple (2)<\/b> (2, 4)",
+    "<b>#5 tuple (2)<\/b> (34, 12)"
+   ],
+   "newVar": "lakh"
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "<code>cost<\/code> changes to 408.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "roles",
+       "→ dict #1"
+      ],
+      [
+       "total",
+       "40"
+      ],
+      [
+       "role",
+       "'worker'"
+      ],
+      [
+       "n",
+       "34"
+      ],
+      [
+       "lakh",
+       "12"
+      ],
+      [
+       "cost",
+       "408"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (4)<\/b> {&#x27;master&#x27;: → tuple #2, &#x27;utility&#x27;: → tuple #3, &#x27;edge&#x27;: → tuple #4, &#x27;worker&#x27;: → tuple #5}",
+    "<b>#2 tuple (2)<\/b> (3, 9)",
+    "<b>#3 tuple (2)<\/b> (1, 5)",
+    "<b>#4 tuple (2)<\/b> (2, 4)",
+    "<b>#5 tuple (2)<\/b> (34, 12)"
+   ],
+   "newVar": "cost"
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "<code>total<\/code> changes to 448.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "roles",
+       "→ dict #1"
+      ],
+      [
+       "total",
+       "448"
+      ],
+      [
+       "role",
+       "'worker'"
+      ],
+      [
+       "n",
+       "34"
+      ],
+      [
+       "lakh",
+       "12"
+      ],
+      [
+       "cost",
+       "408"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (4)<\/b> {&#x27;master&#x27;: → tuple #2, &#x27;utility&#x27;: → tuple #3, &#x27;edge&#x27;: → tuple #4, &#x27;worker&#x27;: → tuple #5}",
+    "<b>#2 tuple (2)<\/b> (3, 9)",
+    "<b>#3 tuple (2)<\/b> (1, 5)",
+    "<b>#4 tuple (2)<\/b> (2, 4)",
+    "<b>#5 tuple (2)<\/b> (34, 12)"
+   ],
+   "newVar": "total"
+  },
+  {
+   "line": 6,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "roles",
+       "→ dict #1"
+      ],
+      [
+       "total",
+       "448"
+      ],
+      [
+       "role",
+       "'worker'"
+      ],
+      [
+       "n",
+       "34"
+      ],
+      [
+       "lakh",
+       "12"
+      ],
+      [
+       "cost",
+       "408"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (4)<\/b> {&#x27;master&#x27;: → tuple #2, &#x27;utility&#x27;: → tuple #3, &#x27;edge&#x27;: → tuple #4, &#x27;worker&#x27;: → tuple #5}",
+    "<b>#2 tuple (2)<\/b> (3, 9)",
+    "<b>#3 tuple (2)<\/b> (1, 5)",
+    "<b>#4 tuple (2)<\/b> (2, 4)",
+    "<b>#5 tuple (2)<\/b> (34, 12)"
+   ],
+   "out": "worker  : 34 x Rs 12 lakh = Rs 408 lakh\n"
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "Nothing is left to loop over, so the loop ends and Python moves on.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "roles",
+       "→ dict #1"
+      ],
+      [
+       "total",
+       "448"
+      ],
+      [
+       "role",
+       "'worker'"
+      ],
+      [
+       "n",
+       "34"
+      ],
+      [
+       "lakh",
+       "12"
+      ],
+      [
+       "cost",
+       "408"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (4)<\/b> {&#x27;master&#x27;: → tuple #2, &#x27;utility&#x27;: → tuple #3, &#x27;edge&#x27;: → tuple #4, &#x27;worker&#x27;: → tuple #5}",
+    "<b>#2 tuple (2)<\/b> (3, 9)",
+    "<b>#3 tuple (2)<\/b> (1, 5)",
+    "<b>#4 tuple (2)<\/b> (2, 4)",
+    "<b>#5 tuple (2)<\/b> (34, 12)"
+   ]
+  },
+  {
+   "line": 7,
+   "phase": "Python",
+   "note": "<code>worker_cost<\/code> is created: 408.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "roles",
+       "→ dict #1"
+      ],
+      [
+       "total",
+       "448"
+      ],
+      [
+       "role",
+       "'worker'"
+      ],
+      [
+       "n",
+       "34"
+      ],
+      [
+       "lakh",
+       "12"
+      ],
+      [
+       "cost",
+       "408"
+      ],
+      [
+       "worker_cost",
+       "408"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (4)<\/b> {&#x27;master&#x27;: → tuple #2, &#x27;utility&#x27;: → tuple #3, &#x27;edge&#x27;: → tuple #4, &#x27;worker&#x27;: → tuple #5}",
+    "<b>#2 tuple (2)<\/b> (3, 9)",
+    "<b>#3 tuple (2)<\/b> (1, 5)",
+    "<b>#4 tuple (2)<\/b> (2, 4)",
+    "<b>#5 tuple (2)<\/b> (34, 12)"
+   ],
+   "newVar": "worker_cost"
+  },
+  {
+   "line": 8,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "roles",
+       "→ dict #1"
+      ],
+      [
+       "total",
+       "448"
+      ],
+      [
+       "role",
+       "'worker'"
+      ],
+      [
+       "n",
+       "34"
+      ],
+      [
+       "lakh",
+       "12"
+      ],
+      [
+       "cost",
+       "408"
+      ],
+      [
+       "worker_cost",
+       "408"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (4)<\/b> {&#x27;master&#x27;: → tuple #2, &#x27;utility&#x27;: → tuple #3, &#x27;edge&#x27;: → tuple #4, &#x27;worker&#x27;: → tuple #5}",
+    "<b>#2 tuple (2)<\/b> (3, 9)",
+    "<b>#3 tuple (2)<\/b> (1, 5)",
+    "<b>#4 tuple (2)<\/b> (2, 4)",
+    "<b>#5 tuple (2)<\/b> (34, 12)"
+   ],
+   "out": "Total Rs 448 lakh; workers are 91%\n"
+  }
+ ]
+}</script>
+    </div>
+  </article>
+</section>
+
+<section class="part" id="quiz">
+  <span class="part-label"><b>9</b> Quiz and revision</span>
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <script type="application/json">[
+ {
+  "q": "Where should ordinary users log in to run commands and submit jobs?",
+  "options": [
+   "The NameNode",
+   "Any worker node",
+   "An edge (gateway) node",
+   "The ZooKeeper server"
+  ],
+  "answer": 2,
+  "why": "Edge nodes have the client tools and configuration and run no core daemons, so user activity can't disturb the cluster."
+ },
+ {
+  "q": "Which daemons run on a typical worker node?",
+  "options": [
+   "NameNode and ResourceManager",
+   "DataNode and NodeManager",
+   "HiveServer2 and Metastore",
+   "JournalNode and ZKFC"
+  ],
+  "answer": 1,
+  "why": "Workers provide storage (<b>DataNode<\/b>) and compute (<b>NodeManager<\/b>)."
+ },
+ {
+  "q": "Why is running a heavy script on the NameNode host dangerous?",
+  "options": [
+   "It competes for the NameNode's memory and CPU, causing pauses that slow every HDFS operation",
+   "It deletes HDFS data",
+   "It changes the replication factor",
+   "It is not dangerous"
+  ],
+  "answer": 0,
+  "why": "The NameNode keeps all metadata in its JVM heap; starving it causes long pauses for the whole cluster."
+ },
+ {
+  "q": "Why do ZooKeeper and JournalNodes run on 3 or 5 different machines?",
+  "options": [
+   "To use spare disk space",
+   "Because Hadoop requires exactly 3 masters",
+   "To store more blocks",
+   "They work by majority (quorum), so an odd number on separate hosts survives failures"
+  ],
+  "answer": 3,
+  "why": "With 3 hosts, a majority of 2 survives one failure; with 5, a majority of 3 survives two."
+ },
+ {
+  "q": "Which service usually runs on a utility node?",
+  "options": [
+   "DataNode",
+   "NodeManager",
+   "Hive Metastore and its database",
+   "Map tasks"
+  ],
+  "answer": 2,
+  "why": "Utility nodes host supporting services such as the Hive Metastore, HiveServer2, Oozie, Ranger and the cluster manager."
+ },
+ {
+  "q": "In Amazon EMR, which node type runs YARN only, without HDFS?",
+  "options": [
+   "Primary node",
+   "Task node",
+   "Core node",
+   "Edge node"
+  ],
+  "answer": 1,
+  "why": "<b>Task nodes<\/b> add compute only, so they can be added or removed (or use spot instances) without risking HDFS data. Core nodes run both."
+ },
+ {
+  "q": "Why should users not run processes by hand on worker nodes?",
+  "options": [
+   "Work outside YARN uses memory YARN thinks is free, so containers can fail and nothing is accounted",
+   "Workers have no Python",
+   "It is faster on masters",
+   "Workers are read-only"
+  ],
+  "answer": 0,
+  "why": "All work on workers should go through YARN so it is scheduled, limited and fair."
+ },
+ {
+  "q": "A small 8-node test cluster without HA typically has:",
+  "options": [
+   "3 masters, 5 workers",
+   "8 masters",
+   "4 edge, 4 workers",
+   "1 master, 1 edge, 6 workers"
+  ],
+  "answer": 3,
+  "why": "One master (NameNode, RM, history), one edge node for users, and the rest as workers."
+ }
+]</script>
+  </div>
+
+  <h3>Quick revision</h3>
+  <div class="revision">
+    <h3>Lesson 3.3 in one screen</h3>
+    <ul><li><b>Master</b>: NameNode(s), ResourceManager(s), JobHistory, JournalNodes, ZKFC. Few, reliable, protected.</li><li><b>Worker</b>: DataNode + NodeManager. Many, identical, replaceable. All work goes through YARN.</li><li><b>Edge / gateway</b>: client tools + configs, user logins, notebooks, schedulers. No core daemons.</li><li><b>Utility</b>: ZooKeeper, Hive Metastore + DB, HiveServer2, Oozie, Ranger, cluster manager.</li><li>Quorum services (ZooKeeper, JournalNodes) on 3 or 5 <b>different</b> hosts; NameNodes on different racks.</li><li>Layouts: 1 node (learning) · small: 1 master + edge + workers · medium: 3 masters, utility, 2 edges · large: dedicated masters, federation.</li><li>Cloud: EMR primary / core / task; Dataproc master / primary workers / secondary workers.</li><li>Rule of thumb: users only on edge nodes.</li></ul>
+  </div>
+
+  <h3>Interview and viva questions</h3>
+  <div class="faq">
+    <details><summary>What is an edge node in Hadoop?</summary><p>A machine that has the Hadoop client libraries, configuration files and tools (hdfs, yarn, hive/beeline, spark-submit, notebooks) but runs no core cluster daemons. It is the controlled entry point for users and applications: they log in there, interact with HDFS and submit jobs, while the work runs on the workers. It is often the only cluster host reachable from the corporate network.</p></details>
+    <details><summary>What runs on master nodes?</summary><p>The coordinating services: the active and standby NameNodes (with ZKFCs), JournalNodes for the shared edit log, the ResourceManager(s), the JobHistory Server, and often ZooKeeper. In non-HA clusters, the Secondary NameNode. Masters are sized for memory and reliability and protected from user workloads.</p></details>
+    <details><summary>Why not run DataNodes on master nodes?</summary><p>Storage and compute work on a master competes with the master daemons for memory, CPU and disk I/O, risking pauses or crashes that affect the whole cluster. It also makes masters harder to maintain, because taking one down would also remove data and compute capacity.</p></details>
+    <details><summary>How many ZooKeeper servers should a cluster have?</summary><p>An odd number, usually 3 for most clusters and 5 for large or critical ones, each on a different host and ideally on different racks. ZooKeeper needs a majority to operate, so 3 servers tolerate one failure and 5 tolerate two; 4 servers still tolerate only one.</p></details>
+    <details><summary>How do node roles map to cloud services like EMR?</summary><p>EMR's primary node runs the master services; core nodes run HDFS DataNodes and YARN NodeManagers; task nodes run only NodeManagers, so they can be scaled in and out freely. Dataproc similarly has master nodes, primary workers (HDFS + YARN) and optional secondary workers (compute only, often preemptible).</p></details>
+    
+  </div>
+
+  <h3 id="practice">Practice problems</h3>
+  <p class="prob-intro">Small programs and calculations for planning and checking node roles.</p>
+  <div class="probs">
+    <article class="prob"><div class="prob__head"><span class="prob__num">P1</span><span class="prob__tag prob__tag--easy">Easy</span><h4>How many workers?</h4></div>
+      <p>A 50-node cluster has 3 masters, 2 utility nodes and 3 edge nodes. How many workers?</p>
+      <div class="prob__io"><div><small>Input</small><pre>50 − 3 − 2 − 3</pre></div><div><small>Expected output</small><pre>42 workers</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>print(50 - 3 - 2 - 3, &quot;workers&quot;)</code></pre><div class="output">42 workers</div></div>
+        <p><b>How it works:</b> 42 workers. Capacity planning uses this number, not 50.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P2</span><span class="prob__tag prob__tag--easy">Easy</span><h4>Quorum survivors</h4></div>
+      <p>For 3 and 5 ZooKeeper servers, print the majority size and how many failures each survives.</p>
+      <div class="prob__io"><div><small>Input</small><pre>[3, 5]</pre></div><div><small>Expected output</small><pre>3 servers: majority 2 | survives 1 failure(s)
+5 servers: majority 3 | survives 2 failure(s)</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>for n in [3, 5]:
+    majority = n // 2 + 1
+    print(n, &quot;servers: majority&quot;, majority, &quot;| survives&quot;, n - majority, &quot;failure(s)&quot;)</code></pre><div class="output">3 servers: majority 2 | survives 1 failure(s)
+5 servers: majority 3 | survives 2 failure(s)</div></div>
+        <p><b>How it works:</b> 3 → majority 2, survives 1. 5 → majority 3, survives 2.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P3</span><span class="prob__tag prob__tag--easy">Easy</span><h4>Role of a host</h4></div>
+      <p>Given a dictionary of host roles, print the role of edge2 and of worker7.</p>
+      <div class="prob__io"><div><small>Input</small><pre>{&quot;edge2&quot;: &quot;edge&quot;, &quot;worker7&quot;: &quot;worker&quot;, &quot;m1&quot;: &quot;master&quot;}</pre></div><div><small>Expected output</small><pre>edge2: edge | worker7: worker</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>roles = {&quot;edge2&quot;: &quot;edge&quot;, &quot;worker7&quot;: &quot;worker&quot;, &quot;m1&quot;: &quot;master&quot;}
+print(&quot;edge2:&quot;, roles[&quot;edge2&quot;], &quot;| worker7:&quot;, roles[&quot;worker7&quot;])</code></pre><div class="output">edge2: edge | worker7: worker</div></div>
+        <p><b>How it works:</b> A host-to-role inventory is the first thing to keep in any cluster runbook.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P4</span><span class="prob__tag prob__tag--medium">Medium</span><h4>Group hosts by role</h4></div>
+      <p>Turn a host → role map into role → sorted list of hosts.</p>
+      <div class="prob__io"><div><small>Input</small><pre>{&quot;w2&quot;: &quot;worker&quot;, &quot;m1&quot;: &quot;master&quot;, &quot;e1&quot;: &quot;edge&quot;, &quot;w1&quot;: &quot;worker&quot;, &quot;m2&quot;: &quot;master&quot;}</pre></div><div><small>Expected output</small><pre>edge [&#x27;e1&#x27;]
+master [&#x27;m1&#x27;, &#x27;m2&#x27;]
+worker [&#x27;w1&#x27;, &#x27;w2&#x27;]</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>roles = {&quot;w2&quot;: &quot;worker&quot;, &quot;m1&quot;: &quot;master&quot;, &quot;e1&quot;: &quot;edge&quot;, &quot;w1&quot;: &quot;worker&quot;, &quot;m2&quot;: &quot;master&quot;}
+by_role = {}
+for h, r in roles.items():
+    by_role.setdefault(r, []).append(h)
+for r in sorted(by_role):
+    print(r, sorted(by_role[r]))</code></pre><div class="output">edge [&#x27;e1&#x27;]
+master [&#x27;m1&#x27;, &#x27;m2&#x27;]
+worker [&#x27;w1&#x27;, &#x27;w2&#x27;]</div></div>
+        <p><b>How it works:</b> The same reverse mapping cluster managers show as “hosts by role”.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P5</span><span class="prob__tag prob__tag--medium">Medium</span><h4>Racks of the masters</h4></div>
+      <p>Check that the three masters are on three different racks; print the racks used and whether the rule holds.</p>
+      <div class="prob__io"><div><small>Input</small><pre>{&quot;m1&quot;: &quot;r1&quot;, &quot;m2&quot;: &quot;r2&quot;, &quot;m3&quot;: &quot;r2&quot;}</pre></div><div><small>Expected output</small><pre>Racks used: [&#x27;r1&#x27;, &#x27;r2&#x27;] | all different: False</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>rack = {&quot;m1&quot;: &quot;r1&quot;, &quot;m2&quot;: &quot;r2&quot;, &quot;m3&quot;: &quot;r2&quot;}
+used = set(rack.values())
+print(&quot;Racks used:&quot;, sorted(used), &quot;| all different:&quot;, len(used) == len(rack))</code></pre><div class="output">Racks used: [&#x27;r1&#x27;, &#x27;r2&#x27;] | all different: False</div></div>
+        <p><b>How it works:</b> m2 and m3 share r2: losing that rack would take two of three JournalNodes and ZooKeepers, breaking the majority.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P6</span><span class="prob__tag prob__tag--medium">Medium</span><h4>Edge nodes for the users</h4></div>
+      <p>Each edge node comfortably serves about 25 active users. With 140 users and one spare for maintenance, how many edge nodes are needed?</p>
+      <div class="prob__io"><div><small>Input</small><pre>140 users · 25 per node · +1 spare</pre></div><div><small>Expected output</small><pre>7 edge nodes</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>import math
+print(math.ceil(140 / 25) + 1, &quot;edge nodes&quot;)</code></pre><div class="output">7 edge nodes</div></div>
+        <p><b>How it works:</b> 6 for the load plus 1 spare: 7. Big companies put edge nodes behind a load balancer.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P7</span><span class="prob__tag prob__tag--business">Business problem</span><h4>Task nodes for a sale weekend</h4></div>
+      <p>An EMR cluster has 20 core nodes. For a sale weekend, analytics needs 3× the usual compute for 60 hours. Task nodes cost Rs 30 per hour (spot). How many task nodes and what extra cost?</p>
+      <div class="prob__io"><div><small>Input</small><pre>20 core · 3× compute · 60 h · Rs 30/h</pre></div><div><small>Expected output</small><pre>Add 40 task nodes; extra cost Rs 72000</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>core = 20
+extra_nodes = core * 3 - core
+cost = extra_nodes * 60 * 30
+print(&quot;Add&quot;, extra_nodes, &quot;task nodes; extra cost Rs&quot;, cost)</code></pre><div class="output">Add 40 task nodes; extra cost Rs 72000</div></div>
+        <p><b>How it works:</b> 40 task nodes for Rs 72,000 (illustrative price). Task nodes add compute without HDFS, so removing them after the weekend is safe.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P8</span><span class="prob__tag prob__tag--business">Business problem</span><h4>Cost of the outage from a user on a master</h4></div>
+      <p>A user's script on the NameNode host caused a 40-minute HDFS slowdown. 120 analysts were blocked, each costing Rs 900 per hour, and 3 nightly SLAs were missed at Rs 50,000 each. Estimate the cost.</p>
+      <div class="prob__io"><div><small>Input</small><pre>40 min · 120 analysts · Rs 900/h · 3 × Rs 50,000</pre></div><div><small>Expected output</small><pre>Lost time: Rs 72,000 | SLA penalties: Rs 150,000 | Total: Rs 222,000</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>people = 120 * 900 * 40 / 60
+sla = 3 * 50_000
+print(f&quot;Lost time: Rs {people:,.0f} | SLA penalties: Rs {sla:,} | Total: Rs {people + sla:,.0f}&quot;)</code></pre><div class="output">Lost time: Rs 72,000 | SLA penalties: Rs 150,000 | Total: Rs 222,000</div></div>
+        <p><b>How it works:</b> About Rs 2.2 lakh for one mistake (illustrative). A second edge node and restricted logins cost far less.</p>
+      </details>
+    </article>
+  </div>
+
+  <h3 id="scenarios">Real-world scenario questions (asked in company interviews)</h3>
+  <p class="scn-intro">Role questions are about judgement: where things should run, and what to do when someone breaks the rules.</p>
+  <div class="scenarios">
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Platform team · design</span><span class="scn__tag scn__tag--level">Fresher</span></div>
+      <h4>Lay out roles for a 20-node cluster</h4>
+      <p class="scn__situation">You have 20 identical servers and the business wants HDFS to keep running even if one master fails. How do you assign roles?</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> do you know which services need HA and how to place quorums?</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li><b>3 masters</b> on different racks: active NameNode + ZKFC on m1, standby NameNode + ZKFC on m2, and JournalNode + ZooKeeper on all three; ResourceManager (and a standby) on m2/m3; JobHistory on m3.</li>
+          <li><b>1 utility</b> node for Hive Metastore + database and HiveServer2 (or on m3 if budget is tight).</li>
+          <li><b>1–2 edge</b> nodes for users and tools.</li>
+          <li><b>14–15 workers</b> with DataNode + NodeManager.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> putting DataNodes on the masters “to use the disks”.</p>
+      </div></details>
+    </article>
+
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Operations · incident</span><span class="scn__tag scn__tag--level">Fresher</span></div>
+      <h4>Containers keep getting killed on one worker</h4>
+      <p class="scn__situation">Tasks on worker <code>w12</code> are often killed with “running beyond physical memory limits” or the node runs out of memory. Other workers are fine.</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> do you consider work happening outside YARN?</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ol>
+          <li>Log in (as an admin) and check what else is running: <code>top</code> often shows a user's script, a stray Python process or a forgotten service on that worker.</li>
+          <li>YARN offers memory based on configuration; anything running outside YARN takes memory YARN believes is free, so the OS or YARN kills containers.</li>
+          <li>Stop the stray process, move the user to the edge node, and restrict logins on workers.</li>
+          <li>If nothing extra is running, check the node's memory settings against its real RAM.</li>
+        </ol>
+        <p class="scn__avoid"><b>Avoid:</b> simply raising container memory for all jobs.</p>
+      </div></details>
+    </article>
+
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Security · access</span><span class="scn__tag scn__tag--level">1–3 years</span></div>
+      <h4>Analysts want SSH access to every node</h4>
+      <p class="scn__situation">The analytics team asks for SSH to all cluster machines “to debug jobs faster”.</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> can you meet the real need while protecting the cluster?</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>Give access to <b>edge nodes</b> only. Masters and workers stay on the private cluster network, reachable by admins.</li>
+          <li>Provide what they actually need for debugging: the ResourceManager and JobHistory UIs, <code>yarn logs -applicationId</code> for container logs (with log aggregation on), and the Spark History Server.</li>
+          <li>Use Kerberos and Ranger so their permissions are the same whatever tool they use.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> a flat “no” without offering the tools that solve their problem.</p>
+      </div></details>
+    </article>
+
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Cloud · cost</span><span class="scn__tag scn__tag--level">1–3 years</span></div>
+      <h4>Scale down an EMR cluster safely</h4>
+      <p class="scn__situation">An EMR cluster has 10 core nodes and 30 task nodes. Overnight, the load drops. Your manager asks you to remove 25 nodes to save money.</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> do you know which cloud roles hold data?</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>Remove <b>task nodes</b> first: they run only YARN, so removing them loses no HDFS data (running tasks are retried elsewhere).</li>
+          <li>Removing <b>core nodes</b> means decommissioning their DataNodes so HDFS can copy their blocks away first, which is slow and risky if done in bulk.</li>
+          <li>Better still, keep data in S3 and size HDFS (core nodes) small, so the cluster can shrink freely, or use managed autoscaling.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> terminating core nodes directly; with replication 3 on a small cluster you can lose blocks.</p>
+      </div></details>
+    </article>
+  </div>
+</section>
+
+<nav class="lesson-nav" id="lesson-nav" aria-label="Lesson navigation"></nav>
+<div class="ad-slot" data-slot="bottom"></div>
+</article>
+
+<aside class="lesson-side">
+  <nav class="toc" aria-label="In this lesson">
+    <h4>In this lesson</h4>
+    <ol>
+      <li><a href="#story">The story</a></li>
+      <li><a href="#definition">Definition</a></li><li><a href="#levels">Beginner → Advanced</a></li>
+      <li><a href="#types">Types and ways to use it</a></li>
+      <li><a href="#steps">Step by step</a></li>
+      <li><a href="#animation">See it happen</a></li>
+      <li><a href="#real-world">Real-world use</a></li>
+      <li><a href="#run">Run the code</a></li>
+      <li><a href="#tracer">Line by line</a></li>
+      <li><a href="#worked">Worked examples</a></li>
+      <li><a href="#quiz">Quiz and revision</a></li>
+      <li><a href="#practice">Practice problems</a></li>
+      <li><a href="#scenarios">Industry scenarios</a></li>
+    </ol>
+  </nav>
+  <div class="ad-slot" data-slot="side"></div>
+  <div class="outline" id="outline"></div>
+</aside>
+</div>
+</main>
+
+<footer class="site-footer">
+  <div class="wrap">
+    <div><h4>MyPhatshala</h4><p>Free programming and IT lessons that show what happens behind the screen.</p></div>
+    <div><h4>Learn</h4><a href="../../../../#tracks">All courses</a><a href="../../">Apache Hadoop syllabus</a></div>
+    <div><h4>Site</h4><a href="../../../../about.html">About</a><a href="../../../../contact.html">Contact</a><a href="../../../../privacy.html">Privacy policy</a><a href="../../../../disclaimer.html">Disclaimer</a></div>
+    <div class="copyright">© MyPhatshala. All lesson content, diagrams and animations are original. Please do not copy without permission.</div>
+  </div>
+</footer>
+
+<script src="../../../../data/courses/hadoop.js"></script>
+<script src="../../../../assets/js/lesson.js"></script>
+<script src="../../../../assets/js/cluster-sim.js"></script>
+<script src="../../../../assets/js/ads.js"></script>
+<script src="../../../../assets/js/site.js"></script>
+</body>
+</html>

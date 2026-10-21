@@ -1,0 +1,247 @@
+<!-- ======================= PART 1: THE STORY ======================= -->
+<section class="part" id="story">
+  <span class="part-label"><b>1</b> The story</span>
+  <h2>Three things Hadoop needs before it will even start</h2>
+  <div class="story">
+    <p class="narration">Riya downloads Hadoop 3.5.0 onto her Windows laptop, double-clicks the file, and nothing useful happens. Kabir tries on his old Ubuntu laptop: <code>start-dfs.sh</code> prints <code>ERROR: JAVA_HOME is not set and could not be found</code> three times. Then <code>Permission denied (publickey,password)</code>. They come to Arjun Sir, frustrated. “Hadoop is broken!”</p>
+
+    <div class="scene">
+      <svg viewBox="0 0 640 180" role="img" aria-label="Three foundations under Hadoop: Linux (or WSL on Windows), Java 17, and SSH. Hadoop sits on top of all three.">
+        <g font-size="10">
+          <rect x="170" y="14" width="300" height="40" rx="8" class="s-board"/><text x="320" y="39" text-anchor="middle" font-weight="700" class="s-chalk">Hadoop 3.5.0</text>
+          <rect x="20" y="72" width="190" height="80" rx="10" class="s-soft-blue" style="stroke:var(--blue);stroke-width:1.5"/>
+          <text x="115" y="94" text-anchor="middle" font-weight="700" class="s-blue">1. Linux</text><text x="115" y="114" text-anchor="middle" font-size="8.6" class="s-ink">Ubuntu, or WSL 2 on Windows</text><text x="115" y="130" text-anchor="middle" font-size="8.6" class="s-ink">shell, files, users, paths</text>
+          <rect x="225" y="72" width="190" height="80" rx="10" class="s-soft-acc" style="stroke:var(--track);stroke-width:1.5"/>
+          <text x="320" y="94" text-anchor="middle" font-weight="700" class="s-acc">2. Java 17 (JDK)</text><text x="320" y="114" text-anchor="middle" font-size="8.6" class="s-ink">every daemon is a Java program</text><text x="320" y="130" text-anchor="middle" font-size="8.6" class="s-ink">JAVA_HOME must point to it</text>
+          <rect x="430" y="72" width="190" height="80" rx="10" class="s-soft-green" style="stroke:var(--green);stroke-width:1.5"/>
+          <text x="525" y="94" text-anchor="middle" font-weight="700" class="s-green">3. SSH</text><text x="525" y="114" text-anchor="middle" font-size="8.6" class="s-ink">start scripts log in to each node</text><text x="525" y="130" text-anchor="middle" font-size="8.6" class="s-ink">passwordless keys</text>
+          <path d="M115 72V54h90M320 72V54M525 72V54h-90" class="s-line"/>
+        </g>
+        <text x="320" y="174" text-anchor="middle" font-size="10" class="s-ink2">Get these three right and the install takes ten minutes. Skip one and you get cryptic errors.</text>
+        <text x="632" y="174" text-anchor="end" class="s-wm">myphatshala.in</text>
+      </svg>
+    </div>
+
+A> Hadoop isn't broken. It's standing on three legs, and each of you is missing one.
+R> Which ones?
+A> Riya, Hadoop is built for <b>Linux</b>. On Windows you'll use <b>WSL</b>, which gives you a real Ubuntu inside Windows. Kabir, Hadoop's daemons are <b>Java</b> programs, and the start scripts couldn't find your Java because <code>JAVA_HOME</code> wasn't set where they look. And that “Permission denied” is <b>SSH</b>: <code>start-dfs.sh</code> logs in to every node, even when the only node is your own laptop, and it needs to do that without a password.
+K> So: Linux, Java, SSH.
+A> Exactly. Today we prepare all three, check them with one script, and learn just enough Linux to feel at home. In the next two lessons, the actual install will then just work. Every error message you saw today has a one-line fix, and you'll know it.
+  </div>
+</section>
+
+<!-- ======================= PART 2: DEFINITION ======================= -->
+<section class="part" id="definition">
+  <span class="part-label"><b>2</b> Definition</span>
+  <h2>Hadoop's prerequisites</h2>
+  <div class="def">
+    <div class="def__formal"><small>Formal definition (write this in exams)</small>
+      <p>Apache Hadoop requires: (1) a <b>supported operating system</b>, in practice <b>Linux</b> (GNU/Linux is the supported production platform; on Windows, <b>WSL 2</b> or a virtual machine provides a Linux environment); (2) a <b>Java Development Kit</b> of a supported version: for Hadoop 3.5 the server daemons <b>require JDK 17</b> (clients support JDK 17 and 21), while Hadoop 3.3 and 3.4 run on Java 8 or 11; the <code>JAVA_HOME</code> environment variable must point to it, typically set in <code>etc/hadoop/hadoop-env.sh</code>; and (3) <b>SSH</b> with an <code>sshd</code> service running and <b>passwordless key-based login</b> from the master to every node (including <code>localhost</code>), because the cluster start/stop scripts use SSH to launch remote daemons.</p></div>
+    <div class="def__simple"><small>In simple words</small>
+      <p>You need a Linux machine (or Ubuntu inside Windows), Java 17 installed and its location written in Hadoop's settings, and SSH set up so your computer can log in to itself without asking for a password. Then Hadoop's start scripts can do their job.</p></div>
+  </div>
+
+  <h3>Words you'll meet in this lesson</h3>
+  <div class="terms">
+    <div class="term"><b>WSL 2</b><span>Windows Subsystem for Linux: runs a real Linux (e.g. Ubuntu) inside Windows 10/11.</span></div>
+    <div class="term"><b>JDK</b><span>Java Development Kit: the Java runtime plus compiler and tools like <code>jps</code>.</span></div>
+    <div class="term"><b>JAVA_HOME</b><span>Environment variable holding the Java install folder, e.g. <code>/usr/lib/jvm/java-17-openjdk-amd64</code>.</span></div>
+    <div class="term"><b>Environment variable</b><span>A named value the shell passes to programs, set with <code>export NAME=value</code>.</span></div>
+    <div class="term"><b>PATH</b><span>The list of folders the shell searches for commands. Add Hadoop's <code>bin</code> and <code>sbin</code> so <code>hdfs</code> works anywhere.</span></div>
+    <div class="term"><b>~/.bashrc</b><span>A script that runs every time you open a terminal. Put your <code>export</code> lines here so they persist.</span></div>
+    <div class="term"><b>SSH</b><span>Secure Shell: log in to and run commands on another machine over the network.</span></div>
+    <div class="term"><b>Key pair</b><span>A private key (kept secret) and public key (copied to <code>~/.ssh/authorized_keys</code>) that allow login without a password.</span></div>
+  </div>
+
+  <h3>What you need (Hadoop 3.5.0, practice setup)</h3>
+  <table class="facts">
+    <tr><th>Operating system</th><td>Ubuntu 22.04/24.04, or Windows 10/11 with WSL 2 + Ubuntu, or macOS (works, but less common)</td></tr>
+    <tr><th>Java</th><td><b>OpenJDK 17</b> for Hadoop 3.5 (the official <code>apache/hadoop:3.5.0</code> Docker image also uses Java 17). For Hadoop 3.3/3.4: Java 8 or 11.</td></tr>
+    <tr><th>RAM</th><td>8 GB minimum to run all daemons comfortably on one machine; 16 GB is pleasant</td></tr>
+    <tr><th>Disk</th><td>about 2 GB for Hadoop itself (0.6 GB download, 1.3 GB unpacked) plus space for your data and logs; keep 10 GB+ free</td></tr>
+    <tr><th>Packages</th><td><code>openjdk-17-jdk-headless</code>, <code>openssh-server</code>, <code>openssh-client</code> (and <code>wget</code> or <code>curl</code>)</td></tr>
+    <tr><th>Download</th><td><code>hadoop-3.5.0.tar.gz</code> from <code>dlcdn.apache.org</code>, about 580 MB; verify its SHA-512 checksum</td></tr>
+  </table>
+  <p class="muted">Source for the Java requirement: the Apache Hadoop “Hadoop Java Versions” wiki page. Always check it before installing a new release.</p>
+
+LEVELS> Prerequisites at three levels
+L1> Cooking needs a kitchen, gas and a key
+      <ul>
+        <li><b>Linux</b> is the kitchen Hadoop was designed for. Windows users borrow a Linux kitchen through WSL.</li>
+        <li><b>Java</b> is the gas: no daemon can “cook” without it, and Hadoop must know which cylinder to use (<code>JAVA_HOME</code>).</li>
+        <li><b>SSH</b> is a master key: the head chef (start script) walks into every room (node) to switch things on, without knocking each time.</li>
+      </ul>
+L2> The Linux you actually need
+      <ul>
+        <li>Move around: <code>pwd</code>, <code>ls -l</code>, <code>cd</code>, <code>mkdir -p</code>.</li>
+        <li>Files: <code>cat</code>, <code>less</code>, <code>nano</code> (to edit XML), <code>cp</code>, <code>mv</code>, <code>tar -xzf</code>.</li>
+        <li>Install software: <code>sudo apt update</code>, <code>sudo apt install …</code>.</li>
+        <li>Variables: <code>export JAVA_HOME=…</code>, <code>echo $JAVA_HOME</code>, add lines to <code>~/.bashrc</code>, then <code>source ~/.bashrc</code>.</li>
+        <li>Processes: <code>jps</code> (Java processes), <code>ps aux | grep java</code>, <code>kill</code>.</li>
+        <li>Logs: <code>tail -f</code> on files in <code>$HADOOP_HOME/logs</code>.</li>
+      </ul>
+L3> Why SSH, and when you don't need it
+      <ul>
+        <li><code>start-dfs.sh</code> reads the <code>workers</code> file and runs <code>ssh &lt;host&gt; hdfs --daemon start datanode</code> for each host. On one machine, the only host is <code>localhost</code>, so SSH still runs.</li>
+        <li>You can skip SSH by starting each daemon yourself: <code>hdfs --daemon start namenode</code>, <code>hdfs --daemon start datanode</code>, <code>yarn --daemon start resourcemanager</code>… This is how containers and cluster managers start Hadoop.</li>
+        <li>Keys must be protected: <code>~/.ssh</code> should be <code>700</code> and <code>authorized_keys</code> <code>600</code>, or <code>sshd</code> refuses them.</li>
+        <li>In production, Hadoop runs as dedicated service users (<code>hdfs</code>, <code>yarn</code>, <code>mapred</code>), and configuration management or Cloudera Manager/Ambari handles start-up, not hand-made keys.</li>
+        <li>Hadoop 3.5's requirement of JDK 17 for servers is a real break from older releases; a cluster upgrade usually starts with a Java upgrade.</li>
+      </ul>
+/LEVELS
+EXAM> For “List the prerequisites for installing Hadoop”, write: <b>Linux OS</b> (or a Linux VM/WSL), <b>Java (JDK)</b> of a supported version with <b>JAVA_HOME</b> set (in <code>hadoop-env.sh</code>), <b>SSH</b> with <b>passwordless login</b> to all nodes, enough RAM and disk, and the Hadoop binary tarball. One line on <i>why</i> each is needed earns full marks.
+</section>
+
+<!-- ======================= PART 3: TYPES AND WAYS TO USE IT ======================= -->
+<section class="part" id="types">
+  <span class="part-label"><b>3</b> Types and ways to use it</span>
+  <h2>Four ways to get a Linux environment for Hadoop</h2>
+  <div class="table-wrap">
+  <table class="compare" style="min-width:640px">
+    <thead><tr><th></th><th>Native Ubuntu</th><th>WSL 2 on Windows</th><th>Docker (any OS)</th><th>Virtual machine</th></tr></thead>
+    <tbody>
+      <tr><td><b>Set-up effort</b></td><td>Low if you already use Linux</td><td>Low: one command in PowerShell</td><td>Low: Docker Desktop + one file</td><td>Medium: install VirtualBox + Ubuntu</td></tr>
+      <tr><td><b>Feels like</b></td><td>A real server</td><td>A real Ubuntu terminal inside Windows</td><td>A ready-made multi-node cluster</td><td>A separate computer</td></tr>
+      <tr><td><b>Learn installation steps?</b></td><td>Yes</td><td>Yes</td><td>No: images come pre-installed</td><td>Yes</td></tr>
+      <tr><td><b>Multi-node practice</b></td><td>Hard on one PC</td><td>Hard</td><td><b>Easy</b> (3 DataNodes in seconds)</td><td>Possible with several VMs, heavy</td></tr>
+      <tr><td><b>RAM needed</b></td><td>8 GB+</td><td>8 GB+</td><td>8 GB+ (16 better)</td><td>12 GB+</td></tr>
+      <tr><td><b>Used in this course</b></td><td>Lesson 4.3</td><td>Lesson 4.3</td><td>Lesson 4.3 (main practice cluster)</td><td>Not covered</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <h3>Which Java for which Hadoop?</h3>
+  <div class="cards">
+    <div class="card"><h4>Hadoop 3.5.x</h4><p>Servers (NameNode, DataNode, YARN…) require <b>JDK 17</b>. Clients support JDK 17 and 21.</p><span class="tag">This course</span></div>
+    <div class="card"><h4>Hadoop 3.3 / 3.4</h4><p>Java 8, and Java 11 as a runtime. Many company clusters still run these.</p><span class="tag">Common at work</span></div>
+    <div class="card"><h4>Hadoop 3.0–3.2</h4><p>Java 8.</p><span class="tag">Older</span></div>
+    <div class="card"><h4>Hadoop 2.x</h4><p>Java 7 or 8. Out of maintenance: upgrade.</p><span class="tag">Legacy</span></div>
+  </div>
+TIP> Install the <b>JDK</b> (with <code>jps</code> and <code>javac</code>), not just a JRE. <code>jps</code> is your most-used Hadoop debugging command, and you'll compile Java MapReduce jobs from Module 8.
+</section>
+
+<!-- ======================= PART 4: STEP BY STEP ======================= -->
+<section class="part" id="steps">
+  <span class="part-label"><b>4</b> Step by step</span>
+  <h2>Prepare a fresh Ubuntu (or WSL) for Hadoop</h2>
+  <ol class="stepper">
+    <li><h4>Windows only: install WSL 2 with Ubuntu</h4>
+      <div class="code" data-lang="bash" data-file="PowerShell (as Administrator)"><pre><code>wsl --install -d Ubuntu-24.04</code></pre></div>
+      <span class="behind">Restart when asked, open “Ubuntu” from the Start menu and create a Linux user name and password. From now on, every command runs in that Ubuntu terminal.</span></li>
+    <li><h4>Install Java 17 and SSH</h4>
+      <div class="code" data-lang="bash" data-file="Terminal"><pre><code>sudo apt update
+sudo apt install -y openjdk-17-jdk-headless openssh-server openssh-client wget</code></pre></div>
+      <span class="behind"><code>headless</code> means no graphical parts, which servers don't need. <code>openssh-server</code> provides <code>sshd</code>, which the start scripts connect to.</span></li>
+    <li><h4>Find where Java lives</h4>
+      <div class="code" data-lang="bash" data-file="Terminal"><pre><code>java -version
+readlink -f $(which java)</code></pre><div class="output">openjdk version "17.0.20.1" 2026-08-18
+OpenJDK Runtime Environment (build 17.0.20.1+1-1-24.04-Ubuntu)
+OpenJDK 64-Bit Server VM (build 17.0.20.1+1-1-24.04-Ubuntu, mixed mode, sharing)
+/usr/lib/jvm/java-17-openjdk-amd64/bin/java</div></div>
+      <span class="behind"><code>JAVA_HOME</code> is that path <b>without</b> <code>/bin/java</code>: <code>/usr/lib/jvm/java-17-openjdk-amd64</code>. The exact update number on your machine will differ.</span></li>
+    <li><h4>Set variables permanently</h4>
+      <div class="code" data-lang="bash" data-file="~/.bashrc (add at the end)"><pre><code>export JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
+export HADOOP_HOME=$HOME/hadoop-3.5.0
+export PATH=$PATH:$HADOOP_HOME/bin:$HADOOP_HOME/sbin</code></pre></div>
+      <span class="behind">Then run <code>source ~/.bashrc</code>. <code>HADOOP_HOME</code> points to where you'll unpack Hadoop in Lesson 4.3; adding <code>bin</code> and <code>sbin</code> to <code>PATH</code> lets you type <code>hdfs</code> and <code>start-dfs.sh</code> from any folder.</span></li>
+    <li><h4>Start the SSH server</h4>
+      <div class="code" data-lang="bash" data-file="Terminal"><pre><code>sudo service ssh start</code></pre></div>
+      <span class="behind">On WSL, services don't always start automatically: run this each time you open Ubuntu (or enable systemd in WSL). Passwordless keys are set up in Lesson 4.3, right before the first <code>start-dfs.sh</code>.</span></li>
+  </ol>
+</section>
+
+<!-- ======================= PART 5: SEE IT HAPPEN ======================= -->
+<section class="part" id="animation">
+  <span class="part-label"><b>5</b> See it happen</span>
+  <h2>Kabir's three errors: what he sees, and what is really missing</h2>
+  <p>Every message on the left is real output from Hadoop 3.5.0 on Ubuntu 24.04. On the right: which leg was missing.</p>
+  <div class="anim" data-frames="6">
+    <div class="anim__title">From errors to a ready machine <span>6 steps</span></div>
+    <div class="anim__views">
+      <div class="view view--see">
+        <span class="view__tag">What you see</span>
+        <svg viewBox="0 0 360 250" role="img" aria-label="Kabir's terminal">
+          <rect x="14" y="14" width="332" height="206" rx="8" class="s-board"/>
+          <text x="26" y="32" font-size="9" class="mono" style="fill:#7F8C86">kabir@laptop : ~</text>
+          <g data-on="1"><text x="26" y="56" font-size="9" class="mono" style="fill:#7F8C86">$ java -version</text><text x="26" y="74" font-size="9" class="mono" style="fill:#FF8A80">Command 'java' not found, but can be</text><text x="26" y="88" font-size="9" class="mono" style="fill:#FF8A80">installed with: sudo apt install …</text></g>
+          <g data-on="2"><text x="26" y="56" font-size="9" class="mono" style="fill:#7F8C86">$ sudo apt install -y openjdk-17-jdk-headless</text><text x="26" y="74" font-size="9" class="mono" style="fill:#7F8C86">$ java -version</text><text x="26" y="92" font-size="9" class="mono" style="fill:#9FD3B8">openjdk version "17.0.20.1" …</text></g>
+          <g data-on="3"><text x="26" y="56" font-size="9" class="mono" style="fill:#7F8C86">$ start-dfs.sh</text><text x="26" y="74" font-size="9" class="mono" style="fill:#9FD3B8">Starting namenodes on [localhost]</text><text x="26" y="90" font-size="9" class="mono" style="fill:#FF8A80">localhost: ERROR: JAVA_HOME is not set</text><text x="26" y="104" font-size="9" class="mono" style="fill:#FF8A80">and could not be found.</text></g>
+          <g data-on="4"><text x="26" y="56" font-size="9" class="mono" style="fill:#7F8C86">$ echo "export JAVA_HOME=/usr/lib/jvm/</text><text x="26" y="70" font-size="9" class="mono" style="fill:#7F8C86">   java-17-openjdk-amd64" &gt;&gt; \</text><text x="26" y="84" font-size="9" class="mono" style="fill:#7F8C86">   $HADOOP_HOME/etc/hadoop/hadoop-env.sh</text><text x="180" y="190" text-anchor="middle" font-size="10" class="s-chalk">Tell Hadoop itself where Java is.</text></g>
+          <g data-on="5"><text x="26" y="56" font-size="9" class="mono" style="fill:#7F8C86">$ ssh localhost</text><text x="26" y="74" font-size="9" class="mono" style="fill:#FF8A80">kabir@localhost: Permission denied</text><text x="26" y="88" font-size="9" class="mono" style="fill:#FF8A80">(publickey,password).</text></g>
+          <g data-on="6"><text x="26" y="56" font-size="9" class="mono" style="fill:#7F8C86">$ ssh-keygen -t rsa -P '' -f ~/.ssh/id_rsa</text><text x="26" y="70" font-size="9" class="mono" style="fill:#7F8C86">$ cat ~/.ssh/id_rsa.pub &gt;&gt; ~/.ssh/authorized_keys</text><text x="26" y="88" font-size="9" class="mono" style="fill:#7F8C86">$ ssh localhost "echo connected"</text><text x="26" y="106" font-size="9" class="mono" style="fill:#9FD3B8">connected</text><text x="180" y="190" text-anchor="middle" font-size="10" class="s-chalk">All three legs ready.</text></g>
+          <text x="352" y="244" text-anchor="end" class="s-wm">myphatshala.in</text>
+        </svg>
+        <ol class="caps" hidden>
+          <li>Fresh Ubuntu: Java isn't installed at all. Ubuntu even suggests the install command.</li>
+          <li>After installing OpenJDK 17, <code>java -version</code> works.</li>
+          <li>But <code>start-dfs.sh</code> still says <b>JAVA_HOME is not set</b> (this is real Hadoop 3.5.0 output). Why, if <code>java</code> works?</li>
+          <li>Because the start script launches daemons over SSH in a new, non-interactive shell. Setting <code>JAVA_HOME</code> in <code>hadoop-env.sh</code> fixes it for every daemon.</li>
+          <li>SSH to <code>localhost</code> is refused: no key is authorised and password logins aren't allowed for scripts.</li>
+          <li>Create a key pair and authorise it: now SSH works without a password, and the start scripts can do their job.</li>
+        </ol>
+      </div>
+
+      <div class="view view--behind">
+        <span class="view__tag">Behind the screen</span>
+        <svg viewBox="0 0 360 250" role="img" aria-label="The three prerequisites being completed">
+          <rect x="110" y="16" width="140" height="34" rx="6" class="s-board"/><text x="180" y="38" text-anchor="middle" font-size="10" font-weight="700" class="s-chalk">Hadoop 3.5.0</text>
+          <g><rect x="16" y="90" width="100" height="70" rx="8" class="s-soft-blue" style="stroke:var(--blue)"/><text x="66" y="112" text-anchor="middle" font-size="9" font-weight="700" class="s-blue">Linux</text><text x="66" y="130" text-anchor="middle" font-size="8.6" class="s-green" font-weight="700">✓ Ubuntu</text></g>
+          <rect x="130" y="90" width="100" height="70" rx="8" class="s-card2"/><text x="180" y="112" text-anchor="middle" font-size="9" font-weight="700" class="s-ink">Java 17</text>
+          <rect x="244" y="90" width="100" height="70" rx="8" class="s-card2"/><text x="294" y="112" text-anchor="middle" font-size="9" font-weight="700" class="s-ink">SSH</text>
+          <g data-on="1"><text x="180" y="132" text-anchor="middle" font-size="8.6" font-weight="700" class="s-red">✕ missing</text><text x="294" y="132" text-anchor="middle" font-size="8.6" class="s-ink2">?</text></g>
+          <g data-on="2-3"><text x="180" y="132" text-anchor="middle" font-size="8.6" font-weight="700" class="s-green">✓ installed</text></g>
+          <g data-on="3"><text x="180" y="148" text-anchor="middle" font-size="8" font-weight="700" class="s-red">JAVA_HOME unknown</text><text x="180" y="148" text-anchor="middle" font-size="8"/>
+            <path d="M180 90V54" style="stroke:var(--red);stroke-width:2;stroke-dasharray:4 3"/><text x="180" y="200" text-anchor="middle" font-size="9" class="s-ink2">daemons start in a fresh shell over SSH</text><text x="180" y="214" text-anchor="middle" font-size="9" class="s-ink2">and don't see your terminal's variables</text></g>
+          <g data-on="4-"><text x="180" y="132" text-anchor="middle" font-size="8.6" font-weight="700" class="s-green">✓ installed</text><text x="180" y="148" text-anchor="middle" font-size="8" font-weight="700" class="s-green">✓ in hadoop-env.sh</text><path d="M180 90V54" style="stroke:var(--green);stroke-width:3"/></g>
+          <g data-on="4"><text x="180" y="210" text-anchor="middle" font-size="9" class="s-green" font-weight="700">every daemon now reads JAVA_HOME from Hadoop's own file</text></g>
+          <g data-on="5"><text x="294" y="132" text-anchor="middle" font-size="8.6" font-weight="700" class="s-red">✕ no key</text><path d="M294 90V54" style="stroke:var(--red);stroke-width:2;stroke-dasharray:4 3"/><text x="180" y="210" text-anchor="middle" font-size="9" class="s-ink2">sshd refuses: no authorised key, no password for scripts</text></g>
+          <g data-on="6"><text x="294" y="132" text-anchor="middle" font-size="8.6" font-weight="700" class="s-green">✓ key authorised</text><path d="M294 90V54" style="stroke:var(--green);stroke-width:3"/><path d="M66 90V54" style="stroke:var(--green);stroke-width:3"/><text x="180" y="210" text-anchor="middle" font-size="9" class="s-green" font-weight="700">three legs ready: install Hadoop (Lesson 4.3)</text></g>
+          <text x="352" y="246" text-anchor="end" class="s-wm">myphatshala.in</text>
+        </svg>
+        <ol class="caps" hidden>
+          <li>Linux is there, but the Java leg is missing entirely.</li>
+          <li>Installing the JDK fixes Java for Kabir's own terminal.</li>
+          <li>Start scripts launch daemons through SSH in a <b>new non-interactive shell</b>. It doesn't load his terminal settings, so the daemons can't find Java.</li>
+          <li><code>hadoop-env.sh</code> is read by every Hadoop command and daemon, whatever shell starts it. Setting <code>JAVA_HOME</code> there fixes the leg for good.</li>
+          <li>The SSH leg: <code>sshd</code> is running but has no authorised key for Kabir, so scripted logins fail.</li>
+          <li>With a key pair in <code>authorized_keys</code>, all three legs are in place.</li>
+        </ol>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ======================= PART 6: REAL-WORLD USE ======================= -->
+<section class="part" id="real-world">
+  <span class="part-label"><b>6</b> Real-world use</span>
+  <h2>Prerequisites at work</h2>
+
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="18" y="20" width="84" height="50" rx="6" class="s-board"/><text x="60" y="42" text-anchor="middle" font-size="8.6" class="mono" style="fill:#9FD3B8">JDK 8 → 17</text><text x="60" y="58" text-anchor="middle" font-size="8.6" class="mono" style="fill:#F5C77E">upgrade first</text></svg></div>
+    <div><h4>1. Upgrades start with Java</h4>
+      <p>Moving a cluster to Hadoop 3.5 means moving every server to JDK 17 first, and checking that Hive, Spark and custom jobs work on it. Java versions are often the longest part of an upgrade plan.</p>
+      <div class="uc-flow"><span>Old JDK</span><i>→</i><span class="java">Test on JDK 17</span><i>→</i><span>Then upgrade Hadoop</span></div></div>
+  </div>
+
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="20" y="22" width="80" height="46" rx="6" class="s-soft-green" style="stroke:var(--green)"/><text x="60" y="44" text-anchor="middle" font-size="8.6" font-weight="700" class="s-green">Ansible</text><text x="60" y="58" text-anchor="middle" font-size="8.6" class="s-ink">200 servers</text></svg></div>
+    <div><h4>2. Automating prerequisites on hundreds of servers</h4>
+      <p>Platform teams don't install Java and SSH keys by hand. Tools like Ansible (or the cluster manager) install the same JDK, users, keys and kernel settings on every node, so all nodes are identical.</p>
+      <div class="uc-flow"><span>Playbook</span><i>→</i><span class="java">Same setup on every node</span><i>→</i><span>No surprises</span></div></div>
+  </div>
+
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="16" y="20" width="40" height="50" rx="6" class="s-soft-blue" style="stroke:var(--blue)"/><text x="36" y="49" text-anchor="middle" font-size="8.6" font-weight="700" class="s-blue">Win</text><rect x="64" y="20" width="40" height="50" rx="6" class="s-board"/><text x="84" y="49" text-anchor="middle" font-size="8.6" font-weight="700" class="s-chalk">WSL</text></svg></div>
+    <div><h4>3. Laptops of data engineers</h4>
+      <p>Many engineers on Windows laptops use WSL 2 for daily data work: Hadoop and Spark clients, Python, Git, Docker. It gives the same Linux commands as the servers they deploy to.</p>
+      <div class="uc-flow"><span>Windows laptop</span><i>→</i><span class="java">Ubuntu on WSL</span><i>→</i><span>Same as servers</span></div></div>
+  </div>
+
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="22" y="18" width="76" height="54" rx="6" class="s-card2"/><text x="60" y="40" text-anchor="middle" font-size="8.6" class="mono s-ink">hdfs · yarn</text><text x="60" y="56" text-anchor="middle" font-size="8.6" class="mono s-ink">mapred users</text></svg></div>
+    <div><h4>4. Service users instead of personal accounts</h4>
+      <p>In production, NameNode and DataNodes run as the <code>hdfs</code> user, YARN as <code>yarn</code>, and history as <code>mapred</code>. Each has only the permissions it needs, which limits damage if one is compromised.</p>
+      <div class="uc-flow"><span>One daemon</span><i>→</i><span class="java">Its own Linux user</span><i>→</i><span>Least privilege</span></div></div>
+  </div>
+  <p class="muted">Simplified; organisations differ in tools and policies.</p>
+</section>

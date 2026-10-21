@@ -1,0 +1,40 @@
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Database design · availability</span><span class="scn__tag scn__tag--level">Fresher</span></div>
+      <h4>Make the orders database survive a server failure</h4>
+      <p class="scn__situation">The orders database runs on one server. Management wants it to survive a hardware failure with at most a minute of downtime and no lost orders.</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> can you design basic replication with clear RPO/RTO?</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul><li>Add a <b>synchronous (or semi-synchronous) standby</b> in another availability zone: RPO ≈ 0 for committed orders.</li><li>Automate failover with health checks and a managed service or a tool like Patroni, aiming for an RTO under a minute.</li><li>Connect apps through a stable endpoint (DNS or proxy) that moves to the new primary.</li><li>Add async read replicas for reports.</li><li>Keep point-in-time backups for mistakes and test restores regularly.</li></ul>
+        <p class="scn__avoid"><b>Avoid:</b> saying “take nightly backups” as the answer to availability.</p>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Consistency · user experience</span><span class="scn__tag scn__tag--level">1–3 years</span></div>
+      <h4>“I paid but the app says unpaid”</h4>
+      <p class="scn__situation">After adding read replicas, some customers see “payment pending” for a few seconds right after paying, and pay again.</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> do you recognise replication lag and read-your-writes?</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <p>Reads go to asynchronous replicas that haven’t applied the payment yet. Fix: route a user’s reads to the primary for a short window after they write (or for critical screens like payment status), or read from a replica only if it has caught up to the user’s last write position. Make the payment API idempotent so a second tap doesn’t charge twice, and show “processing” instead of “unpaid” while confirming.</p>
+        <p class="scn__avoid"><b>Avoid:</b> removing replicas entirely, or adding a fixed sleep before reading.</p>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Streaming · durability</span><span class="scn__tag scn__tag--level">1–3 years</span></div>
+      <h4>Messages lost during a broker restart</h4>
+      <p class="scn__situation">During a rolling restart of Kafka brokers, a few order events disappeared, although producers logged success.</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> do you know how acks, ISR and unclean leader election interact?</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <p>Producers were probably using <code>acks=1</code> (or the topic allowed unclean leader election), so a leader acknowledged messages and then lost leadership before followers copied them. Fix: replication factor 3, <code>min.insync.replicas=2</code>, producers with <code>acks=all</code> and idempotence enabled, and <code>unclean.leader.election.enable=false</code>. Restart brokers one at a time, waiting for under-replicated partitions to return to zero.</p>
+        <p class="scn__avoid"><b>Avoid:</b> adding retries in consumers, which can’t bring back a message that was never stored.</p>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Fundamentals · interview</span><span class="scn__tag scn__tag--level">Fresher</span></div>
+      <h4>“Is replication the same as backup?”</h4>
+      <p class="scn__situation">Interviewers like this question because many candidates say yes.</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> do you understand what each protects against?</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <p>No. Replication keeps live copies so the system survives machine, disk or zone failures with little downtime; every change, including mistakes and corruption, is copied within seconds. Backups are point-in-time copies kept separately so you can restore data after accidental deletes, bugs, ransomware or logical corruption. Production systems need both, and backups must be tested by actually restoring them.</p>
+        <p class="scn__avoid"><b>Avoid:</b> saying “we have three replicas, so we don’t need backups”.</p>
+      </div></details>
+    </article>

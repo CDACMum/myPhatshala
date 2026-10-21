@@ -1,0 +1,278 @@
+<!-- ======================= PART 1: THE STORY ======================= -->
+<section class="part" id="story">
+  <span class="part-label"><b>1</b> The story</span>
+  <h2>“What is actually running on these machines?”</h2>
+  <div class="story">
+    <p class="narration">Kabir's team lead gives him login access to the company's Hadoop cluster and one task: “Find out what is running on each machine, and on which port.” Kabir logs in to the first server, types <code>jps</code>, and sees a short list of strange names: <code>NameNode</code>, <code>ResourceManager</code>, <code>JournalNode</code>. On the next server: <code>DataNode</code>, <code>NodeManager</code>. He calls Riya: “It's like a zoo of Java programs.”</p>
+
+    <div class="scene">
+      <svg viewBox="0 0 640 190" role="img" aria-label="A layered diagram: applications at the top, then YARN for resources, then HDFS for storage, then Hadoop Common, all on top of Java and Linux on many servers.">
+        <g font-size="10">
+          <rect x="20" y="10" width="600" height="30" rx="6" class="s-soft-blue" style="stroke:var(--blue)"/>
+          <text x="320" y="30" text-anchor="middle" font-weight="700" class="s-blue">Applications: MapReduce · Spark · Hive (Tez) · your jobs</text>
+          <rect x="20" y="48" width="600" height="30" rx="6" class="s-soft-acc" style="stroke:var(--track)"/>
+          <text x="320" y="68" text-anchor="middle" font-weight="700" class="s-acc">YARN: ResourceManager + NodeManagers (who gets CPU and memory)</text>
+          <rect x="20" y="86" width="600" height="30" rx="6" class="s-soft-green" style="stroke:var(--green)"/>
+          <text x="320" y="106" text-anchor="middle" font-weight="700" class="s-green">HDFS: NameNode + DataNodes (where the bytes live)</text>
+          <rect x="20" y="124" width="600" height="26" rx="6" class="s-board"/>
+          <text x="320" y="141" text-anchor="middle" font-weight="700" class="s-chalk">Hadoop Common: configuration, RPC, security, file-system API, tools</text>
+          <rect x="20" y="156" width="600" height="20" rx="5" class="s-card2"/>
+          <text x="320" y="170" text-anchor="middle" font-size="9" class="s-ink2">Java (JVM) · Linux · many servers in racks</text>
+        </g>
+        <text x="632" y="186" text-anchor="end" class="s-wm">myphatshala.in</text>
+      </svg>
+    </div>
+
+R> A zoo? I thought Hadoop was one program.
+A> That's the most common mistake, Riya. Hadoop is a <b>set of long-running Java programs</b>, called <b>daemons</b>, spread over the cluster. Each one has one job. Some run on one or two master machines; others run on every worker.
+K> So the <code>NameNode</code> on server 1 is the HDFS master, and the <code>DataNode</code>s on the other servers are the HDFS workers?
+A> Yes. Same for YARN: one <code>ResourceManager</code>, a <code>NodeManager</code> on every worker. And there are helpers: JournalNodes, the JobHistory server, ZooKeeper.
+R> And how do they know about each other?
+A> Through a handful of XML configuration files that every node shares. Today we'll open up a real cluster layer by layer: which daemon runs where, what it does, which port it listens on, and which configuration file controls it. After this lesson, <code>jps</code> output will read like a sentence to you.
+  </div>
+</section>
+
+<!-- ======================= PART 2: DEFINITION ======================= -->
+<section class="part" id="definition">
+  <span class="part-label"><b>2</b> Definition</span>
+  <h2>Hadoop's architecture, daemon by daemon</h2>
+  <div class="def">
+    <div class="def__formal"><small>Formal definition (write this in exams)</small>
+      <p>A Hadoop cluster is a <b>layered, master–worker system</b> of long-running Java processes (<b>daemons</b>). The <b>storage layer</b> (HDFS) consists of a <b>NameNode</b>, which manages the namespace and block map, and <b>DataNodes</b>, which store blocks; with High Availability it adds a standby NameNode, <b>JournalNodes</b> and <b>ZKFailoverControllers</b>. The <b>resource layer</b> (YARN) consists of a <b>ResourceManager</b>, which allocates containers cluster-wide, and <b>NodeManagers</b>, which launch and monitor containers on each worker. The <b>processing layer</b> consists of applications such as MapReduce, each run by its own <b>ApplicationMaster</b>; the <b>JobHistory Server</b> keeps records of finished MapReduce jobs. <b>Hadoop Common</b> provides the shared libraries, RPC, configuration and security on which all daemons are built. Daemons communicate through RPC and periodic heartbeats and are configured through <code>core-site.xml</code>, <code>hdfs-site.xml</code>, <code>yarn-site.xml</code> and <code>mapred-site.xml</code>.</p></div>
+    <div class="def__simple"><small>In simple words</small>
+      <p>Hadoop is not one program but a team of programs. On the master machines run the “managers”: the NameNode (knows where every file block is) and the ResourceManager (decides who gets CPU and memory). On every worker run two “staff members”: a DataNode (stores blocks) and a NodeManager (runs tasks). They talk to each other all the time, and four XML files tell each of them where the others are.</p></div>
+  </div>
+
+  <h3>Words you'll meet in this lesson</h3>
+  <div class="terms">
+    <div class="term"><b>Daemon</b><span>A program that runs in the background all the time, like a service. Every Hadoop component is a Java daemon.</span></div>
+    <div class="term"><b>jps</b><span>A JDK command that lists running Java processes. The quickest way to see which Hadoop daemons are up on a machine.</span></div>
+    <div class="term"><b>RPC</b><span>Remote procedure call: one daemon calling a function on another over the network.</span></div>
+    <div class="term"><b>fs.defaultFS</b><span>The setting in <code>core-site.xml</code> that tells every client and daemon where the NameNode is, e.g. <code>hdfs://nn1:8020</code>.</span></div>
+    <div class="term"><b>JobHistory Server</b><span>Daemon that keeps the logs and counters of finished MapReduce jobs (web UI on port 19888).</span></div>
+    <div class="term"><b>JournalNode</b><span>HA helper that stores the NameNode's edit log so the standby can follow it.</span></div>
+    <div class="term"><b>ZKFC</b><span>ZooKeeper Failover Controller: watches a NameNode's health and triggers automatic failover.</span></div>
+    <div class="term"><b>Aux service</b><span>A plug-in that runs inside each NodeManager. MapReduce's shuffle handler is one; it serves map outputs to reducers.</span></div>
+  </div>
+
+  <h3>Every daemon, where it runs, and its default ports (Hadoop 3)</h3>
+  <div class="table-wrap">
+  <table class="compare" style="min-width:620px">
+    <thead><tr><th>Daemon</th><th>Layer</th><th>Runs on</th><th>Main job</th><th>Ports</th></tr></thead>
+    <tbody>
+      <tr><td><b>NameNode</b></td><td>HDFS</td><td>Master (1 active)</td><td>Namespace + block locations</td><td>8020 RPC · 9870 web UI</td></tr>
+      <tr><td><b>DataNode</b></td><td>HDFS</td><td>Every worker</td><td>Store and serve blocks</td><td>9866 data · 9867 IPC · 9864 web</td></tr>
+      <tr><td><b>Secondary NameNode</b></td><td>HDFS</td><td>A master (non-HA only)</td><td>Checkpoints fsimage</td><td>9868 web</td></tr>
+      <tr><td><b>JournalNode</b></td><td>HDFS (HA)</td><td>3 or 5 masters</td><td>Shared edit log</td><td>8485 RPC · 8480 web</td></tr>
+      <tr><td><b>ZKFC</b></td><td>HDFS (HA)</td><td>Next to each NameNode</td><td>Automatic failover</td><td>8019</td></tr>
+      <tr><td><b>ResourceManager</b></td><td>YARN</td><td>Master</td><td>Allocate containers</td><td>8032 clients · 8030 AMs · 8031 NMs · 8088 web</td></tr>
+      <tr><td><b>NodeManager</b></td><td>YARN</td><td>Every worker</td><td>Launch and watch containers</td><td>8042 web · 13562 shuffle</td></tr>
+      <tr><td><b>JobHistory Server</b></td><td>MapReduce</td><td>A master or utility node</td><td>History of finished jobs</td><td>10020 IPC · 19888 web</td></tr>
+      <tr><td><b>ZooKeeper</b></td><td>Coordination (separate project)</td><td>3 or 5 nodes</td><td>Leader election for HA</td><td>2181</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <p class="muted">These are Apache Hadoop 3 defaults. Distributions and companies often change them; always check the cluster's configuration files.</p>
+
+LEVELS> The architecture at three levels
+L1> A hospital
+      <ul>
+        <li><b>The records office (NameNode)</b> knows which file is in which cupboard, but holds no files itself.</li>
+        <li><b>The cupboards in every ward (DataNodes)</b> hold the actual files, with copies in other wards.</li>
+        <li><b>The bed manager (ResourceManager)</b> decides which patient gets which bed and how many nurses.</li>
+        <li><b>Each ward's in-charge (NodeManager)</b> sets up the beds the bed manager approved and reports back.</li>
+        <li><b>Each patient's doctor (ApplicationMaster)</b> plans that one patient's treatment and asks for beds as needed.</li>
+        <li>The <b>hospital rule book</b> (Common + config files) is the same in every ward.</li>
+      </ul>
+L2> How the daemons talk to each other
+      <ul>
+        <li><b>DataNode → NameNode:</b> registration, heartbeats every 3 s, block reports. The NameNode answers with commands (copy, delete).</li>
+        <li><b>NodeManager → ResourceManager:</b> heartbeats with free memory/CPU and container status. The RM answers with containers to start or kill.</li>
+        <li><b>Client → NameNode:</b> “create this file”, “where are the blocks of that file?”. <b>Client → DataNodes:</b> the actual bytes. The NameNode never carries file data.</li>
+        <li><b>Client → ResourceManager:</b> submit an application. <b>ApplicationMaster → RM:</b> ask for containers. <b>AM → NodeManagers:</b> start containers.</li>
+        <li><b>Reducers → NodeManagers' shuffle service:</b> fetch map outputs over HTTP.</li>
+      </ul>
+L3> Design details that matter in production
+      <ul>
+        <li><b>Masters are out of the data path:</b> clients read and write blocks directly from DataNodes, so the NameNode handles only small metadata calls. That's how one NameNode serves thousands of nodes.</li>
+        <li><b>Control vs data traffic:</b> RPC (small, frequent) and data transfer (large, streaming) use different ports and can be tuned separately.</li>
+        <li><b>Co-location:</b> DataNode and NodeManager on the same worker make data locality possible. Separating them (compute-only nodes) is possible but loses locality.</li>
+        <li><b>Same configuration everywhere:</b> the XML files are usually managed centrally (Ambari, Cloudera Manager, Ansible) and pushed to every node; a mismatch is a classic source of strange errors.</li>
+        <li><b>Each daemon has its own log</b> under <code>$HADOOP_HOME/logs</code> (for example <code>hadoop-&lt;user&gt;-namenode-&lt;host&gt;.log</code>), which is the first place to look when something fails.</li>
+      </ul>
+/LEVELS
+EXAM> For “Explain the architecture of Hadoop with a neat diagram”, draw two master–worker pairs: <b>NameNode ↔ DataNodes</b> (HDFS) and <b>ResourceManager ↔ NodeManagers</b> (YARN), show a client talking to the NameNode for metadata but to DataNodes for data, add one ApplicationMaster inside a NodeManager, and label heartbeats. Mention Hadoop Common underneath.
+</section>
+
+<!-- ======================= PART 3: TYPES AND WAYS TO USE IT ======================= -->
+<section class="part" id="types">
+  <span class="part-label"><b>3</b> Types and ways to use it</span>
+  <h2>The four modules, their daemons and their configuration files</h2>
+  <div class="cards">
+    <div class="card"><h4>Hadoop Common</h4><p>No daemon of its own. Libraries used by all others: the <code>FileSystem</code> API, RPC, security (Kerberos), metrics, the <code>hadoop</code> command.</p><span class="tag">core-site.xml</span></div>
+    <div class="card"><h4>HDFS</h4><p>NameNode, DataNodes, plus Secondary NameNode (non-HA) or JournalNodes + ZKFCs (HA). Commands: <code>hdfs dfs</code>, <code>hdfs dfsadmin</code>.</p><span class="tag">hdfs-site.xml</span></div>
+    <div class="card"><h4>YARN</h4><p>ResourceManager, NodeManagers (and optionally a Timeline Server). Commands: <code>yarn application</code>, <code>yarn node</code>.</p><span class="tag">yarn-site.xml</span></div>
+    <div class="card"><h4>MapReduce</h4><p>No permanent daemon per job: each job's MRAppMaster runs in a container. The JobHistory Server keeps finished-job records. Command: <code>mapred</code>.</p><span class="tag">mapred-site.xml</span></div>
+  </div>
+
+  <h3>The most important settings in each file</h3>
+  <div class="table-wrap">
+  <table class="compare" style="min-width:600px">
+    <thead><tr><th>File</th><th>Key property</th><th>Example value</th><th>Meaning</th></tr></thead>
+    <tbody>
+      <tr><td><code>core-site.xml</code></td><td><code>fs.defaultFS</code></td><td><code>hdfs://nn1:8020</code></td><td>Where the default file system (NameNode) is</td></tr>
+      <tr><td><code>hdfs-site.xml</code></td><td><code>dfs.replication</code></td><td><code>3</code></td><td>Copies of each block</td></tr>
+      <tr><td><code>hdfs-site.xml</code></td><td><code>dfs.namenode.name.dir</code></td><td><code>/data/nn</code></td><td>Where the NameNode saves its metadata</td></tr>
+      <tr><td><code>hdfs-site.xml</code></td><td><code>dfs.datanode.data.dir</code></td><td><code>/data/1/dn,/data/2/dn</code></td><td>Disks where a DataNode stores blocks</td></tr>
+      <tr><td><code>yarn-site.xml</code></td><td><code>yarn.resourcemanager.hostname</code></td><td><code>rm1</code></td><td>Where the ResourceManager is</td></tr>
+      <tr><td><code>yarn-site.xml</code></td><td><code>yarn.nodemanager.aux-services</code></td><td><code>mapreduce_shuffle</code></td><td>Turns on the shuffle service for MapReduce</td></tr>
+      <tr><td><code>yarn-site.xml</code></td><td><code>yarn.nodemanager.resource.memory-mb</code></td><td><code>196608</code></td><td>Memory a node offers to containers</td></tr>
+      <tr><td><code>mapred-site.xml</code></td><td><code>mapreduce.framework.name</code></td><td><code>yarn</code></td><td>Run MapReduce jobs on YARN</td></tr>
+      <tr><td><code>workers</code></td><td>(plain list)</td><td>one host per line</td><td>Where start scripts launch DataNodes and NodeManagers (called <code>slaves</code> in Hadoop 2)</td></tr>
+    </tbody>
+  </table>
+  </div>
+TIP> When a client says “Connection refused” to <code>localhost:8020</code> or similar, check <code>fs.defaultFS</code> first. Half of all beginner Hadoop errors are a wrong host name or port in <code>core-site.xml</code>, or a daemon that is simply not running (check with <code>jps</code>).
+</section>
+
+<!-- ======================= PART 4: STEP BY STEP ======================= -->
+<section class="part" id="steps">
+  <span class="part-label"><b>4</b> Step by step</span>
+  <h2>Bringing a cluster up, daemon by daemon</h2>
+  <ol class="stepper">
+    <li><h4>Every node gets the same configuration</h4>
+      <div class="code" data-lang="python" data-file="read_conf.py"><pre><code>import xml.etree.ElementTree as ET
+xml = """&lt;configuration&gt;&lt;property&gt;&lt;name&gt;fs.defaultFS&lt;/name&gt;
+&lt;value&gt;hdfs://nn1:8020&lt;/value&gt;&lt;/property&gt;&lt;/configuration&gt;"""
+for p in ET.fromstring(xml).iter("property"):
+    print(p.findtext("name"), "=", p.findtext("value"))</code></pre><div class="output">fs.defaultFS = hdfs://nn1:8020</div></div>
+      <span class="behind">Every Hadoop configuration file is a list of <code>&lt;property&gt;</code> name–value pairs. Every daemon and client reads them at start-up, so they all agree on where the masters are.</span></li>
+    <li><h4>Start HDFS: the NameNode first</h4>
+      <p>The admin runs <code>start-dfs.sh</code>. The NameNode loads its saved metadata (fsimage + edit log) and waits in <b>safe mode</b>.</p>
+      <span class="behind">The NameNode knows the files and their blocks, but not yet <i>where</i> the blocks are. That information is never saved; it comes fresh from the DataNodes.</span></li>
+    <li><h4>DataNodes start and report</h4>
+      <p>On each worker a DataNode starts, registers with the NameNode and sends a <b>block report</b>.</p>
+      <span class="behind">When enough blocks have been reported (99.9% by default), the NameNode leaves safe mode and allows writes. Module 5 explains safe mode in detail.</span></li>
+    <li><h4>Start YARN</h4>
+      <p>The admin runs <code>start-yarn.sh</code>. The ResourceManager starts; each NodeManager registers with how much memory and how many vcores it offers.</p>
+      <span class="behind">The RM now knows total cluster capacity, for example 40 nodes × 192 GB. Its web UI on port 8088 shows it.</span></li>
+    <li><h4>Start the JobHistory Server, then check</h4>
+      <div class="code" data-lang="bash" data-file="Terminal"><pre><code>mapred --daemon start historyserver
+jps</code></pre></div>
+      <span class="behind">On a single-machine (pseudo-distributed) test cluster, <code>jps</code> should list NameNode, DataNode, SecondaryNameNode, ResourceManager, NodeManager and JobHistoryServer. If one is missing, its log file says why. You'll do this yourself in Module 4.</span></li>
+  </ol>
+</section>
+
+<!-- ======================= PART 5: SEE IT HAPPEN ======================= -->
+<section class="part" id="animation">
+  <span class="part-label"><b>5</b> See it happen</span>
+  <h2>A cluster starting up: what the admin sees, and which daemons appear</h2>
+  <p>Follow a small cluster (one master, three workers) from power-on to ready. Left: the admin's terminal. Right: the daemons on each machine.</p>
+  <div class="anim" data-frames="6">
+    <div class="anim__title">From power-on to ready <span>6 steps</span></div>
+    <div class="anim__views">
+      <div class="view view--see">
+        <span class="view__tag">What you see</span>
+        <svg viewBox="0 0 360 250" role="img" aria-label="Admin terminal while starting the cluster">
+          <rect x="14" y="14" width="332" height="206" rx="8" class="s-board"/>
+          <text x="26" y="32" font-size="9" class="mono" style="fill:#7F8C86">admin@master1 : ~ (illustrative output)</text>
+          <g data-on="1"><text x="26" y="56" font-size="9" class="mono" style="fill:#7F8C86">$ jps</text><text x="26" y="74" font-size="9" class="mono" style="fill:#9FD3B8">4410 Jps</text><text x="180" y="190" text-anchor="middle" font-size="10" class="s-chalk">Nothing running yet.</text></g>
+          <g data-on="2"><text x="26" y="56" font-size="9" class="mono" style="fill:#7F8C86">$ start-dfs.sh</text><text x="26" y="74" font-size="9" class="mono" style="fill:#9FD3B8">Starting namenodes on [master1]</text><text x="26" y="90" font-size="9" class="mono" style="fill:#9FD3B8">Starting datanodes</text><text x="26" y="106" font-size="9" class="mono" style="fill:#9FD3B8">Starting secondary namenodes [master1]</text></g>
+          <g data-on="3"><text x="26" y="56" font-size="9" class="mono" style="fill:#7F8C86">$ hdfs dfsadmin -safemode get</text><text x="26" y="74" font-size="9" class="mono" style="fill:#F5C77E">Safe mode is ON</text><text x="26" y="98" font-size="9" class="mono" style="fill:#7F8C86">(a few seconds later)</text><text x="26" y="116" font-size="9" class="mono" style="fill:#9FD3B8">Safe mode is OFF</text></g>
+          <g data-on="4"><text x="26" y="56" font-size="9" class="mono" style="fill:#7F8C86">$ start-yarn.sh</text><text x="26" y="74" font-size="9" class="mono" style="fill:#9FD3B8">Starting resourcemanager</text><text x="26" y="90" font-size="9" class="mono" style="fill:#9FD3B8">Starting nodemanagers</text></g>
+          <g data-on="5"><text x="26" y="56" font-size="9" class="mono" style="fill:#7F8C86">$ mapred --daemon start historyserver</text><text x="26" y="80" font-size="9" class="mono" style="fill:#7F8C86">$ jps</text><text x="26" y="98" font-size="9" class="mono" style="fill:#9FD3B8">5121 NameNode</text><text x="26" y="114" font-size="9" class="mono" style="fill:#9FD3B8">5410 SecondaryNameNode</text><text x="26" y="130" font-size="9" class="mono" style="fill:#9FD3B8">5702 ResourceManager</text><text x="26" y="146" font-size="9" class="mono" style="fill:#9FD3B8">6015 JobHistoryServer</text><text x="26" y="162" font-size="9" class="mono" style="fill:#9FD3B8">6102 Jps</text></g>
+          <g data-on="6"><text x="26" y="56" font-size="9" class="mono" style="fill:#7F8C86">open http://master1:9870  (HDFS)</text><text x="26" y="72" font-size="9" class="mono" style="fill:#7F8C86">open http://master1:8088  (YARN)</text><text x="26" y="96" font-size="9" class="mono" style="fill:#9FD3B8">Live DataNodes: 3</text><text x="26" y="112" font-size="9" class="mono" style="fill:#9FD3B8">Active NodeManagers: 3</text><text x="180" y="190" text-anchor="middle" font-size="10" class="s-chalk">The cluster is ready for jobs.</text></g>
+          <text x="352" y="244" text-anchor="end" class="s-wm">myphatshala.in</text>
+        </svg>
+        <ol class="caps" hidden>
+          <li>Before start-up, <code>jps</code> shows only itself: no Hadoop daemons are running.</li>
+          <li><code>start-dfs.sh</code> starts the NameNode on the master, a DataNode on each host in the <code>workers</code> file, and the Secondary NameNode.</li>
+          <li>The NameNode starts in <b>safe mode</b> (read-only) until enough DataNodes have reported their blocks, then leaves it.</li>
+          <li><code>start-yarn.sh</code> starts the ResourceManager and a NodeManager on every worker.</li>
+          <li>The JobHistory Server starts. <code>jps</code> on the master now lists all master daemons (PIDs differ on every machine).</li>
+          <li>The web UIs confirm 3 live DataNodes and 3 active NodeManagers. Jobs can run.</li>
+        </ol>
+      </div>
+
+      <div class="view view--behind">
+        <span class="view__tag">Behind the screen</span>
+        <svg viewBox="0 0 360 250" role="img" aria-label="Daemons appearing on master and worker machines">
+          <rect x="110" y="12" width="140" height="92" rx="8" class="s-board"/>
+          <text x="180" y="28" text-anchor="middle" font-size="9" font-weight="700" class="s-chalk">master1</text>
+          <g data-on="2-"><rect x="120" y="34" width="120" height="13" rx="3" class="s-green"/><text x="180" y="44" text-anchor="middle" font-size="7.6" font-weight="700" style="fill:#fff">NameNode</text>
+            <rect x="120" y="50" width="120" height="13" rx="3" style="fill:#4A6B5E"/><text x="180" y="60" text-anchor="middle" font-size="7.6" font-weight="700" style="fill:#fff">SecondaryNameNode</text></g>
+          <g data-on="4-"><rect x="120" y="66" width="120" height="13" rx="3" style="fill:var(--track)"/><text x="180" y="76" text-anchor="middle" font-size="7.6" font-weight="700" style="fill:#fff">ResourceManager</text></g>
+          <g data-on="5-"><rect x="120" y="82" width="120" height="13" rx="3" style="fill:#8B5CF6"/><text x="180" y="92" text-anchor="middle" font-size="7.6" font-weight="700" style="fill:#fff">JobHistoryServer</text></g>
+          <path d="M180 104v14M60 118h240M60 118v12M180 118v12M300 118v12" class="s-wire"/>
+          <g><rect x="14" y="130" width="92" height="76" rx="8" class="s-card2"/><rect x="134" y="130" width="92" height="76" rx="8" class="s-card2"/><rect x="254" y="130" width="92" height="76" rx="8" class="s-card2"/>
+            <text x="60" y="146" text-anchor="middle" font-size="8.6" font-weight="700" class="s-ink">worker1</text><text x="180" y="146" text-anchor="middle" font-size="8.6" font-weight="700" class="s-ink">worker2</text><text x="300" y="146" text-anchor="middle" font-size="8.6" font-weight="700" class="s-ink">worker3</text></g>
+          <g data-on="2-"><rect x="22" y="154" width="76" height="14" rx="3" class="s-green"/><rect x="142" y="154" width="76" height="14" rx="3" class="s-green"/><rect x="262" y="154" width="76" height="14" rx="3" class="s-green"/>
+            <text x="60" y="164" text-anchor="middle" font-size="7.6" font-weight="700" style="fill:#fff">DataNode</text><text x="180" y="164" text-anchor="middle" font-size="7.6" font-weight="700" style="fill:#fff">DataNode</text><text x="300" y="164" text-anchor="middle" font-size="7.6" font-weight="700" style="fill:#fff">DataNode</text></g>
+          <g data-on="4-"><rect x="22" y="172" width="76" height="14" rx="3" style="fill:var(--track)"/><rect x="142" y="172" width="76" height="14" rx="3" style="fill:var(--track)"/><rect x="262" y="172" width="76" height="14" rx="3" style="fill:var(--track)"/>
+            <text x="60" y="182" text-anchor="middle" font-size="7.6" font-weight="700" style="fill:#fff">NodeManager</text><text x="180" y="182" text-anchor="middle" font-size="7.6" font-weight="700" style="fill:#fff">NodeManager</text><text x="300" y="182" text-anchor="middle" font-size="7.6" font-weight="700" style="fill:#fff">NodeManager</text></g>
+          <g data-on="3"><path d="M60 154V124M180 154v-36M300 154V124" style="fill:none;stroke:#E05A8A;stroke-width:2;stroke-dasharray:4 3"/><text x="180" y="228" text-anchor="middle" font-size="9" font-weight="700" style="fill:#E05A8A">block reports → NameNode</text></g>
+          <g data-on="4"><text x="180" y="228" text-anchor="middle" font-size="9" font-weight="700" class="s-acc">NodeManagers register their memory + vcores</text></g>
+          <g data-on="1"><text x="180" y="228" text-anchor="middle" font-size="9" class="s-ink2">4 machines, no daemons</text></g>
+          <g data-on="2"><text x="180" y="228" text-anchor="middle" font-size="9" class="s-green" font-weight="700">HDFS daemons start</text></g>
+          <g data-on="5"><text x="180" y="228" text-anchor="middle" font-size="9" class="s-ink2">master: 4 daemons · each worker: 2</text></g>
+          <g data-on="6"><text x="180" y="228" text-anchor="middle" font-size="9" class="s-green" font-weight="700">storage layer + resource layer up</text></g>
+          <text x="352" y="246" text-anchor="end" class="s-wm">myphatshala.in</text>
+        </svg>
+        <ol class="caps" hidden>
+          <li>Four machines are powered on, but no Hadoop daemon is running yet.</li>
+          <li>HDFS starts: the NameNode and Secondary NameNode on the master, one DataNode per worker.</li>
+          <li>Each DataNode registers and sends a <b>block report</b>. The NameNode builds its map of block locations in memory.</li>
+          <li>YARN starts: the ResourceManager on the master and a NodeManager next to each DataNode. Each NodeManager tells the RM how much memory and CPU it can offer.</li>
+          <li>The JobHistory Server joins the master. Typical small layout: 4 daemons on the master, 2 on each worker.</li>
+          <li>Both layers are running. Clients can now store files and submit jobs.</li>
+        </ol>
+      </div>
+    </div>
+  </div>
+
+  <h3 id="playground">Try it yourself: find each daemon in the playground</h3>
+  <p>The playground shows the same architecture: masters at the top, DataNodes (with their NodeManager containers) below.</p>
+  {{PLAYGROUND}}
+</section>
+
+<!-- ======================= PART 6: REAL-WORLD USE ======================= -->
+<section class="part" id="real-world">
+  <span class="part-label"><b>6</b> Real-world use</span>
+  <h2>Architecture knowledge in daily work</h2>
+
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="18" y="16" width="84" height="58" rx="6" class="s-board"/><text x="28" y="36" font-size="8.6" class="mono" style="fill:#9FD3B8">$ jps</text><text x="28" y="52" font-size="8.6" class="mono" style="fill:#9FD3B8">DataNode</text><text x="28" y="66" font-size="8.6" class="mono" style="fill:#FF8A80">NodeManager?</text></svg></div>
+    <div><h4>1. First check in any incident</h4>
+      <p>When jobs fail on one node, an engineer logs in and runs <code>jps</code>. If the NodeManager is missing, the node offers no containers; if the DataNode is missing, its blocks are unavailable. The daemon's log file then explains why.</p>
+      <div class="uc-flow"><span>Alert</span><i>→</i><span class="java">jps + daemon log</span><i>→</i><span>Restart or fix</span></div></div>
+  </div>
+
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="20" y="18" width="80" height="54" rx="6" class="s-card2"/><text x="60" y="40" text-anchor="middle" font-size="9" font-weight="700" class="s-ink mono">:9870</text><text x="60" y="58" text-anchor="middle" font-size="9" font-weight="700" class="s-ink mono">:8088</text></svg></div>
+    <div><h4>2. Firewall and security reviews</h4>
+      <p>Security teams ask exactly which ports each node needs open. The daemon-and-port table in this lesson is what platform engineers hand them, with web UIs restricted to admin networks.</p>
+      <div class="uc-flow"><span>Port list</span><i>→</i><span class="java">Firewall rules</span><i>→</i><span>Only needed ports open</span></div></div>
+  </div>
+
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="16" y="20" width="88" height="50" rx="6" class="s-soft-blue" style="stroke:var(--blue)"/><text x="60" y="42" text-anchor="middle" font-size="8.6" font-weight="700" class="s-blue">Ambari /</text><text x="60" y="56" text-anchor="middle" font-size="8.6" font-weight="700" class="s-blue">Cloudera Manager</text></svg></div>
+    <div><h4>3. Cluster managers show the same picture</h4>
+      <p>Management tools like Apache Ambari or Cloudera Manager display every host with its roles (NameNode, DataNode, NodeManager…), their health and their configuration, the same architecture you learned today with a dashboard on top.</p>
+      <div class="uc-flow"><span>Hosts</span><i>→</i><span class="java">Roles per host</span><i>→</i><span>Health + config</span></div></div>
+  </div>
+
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="18" y="18" width="84" height="54" rx="6" class="s-card2"/><text x="60" y="40" text-anchor="middle" font-size="8.6" class="mono s-ink">&lt;property&gt;</text><text x="60" y="56" text-anchor="middle" font-size="8.6" class="mono s-acc">fs.defaultFS</text></svg></div>
+    <div><h4>4. Connecting tools to the cluster</h4>
+      <p>Spark, Hive, Airflow and BI tools need the cluster's <code>core-site.xml</code> and <code>hdfs-site.xml</code> (and <code>yarn-site.xml</code> to submit jobs). Copying these files to an edge node is how new tools are connected.</p>
+      <div class="uc-flow"><span>Config files</span><i>→</i><span class="java">Client tool</span><i>→</i><span>Reads HDFS, submits to YARN</span></div></div>
+  </div>
+
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><path d="M20 66h80" class="s-line"/><rect x="26" y="34" width="18" height="32" rx="3" class="s-green"/><rect x="51" y="24" width="18" height="42" rx="3" style="fill:var(--track)"/><rect x="76" y="40" width="18" height="26" rx="3" style="fill:#8B5CF6"/></svg></div>
+    <div><h4>5. Capacity and health dashboards</h4>
+      <p>Monitoring systems scrape metrics from each daemon (NameNode heap, DataNode disk, NodeManager memory) and graph them per layer, so teams see whether storage or compute is running out.</p>
+      <div class="uc-flow"><span>Daemon metrics</span><i>→</i><span class="java">Monitoring</span><i>→</i><span>Alerts per layer</span></div></div>
+  </div>
+  <p class="muted">Examples are simplified. Port numbers are Apache defaults; distributions may differ.</p>
+</section>

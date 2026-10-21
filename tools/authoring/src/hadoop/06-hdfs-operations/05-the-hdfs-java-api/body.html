@@ -1,0 +1,291 @@
+<!-- ======================= PART 1: THE STORY ======================= -->
+<section class="part" id="story">
+  <span class="part-label"><b>1</b> The story</span>
+  <h2>When the shell is not enough</h2>
+  <div class="story">
+    <p class="narration">The canteen app's backend, written in Java, must save every order batch into HDFS and read daily totals back. Riya's first version calls <code>hdfs dfs -put</code> from Java with <code>Runtime.exec()</code>. It works, but each call starts a new JVM: 1.8 seconds per batch, and errors arrive as text she has to parse. Arjun shows her that every <code>hdfs dfs</code> command is itself a small Java program built on one class, <code>FileSystem</code>, and her backend can use that class directly.</p>
+
+    <div class="scene">
+      <svg viewBox="0 0 640 190" role="img" aria-label="Your program, the hdfs dfs shell, Spark and Hive all use the FileSystem API; it talks to the NameNode for metadata and to DataNodes for data. The same API can point at local disk or cloud storage.">
+        <g font-size="10">
+          <rect x="16" y="16" width="130" height="34" rx="8" class="s-soft-acc" style="stroke:var(--track)"/><text x="81" y="37" text-anchor="middle" font-weight="700" class="s-acc">your Java app</text>
+          <rect x="16" y="58" width="130" height="34" rx="8" class="s-card2"/><text x="81" y="79" text-anchor="middle" class="s-ink">hdfs dfs (FsShell)</text>
+          <rect x="16" y="100" width="130" height="34" rx="8" class="s-card2"/><text x="81" y="121" text-anchor="middle" class="s-ink">MapReduce, Spark, Hive</text>
+          <path d="M146 33h40M146 75h40M146 117h40" style="fill:none;stroke:var(--track);stroke-width:2"/>
+          <rect x="186" y="16" width="150" height="118" rx="10" class="s-board"/>
+          <text x="261" y="44" text-anchor="middle" font-weight="700" class="s-chalk">FileSystem API</text>
+          <g font-size="8.6" class="mono" style="fill:#9FD3B8"><text x="198" y="66">create  open  append</text><text x="198" y="82">listStatus  rename</text><text x="198" y="98">delete  getFileStatus</text><text x="198" y="114">getFileBlockLocations</text></g>
+          <path d="M336 50h50M336 100h50" style="fill:none;stroke:var(--blue);stroke-width:2"/>
+          <rect x="386" y="24" width="112" height="40" rx="8" class="s-board"/><text x="442" y="48" text-anchor="middle" font-weight="700" class="s-chalk">NameNode</text>
+          <rect x="386" y="80" width="112" height="40" rx="8" class="s-soft-green" style="stroke:var(--green)"/><text x="442" y="104" text-anchor="middle" class="s-green">DataNodes</text>
+          <text x="566" y="40" text-anchor="middle" font-size="8.6" class="s-ink2">hdfs://</text>
+          <text x="566" y="70" text-anchor="middle" font-size="8.6" class="s-ink2">file://</text>
+          <text x="566" y="100" text-anchor="middle" font-size="8.6" class="s-ink2">s3a://  abfs://</text>
+          <text x="566" y="122" text-anchor="middle" font-size="8.6" class="s-ink2">same code, other storage</text>
+        </g>
+        <text x="320" y="166" text-anchor="middle" font-size="10" class="s-ink2">metadata calls go to the NameNode; bytes stream to and from DataNodes</text>
+        <text x="632" y="184" text-anchor="end" class="s-wm">myphatshala.in</text>
+      </svg>
+    </div>
+
+A> Everything you did with the shell, you can do from code: <code>fs.create()</code> is <code>-put</code>, <code>fs.open()</code> is <code>-cat</code>, <code>fs.rename()</code> is <code>-mv</code>. The JVM starts once, connections are reused, and errors are real Java exceptions.
+R> Is it different from writing a normal file?
+A> Almost the same streams you know from Java. The difference is what happens underneath: a <code>create</code> asks the NameNode, the bytes go through the write pipeline from Lesson 6.1, and <code>open</code> reads from the nearest DataNode as in Lesson 6.2. Spark and Hive use this same class, which is why they can read HDFS and S3 with the same code.
+  </div>
+</section>
+
+<!-- ======================= PART 2: DEFINITION ======================= -->
+<section class="part" id="definition">
+  <span class="part-label"><b>2</b> Definition</span>
+  <h2>The Hadoop FileSystem API</h2>
+  <div class="def">
+    <div class="def__formal"><small>Formal definition (write this in exams)</small>
+      <p>The <b>Hadoop FileSystem API</b> (<code>org.apache.hadoop.fs</code>) is the Java interface through which all Hadoop clients access storage. <code>FileSystem.get(Configuration)</code> returns an implementation chosen by the URI scheme of <code>fs.defaultFS</code> or of a <code>Path</code>; for <code>hdfs://</code> it is <code>DistributedFileSystem</code>, which uses a <code>DFSClient</code> to call the NameNode over RPC and to stream data to and from DataNodes. Files are created with <code>create()</code> (returning an <code>FSDataOutputStream</code> that supports <code>hflush()</code> and <code>hsync()</code>) and read with <code>open()</code> (returning a seekable <code>FSDataInputStream</code>). Metadata is returned as <code>FileStatus</code> and block placement as <code>BlockLocation</code>; namespace operations include <code>mkdirs</code>, <code>listStatus</code>, <code>rename</code> and <code>delete</code>.</p></div>
+    <div class="def__simple"><small>In simple words</small>
+      <p>A Java library that lets your program open, write, list, rename and delete HDFS files, the way the shell does, but inside your own application.</p></div>
+  </div>
+
+  <h3>Words you'll meet in this lesson</h3>
+  <div class="terms">
+    <div class="term"><b>Configuration</b><span>Loads core-site.xml and hdfs-site.xml from the classpath; <code>fs.defaultFS</code> says where HDFS is.</span></div>
+    <div class="term"><b>FileSystem</b><span>The abstract class; get one with <code>FileSystem.get(conf)</code>.</span></div>
+    <div class="term"><b>Path</b><span>A file or folder name, absolute or relative, optionally a full URI.</span></div>
+    <div class="term"><b>FSDataOutputStream</b><span>What <code>create()</code> returns; <code>hflush()</code> makes data visible to readers.</span></div>
+    <div class="term"><b>FSDataInputStream</b><span>What <code>open()</code> returns; supports <code>seek(offset)</code>.</span></div>
+    <div class="term"><b>FileStatus</b><span>Length, replication, block size, owner, permission, times.</span></div>
+    <div class="term"><b>BlockLocation</b><span>Offset, length and hosts of one block.</span></div>
+    <div class="term"><b>WebHDFS</b><span>The same operations over HTTP/JSON, for non-Java programs.</span></div>
+  </div>
+
+  <h3>API facts worth remembering</h3>
+  <table class="facts" style="table-layout:fixed;overflow-wrap:anywhere">
+    <tr><th>FileSystem.get(conf)</th><td>Returns a <b>cached, shared</b> instance per scheme, authority and user; closing it closes it for the whole JVM</td></tr>
+    <tr><th>rename()</th><td>Returns <code>false</code> on many failures instead of throwing: always check it</td></tr>
+    <tr><th>delete(path, true)</th><td>Recursive and permanent: the API does <b>not</b> use the trash</td></tr>
+    <tr><th>create(path, true)</th><td><code>true</code> = overwrite an existing file</td></tr>
+    <tr><th>Visibility</th><td>Other readers see written data after <code>hflush()</code> or <code>close()</code></td></tr>
+    <tr><th>Classpath</th><td><code>hadoop classpath</code> prints the jars to compile and run with</td></tr>
+  </table>
+
+LEVELS> The API at three levels
+L1> Like Java file handling you already know
+      <ul>
+        <li><code>Path</code> is like <code>java.io.File</code>, <code>open()</code>/<code>create()</code> give streams.</li>
+        <li>You wrap them in a <code>BufferedReader</code> or write bytes, as usual.</li>
+        <li>Always close streams (try-with-resources).</li>
+      </ul>
+L2> Everyday use
+      <ul>
+        <li>Upload: <code>fs.copyFromLocalFile(src, dst)</code>, or <code>create()</code> and write.</li>
+        <li>Check before reading: <code>fs.exists(p)</code>, <code>fs.getFileStatus(p).getLen()</code>.</li>
+        <li>Walk a tree: <code>fs.listFiles(dir, true)</code> (recursive iterator, includes block locations).</li>
+        <li>Publish results: write into a temporary folder, then one <code>fs.rename()</code>.</li>
+      </ul>
+L3> What library and framework authors care about
+      <ul>
+        <li><code>getFileBlockLocations</code> is how MapReduce and Spark place tasks near data.</li>
+        <li><code>hflush()</code> vs <code>hsync()</code>: visible to readers vs also forced to disk on DataNodes.</li>
+        <li>Seek + read lets a reader start in the middle of a file: that is how input splits work.</li>
+        <li>Use <code>FileSystem.newInstance()</code> if your code must close its own instance without affecting others.</li>
+        <li>On a secure cluster, the same code needs a Kerberos login (<code>UserGroupInformation</code>).</li>
+      </ul>
+/LEVELS
+EXAM> “Write a Java program to read a file from HDFS.” Steps: create a <code>Configuration</code>; <code>FileSystem fs = FileSystem.get(conf)</code>; <code>FSDataInputStream in = fs.open(new Path(...))</code>; read lines with a <code>BufferedReader</code> (or <code>IOUtils.copyBytes(in, System.out, 4096, false)</code>); close the stream. Mention that <code>open()</code> gets block locations from the NameNode and reads from DataNodes.
+</section>
+
+<!-- ======================= PART 3: TYPES AND WAYS TO USE IT ======================= -->
+<section class="part" id="types">
+  <span class="part-label"><b>3</b> Types and ways to use it</span>
+  <h2>API methods, shell commands and what happens underneath</h2>
+  <div class="table-wrap">
+  <table class="compare" style="min-width:640px">
+    <thead><tr><th>FileSystem method</th><th>Shell equivalent</th><th>Talks to</th></tr></thead>
+    <tbody>
+      <tr><td><code>mkdirs(p)</code></td><td><code>-mkdir -p</code></td><td>NameNode</td></tr>
+      <tr><td><code>create(p, overwrite)</code> + write + close</td><td><code>-put</code></td><td>NameNode, then DataNode pipeline</td></tr>
+      <tr><td><code>append(p)</code></td><td><code>-appendToFile</code></td><td>NameNode, then DataNodes</td></tr>
+      <tr><td><code>open(p)</code> + read</td><td><code>-cat</code>, <code>-get</code></td><td>NameNode (locations), then DataNodes</td></tr>
+      <tr><td><code>getFileStatus(p)</code></td><td><code>-stat</code>, <code>-ls</code> one file</td><td>NameNode</td></tr>
+      <tr><td><code>listStatus(dir)</code>, <code>listFiles(dir, recursive)</code></td><td><code>-ls</code>, <code>-ls -R</code></td><td>NameNode</td></tr>
+      <tr><td><code>getFileBlockLocations(st, 0, len)</code></td><td><code>fsck -blocks -locations</code></td><td>NameNode</td></tr>
+      <tr><td><code>rename(src, dst)</code></td><td><code>-mv</code></td><td>NameNode</td></tr>
+      <tr><td><code>delete(p, recursive)</code></td><td><code>-rm -r -skipTrash</code></td><td>NameNode (blocks freed later)</td></tr>
+      <tr><td><code>setReplication(p, n)</code></td><td><code>-setrep</code></td><td>NameNode</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <h3>Ways to reach HDFS from a program</h3>
+  <div class="cards">
+    <div class="card"><h4>Java FileSystem API</h4><p>Native and fastest; what Hadoop's own tools use. This lesson.</p><span class="tag">Java, Scala</span></div>
+    <div class="card"><h4>WebHDFS (REST)</h4><p>HTTP + JSON on the NameNode port 9870, redirecting to DataNodes on 9864. Any language, even curl.</p><span class="tag">Any language</span></div>
+    <div class="card"><h4>libhdfs / pyarrow</h4><p>A C library over the Java client; Python's <code>pyarrow.fs.HadoopFileSystem</code> uses it.</p><span class="tag">C, Python</span></div>
+    <div class="card"><h4>Through a framework</h4><p>Spark, Hive, Flink read <code>hdfs://</code> paths with this API inside; you rarely see it.</p><span class="tag">Most common</span></div>
+  </div>
+TIP> When you change <code>hdfs://</code> to <code>s3a://bucket/</code> in a path, the same code talks to cloud storage, if the connector jar and credentials are configured. That portability is the main reason the API is an abstract <code>FileSystem</code> class.
+</section>
+
+<!-- ======================= PART 4: STEP BY STEP ======================= -->
+<section class="part" id="steps">
+  <span class="part-label"><b>4</b> Step by step</span>
+  <h2>Two real programs on the lab cluster</h2>
+  <p>Both Java files are in “Run it on your PC” below. We compiled and ran them inside the namenode container, where Java and the Hadoop jars are already installed.</p>
+  <ol class="stepper">
+    <li><h4>Compile and package</h4>
+      <div class="code" data-lang="bash" data-file="Terminal"><pre><code>javac -cp $(hadoop classpath) HdfsBasics.java ItemCount.java
+jar cf hdfs-demo.jar *.class
+hadoop jar hdfs-demo.jar HdfsBasics</code></pre><div class="output">Connected to: hdfs://namenode</div></div>
+      <span class="behind"><code>hadoop classpath</code> lists every Hadoop jar. <code>hadoop jar</code> runs the class with that classpath and the cluster's configuration, so <code>new Configuration()</code> finds <code>fs.defaultFS=hdfs://namenode</code> and <code>FileSystem.get()</code> returns a DistributedFileSystem.</span></li>
+    <li><h4>Write and read back</h4>
+      <div class="code" data-lang="java" data-file="HdfsBasics.java (part)"><pre><code>try (FSDataOutputStream out = fs.create(file, true)) {
+    out.write("order_id,item,amount\n".getBytes(StandardCharsets.UTF_8));
+    out.write("3001,samosa,18\n3002,chai,15\n".getBytes(StandardCharsets.UTF_8));
+}
+try (FSDataInputStream in = fs.open(file); BufferedReader r = ...) {
+    while ((line = r.readLine()) != null) System.out.println("  read: " + line);
+}</code></pre><div class="output">  read: order_id,item,amount
+  read: 3001,samosa,18
+  read: 3002,chai,15</div></div>
+      <span class="behind"><code>create</code> = NameNode create + addBlock; the bytes went through a 3-DataNode pipeline; closing the stream completed the file. <code>open</code> fetched block locations and streamed from a DataNode.</span></li>
+    <li><h4>Metadata and block locations</h4>
+      <div class="code" data-lang="java" data-file="HdfsBasics.java (part)"><pre><code>FileStatus st = fs.getFileStatus(file);
+for (BlockLocation b : fs.getFileBlockLocations(bs, 0, bs.getLen())) ...</code></pre><div class="output">orders.csv  49 bytes  replication 3  block size 128 MB  owner hadoop
+  block at offset 0 length 134,217,728 on ab3b1bedf98a, 46201bb62e68, 264eb9c0f8e2
+  block at offset 134,217,728 length 6,542,542 on ab3b1bedf98a, 46201bb62e68, 264eb9c0f8e2</div></div>
+      <span class="behind">The hosts are Docker container IDs: datanode-1, datanode-2 and datanode-3. <code>orders_x30.csv</code> (140,760,270 bytes) has a full 128 MB block plus a 6.5 MB tail block. A job scheduler uses exactly this list to run tasks next to the data.</span></li>
+    <li><h4>List, rename, delete</h4>
+      <div class="code" data-lang="java" data-file="HdfsBasics.java (part)"><pre><code>System.out.println("rename: " + fs.rename(file, renamed));
+System.out.println("exists after rename: " + fs.exists(file));
+System.out.println("delete: " + fs.delete(dir, true));</code></pre><div class="output">  ls: hdfs://namenode/user/hadoop/api_demo/orders.csv
+rename: true
+exists after rename: false
+delete: true</div></div>
+      <span class="behind">Both return booleans. A rename to a missing parent folder returns <code>false</code> without an exception, so check it. <code>delete(dir, true)</code> removed the folder and the file permanently: the API skips the trash.</span></li>
+    <li><h4>Count items in one file</h4>
+      <div class="code" data-lang="bash" data-file="Terminal"><pre><code>hadoop jar hdfs-demo.jar ItemCount /user/hadoop/data/canteen_orders.csv</code></pre><div class="output">chai      50,170
+dosa      49,948
+idli      49,984
+poha      49,891
+samosa    50,021
+vada pav  49,986
+took 1327 ms in one JVM</div></div>
+      <span class="behind">300,000 orders (4.5 MB) streamed through one client in 1.3 seconds, including connecting. The program reads the file block after block like <code>-cat</code> does.</span></li>
+    <li><h4>Same program, 90× the data, and a bug</h4>
+      <div class="code" data-lang="bash" data-file="Terminal"><pre><code>hadoop jar hdfs-demo.jar ItemCount /user/hadoop/data/orders_x90.csv</code></pre><div class="output">chai      4,515,300
+dosa      4,495,320
+idli      4,498,560
+item      89
+poha      4,490,190
+samosa    4,501,890
+vada pav  4,498,740
+took 5890 ms in one JVM</div></div>
+      <span class="behind">403 MB took 5.9 s: about 68 MB/s through one client. A 4 TB file would take about 17 hours this way, which is why MapReduce (Module 8) runs one reader per block in parallel. And “item 89”: <code>orders_x90.csv</code> was made by concatenating the file 90 times, so 89 header lines sit inside the data. HDFS stores bytes; cleaning data is the program's job.</span></li>
+    <li><h4>The same file over HTTP: WebHDFS</h4>
+      <div class="code" data-lang="bash" data-file="Terminal"><pre><code>curl -s "http://namenode:9870/webhdfs/v1/user/hadoop/canteen/raw/day1.csv?op=GETFILESTATUS&amp;user.name=hadoop"
+curl -s -i "http://namenode:9870/webhdfs/v1/user/hadoop/canteen/raw/day1.csv?op=OPEN&amp;user.name=hadoop" | grep -iE "^HTTP|^Location"</code></pre><div class="output">{"FileStatus":{"accessTime":1792579946689,"blockSize":134217728,"childrenNum":0,"fileId":16425,"group":"supergroup","length":47,"modificationTime":1792575484677,"owner":"hadoop","pathSuffix":"","permission":"640","replication":3,"storagePolicy":0,"type":"FILE"}}
+HTTP/1.1 307 Temporary Redirect
+Location: http://46201bb62e68:9864/webhdfs/v1/user/hadoop/canteen/raw/day1.csv?op=OPEN&amp;user.name=hadoop&amp;namenoderpcaddress=namenode:8020&amp;offset=0</div></div>
+      <span class="behind">The NameNode answers metadata itself but never sends file data: for OPEN it redirects (HTTP 307) to a DataNode (datanode-2, port 9864). The same split as the Java client, in plain HTTP.</span></li>
+  </ol>
+WARN> Don't call <code>fs.close()</code> on the instance from <code>FileSystem.get()</code> in a long-running server: it is shared, and other parts of the application will start failing with “Filesystem closed”. Close streams, keep the FileSystem open (or use <code>FileSystem.newInstance()</code>). Our short demo programs close it on exit, which is fine.
+</section>
+
+<!-- ======================= PART 5: SEE IT HAPPEN ======================= -->
+<section class="part" id="animation">
+  <span class="part-label"><b>5</b> See it happen</span>
+  <h2>Six API calls, and who answers each</h2>
+  <p>The calls from <code>HdfsBasics</code>, in order.</p>
+  <div class="anim" data-frames="6">
+    <div class="anim__title">From Java call to NameNode and DataNodes <span>6 steps</span></div>
+    <div class="anim__views">
+      <div class="view view--see">
+        <span class="view__tag">What you see</span>
+        <svg viewBox="0 0 360 250" role="img" aria-label="Java calls and their output">
+          <rect x="14" y="14" width="332" height="206" rx="8" class="s-board"/>
+          <text x="26" y="32" font-size="9" class="mono" style="fill:#7F8C86">HdfsBasics.java</text>
+          <g data-on="1"><text x="26" y="56" font-size="8.6" class="mono" style="fill:#F5C77E">fs = FileSystem.get(conf);</text><text x="26" y="80" font-size="8.6" class="mono" style="fill:#9FD3B8">Connected to: hdfs://namenode</text></g>
+          <g data-on="2"><text x="26" y="56" font-size="8.6" class="mono" style="fill:#F5C77E">out = fs.create(file, true);</text><text x="26" y="80" font-size="8.6" class="mono" style="fill:#7F8C86">(no output)</text></g>
+          <g data-on="3"><text x="26" y="56" font-size="8.6" class="mono" style="fill:#F5C77E">out.write(...); out.close();</text><text x="26" y="80" font-size="8.6" class="mono" style="fill:#7F8C86">(no output: 49 bytes stored)</text></g>
+          <g data-on="4"><text x="26" y="56" font-size="8.6" class="mono" style="fill:#F5C77E">in = fs.open(file);</text><text x="26" y="80" font-size="8.6" class="mono" style="fill:#7F8C86">(no output yet)</text></g>
+          <g data-on="5"><text x="26" y="56" font-size="8.6" class="mono" style="fill:#F5C77E">r.readLine() ...</text><text x="26" y="80" font-size="8.6" class="mono" style="fill:#9FD3B8">read: order_id,item,amount</text><text x="26" y="96" font-size="8.6" class="mono" style="fill:#9FD3B8">read: 3001,samosa,18</text><text x="26" y="112" font-size="8.6" class="mono" style="fill:#9FD3B8">read: 3002,chai,15</text></g>
+          <g data-on="6"><text x="26" y="56" font-size="8.6" class="mono" style="fill:#F5C77E">fs.rename(...); fs.delete(dir, true);</text><text x="26" y="80" font-size="8.6" class="mono" style="fill:#9FD3B8">rename: true</text><text x="26" y="96" font-size="8.6" class="mono" style="fill:#9FD3B8">delete: true</text></g>
+          <text x="352" y="244" text-anchor="end" class="s-wm">myphatshala.in</text>
+        </svg>
+        <ol class="caps" hidden>
+          <li><code>FileSystem.get</code> reads the configuration and connects.</li>
+          <li><code>create</code> returns an output stream.</li>
+          <li>Writing and closing stores the file.</li>
+          <li><code>open</code> returns an input stream.</li>
+          <li>Reading prints the three lines.</li>
+          <li>Rename and delete both return true.</li>
+        </ol>
+      </div>
+
+      <div class="view view--behind">
+        <span class="view__tag">Behind the screen</span>
+        <svg viewBox="0 0 360 250" role="img" aria-label="Client JVM, NameNode and DataNodes">
+          <rect x="14" y="20" width="96" height="150" rx="8" class="s-soft-acc" style="stroke:var(--track)"/>
+          <text x="62" y="40" text-anchor="middle" font-size="9" font-weight="700" class="s-acc">your JVM</text>
+          <text x="62" y="62" text-anchor="middle" font-size="8.6" class="s-ink">FileSystem</text>
+          <text x="62" y="76" text-anchor="middle" font-size="8.6" class="s-ink2">= Distributed-</text>
+          <text x="62" y="90" text-anchor="middle" font-size="8.6" class="s-ink2">FileSystem</text>
+          <text x="62" y="112" text-anchor="middle" font-size="8.6" class="s-ink">DFSClient</text>
+          <rect x="200" y="20" width="140" height="40" rx="6" class="s-board"/><text x="270" y="44" text-anchor="middle" font-size="9" font-weight="700" class="s-chalk">NameNode :8020</text>
+          <rect x="200" y="100" width="40" height="36" rx="6" class="s-soft-green" style="stroke:var(--green)"/><text x="220" y="122" text-anchor="middle" font-size="8.6" class="s-green">dn1</text>
+          <rect x="250" y="100" width="40" height="36" rx="6" class="s-soft-green" style="stroke:var(--green)"/><text x="270" y="122" text-anchor="middle" font-size="8.6" class="s-green">dn2</text>
+          <rect x="300" y="100" width="40" height="36" rx="6" class="s-soft-green" style="stroke:var(--green)"/><text x="320" y="122" text-anchor="middle" font-size="8.6" class="s-green">dn3</text>
+          <g data-on="1"><text x="180" y="196" text-anchor="middle" font-size="9" class="s-ink2">fs.defaultFS = hdfs://namenode → DistributedFileSystem</text></g>
+          <g data-on="2"><path d="M110 40h90" style="fill:none;stroke:var(--track);stroke-width:2.4"/><text x="155" y="34" text-anchor="middle" font-size="8.6" class="s-acc">create</text><text x="180" y="196" text-anchor="middle" font-size="9" class="s-ink2">RPC create: a new, empty file in the namespace</text></g>
+          <g data-on="3"><path d="M110 50h90" style="fill:none;stroke:var(--track);stroke-width:2"/><path d="M110 118h90M240 118h10M290 118h10" style="fill:none;stroke:var(--blue);stroke-width:3"/><text x="180" y="196" text-anchor="middle" font-size="9" class="s-ink2">addBlock, pipeline dn1→dn2→dn3, then complete</text></g>
+          <g data-on="4"><path d="M110 40h90" style="fill:none;stroke:var(--track);stroke-width:2.4"/><text x="155" y="34" text-anchor="middle" font-size="8.6" class="s-acc">getBlockLocations</text><text x="180" y="196" text-anchor="middle" font-size="9" class="s-ink2">NameNode returns sorted replica locations</text></g>
+          <g data-on="5"><path d="M200 128H110" style="fill:none;stroke:var(--blue);stroke-width:3"/><text x="180" y="196" text-anchor="middle" font-size="9" class="s-ink2">bytes stream from one DataNode, checksums verified</text></g>
+          <g data-on="6"><path d="M110 40h90" style="fill:none;stroke:var(--track);stroke-width:2.4"/><text x="155" y="34" text-anchor="middle" font-size="8.6" class="s-acc">rename, delete</text><text x="180" y="196" text-anchor="middle" font-size="9" class="s-ink2">metadata only; blocks deleted later by DataNodes</text></g>
+          <text x="352" y="246" text-anchor="end" class="s-wm">myphatshala.in</text>
+        </svg>
+        <ol class="caps" hidden>
+          <li>The configuration's <code>fs.defaultFS</code> picks DistributedFileSystem, which wraps a DFSClient.</li>
+          <li><code>create</code> is one RPC to the NameNode: the file exists, still empty and open for writing.</li>
+          <li><code>write</code> + <code>close</code>: addBlock, the DataNode pipeline (Lesson 6.1), then complete.</li>
+          <li><code>open</code> asks the NameNode where the blocks are (Lesson 6.2).</li>
+          <li>Reading streams bytes directly from a DataNode.</li>
+          <li><code>rename</code> and <code>delete</code> touch only the NameNode.</li>
+        </ol>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ======================= PART 6: REAL-WORLD USE ======================= -->
+<section class="part" id="real-world">
+  <span class="part-label"><b>6</b> Real-world use</span>
+  <h2>The API at work</h2>
+
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="20" y="20" width="80" height="50" rx="6" class="s-soft-acc" style="stroke:var(--track)"/><text x="60" y="42" text-anchor="middle" font-size="8.6" font-weight="700" class="s-acc">ingest service</text><text x="60" y="58" text-anchor="middle" font-size="8.6" class="s-ink">hflush()</text></svg></div>
+    <div><h4>1. Ingestion services</h4>
+      <p>Services that collect events (from Kafka, logs or apps) keep an HDFS file open, write records and call <code>hflush()</code> regularly so readers see recent data, then roll to a new file every hour.</p>
+      <div class="uc-flow"><span>Events</span><i>→</i><span class="java">create + write + hflush</span><i>→</i><span>Hourly files</span></div></div>
+  </div>
+
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="20" y="20" width="80" height="50" rx="6" class="s-board"/><text x="60" y="42" text-anchor="middle" font-size="8.6" class="mono" style="fill:#9FD3B8">hdfs:// → s3a://</text><text x="60" y="58" text-anchor="middle" font-size="8.6" class="mono" style="fill:#F5C77E">same code</text></svg></div>
+    <div><h4>2. Moving to the cloud</h4>
+      <p>Teams migrating from on-premise Hadoop to cloud object stores often change only paths and configuration: Spark and Hive jobs keep working because they talk to the <code>FileSystem</code> abstraction.</p>
+      <div class="uc-flow"><span>hdfs:// paths</span><i>→</i><span class="java">FileSystem API</span><i>→</i><span>s3a:// paths</span></div></div>
+  </div>
+
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="20" y="20" width="80" height="50" rx="6" class="s-soft-blue" style="stroke:var(--blue)"/><text x="60" y="42" text-anchor="middle" font-size="8.6" font-weight="700" class="s-blue">WebHDFS</text><text x="60" y="58" text-anchor="middle" font-size="8.6" class="s-ink">Python, dashboards</text></svg></div>
+    <div><h4>3. Non-Java tools</h4>
+      <p>Dashboards and Python scripts read result files through WebHDFS or HttpFS (a gateway that also hides the DataNodes), with no Hadoop installation on the client.</p>
+      <div class="uc-flow"><span>Python app</span><i>→</i><span class="java">HTTP/JSON</span><i>→</i><span>HDFS</span></div></div>
+  </div>
+
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="20" y="20" width="80" height="50" rx="6" class="s-card2"/><text x="60" y="42" text-anchor="middle" font-size="8.6" font-weight="700" class="s-ink">small-file report</text><text x="60" y="58" text-anchor="middle" font-size="8.6" class="s-ink2">listFiles(…, true)</text></svg></div>
+    <div><h4>4. Housekeeping tools</h4>
+      <p>Admins write small Java tools that walk the namespace once with <code>listFiles(dir, true)</code> to find small files, old data or wrong replication, far faster than thousands of shell calls.</p>
+      <div class="uc-flow"><span>listFiles</span><i>→</i><span class="java">Filter in Java</span><i>→</i><span>Report or fix</span></div></div>
+  </div>
+  <p class="muted">Simplified; organisations differ in tools and policies.</p>
+</section>

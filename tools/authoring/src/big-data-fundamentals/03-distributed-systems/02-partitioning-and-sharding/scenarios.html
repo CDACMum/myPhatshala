@@ -1,0 +1,40 @@
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">System design · partitioning</span><span class="scn__tag scn__tag--level">Fresher</span></div>
+      <h4>Choose a shard key for a chat app</h4>
+      <p class="scn__situation">A chat app stores messages. The main screens are “messages in this conversation, newest first” and “my conversations”. Messages reach crores per day. How would you partition the messages table?</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> can you choose a key from the access pattern and spot hotspots?</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <p>Partition by <code>conversation_id</code> (all messages of a chat together, so one query reads one partition), clustered by time descending. Bound partition size for huge group chats by adding a time bucket: <code>(conversation_id, month)</code>. Keep “my conversations” in a separate table partitioned by <code>user_id</code>. Avoid partitioning by date (write hotspot) or by user for messages (a conversation would span many partitions).</p>
+        <p class="scn__avoid"><b>Avoid:</b> picking a key without saying which queries it serves.</p>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Operations · rebalancing</span><span class="scn__tag scn__tag--level">1–3 years</span></div>
+      <h4>We need to go from 8 to 12 shards</h4>
+      <p class="scn__situation">A sharded MySQL setup uses <code>user_id % 8</code>. Growth means you need 12 shards. How do you migrate safely?</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> do you understand the cost of mod-N resharding and safe migration steps?</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ol><li>Recognise that changing the modulus moves most users. Consider moving to a directory-based or consistent-hash scheme, or to many logical shards (for example 1,024) mapped onto physical servers, so future growth moves whole logical shards.</li><li>Copy data to the new layout in the background, then dual-write new changes to old and new locations.</li><li>Verify counts and checksums per user range.</li><li>Switch reads gradually, then writes; keep a rollback path.</li><li>Finally, clean up the old copies.</li></ol>
+        <p class="scn__avoid"><b>Avoid:</b> changing the modulus in production and copying everything in one big bang.</p>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Streaming · Kafka</span><span class="scn__tag scn__tag--level">1–3 years</span></div>
+      <h4>Order events are processed out of order</h4>
+      <p class="scn__situation">Consumers sometimes process “order delivered” before “order placed” for the same order. The topic has 12 partitions and producers don’t set a message key.</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> do you know how Kafka partitioning affects ordering?</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <p>Without a key, messages are spread across partitions, and Kafka guarantees order only within one partition. Set the message key to <code>order_id</code> so all events for an order go to the same partition and are consumed in order by one consumer. Choose enough partitions for the needed parallelism, and watch for hot keys. Changing partition count later remaps keys, so plan it up front.</p>
+        <p class="scn__avoid"><b>Avoid:</b> adding a sleep in consumers or using a single partition for everything.</p>
+      </div></details>
+    </article>
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Fundamentals · interview</span><span class="scn__tag scn__tag--level">Fresher</span></div>
+      <h4>“What is the difference between partitioning and replication?”</h4>
+      <p class="scn__situation">Interviewers often ask this to check basic distributed-systems vocabulary.</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> can you separate splitting data from copying data?</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <p><b>Partitioning (sharding)</b> splits data into parts so each node stores and processes only a subset; it increases capacity and throughput. <b>Replication</b> stores copies of the same data on several nodes; it increases availability, durability and read capacity. Real systems use both: each partition is replicated (for example HDFS blocks with 3 replicas, Kafka partitions with a replication factor, Cassandra partitions on several nodes).</p>
+        <p class="scn__avoid"><b>Avoid:</b> using the two words as if they mean the same thing.</p>
+      </div></details>
+    </article>

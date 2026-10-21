@@ -1,0 +1,4319 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>What is a cluster? Masters and workers | MyPhatshala</title>
+<meta name="description" content="What a computer cluster is, the master–worker architecture, heartbeats and timeouts, how a master assigns tasks and recovers from a dead worker, and how Hadoop uses masters and workers in HDFS and YARN. With animations, a cluster playground, Python simulations, quiz and interview scenarios.">
+<meta name="mp:minutes" content="25">
+<link rel="canonical" href="https://myphatshala.in/courses/hadoop/01-foundations/02-what-is-a-cluster-masters-and-workers/">
+<meta property="og:title" content="What is a cluster? Masters and workers · MyPhatshala">
+<meta property="og:description" content="A cluster is a team of computers. Meet the masters that coordinate, the workers that do the work, and the heartbeats between them.">
+<link rel="icon" href="../../../../assets/img/logo.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Fraunces:ital,opsz,wght@0,9..144,600;0,9..144,700;1,9..144,600&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../../../../assets/css/style.css">
+<link rel="stylesheet" href="../../../../assets/css/lesson.css">
+<link rel="stylesheet" href="../../../../assets/css/cluster-sim.css">
+<script src="../../../../assets/js/config.js"></script>
+<script>try { const t = localStorage.getItem("mp-theme"); if (t) document.documentElement.dataset.theme = t; } catch (e) {}</script>
+<script type="application/ld+json">{"@context": "https://schema.org", "@type": "LearningResource", "name": "What is a cluster? Masters and workers", "learningResourceType": "Lesson", "educationalLevel": "Beginner → Intermediate", "isAccessibleForFree": true, "inLanguage": "en", "isPartOf": {"@type": "Course", "name": "Apache Hadoop", "provider": {"@type": "Organization", "name": "MyPhatshala"}}}</script>
+</head>
+<body style="--track:#B45309" data-lesson="01-foundations/02-what-is-a-cluster-masters-and-workers" data-course-root="../../">
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="site-header">
+  <div class="wrap">
+    <a class="brand" href="../../../../" aria-label="MyPhatshala home"><img src="../../../../assets/img/logo.svg" width="34" height="34" alt=""><span>My<b>Phatshala</b></span></a>
+    <nav class="nav" aria-label="Main">
+      <a href="../../../../#tracks">All courses</a>
+      <a href="../../">Apache Hadoop syllabus</a>
+      <button class="theme-btn" id="theme-btn" aria-label="Toggle dark mode"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg></button>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+<section class="lesson-hero">
+  <div class="wrap">
+    <nav class="crumbs" aria-label="Breadcrumb"><a href="../../../../">Home</a><span>›</span><a href="../../../../#track-big-data">Big Data Engineering</a><span>›</span><a href="../../">Apache Hadoop</a><span>›</span><b>Lesson 1.2</b></nav>
+    <h1>What is a cluster? Masters and workers</h1>
+    <p class="lead">A cluster is many computers acting as one. This lesson explains how: one or two masters keep track of everything, many workers store data and run tasks, and heartbeats every few seconds tell the master who is still alive. You will watch a worker die in the middle of a job and see the master quietly give its work to others, then do it yourself in the Cluster Playground.</p>
+    <div class="lesson-meta"><span>Module 1 · Foundations: before Hadoop</span><span>⏱ 25 min</span><span>Beginner → Intermediate</span><span>Cluster Playground</span><span>Runs in your browser (Python)</span><span>Master and workers on your PC</span><span>8 practice problems</span></div>
+  </div>
+</section>
+
+<div class="wrap lesson-layout">
+<article class="lesson-main">
+<!-- ======================= PART 1: THE STORY ======================= -->
+<section class="part" id="story">
+  <span class="part-label"><b>1</b> The story</span>
+  <h2>The head chef who never cooks</h2>
+  <div class="story">
+    <p class="narration">It is the college fest, and the canteen must serve 3,000 plates of pav bhaji in two hours. Arjun Sir takes Riya and Kabir into the kitchen. Eight cooks are working at eight stoves. One person, the head chef, is not cooking at all. She holds a clipboard, calls out orders, and keeps looking at every stove.</p>
+
+    <div class="scene">
+      <svg viewBox="0 0 640 180" role="img" aria-label="A head chef with a clipboard gives orders to four cooks at stoves. One cook has stopped; the chef moves his order to another cook.">
+        <g font-size="10">
+          <rect x="250" y="10" width="140" height="56" rx="10" class="s-board"/>
+          <text x="320" y="30" text-anchor="middle" font-weight="700" class="s-chalk">Head chef (master)</text>
+          <text x="320" y="46" text-anchor="middle" font-size="8.6" style="fill:#9FD3B8">who cooks what · who is free</text>
+          <text x="320" y="59" text-anchor="middle" font-size="8.6" style="fill:#F5C77E">does not cook herself</text>
+          <path d="M320 66v16M80 82h480M80 82v12M240 82v12M400 82v12M560 82v12" class="s-line"/>
+          <g>
+            <rect x="20" y="96" width="120" height="58" rx="8" class="s-card2"/><text x="80" y="114" text-anchor="middle" font-weight="700" class="s-ink">Cook 1 (worker)</text><text x="80" y="132" text-anchor="middle" font-size="8.6" class="s-green">order 1 ✓ order 5 …</text>
+            <rect x="180" y="96" width="120" height="58" rx="8" class="s-card2"/><text x="240" y="114" text-anchor="middle" font-weight="700" class="s-ink">Cook 2 (worker)</text><text x="240" y="132" text-anchor="middle" font-size="8.6" class="s-green">order 2 ✓ order 6 …</text>
+            <rect x="340" y="96" width="120" height="58" rx="8" class="s-soft-acc" style="stroke:#D64545;stroke-width:1.5"/><text x="400" y="114" text-anchor="middle" font-weight="700" class="s-red">Cook 3: burnt hand</text><text x="400" y="132" text-anchor="middle" font-size="8.6" class="s-red">order 3 stopped</text>
+            <rect x="500" y="96" width="120" height="58" rx="8" class="s-card2"/><text x="560" y="114" text-anchor="middle" font-weight="700" class="s-ink">Cook 4 (worker)</text><text x="560" y="132" text-anchor="middle" font-size="8.6" class="s-acc" font-weight="700">+ order 3 (moved)</text>
+          </g>
+          <path d="M470 125h20" class="s-line"/><path d="M486 121l6 4-6 4" class="s-line"/>
+        </g>
+        <text x="320" y="174" text-anchor="middle" font-size="10" class="s-ink2">One <tspan font-weight="700" class="s-acc">master</tspan> coordinates, many <tspan font-weight="700" class="s-acc">workers</tspan> do the work. A failed worker's job is simply given to someone else.</text>
+        <text x="632" y="174" text-anchor="end" class="s-wm">myphatshala.in</text>
+      </svg>
+    </div>
+
+    <div class="panel"><div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#FCE6D6"/><path d="M14 64c2-12 9-18 18-18s16 6 18 18z" fill="#2E5AAC"/><circle cx="32" cy="29" r="12" fill="#C68B5E"/><path d="M19 29c0-10 6-15 13-15s13 5 13 15c-3-5-7-8-13-8s-10 3-13 8z" fill="#2A1B14"/><path d="M43 27c3 6 3 14 0 20" stroke="#2A1B14" stroke-width="4" fill="none" stroke-linecap="round"/><circle cx="27.5" cy="30" r="1.5" fill="#2A1B14"/><circle cx="36.5" cy="30" r="1.5" fill="#2A1B14"/><path d="M28 35q4 3 8 0" stroke="#2A1B14" stroke-width="1.6" fill="none" stroke-linecap="round"/><circle cx="32" cy="24" r="1.2" fill="#D64545"/></svg></div><div class="bubble"><b class="who">Riya</b><p>Sir, why isn't the head chef cooking? With nine people cooking, we'd be faster.</p></div></div>
+    <div class="panel panel--right"><div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#DDEFE6"/><path d="M12 64c2-12 10-18 20-18s18 6 20 18z" fill="#F4F1EA"/><path d="M28 46l4 8 4-8" fill="#2F7D5B"/><circle cx="32" cy="28" r="12" fill="#B57A50"/><path d="M20 26c0-8 5-13 12-13s12 5 12 13c-2-3-6-5-12-5s-10 2-12 5z" fill="#5A5A5A"/><path d="M22 32c1 8 5 11 10 11s9-3 10-11c-2 3-6 4-10 4s-8-1-10-4z" fill="#5A5A5A"/><circle cx="27" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><circle cx="37" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><path d="M30.4 29h3.2" stroke="#1B2433" stroke-width="1.4"/><circle cx="27" cy="29" r="1.1" fill="#1B2433"/><circle cx="37" cy="29" r="1.1" fill="#1B2433"/></svg></div><div class="bubble"><b class="who">Arjun Sir</b><p>Watch what happens when cook 3 burns his hand. Who notices? Who gives his order to cook 4? Who knows that 2,400 plates are done and 600 are left?</p></div></div>
+    <div class="panel"><div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#E1E9F7"/><path d="M12 64c2-12 10-18 20-18s18 6 20 18z" fill="#B45309"/><circle cx="32" cy="29" r="12" fill="#A9714A"/><path d="M19 27c0-9 6-14 13-14s13 5 13 14c-2-4-5-6-8-6-3 3-9 4-13 3-2 1-4 2-5 3z" fill="#1E1A17"/><circle cx="27.5" cy="30" r="1.5" fill="#1E1A17"/><circle cx="36.5" cy="30" r="1.5" fill="#1E1A17"/><path d="M27 35.5q5 3.5 10 0" stroke="#1E1A17" stroke-width="1.6" fill="none" stroke-linecap="round"/><rect x="41" y="40" width="10" height="7" rx="1.5" fill="#2E5AAC"/></svg></div><div class="bubble"><b class="who">Kabir</b><p>The head chef. Without her, the cooks would make the same order twice, or forget some.</p></div></div>
+    <div class="panel panel--right"><div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#DDEFE6"/><path d="M12 64c2-12 10-18 20-18s18 6 20 18z" fill="#F4F1EA"/><path d="M28 46l4 8 4-8" fill="#2F7D5B"/><circle cx="32" cy="28" r="12" fill="#B57A50"/><path d="M20 26c0-8 5-13 12-13s12 5 12 13c-2-3-6-5-12-5s-10 2-12 5z" fill="#5A5A5A"/><path d="M22 32c1 8 5 11 10 11s9-3 10-11c-2 3-6 4-10 4s-8-1-10-4z" fill="#5A5A5A"/><circle cx="27" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><circle cx="37" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><path d="M30.4 29h3.2" stroke="#1B2433" stroke-width="1.4"/><circle cx="27" cy="29" r="1.1" fill="#1B2433"/><circle cx="37" cy="29" r="1.1" fill="#1B2433"/></svg></div><div class="bubble"><b class="who">Arjun Sir</b><p>Exactly. A <b>cluster</b> works the same way. Many computers, the <b>workers</b>, do the real work. One or two computers, the <b>masters</b>, keep track of everything: which worker is alive, which piece of work is where, what is finished.</p></div></div>
+    <div class="panel"><div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#FCE6D6"/><path d="M14 64c2-12 9-18 18-18s16 6 18 18z" fill="#2E5AAC"/><circle cx="32" cy="29" r="12" fill="#C68B5E"/><path d="M19 29c0-10 6-15 13-15s13 5 13 15c-3-5-7-8-13-8s-10 3-13 8z" fill="#2A1B14"/><path d="M43 27c3 6 3 14 0 20" stroke="#2A1B14" stroke-width="4" fill="none" stroke-linecap="round"/><circle cx="27.5" cy="30" r="1.5" fill="#2A1B14"/><circle cx="36.5" cy="30" r="1.5" fill="#2A1B14"/><path d="M28 35q4 3 8 0" stroke="#2A1B14" stroke-width="1.6" fill="none" stroke-linecap="round"/><circle cx="32" cy="24" r="1.2" fill="#D64545"/></svg></div><div class="bubble"><b class="who">Riya</b><p>And the workers tell the master they are still alive?</p></div></div>
+    <div class="panel panel--right"><div class="avatar" aria-hidden="true"><svg viewBox="0 0 64 64"><rect width="64" height="64" fill="#DDEFE6"/><path d="M12 64c2-12 10-18 20-18s18 6 20 18z" fill="#F4F1EA"/><path d="M28 46l4 8 4-8" fill="#2F7D5B"/><circle cx="32" cy="28" r="12" fill="#B57A50"/><path d="M20 26c0-8 5-13 12-13s12 5 12 13c-2-3-6-5-12-5s-10 2-12 5z" fill="#5A5A5A"/><path d="M22 32c1 8 5 11 10 11s9-3 10-11c-2 3-6 4-10 4s-8-1-10-4z" fill="#5A5A5A"/><circle cx="27" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><circle cx="37" cy="29" r="3.4" fill="none" stroke="#1B2433" stroke-width="1.4"/><path d="M30.4 29h3.2" stroke="#1B2433" stroke-width="1.4"/><circle cx="27" cy="29" r="1.1" fill="#1B2433"/><circle cx="37" cy="29" r="1.1" fill="#1B2433"/></svg></div><div class="bubble"><b class="who">Arjun Sir</b><p>Every few seconds. It's called a <b>heartbeat</b>. In Hadoop, a worker that stays silent for long enough is treated as dead, and its work is given to someone else. That's the whole lesson today: what makes a group of computers a cluster, and how masters and workers share the job.</p></div></div>
+  </div>
+</section>
+
+<!-- ======================= PART 2: DEFINITION ======================= -->
+<section class="part" id="definition">
+  <span class="part-label"><b>2</b> Definition</span>
+  <h2>What is a cluster?</h2>
+  <div class="def">
+    <div class="def__formal"><small>Formal definition (write this in exams)</small>
+      <p>A <b>cluster</b> is a set of independent computers (<b>nodes</b>) connected by a network and managed by software so that they work together as a single system. In the <b>master–worker</b> (also called master–slave or coordinator–worker) architecture, one or more <b>master nodes</b> hold the cluster's metadata, monitor worker health through periodic <b>heartbeats</b> and assign work, while many <b>worker nodes</b> store data and execute tasks. Hadoop uses this architecture twice: in HDFS (NameNode and DataNodes) and in YARN (ResourceManager and NodeManagers).</p></div>
+    <div class="def__simple"><small>In simple words</small>
+      <p>A cluster is a team of computers that behaves like one big computer. The <b>master</b> is the team leader: it remembers where everything is and gives out the work. The <b>workers</b> do the work and keep saying “I'm alive and here's my progress”. If a worker goes quiet, the master gives its work to another worker.</p></div>
+  </div>
+
+  <h3>Words you'll meet in this lesson</h3>
+  <div class="terms">
+    <div class="term"><b>Cluster</b><span>Networked computers that work together as one system.</span></div>
+    <div class="term"><b>Master node</b><span>Coordinates the cluster: keeps metadata, tracks workers, assigns work. Does little of the actual work.</span></div>
+    <div class="term"><b>Worker node</b><span>Stores data and runs tasks given by the master. Clusters have many.</span></div>
+    <div class="term"><b>Heartbeat</b><span>A short, regular “I'm alive” message from a worker to the master, often carrying status.</span></div>
+    <div class="term"><b>Task</b><span>A small piece of a big job, run on one worker.</span></div>
+    <div class="term"><b>Metadata</b><span>Data about the data: file names, where each piece is stored, who is running what.</span></div>
+    <div class="term"><b>Shared-nothing</b><span>Each node has its own CPU, RAM and disks; nodes share only the network. Hadoop clusters are shared-nothing.</span></div>
+    <div class="term"><b>Single point of failure (SPOF)</b><span>A part whose failure stops everything, like a master with no backup.</span></div>
+  </div>
+
+  <h3>Masters and workers in Hadoop</h3>
+  <table class="facts">
+    <tr><th>Storage (HDFS)</th><td>Master: <b>NameNode</b> (file names, blocks, locations). Workers: <b>DataNodes</b> (store the blocks).</td></tr>
+    <tr><th>Compute (YARN)</th><td>Master: <b>ResourceManager</b> (hands out CPU and memory). Workers: <b>NodeManagers</b> (run tasks in containers).</td></tr>
+    <tr><th>Per job</th><td>An <b>ApplicationMaster</b> runs on one worker and manages that one job's tasks.</td></tr>
+    <tr><th>HDFS heartbeat interval</th><td>every <b>3 seconds</b> by default (<code>dfs.heartbeat.interval</code>)</td></tr>
+    <tr><th>DataNode declared dead after</th><td>about <b>10 minutes 30 seconds</b> without a heartbeat, by default</td></tr>
+    <tr><th>Typical worker node usage</th><td>One machine usually runs <b>both</b> a DataNode and a NodeManager, so the compute sits next to the data.</td></tr>
+  </table>
+
+  <h3 id="levels">Clusters at three levels</h3>
+  <div class="modlab levels"><div class="modlab__bar"><b>Pick your level. New to this? Start at Beginner and climb.</b><button type="button" data-mod="b">Beginner</button><button type="button" data-mod="i">Intermediate</button><button type="button" data-mod="a">Advanced</button></div>
+    <div class="modlab__panel" data-mod="b"><h4><span class="lvl lvl--b">Beginner</span> A team with a leader</h4>
+      <ul>
+        <li>One <b>leader</b> (master) and many <b>members</b> (workers).</li>
+        <li>The leader keeps a list: who is present, who is doing what, what is done.</li>
+        <li>Members report in regularly (heartbeat). Someone who stops reporting is assumed absent, and their work is given to others.</li>
+        <li>To the outside world, the team looks like one unit: you give the job to the leader, not to each member.</li>
+      </ul>
+
+    </div>
+    <div class="modlab__panel" data-mod="i"><h4><span class="lvl lvl--i">Intermediate</span> What the master keeps, and what the workers send</h4>
+      <ul>
+        <li><b>The master's table:</b> worker list, last heartbeat time of each, resources free on each, which task is on which worker, and (for storage) which piece of data is on which worker.</li>
+        <li><b>The heartbeat:</b> “I'm alive”, plus useful numbers: free disk, free memory, running tasks, finished tasks. In HDFS, DataNodes also send a full <b>block report</b> (the list of blocks on their disks) every few hours, and on start-up.</li>
+        <li><b>The reply:</b> the master often answers a heartbeat with instructions: “start this task”, “copy this block to node 9”, “delete that block”.</li>
+        <li><b>Timeouts:</b> the master doesn't declare a worker dead after one missed heartbeat; networks hiccup. It waits for a timeout, then acts.</li>
+      </ul>
+
+    </div>
+    <div class="modlab__panel" data-mod="a"><h4><span class="lvl lvl--a">Advanced</span> Design choices behind Hadoop's clusters</h4>
+      <ul>
+        <li><b>Master–worker vs peer-to-peer:</b> Hadoop uses masters because one source of truth for metadata is simple and consistent. Systems like Cassandra are <b>peer-to-peer</b> (no master); every node is equal and they agree using gossip, which avoids a master bottleneck but makes coordination harder.</li>
+        <li><b>The master can be a bottleneck:</b> the NameNode keeps all metadata in RAM (very roughly 150 bytes per file, directory or block object), so millions of tiny files can exhaust it. That's the “small files problem” (Module 7).</li>
+        <li><b>The master can be a SPOF:</b> early Hadoop had one NameNode. Hadoop 2 added <b>High Availability</b>: an active and a standby NameNode with automatic failover via ZooKeeper (Module 7).</li>
+        <li><b>Shared-nothing</b> lets the cluster grow just by adding nodes, unlike HPC clusters that share a central storage system.</li>
+        <li><b>Workers are cattle, masters are pets:</b> a dead worker is replaced without fuss; masters are protected and backed up carefully.</li>
+      </ul>
+
+    </div>
+  </div>
+  <div class="callout callout--exam"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19V5a2 2 0 0 1 2-2h12v18H6a2 2 0 0 1-2-2zm0 0a2 2 0 0 1 2-2h12"/></svg><p><b>Exam tip:</b> For “Explain the master–slave architecture of Hadoop”, draw two pictures: <b>NameNode + DataNodes</b> (storage) and <b>ResourceManager + NodeManagers</b> (compute). Mention <b>heartbeats</b>, what the master stores (metadata), what workers do (store blocks, run tasks), and that the master is a potential single point of failure solved by HA.</p></div>
+</section>
+
+<!-- ======================= PART 3: TYPES AND WAYS TO USE IT ======================= -->
+<section class="part" id="types">
+  <span class="part-label"><b>3</b> Types and ways to use it</span>
+  <h2>Kinds of clusters, and two ways to organise them</h2>
+  <div class="cards">
+    <div class="card"><h4>Big data cluster</h4><p>Shared-nothing nodes, each with its own disks. Data is spread over the nodes and processed where it is stored. Hadoop, Spark, Kafka.</p><span class="tag">This course</span></div>
+    <div class="card"><h4>HPC cluster</h4><p>High-performance computing for science and weather. Very fast networks and a central shared file system; programs (often MPI) work closely together.</p><span class="tag">Supercomputers</span></div>
+    <div class="card"><h4>High-availability (HA) cluster</h4><p>Two or more machines where a standby takes over if the active one fails. Used for databases and for Hadoop's own NameNode.</p><span class="tag">Failover</span></div>
+    <div class="card"><h4>Load-balanced web cluster</h4><p>Many identical web servers behind a load balancer; each request goes to any free server. Used by shopping and ticketing sites.</p><span class="tag">Web traffic</span></div>
+    <div class="card"><h4>Container cluster</h4><p>Kubernetes runs many small applications (containers) across nodes. It also has a master (control plane) and workers.</p><span class="tag">Kubernetes</span></div>
+  </div>
+
+  <h3>Master–worker vs peer-to-peer</h3>
+  <div class="table-wrap">
+  <table class="compare" style="min-width:560px">
+    <thead><tr><th></th><th>Master–worker</th><th>Peer-to-peer (masterless)</th></tr></thead>
+    <tbody>
+      <tr><td><b>Who decides</b></td><td>The master</td><td>All nodes agree among themselves</td></tr>
+      <tr><td><b>Metadata</b></td><td>In one place: simple and consistent</td><td>Spread over all nodes</td></tr>
+      <tr><td><b>Weak point</b></td><td>Master can be a bottleneck or SPOF (solved with HA)</td><td>Coordination is more complex</td></tr>
+      <tr><td><b>Examples</b></td><td>HDFS, YARN, Spark, HBase, Kubernetes</td><td>Cassandra, Riak, BitTorrent</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <div class="callout callout--tip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18h6M10 22h4M12 2a7 7 0 0 0-4 12.7V17h8v-2.3A7 7 0 0 0 12 2z"/></svg><p>Older books and some exam papers say “master–slave”. Today most projects say <b>master–worker</b>, primary–replica or coordinator–worker. They mean the same structure. Use the term your exam expects.</p></div>
+</section>
+
+<!-- ======================= PART 4: STEP BY STEP ======================= -->
+<section class="part" id="steps">
+  <span class="part-label"><b>4</b> Step by step</span>
+  <h2>How a master and its workers run one job</h2>
+  <ol class="stepper">
+    <li><h4>Workers join and register</h4>
+      <p>When a worker starts, it contacts the master: “I am <code>dn4</code>, on <code>/rack2</code>, with 32 cores, 256 GB RAM and 144 TB of disk.”</p>
+      <span class="behind">The master adds a row to its worker table. In HDFS, the DataNode also sends a <b>block report</b>: the list of every block on its disks.</span></li>
+    <li><h4>Heartbeats every few seconds</h4>
+      <div class="code" data-lang="python" data-file="heartbeat.py"><pre><code>last_seen = {"dn1": 120.0, "dn2": 121.5, "dn3": 119.0}   # time of last heartbeat (seconds)
+now = 122.0
+for w, t in last_seen.items():
+    print(w, "silent for", now - t, "s")</code></pre><div class="output">dn1 silent for 2.0 s
+dn2 silent for 0.5 s
+dn3 silent for 3.0 s</div></div>
+      <span class="behind">The master only stores <i>when</i> it last heard from each worker. Silence for a few seconds is normal. Silence past the timeout means trouble.</span></li>
+    <li><h4>A job arrives and is split into tasks</h4>
+      <p>A user submits a job on the master. The job is divided into many small, independent tasks, for example one per 128 MB piece of the input.</p>
+      <span class="behind">Small tasks are the secret: if one fails, only that small piece is redone, not the whole job.</span></li>
+    <li><h4>The master assigns tasks to free workers</h4>
+      <p>Each worker gets as many tasks as it has free slots. The rest wait in a queue.</p>
+      <span class="behind">In YARN, a “slot” is a <b>container</b>: a fixed amount of memory and CPU on one node. The master picks workers that are free and, ideally, already hold the task's data (Lesson 1.5).</span></li>
+    <li><h4>Workers report progress</h4>
+      <p>Heartbeats now carry “task 7: 60% done”, “task 3: finished”.</p>
+      <span class="behind">This is how you see <code>map 45% reduce 0%</code> in your terminal: the master adds up progress from all workers.</span></li>
+    <li><h4>A worker dies: its tasks are re-run</h4>
+      <p>Worker 3 loses power. Its heartbeats stop. After the timeout, the master marks it dead and gives its unfinished tasks to other workers.</p>
+      <span class="behind">The job finishes a little later, but it <b>finishes</b>, and nobody had to do anything by hand. That is the core promise of a cluster built from ordinary machines.</span></li>
+  </ol>
+</section>
+
+<!-- ======================= PART 5: SEE IT HAPPEN ======================= -->
+<section class="part" id="animation">
+  <span class="part-label"><b>5</b> See it happen</span>
+  <h2>A job with a dying worker: what Riya sees, and what the master does</h2>
+  <p>Riya runs a job on a 3-worker cluster. Halfway through, worker 2 crashes. Left: her terminal. Right: the master's view.</p>
+  <div class="anim" data-frames="6">
+    <div class="anim__title">Master, workers and a failure <span>6 steps</span></div>
+    <div class="anim__views">
+      <div class="view view--see">
+        <span class="view__tag">What you see</span>
+        <svg viewBox="0 0 360 250" role="img" aria-label="Riya's terminal running a job">
+          <rect x="14" y="14" width="332" height="206" rx="8" class="s-board"/>
+          <text x="26" y="32" font-size="9" class="mono" style="fill:#7F8C86">riya@edge-01 : ~</text>
+          <text x="26" y="54" font-size="9" class="mono" style="fill:#7F8C86">$ hadoop jar sales.jar SalesReport</text>
+          <g data-on="1">
+            <text x="26" y="76" font-size="9" class="mono" style="fill:#9FD3B8">Connecting to ResourceManager…</text>
+            <text x="26" y="92" font-size="9" class="mono" style="fill:#9FD3B8">number of splits: 6</text>
+          </g>
+          <g data-on="2"><text x="26" y="76" font-size="9" class="mono" style="fill:#9FD3B8">Running job: job_1_0001</text><text x="26" y="92" font-size="9" class="mono" style="fill:#9FD3B8"> map 0% reduce 0%</text></g>
+          <g data-on="3"><text x="26" y="76" font-size="9" class="mono" style="fill:#9FD3B8">Running job: job_1_0001</text><text x="26" y="92" font-size="9" class="mono" style="fill:#9FD3B8"> map 50% reduce 0%</text></g>
+          <g data-on="4">
+            <text x="26" y="76" font-size="9" class="mono" style="fill:#9FD3B8"> map 50% reduce 0%</text>
+            <text x="26" y="92" font-size="9" class="mono" style="fill:#7F8C86"> (nothing changes for a while…)</text>
+            <text x="180" y="190" text-anchor="middle" font-size="10" class="s-chalk">Riya: “Is it stuck?”</text>
+          </g>
+          <g data-on="5">
+            <text x="26" y="76" font-size="9" class="mono" style="fill:#9FD3B8"> map 50% reduce 0%</text>
+            <text x="26" y="92" font-size="9" class="mono" style="fill:#FF8A80">attempt_…_m_000004_0 FAILED</text>
+            <text x="26" y="108" font-size="9" class="mono" style="fill:#FF8A80">Container released on a *lost* node</text>
+            <text x="26" y="124" font-size="9" class="mono" style="fill:#9FD3B8"> map 67% reduce 0%</text>
+          </g>
+          <g data-on="6">
+            <text x="26" y="76" font-size="9" class="mono" style="fill:#9FD3B8"> map 100% reduce 100%</text>
+            <text x="26" y="92" font-size="9" class="mono" style="fill:#9FD3B8">Job job_1_0001 completed</text>
+            <text x="26" y="108" font-size="9" class="mono" style="fill:#9FD3B8">successfully</text>
+            <text x="180" y="190" text-anchor="middle" font-size="10" class="s-chalk">Done. She never touched the dead node.</text>
+          </g>
+          <text x="352" y="244" text-anchor="end" class="s-wm">myphatshala.in</text>
+        </svg>
+        <ol class="caps" hidden>
+          <li>Riya submits a job from the edge node. It is split into <b>6 tasks</b>, one per piece of input.</li>
+          <li>The job starts. No task has finished yet.</li>
+          <li>Half the tasks are done: <b>map 50%</b>.</li>
+          <li>Progress stops for a while. To Riya it looks stuck. Something has happened on the cluster.</li>
+          <li>A message says a task attempt FAILED: “Container released on a <b>lost</b> node”. Then progress moves again.</li>
+          <li>The job completes successfully. The failure was handled entirely by the cluster.</li>
+        </ol>
+      </div>
+
+      <div class="view view--behind">
+        <span class="view__tag">Behind the screen</span>
+        <svg viewBox="0 0 360 250" role="img" aria-label="Master assigning tasks to three workers">
+          <rect x="110" y="12" width="140" height="58" rx="8" class="s-board"/>
+          <text x="180" y="30" text-anchor="middle" font-size="10" font-weight="700" class="s-chalk">Master</text>
+          <g data-on="1"><text x="180" y="48" text-anchor="middle" font-size="8.6" style="fill:#9FD3B8">queue: T1 T2 T3 T4 T5 T6</text></g>
+          <g data-on="2-3"><text x="180" y="48" text-anchor="middle" font-size="8.6" style="fill:#9FD3B8">queue: T4 T5 T6</text></g>
+          <g data-on="4"><text x="180" y="48" text-anchor="middle" font-size="8.6" style="fill:#F5C77E">W2 silent… waiting</text><text x="180" y="62" text-anchor="middle" font-size="8.6" style="fill:#F5C77E">for the timeout</text></g>
+          <g data-on="5"><text x="180" y="48" text-anchor="middle" font-size="8.6" style="fill:#FF8A80">W2 DEAD → re-run T2, T5</text></g>
+          <g data-on="6"><text x="180" y="48" text-anchor="middle" font-size="8.6" style="fill:#9FD3B8">all 6 tasks done ✓</text></g>
+          <path d="M180 70v20M60 90h240M60 90v18M180 90v18M300 90v18" class="s-wire"/>
+          <rect x="14" y="108" width="92" height="104" rx="8" class="s-card2"/>
+          <rect x="134" y="108" width="92" height="104" rx="8" class="s-card2"/>
+          <rect x="254" y="108" width="92" height="104" rx="8" class="s-card2"/>
+          <text x="60" y="126" text-anchor="middle" font-size="9.4" font-weight="700" class="s-ink">Worker 1</text>
+          <text x="180" y="126" text-anchor="middle" font-size="9.4" font-weight="700" class="s-ink">Worker 2</text>
+          <text x="300" y="126" text-anchor="middle" font-size="9.4" font-weight="700" class="s-ink">Worker 3</text>
+          <g data-on="2"><rect x="30" y="138" width="60" height="18" rx="4" class="s-soft-acc" style="stroke:var(--track)"/><text x="60" y="151" text-anchor="middle" font-size="8.6" class="s-ink">T1 …</text>
+            <rect x="150" y="138" width="60" height="18" rx="4" class="s-soft-acc" style="stroke:var(--track)"/><text x="180" y="151" text-anchor="middle" font-size="8.6" class="s-ink">T2 …</text>
+            <rect x="270" y="138" width="60" height="18" rx="4" class="s-soft-acc" style="stroke:var(--track)"/><text x="300" y="151" text-anchor="middle" font-size="8.6" class="s-ink">T3 …</text></g>
+          <g data-on="3-6"><rect x="30" y="138" width="60" height="18" rx="4" class="s-soft-green" style="stroke:var(--green)"/><text x="60" y="151" text-anchor="middle" font-size="8.6" class="s-green">T1 ✓</text>
+            <rect x="270" y="138" width="60" height="18" rx="4" class="s-soft-green" style="stroke:var(--green)"/><text x="300" y="151" text-anchor="middle" font-size="8.6" class="s-green">T3 ✓</text></g>
+          <g data-on="3"><rect x="150" y="138" width="60" height="18" rx="4" class="s-soft-green" style="stroke:var(--green)"/><text x="180" y="151" text-anchor="middle" font-size="8.6" class="s-green">T2 ✓?</text>
+            <rect x="30" y="162" width="60" height="18" rx="4" class="s-soft-acc" style="stroke:var(--track)"/><text x="60" y="175" text-anchor="middle" font-size="8.6" class="s-ink">T4 …</text>
+            <rect x="150" y="162" width="60" height="18" rx="4" class="s-soft-acc" style="stroke:var(--track)"/><text x="180" y="175" text-anchor="middle" font-size="8.6" class="s-ink">T5 …</text>
+            <rect x="270" y="162" width="60" height="18" rx="4" class="s-soft-acc" style="stroke:var(--track)"/><text x="300" y="175" text-anchor="middle" font-size="8.6" class="s-ink">T6 …</text></g>
+          <g data-on="4-6"><rect x="134" y="108" width="92" height="104" rx="8" style="fill:none;stroke:var(--red);stroke-width:2.5;stroke-dasharray:6 4"/><text x="180" y="200" text-anchor="middle" font-size="9" font-weight="700" class="s-red">✕ power lost</text></g>
+          <g data-on="4"><rect x="30" y="162" width="60" height="18" rx="4" class="s-soft-acc" style="stroke:var(--track)"/><text x="60" y="175" text-anchor="middle" font-size="8.6" class="s-ink">T4 …</text>
+            <rect x="270" y="162" width="60" height="18" rx="4" class="s-soft-acc" style="stroke:var(--track)"/><text x="300" y="175" text-anchor="middle" font-size="8.6" class="s-ink">T6 …</text></g>
+          <g data-on="5-6"><rect x="30" y="162" width="60" height="18" rx="4" class="s-soft-green" style="stroke:var(--green)"/><text x="60" y="175" text-anchor="middle" font-size="8.6" class="s-green">T4 ✓</text>
+            <rect x="270" y="162" width="60" height="18" rx="4" class="s-soft-green" style="stroke:var(--green)"/><text x="300" y="175" text-anchor="middle" font-size="8.6" class="s-green">T6 ✓</text></g>
+          <g data-on="5"><rect x="30" y="186" width="60" height="18" rx="4" class="s-soft-acc" style="stroke:var(--track)"/><text x="60" y="199" text-anchor="middle" font-size="8.6" class="s-acc" font-weight="700">T2′ …</text>
+            <rect x="270" y="186" width="60" height="18" rx="4" class="s-soft-acc" style="stroke:var(--track)"/><text x="300" y="199" text-anchor="middle" font-size="8.6" class="s-acc" font-weight="700">T5′ …</text></g>
+          <g data-on="6"><rect x="30" y="186" width="60" height="18" rx="4" class="s-soft-green" style="stroke:var(--green)"/><text x="60" y="199" text-anchor="middle" font-size="8.6" class="s-green">T2′ ✓</text>
+            <rect x="270" y="186" width="60" height="18" rx="4" class="s-soft-green" style="stroke:var(--green)"/><text x="300" y="199" text-anchor="middle" font-size="8.6" class="s-green">T5′ ✓</text></g>
+          <text x="352" y="244" text-anchor="end" class="s-wm">myphatshala.in</text>
+        </svg>
+        <ol class="caps" hidden>
+          <li>The master splits the job into 6 tasks and puts them in a <b>queue</b>. Each worker has room for one task at a time here.</li>
+          <li>The master gives T1, T2, T3 to the three workers. T4–T6 wait.</li>
+          <li>T1 and T3 finish. Worker 2 reported T2 done too, but its output lives on worker 2's disk. T4, T5, T6 start.</li>
+          <li>Worker 2 loses power. Its heartbeats stop. The master <b>waits for the timeout</b> before deciding, because a short silence can be a network hiccup.</li>
+          <li>Timeout: worker 2 is <b>dead</b>. Its task T5 was unfinished, and T2's output was on the dead disk, so both are re-run (T2′, T5′) on healthy workers.</li>
+          <li>Every task is done. The job completes. The cluster healed itself.</li>
+        </ol>
+      </div>
+    </div>
+  </div>
+
+  <h3 id="playground">Try it yourself: break a worker during a job</h3>
+  <p>Now do it for real in the Cluster Playground. Run the job, then stop a node while its task bars are filling.</p>
+  <div class="csim"><script type="application/json">{"title": "Masters, workers and a failure", "intro": "<p>The <b>NameNode<\/b> and <b>ResourceManager<\/b> at the top are the masters. Each DataNode is a worker. The two bars at the bottom of each node are its <b>containers<\/b>: places where one task can run. A 1 GB file (8 blocks) is already stored.<\/p>", "racks": 2, "nodes": 3, "features": ["job", "fail"], "preload": [{"name": "canteen_orders.csv", "sizeMB": 1024}], "try": [{"text": "Press <b>Run word count job<\/b>. The ResourceManager gives one map task (M1…M8) per block to the workers. Let it finish.", "on": "job-done"}, {"text": "Run it again, and while the green bars are filling, <b>click a busy node<\/b> to stop it. Its tasks are re-run elsewhere (marked M′).", "on": "node-stop"}, {"text": "Open the <b>Event log<\/b> and <b>Job runs<\/b> tabs. Compare the time of the two runs."}, {"text": "Press <b>⏩ Skip to timeout<\/b>: after 10 min 30 s of silence the NameNode declares the node dead.", "on": "node-dead"}]}</script></div>
+</section>
+
+<!-- ======================= PART 6: REAL-WORLD USE ======================= -->
+<section class="part" id="real-world">
+  <span class="part-label"><b>6</b> Real-world use</span>
+  <h2>Masters and workers everywhere</h2>
+
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="40" y="10" width="40" height="22" rx="4" class="s-board"/><path d="M60 32v10M24 42h72M24 42v8M60 42v8M96 42v8" class="s-line"/><rect x="10" y="50" width="28" height="22" rx="4" class="s-card2"/><rect x="46" y="50" width="28" height="22" rx="4" class="s-card2"/><rect x="82" y="50" width="28" height="22" rx="4" class="s-card2"/></svg></div>
+    <div><h4>1. HDFS: NameNode and DataNodes</h4>
+      <p>The NameNode knows every file's blocks and where they are. DataNodes store the blocks and send heartbeats every 3 seconds. You'll build and break this in Modules 5–7.</p>
+      <div class="uc-flow"><span>File</span><i>→</i><span class="java">NameNode: where?</span><i>→</i><span>DataNodes store it</span></div></div>
+  </div>
+
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="18" y="16" width="84" height="22" rx="4" class="s-board"/><text x="60" y="31" text-anchor="middle" font-size="8.6" font-weight="700" class="s-chalk">ResourceManager</text><rect x="18" y="48" width="38" height="26" rx="4" class="s-soft-acc" style="stroke:var(--track)"/><rect x="64" y="48" width="38" height="26" rx="4" class="s-soft-acc" style="stroke:var(--track)"/></svg></div>
+    <div><h4>2. YARN: ResourceManager and NodeManagers</h4>
+      <p>Every Hadoop and Spark-on-YARN job asks the ResourceManager for containers, and NodeManagers run them. One cluster can serve hundreds of jobs from different teams at once (Module 11).</p>
+      <div class="uc-flow"><span>Job</span><i>→</i><span class="java">RM gives containers</span><i>→</i><span>NodeManagers run tasks</span></div></div>
+  </div>
+
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><circle cx="60" cy="24" r="12" class="s-soft-blue" style="stroke:var(--blue);stroke-width:2"/><text x="60" y="28" text-anchor="middle" font-size="9" font-weight="700" class="s-blue">D</text><circle cx="26" cy="64" r="10" class="s-card2"/><circle cx="60" cy="68" r="10" class="s-card2"/><circle cx="94" cy="64" r="10" class="s-card2"/><path d="M52 32l-20 24M60 36v22M68 32l20 24" class="s-line"/></svg></div>
+    <div><h4>3. Spark: driver and executors</h4>
+      <p>A Spark application has a <b>driver</b> (the master for that job) that plans the work and many <b>executors</b> (workers) that process the data. Same pattern, one level down.</p>
+      <div class="uc-flow"><span>Spark job</span><i>→</i><span class="java">Driver plans</span><i>→</i><span>Executors compute</span></div></div>
+  </div>
+
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="16" y="14" width="88" height="20" rx="4" class="s-board"/><text x="60" y="28" text-anchor="middle" font-size="8.6" font-weight="700" class="s-chalk">control plane</text><g><rect x="16" y="44" width="26" height="30" rx="3" class="s-soft-green" style="stroke:var(--green)"/><rect x="47" y="44" width="26" height="30" rx="3" class="s-soft-green" style="stroke:var(--green)"/><rect x="78" y="44" width="26" height="30" rx="3" class="s-soft-green" style="stroke:var(--green)"/></g></svg></div>
+    <div><h4>4. Kubernetes runs your favourite apps</h4>
+      <p>Food delivery and ride apps often run on Kubernetes clusters: a control plane (masters) decides where each container runs; worker nodes run them and are replaced when they fail.</p>
+      <div class="uc-flow"><span>App containers</span><i>→</i><span class="java">Control plane schedules</span><i>→</i><span>Workers run</span></div></div>
+  </div>
+
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><circle cx="30" cy="30" r="10" class="s-card2"/><circle cx="90" cy="30" r="10" class="s-card2"/><circle cx="30" cy="66" r="10" class="s-card2"/><circle cx="90" cy="66" r="10" class="s-card2"/><path d="M40 30h40M30 40v16M90 40v16M40 66h40M38 37l44 22M82 37l-44 22" class="s-line"/></svg></div>
+    <div><h4>5. Cassandra: a cluster with no master</h4>
+      <p>Some databases, like Apache Cassandra, are peer-to-peer: every node is equal and any node can answer a request. It is a useful contrast when an interviewer asks why Hadoop chose masters.</p>
+      <div class="uc-flow"><span>Request</span><i>→</i><span class="java">Any node coordinates</span><i>→</i><span>Replicas answer</span></div></div>
+  </div>
+  <p class="muted">Examples are simplified. Real deployments add more components (backups, monitoring, security) around these basic roles.</p>
+</section>
+
+
+<div class="ad-slot" data-slot="mid"></div>
+
+<section class="part" id="run">
+  <span class="part-label"><b>7</b> Run the code</span>
+  <h2>A tiny master and its workers in Python</h2>
+  <p>This program plays the master. It has a queue of tasks and three workers, and gives each free worker the next task, round after round, until the queue is empty. Then try the challenges, including a worker that dies.</p>
+  <div class="code" data-lang="python" data-file="main.py"><pre><code>from collections import deque
+
+queue = deque([&quot;T1&quot;, &quot;T2&quot;, &quot;T3&quot;, &quot;T4&quot;, &quot;T5&quot;, &quot;T6&quot;, &quot;T7&quot;])
+workers = [&quot;W1&quot;, &quot;W2&quot;, &quot;W3&quot;]
+done = {w: [] for w in workers}
+
+round_no = 0
+while queue:
+    round_no += 1
+    for w in workers:
+        if queue:
+            done[w].append(queue.popleft())
+    print(&quot;after round&quot;, round_no, &quot;-&gt;&quot;, done)</code></pre><div class="output">after round 1 -&gt; {&#x27;W1&#x27;: [&#x27;T1&#x27;], &#x27;W2&#x27;: [&#x27;T2&#x27;], &#x27;W3&#x27;: [&#x27;T3&#x27;]}
+after round 2 -&gt; {&#x27;W1&#x27;: [&#x27;T1&#x27;, &#x27;T4&#x27;], &#x27;W2&#x27;: [&#x27;T2&#x27;, &#x27;T5&#x27;], &#x27;W3&#x27;: [&#x27;T3&#x27;, &#x27;T6&#x27;]}
+after round 3 -&gt; {&#x27;W1&#x27;: [&#x27;T1&#x27;, &#x27;T4&#x27;, &#x27;T7&#x27;], &#x27;W2&#x27;: [&#x27;T2&#x27;, &#x27;T5&#x27;], &#x27;W3&#x27;: [&#x27;T3&#x27;, &#x27;T6&#x27;]}</div></div>
+  <ul class="anno"><li><code>queue = deque([...])</code><span>A <code>deque</code> (double-ended queue) gives the next item quickly with <code>popleft()</code>: first in, first out, like a real job queue.</span></li><li><code>done = {w: [] for w in workers}</code><span>The master's table: for each worker, the list of tasks it has run.</span></li><li><code>while queue:</code><span>Keep going while tasks are waiting. An empty deque counts as <code>False</code>.</span></li></ul>
+  <div class="runner">
+    <script type="application/json">{
+ "lang": "python",
+ "file": "main.py",
+ "tasks": [
+  {
+   "label": "1 · Hand out tasks",
+   "hint": "Press <b>Run<\/b>. Add a fourth worker <code>\"W4\"<\/code>. How many rounds now?",
+   "code": "from collections import deque\n\nqueue = deque([\"T1\", \"T2\", \"T3\", \"T4\", \"T5\", \"T6\", \"T7\"])\nworkers = [\"W1\", \"W2\", \"W3\"]\ndone = {w: [] for w in workers}\n\nround_no = 0\nwhile queue:\n    round_no += 1\n    for w in workers:\n        if queue:\n            done[w].append(queue.popleft())\n    print(\"after round\", round_no, \"->\", done)\n"
+  },
+  {
+   "label": "2 · Who is dead?",
+   "hint": "<b>Predict first:<\/b> with a timeout of 30 s, which workers are declared dead at time 100? Then change <code>timeout<\/code> to 10.",
+   "code": "last_heartbeat = {\"W1\": 98, \"W2\": 61, \"W3\": 95, \"W4\": 40}\nnow, timeout = 100, 30\n\nfor w, t in last_heartbeat.items():\n    silent = now - t\n    status = \"DEAD\" if silent > timeout else \"alive\"\n    print(f\"{w}: silent {silent:>2} s -> {status}\")\n"
+  },
+  {
+   "label": "3 · Re-run lost tasks",
+   "hint": "W2 dies with two tasks. The master gives them to the other workers, one each, in turn. Try it with W1 dying instead.",
+   "code": "running = {\"W1\": [\"T1\"], \"W2\": [\"T2\", \"T5\"], \"W3\": [\"T3\"]}\ndead = \"W2\"\n\nlost = running.pop(dead)\nalive = list(running)\nfor i, task in enumerate(lost):\n    target = alive[i % len(alive)]\n    running[target].append(task + \"'\")      # ' marks a second attempt\nprint(\"lost:\", lost)\nprint(\"now :\", running)\n"
+  },
+  {
+   "label": "4 · Least-loaded first",
+   "hint": "Real masters give a task to the worker with the most free room, not just the next one in line. Run it, then make W3 start with 3 tasks.",
+   "code": "load = {\"W1\": 2, \"W2\": 0, \"W3\": 1}      # tasks already running\nfor task in [\"T7\", \"T8\", \"T9\", \"T10\"]:\n    w = min(load, key=load.get)         # worker with the fewest tasks\n    load[w] += 1\n    print(task, \"->\", w, load)\n"
+  },
+  {
+   "label": "5 · Spot the error",
+   "hint": "This “master” crashes when the queue runs out in the middle of a round. Find the line and protect it with <code>if queue:<\/code>.",
+   "code": "from collections import deque\nqueue = deque([\"T1\", \"T2\", \"T3\", \"T4\"])\nworkers = [\"W1\", \"W2\", \"W3\"]\nwhile queue:\n    for w in workers:\n        print(w, \"gets\", queue.popleft())\n"
+  }
+ ]
+}</script>
+  </div>
+  <h3 id="pc">Run it on your PC: a master with real worker processes</h3>
+  <p>Your computer can be a tiny cluster too: one <b>master</b> process and one <b>worker</b> process per CPU core. Python's <code>ProcessPoolExecutor</code> keeps a task queue and gives tasks to whichever worker is free, exactly like a cluster master. Save this as <code>workers.py</code> and run it.</p>
+  <div class="pcrun"><h4>Watch tasks go to different worker processes</h4>
+  <div class="code" data-lang="bash" data-file="workers.py"><pre><code># workers.py: a master process hands out tasks to worker processes on your own PC
+import os, time
+from concurrent.futures import ProcessPoolExecutor, as_completed
+
+def task(n):
+    &quot;&quot;&quot;One task: count the even numbers in its own range of 20 lakh numbers.&quot;&quot;&quot;
+    start = n * 2_000_000
+    evens = sum(1 for x in range(start, start + 2_000_000) if x % 2 == 0)
+    return n, os.getpid(), evens
+
+if __name__ == &quot;__main__&quot;:               # this part runs only in the master
+    workers = os.cpu_count()
+    print(&quot;Master PID&quot;, os.getpid(), &quot;starting&quot;, workers, &quot;workers&quot;)
+    t0 = time.time()
+    with ProcessPoolExecutor(max_workers=workers) as pool:
+        futures = [pool.submit(task, n) for n in range(8)]      # 8 tasks in the queue
+        total = 0
+        for f in as_completed(futures):
+            n, pid, evens = f.result()
+            total += evens
+            print(f&quot;  task {n} done by worker PID {pid}&quot;)
+    print(&quot;Total evens:&quot;, total)
+    print(f&quot;Time: {time.time() - t0:.1f} s&quot;)
+
+# In a terminal:  python workers.py</code></pre><div class="output">Master PID 1726 starting 2 workers
+  task 0 done by worker PID 1727
+  task 1 done by worker PID 1728
+  task 2 done by worker PID 1727
+  task 3 done by worker PID 1728
+  task 4 done by worker PID 1727
+  task 5 done by worker PID 1728
+  task 6 done by worker PID 1727
+  task 7 done by worker PID 1728
+Total evens: 8000000
+Time: 0.6 s</div></div>
+  <p class="muted">Recorded on a 2-core machine, so there are 2 workers. With 8 cores you'll see 8 different worker PIDs, and the order of finished tasks will change from run to run: whichever worker is free takes the next task. The <code>if __name__ == "__main__":</code> line matters on Windows: without it, each worker would start its own master.</p></div>
+</section>
+
+<section class="part" id="tracer">
+  <span class="part-label"><b>8</b> Line by line</span>
+  <h2>The master's timeout check, one line at a time</h2>
+  <p>The master loops over its table of last heartbeats. Watch <code>silent</code> change for each worker and see which ones end up in the <code>dead</code> list.</p>
+  <div class="tracer">
+    <script type="application/json">{
+ "lang": "python",
+ "code": [
+  "def find_dead(last_seen, now, timeout):",
+  "    dead = []",
+  "    for w, t in last_seen.items():",
+  "        silent = now - t",
+  "        if silent > timeout:",
+  "            dead.append(w)",
+  "    return dead",
+  "",
+  "table = {\"W1\": 95, \"W2\": 40, \"W3\": 99}",
+  "print(\"Dead:\", find_dead(table, 100, 30))"
+ ],
+ "steps": [
+  {
+   "line": 1,
+   "phase": "Python",
+   "note": "<code>find_dead<\/code> is created: function find_dead().",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "find_dead",
+       "function find_dead()"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "find_dead"
+  },
+  {
+   "line": 9,
+   "phase": "Table",
+   "note": "The master keeps only the time of the last heartbeat from each worker. <code>table<\/code> is created: → dict #1. A new dict object (#1) is created: {&#x27;W1&#x27;: 95, &#x27;W2&#x27;: 40, &#x27;W3&#x27;: 99}",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "find_dead",
+       "function find_dead()"
+      ],
+      [
+       "table",
+       "→ dict #1"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;W1&#x27;: 95, &#x27;W2&#x27;: 40, &#x27;W3&#x27;: 99}"
+   ],
+   "newVar": "table"
+  },
+  {
+   "line": 10,
+   "phase": "Python",
+   "note": "<code>find_dead()<\/code> is called: a new frame is pushed with <code>last_seen<\/code> = → dict #1, <code>now<\/code> = 100, <code>timeout<\/code> = 30.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "find_dead",
+       "function find_dead()"
+      ],
+      [
+       "table",
+       "→ dict #1"
+      ]
+     ]
+    },
+    {
+     "frame": "find_dead()",
+     "vars": [
+      [
+       "last_seen",
+       "→ dict #1"
+      ],
+      [
+       "now",
+       "100"
+      ],
+      [
+       "timeout",
+       "30"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;W1&#x27;: 95, &#x27;W2&#x27;: 40, &#x27;W3&#x27;: 99}"
+   ],
+   "newVar": "timeout"
+  },
+  {
+   "line": 2,
+   "phase": "Python",
+   "note": "<code>dead<\/code> is created: → list #2. A new list object (#2) is created: []",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "find_dead",
+       "function find_dead()"
+      ],
+      [
+       "table",
+       "→ dict #1"
+      ]
+     ]
+    },
+    {
+     "frame": "find_dead()",
+     "vars": [
+      [
+       "last_seen",
+       "→ dict #1"
+      ],
+      [
+       "now",
+       "100"
+      ],
+      [
+       "timeout",
+       "30"
+      ],
+      [
+       "dead",
+       "→ list #2"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;W1&#x27;: 95, &#x27;W2&#x27;: 40, &#x27;W3&#x27;: 99}",
+    "<b>#2 list (0)<\/b> []"
+   ],
+   "newVar": "dead"
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "<code>w<\/code> is created: &#x27;W1&#x27;. <code>t<\/code> is created: 95.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "find_dead",
+       "function find_dead()"
+      ],
+      [
+       "table",
+       "→ dict #1"
+      ]
+     ]
+    },
+    {
+     "frame": "find_dead()",
+     "vars": [
+      [
+       "last_seen",
+       "→ dict #1"
+      ],
+      [
+       "now",
+       "100"
+      ],
+      [
+       "timeout",
+       "30"
+      ],
+      [
+       "dead",
+       "→ list #2"
+      ],
+      [
+       "w",
+       "'W1'"
+      ],
+      [
+       "t",
+       "95"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;W1&#x27;: 95, &#x27;W2&#x27;: 40, &#x27;W3&#x27;: 99}",
+    "<b>#2 list (0)<\/b> []"
+   ],
+   "newVar": "t"
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "<code>silent<\/code> is created: 5.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "find_dead",
+       "function find_dead()"
+      ],
+      [
+       "table",
+       "→ dict #1"
+      ]
+     ]
+    },
+    {
+     "frame": "find_dead()",
+     "vars": [
+      [
+       "last_seen",
+       "→ dict #1"
+      ],
+      [
+       "now",
+       "100"
+      ],
+      [
+       "timeout",
+       "30"
+      ],
+      [
+       "dead",
+       "→ list #2"
+      ],
+      [
+       "w",
+       "'W1'"
+      ],
+      [
+       "t",
+       "95"
+      ],
+      [
+       "silent",
+       "5"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;W1&#x27;: 95, &#x27;W2&#x27;: 40, &#x27;W3&#x27;: 99}",
+    "<b>#2 list (0)<\/b> []"
+   ],
+   "newVar": "silent"
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "The condition is <b>False<\/b>, so the indented block is skipped.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "find_dead",
+       "function find_dead()"
+      ],
+      [
+       "table",
+       "→ dict #1"
+      ]
+     ]
+    },
+    {
+     "frame": "find_dead()",
+     "vars": [
+      [
+       "last_seen",
+       "→ dict #1"
+      ],
+      [
+       "now",
+       "100"
+      ],
+      [
+       "timeout",
+       "30"
+      ],
+      [
+       "dead",
+       "→ list #2"
+      ],
+      [
+       "w",
+       "'W1'"
+      ],
+      [
+       "t",
+       "95"
+      ],
+      [
+       "silent",
+       "5"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;W1&#x27;: 95, &#x27;W2&#x27;: 40, &#x27;W3&#x27;: 99}",
+    "<b>#2 list (0)<\/b> []"
+   ]
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "<code>w<\/code> changes to &#x27;W2&#x27;. <code>t<\/code> changes to 40.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "find_dead",
+       "function find_dead()"
+      ],
+      [
+       "table",
+       "→ dict #1"
+      ]
+     ]
+    },
+    {
+     "frame": "find_dead()",
+     "vars": [
+      [
+       "last_seen",
+       "→ dict #1"
+      ],
+      [
+       "now",
+       "100"
+      ],
+      [
+       "timeout",
+       "30"
+      ],
+      [
+       "dead",
+       "→ list #2"
+      ],
+      [
+       "w",
+       "'W2'"
+      ],
+      [
+       "t",
+       "40"
+      ],
+      [
+       "silent",
+       "5"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;W1&#x27;: 95, &#x27;W2&#x27;: 40, &#x27;W3&#x27;: 99}",
+    "<b>#2 list (0)<\/b> []"
+   ],
+   "newVar": "t"
+  },
+  {
+   "line": 4,
+   "phase": "W2",
+   "note": "Silent for 60 seconds, longer than the 30-second timeout. <code>silent<\/code> changes to 60.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "find_dead",
+       "function find_dead()"
+      ],
+      [
+       "table",
+       "→ dict #1"
+      ]
+     ]
+    },
+    {
+     "frame": "find_dead()",
+     "vars": [
+      [
+       "last_seen",
+       "→ dict #1"
+      ],
+      [
+       "now",
+       "100"
+      ],
+      [
+       "timeout",
+       "30"
+      ],
+      [
+       "dead",
+       "→ list #2"
+      ],
+      [
+       "w",
+       "'W2'"
+      ],
+      [
+       "t",
+       "40"
+      ],
+      [
+       "silent",
+       "60"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;W1&#x27;: 95, &#x27;W2&#x27;: 40, &#x27;W3&#x27;: 99}",
+    "<b>#2 list (0)<\/b> []"
+   ],
+   "newVar": "silent"
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "The condition is <b>True<\/b>, so the indented block runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "find_dead",
+       "function find_dead()"
+      ],
+      [
+       "table",
+       "→ dict #1"
+      ]
+     ]
+    },
+    {
+     "frame": "find_dead()",
+     "vars": [
+      [
+       "last_seen",
+       "→ dict #1"
+      ],
+      [
+       "now",
+       "100"
+      ],
+      [
+       "timeout",
+       "30"
+      ],
+      [
+       "dead",
+       "→ list #2"
+      ],
+      [
+       "w",
+       "'W2'"
+      ],
+      [
+       "t",
+       "40"
+      ],
+      [
+       "silent",
+       "60"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;W1&#x27;: 95, &#x27;W2&#x27;: 40, &#x27;W3&#x27;: 99}",
+    "<b>#2 list (0)<\/b> []"
+   ]
+  },
+  {
+   "line": 6,
+   "phase": "Python",
+   "note": "Object #2 list now holds [&#x27;W2&#x27;]",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "find_dead",
+       "function find_dead()"
+      ],
+      [
+       "table",
+       "→ dict #1"
+      ]
+     ]
+    },
+    {
+     "frame": "find_dead()",
+     "vars": [
+      [
+       "last_seen",
+       "→ dict #1"
+      ],
+      [
+       "now",
+       "100"
+      ],
+      [
+       "timeout",
+       "30"
+      ],
+      [
+       "dead",
+       "→ list #2"
+      ],
+      [
+       "w",
+       "'W2'"
+      ],
+      [
+       "t",
+       "40"
+      ],
+      [
+       "silent",
+       "60"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;W1&#x27;: 95, &#x27;W2&#x27;: 40, &#x27;W3&#x27;: 99}",
+    "<b>#2 list (1)<\/b> [&#x27;W2&#x27;]"
+   ]
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "<code>w<\/code> changes to &#x27;W3&#x27;. <code>t<\/code> changes to 99.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "find_dead",
+       "function find_dead()"
+      ],
+      [
+       "table",
+       "→ dict #1"
+      ]
+     ]
+    },
+    {
+     "frame": "find_dead()",
+     "vars": [
+      [
+       "last_seen",
+       "→ dict #1"
+      ],
+      [
+       "now",
+       "100"
+      ],
+      [
+       "timeout",
+       "30"
+      ],
+      [
+       "dead",
+       "→ list #2"
+      ],
+      [
+       "w",
+       "'W3'"
+      ],
+      [
+       "t",
+       "99"
+      ],
+      [
+       "silent",
+       "60"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;W1&#x27;: 95, &#x27;W2&#x27;: 40, &#x27;W3&#x27;: 99}",
+    "<b>#2 list (1)<\/b> [&#x27;W2&#x27;]"
+   ],
+   "newVar": "t"
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "<code>silent<\/code> changes to 1.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "find_dead",
+       "function find_dead()"
+      ],
+      [
+       "table",
+       "→ dict #1"
+      ]
+     ]
+    },
+    {
+     "frame": "find_dead()",
+     "vars": [
+      [
+       "last_seen",
+       "→ dict #1"
+      ],
+      [
+       "now",
+       "100"
+      ],
+      [
+       "timeout",
+       "30"
+      ],
+      [
+       "dead",
+       "→ list #2"
+      ],
+      [
+       "w",
+       "'W3'"
+      ],
+      [
+       "t",
+       "99"
+      ],
+      [
+       "silent",
+       "1"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;W1&#x27;: 95, &#x27;W2&#x27;: 40, &#x27;W3&#x27;: 99}",
+    "<b>#2 list (1)<\/b> [&#x27;W2&#x27;]"
+   ],
+   "newVar": "silent"
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "The condition is <b>False<\/b>, so the indented block is skipped.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "find_dead",
+       "function find_dead()"
+      ],
+      [
+       "table",
+       "→ dict #1"
+      ]
+     ]
+    },
+    {
+     "frame": "find_dead()",
+     "vars": [
+      [
+       "last_seen",
+       "→ dict #1"
+      ],
+      [
+       "now",
+       "100"
+      ],
+      [
+       "timeout",
+       "30"
+      ],
+      [
+       "dead",
+       "→ list #2"
+      ],
+      [
+       "w",
+       "'W3'"
+      ],
+      [
+       "t",
+       "99"
+      ],
+      [
+       "silent",
+       "1"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;W1&#x27;: 95, &#x27;W2&#x27;: 40, &#x27;W3&#x27;: 99}",
+    "<b>#2 list (1)<\/b> [&#x27;W2&#x27;]"
+   ]
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "Nothing is left to loop over, so the loop ends and Python moves on.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "find_dead",
+       "function find_dead()"
+      ],
+      [
+       "table",
+       "→ dict #1"
+      ]
+     ]
+    },
+    {
+     "frame": "find_dead()",
+     "vars": [
+      [
+       "last_seen",
+       "→ dict #1"
+      ],
+      [
+       "now",
+       "100"
+      ],
+      [
+       "timeout",
+       "30"
+      ],
+      [
+       "dead",
+       "→ list #2"
+      ],
+      [
+       "w",
+       "'W3'"
+      ],
+      [
+       "t",
+       "99"
+      ],
+      [
+       "silent",
+       "1"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;W1&#x27;: 95, &#x27;W2&#x27;: 40, &#x27;W3&#x27;: 99}",
+    "<b>#2 list (1)<\/b> [&#x27;W2&#x27;]"
+   ]
+  },
+  {
+   "line": 7,
+   "phase": "Python",
+   "note": "The return value is worked out and handed back to the caller.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "find_dead",
+       "function find_dead()"
+      ],
+      [
+       "table",
+       "→ dict #1"
+      ]
+     ]
+    },
+    {
+     "frame": "find_dead()",
+     "vars": [
+      [
+       "last_seen",
+       "→ dict #1"
+      ],
+      [
+       "now",
+       "100"
+      ],
+      [
+       "timeout",
+       "30"
+      ],
+      [
+       "dead",
+       "→ list #2"
+      ],
+      [
+       "w",
+       "'W3'"
+      ],
+      [
+       "t",
+       "99"
+      ],
+      [
+       "silent",
+       "1"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;W1&#x27;: 95, &#x27;W2&#x27;: 40, &#x27;W3&#x27;: 99}",
+    "<b>#2 list (1)<\/b> [&#x27;W2&#x27;]"
+   ]
+  },
+  {
+   "line": 10,
+   "phase": "Return",
+   "note": "<code>find_dead()<\/code> returns <b>→ list #2<\/b> and its frame is popped. The caller continues on this line with that value.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "find_dead",
+       "function find_dead()"
+      ],
+      [
+       "table",
+       "→ dict #1"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;W1&#x27;: 95, &#x27;W2&#x27;: 40, &#x27;W3&#x27;: 99}"
+   ],
+   "out": "Dead: ['W2']\n"
+  }
+ ]
+}</script>
+  </div>
+
+<h3 id="worked">Worked examples: real problems, solved and traced in memory</h3>
+  <p class="wx-intro">Three jobs a cluster master really does: share out work, notice dead workers, and recover their tasks. Each solution runs live, and the trace shows the master's table changing in memory.</p>
+  <article class="wx">
+    <div class="wx__head"><span class="wx__num">Example 1</span><span class="lvl lvl--b">Beginner</span><span class="wx__tag">Scheduling · fairness</span></div>
+    <h4>Share 7 input files among 3 workers</h4>
+    <div class="wx__problem"><p class="wx__label">Problem statement</p><p>A report job has 7 input files. Give them to 3 workers in turn (file 1 to W1, file 2 to W2, …) and print each worker's list.</p></div>
+    <div class="prob__io"><div><small>Input</small><pre>files part-1 … part-7 · workers W1, W2, W3</pre></div><div><small>Expected output</small><pre>W1 [&#x27;part-1&#x27;, &#x27;part-4&#x27;, &#x27;part-7&#x27;]
+W2 [&#x27;part-2&#x27;, &#x27;part-5&#x27;]
+W3 [&#x27;part-3&#x27;, &#x27;part-6&#x27;]</pre></div></div>
+    <div class="wx__approach"><p class="wx__label">Approach</p><ol><li>Create an empty list for each worker.</li><li>For file number <code>i</code>, the worker is <code>i % 3</code>: 0, 1, 2, 0, 1, 2, 0.</li><li>Print the lists.</li></ol></div>
+    <p class="wx__label">Solution: run it live</p>
+    <div class="runner">
+    <script type="application/json">{
+ "lang": "python",
+ "file": "main.py",
+ "tasks": [
+  {
+   "label": "Solution",
+   "hint": "With 7 files and 3 workers, W1 gets one extra. What happens with 100 files and 7 workers? Is the work still nearly equal?",
+   "code": "files = [\"part-1\", \"part-2\", \"part-3\", \"part-4\", \"part-5\", \"part-6\", \"part-7\"]\nworkers = [\"W1\", \"W2\", \"W3\"]\nplan = {w: [] for w in workers}\nfor i, f in enumerate(files):\n    plan[workers[i % len(workers)]].append(f)\nfor w in workers:\n    print(w, plan[w])\n"
+  }
+ ]
+}</script>
+    </div>
+    <p class="wx__label">What happens in memory, step by step</p>
+    <p class="wx__how">Recorded from a real Python run: press <b>Next</b> to execute one line at a time. Watch variables change in each frame, and lists and dictionaries (numbered #1, #2 …) fill up as objects.</p>
+    <div class="tracer">
+    <script type="application/json">{
+ "lang": "python",
+ "code": [
+  "files = [\"part-1\", \"part-2\", \"part-3\", \"part-4\", \"part-5\", \"part-6\", \"part-7\"]",
+  "workers = [\"W1\", \"W2\", \"W3\"]",
+  "plan = {w: [] for w in workers}",
+  "for i, f in enumerate(files):",
+  "    plan[workers[i % len(workers)]].append(f)",
+  "for w in workers:",
+  "    print(w, plan[w])"
+ ],
+ "steps": [
+  {
+   "line": 1,
+   "phase": "Python",
+   "note": "<code>files<\/code> is created: → list #1.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "files",
+       "→ list #1"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (7)<\/b> [&#x27;part-1&#x27;, &#x27;part-2&#x27;, &#x27;part-3&#x27;, &#x27;part-4&#x27;, &#x27;part-5&#x27;, &#x27;part-6&#x27;, &#x27;part-7&#x27;]"
+   ],
+   "newVar": "files"
+  },
+  {
+   "line": 2,
+   "phase": "Python",
+   "note": "<code>workers<\/code> is created: → list #2. A new list object (#2) is created: [&#x27;W1&#x27;, &#x27;W2&#x27;, &#x27;W3&#x27;]",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "files",
+       "→ list #1"
+      ],
+      [
+       "workers",
+       "→ list #2"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (7)<\/b> [&#x27;part-1&#x27;, &#x27;part-2&#x27;, &#x27;part-3&#x27;, &#x27;part-4&#x27;, &#x27;part-5&#x27;, &#x27;part-6&#x27;, &#x27;part-7&#x27;]",
+    "<b>#2 list (3)<\/b> [&#x27;W1&#x27;, &#x27;W2&#x27;, &#x27;W3&#x27;]"
+   ],
+   "newVar": "workers"
+  },
+  {
+   "line": 3,
+   "phase": "Plan",
+   "note": "One empty list per worker.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "files",
+       "→ list #1"
+      ],
+      [
+       "workers",
+       "→ list #2"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (7)<\/b> [&#x27;part-1&#x27;, &#x27;part-2&#x27;, &#x27;part-3&#x27;, &#x27;part-4&#x27;, &#x27;part-5&#x27;, &#x27;part-6&#x27;, &#x27;part-7&#x27;]",
+    "<b>#2 list (3)<\/b> [&#x27;W1&#x27;, &#x27;W2&#x27;, &#x27;W3&#x27;]"
+   ]
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "files",
+       "→ list #1"
+      ],
+      [
+       "workers",
+       "→ list #2"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (7)<\/b> [&#x27;part-1&#x27;, &#x27;part-2&#x27;, &#x27;part-3&#x27;, &#x27;part-4&#x27;, &#x27;part-5&#x27;, &#x27;part-6&#x27;, &#x27;part-7&#x27;]",
+    "<b>#2 list (3)<\/b> [&#x27;W1&#x27;, &#x27;W2&#x27;, &#x27;W3&#x27;]"
+   ]
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "This line runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "files",
+       "→ list #1"
+      ],
+      [
+       "workers",
+       "→ list #2"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (7)<\/b> [&#x27;part-1&#x27;, &#x27;part-2&#x27;, &#x27;part-3&#x27;, &#x27;part-4&#x27;, &#x27;part-5&#x27;, &#x27;part-6&#x27;, &#x27;part-7&#x27;]",
+    "<b>#2 list (3)<\/b> [&#x27;W1&#x27;, &#x27;W2&#x27;, &#x27;W3&#x27;]"
+   ]
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "<code>plan<\/code> is created: → dict #3. A new dict object (#3) is created: {&#x27;W1&#x27;: → list #4, &#x27;W2&#x27;: → list #5, &#x27;W3&#x27;: → list #6} A new list object (#4) is created: [] A new list object (#5) is created: [] A new list object (#6) is created: []",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "files",
+       "→ list #1"
+      ],
+      [
+       "workers",
+       "→ list #2"
+      ],
+      [
+       "plan",
+       "→ dict #3"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (7)<\/b> [&#x27;part-1&#x27;, &#x27;part-2&#x27;, &#x27;part-3&#x27;, &#x27;part-4&#x27;, &#x27;part-5&#x27;, &#x27;part-6&#x27;, &#x27;part-7&#x27;]",
+    "<b>#2 list (3)<\/b> [&#x27;W1&#x27;, &#x27;W2&#x27;, &#x27;W3&#x27;]",
+    "<b>#3 dict (3)<\/b> {&#x27;W1&#x27;: → list #4, &#x27;W2&#x27;: → list #5, &#x27;W3&#x27;: → list #6}",
+    "<b>#4 list (0)<\/b> []",
+    "<b>#5 list (0)<\/b> []",
+    "<b>#6 list (0)<\/b> []"
+   ],
+   "newVar": "plan"
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "<code>i<\/code> is created: 0. <code>f<\/code> is created: &#x27;part-1&#x27;.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "files",
+       "→ list #1"
+      ],
+      [
+       "workers",
+       "→ list #2"
+      ],
+      [
+       "plan",
+       "→ dict #3"
+      ],
+      [
+       "i",
+       "0"
+      ],
+      [
+       "f",
+       "'part-1'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (7)<\/b> [&#x27;part-1&#x27;, &#x27;part-2&#x27;, &#x27;part-3&#x27;, &#x27;part-4&#x27;, &#x27;part-5&#x27;, &#x27;part-6&#x27;, &#x27;part-7&#x27;]",
+    "<b>#2 list (3)<\/b> [&#x27;W1&#x27;, &#x27;W2&#x27;, &#x27;W3&#x27;]",
+    "<b>#3 dict (3)<\/b> {&#x27;W1&#x27;: → list #4, &#x27;W2&#x27;: → list #5, &#x27;W3&#x27;: → list #6}",
+    "<b>#4 list (0)<\/b> []",
+    "<b>#5 list (0)<\/b> []",
+    "<b>#6 list (0)<\/b> []"
+   ],
+   "newVar": "f"
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "Object #4 list now holds [&#x27;part-1&#x27;]",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "files",
+       "→ list #1"
+      ],
+      [
+       "workers",
+       "→ list #2"
+      ],
+      [
+       "plan",
+       "→ dict #3"
+      ],
+      [
+       "i",
+       "0"
+      ],
+      [
+       "f",
+       "'part-1'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (7)<\/b> [&#x27;part-1&#x27;, &#x27;part-2&#x27;, &#x27;part-3&#x27;, &#x27;part-4&#x27;, &#x27;part-5&#x27;, &#x27;part-6&#x27;, &#x27;part-7&#x27;]",
+    "<b>#2 list (3)<\/b> [&#x27;W1&#x27;, &#x27;W2&#x27;, &#x27;W3&#x27;]",
+    "<b>#3 dict (3)<\/b> {&#x27;W1&#x27;: → list #4, &#x27;W2&#x27;: → list #5, &#x27;W3&#x27;: → list #6}",
+    "<b>#4 list (1)<\/b> [&#x27;part-1&#x27;]",
+    "<b>#5 list (0)<\/b> []",
+    "<b>#6 list (0)<\/b> []"
+   ]
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "<code>i<\/code> changes to 1. <code>f<\/code> changes to &#x27;part-2&#x27;.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "files",
+       "→ list #1"
+      ],
+      [
+       "workers",
+       "→ list #2"
+      ],
+      [
+       "plan",
+       "→ dict #3"
+      ],
+      [
+       "i",
+       "1"
+      ],
+      [
+       "f",
+       "'part-2'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (7)<\/b> [&#x27;part-1&#x27;, &#x27;part-2&#x27;, &#x27;part-3&#x27;, &#x27;part-4&#x27;, &#x27;part-5&#x27;, &#x27;part-6&#x27;, &#x27;part-7&#x27;]",
+    "<b>#2 list (3)<\/b> [&#x27;W1&#x27;, &#x27;W2&#x27;, &#x27;W3&#x27;]",
+    "<b>#3 dict (3)<\/b> {&#x27;W1&#x27;: → list #4, &#x27;W2&#x27;: → list #5, &#x27;W3&#x27;: → list #6}",
+    "<b>#4 list (1)<\/b> [&#x27;part-1&#x27;]",
+    "<b>#5 list (0)<\/b> []",
+    "<b>#6 list (0)<\/b> []"
+   ],
+   "newVar": "f"
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "Object #5 list now holds [&#x27;part-2&#x27;]",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "files",
+       "→ list #1"
+      ],
+      [
+       "workers",
+       "→ list #2"
+      ],
+      [
+       "plan",
+       "→ dict #3"
+      ],
+      [
+       "i",
+       "1"
+      ],
+      [
+       "f",
+       "'part-2'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (7)<\/b> [&#x27;part-1&#x27;, &#x27;part-2&#x27;, &#x27;part-3&#x27;, &#x27;part-4&#x27;, &#x27;part-5&#x27;, &#x27;part-6&#x27;, &#x27;part-7&#x27;]",
+    "<b>#2 list (3)<\/b> [&#x27;W1&#x27;, &#x27;W2&#x27;, &#x27;W3&#x27;]",
+    "<b>#3 dict (3)<\/b> {&#x27;W1&#x27;: → list #4, &#x27;W2&#x27;: → list #5, &#x27;W3&#x27;: → list #6}",
+    "<b>#4 list (1)<\/b> [&#x27;part-1&#x27;]",
+    "<b>#5 list (1)<\/b> [&#x27;part-2&#x27;]",
+    "<b>#6 list (0)<\/b> []"
+   ]
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "<code>i<\/code> changes to 2. <code>f<\/code> changes to &#x27;part-3&#x27;.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "files",
+       "→ list #1"
+      ],
+      [
+       "workers",
+       "→ list #2"
+      ],
+      [
+       "plan",
+       "→ dict #3"
+      ],
+      [
+       "i",
+       "2"
+      ],
+      [
+       "f",
+       "'part-3'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (7)<\/b> [&#x27;part-1&#x27;, &#x27;part-2&#x27;, &#x27;part-3&#x27;, &#x27;part-4&#x27;, &#x27;part-5&#x27;, &#x27;part-6&#x27;, &#x27;part-7&#x27;]",
+    "<b>#2 list (3)<\/b> [&#x27;W1&#x27;, &#x27;W2&#x27;, &#x27;W3&#x27;]",
+    "<b>#3 dict (3)<\/b> {&#x27;W1&#x27;: → list #4, &#x27;W2&#x27;: → list #5, &#x27;W3&#x27;: → list #6}",
+    "<b>#4 list (1)<\/b> [&#x27;part-1&#x27;]",
+    "<b>#5 list (1)<\/b> [&#x27;part-2&#x27;]",
+    "<b>#6 list (0)<\/b> []"
+   ],
+   "newVar": "f"
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "Object #6 list now holds [&#x27;part-3&#x27;]",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "files",
+       "→ list #1"
+      ],
+      [
+       "workers",
+       "→ list #2"
+      ],
+      [
+       "plan",
+       "→ dict #3"
+      ],
+      [
+       "i",
+       "2"
+      ],
+      [
+       "f",
+       "'part-3'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (7)<\/b> [&#x27;part-1&#x27;, &#x27;part-2&#x27;, &#x27;part-3&#x27;, &#x27;part-4&#x27;, &#x27;part-5&#x27;, &#x27;part-6&#x27;, &#x27;part-7&#x27;]",
+    "<b>#2 list (3)<\/b> [&#x27;W1&#x27;, &#x27;W2&#x27;, &#x27;W3&#x27;]",
+    "<b>#3 dict (3)<\/b> {&#x27;W1&#x27;: → list #4, &#x27;W2&#x27;: → list #5, &#x27;W3&#x27;: → list #6}",
+    "<b>#4 list (1)<\/b> [&#x27;part-1&#x27;]",
+    "<b>#5 list (1)<\/b> [&#x27;part-2&#x27;]",
+    "<b>#6 list (1)<\/b> [&#x27;part-3&#x27;]"
+   ]
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "<code>i<\/code> changes to 3. <code>f<\/code> changes to &#x27;part-4&#x27;.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "files",
+       "→ list #1"
+      ],
+      [
+       "workers",
+       "→ list #2"
+      ],
+      [
+       "plan",
+       "→ dict #3"
+      ],
+      [
+       "i",
+       "3"
+      ],
+      [
+       "f",
+       "'part-4'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (7)<\/b> [&#x27;part-1&#x27;, &#x27;part-2&#x27;, &#x27;part-3&#x27;, &#x27;part-4&#x27;, &#x27;part-5&#x27;, &#x27;part-6&#x27;, &#x27;part-7&#x27;]",
+    "<b>#2 list (3)<\/b> [&#x27;W1&#x27;, &#x27;W2&#x27;, &#x27;W3&#x27;]",
+    "<b>#3 dict (3)<\/b> {&#x27;W1&#x27;: → list #4, &#x27;W2&#x27;: → list #5, &#x27;W3&#x27;: → list #6}",
+    "<b>#4 list (1)<\/b> [&#x27;part-1&#x27;]",
+    "<b>#5 list (1)<\/b> [&#x27;part-2&#x27;]",
+    "<b>#6 list (1)<\/b> [&#x27;part-3&#x27;]"
+   ],
+   "newVar": "f"
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "Object #4 list now holds [&#x27;part-1&#x27;, &#x27;part-4&#x27;]",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "files",
+       "→ list #1"
+      ],
+      [
+       "workers",
+       "→ list #2"
+      ],
+      [
+       "plan",
+       "→ dict #3"
+      ],
+      [
+       "i",
+       "3"
+      ],
+      [
+       "f",
+       "'part-4'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (7)<\/b> [&#x27;part-1&#x27;, &#x27;part-2&#x27;, &#x27;part-3&#x27;, &#x27;part-4&#x27;, &#x27;part-5&#x27;, &#x27;part-6&#x27;, &#x27;part-7&#x27;]",
+    "<b>#2 list (3)<\/b> [&#x27;W1&#x27;, &#x27;W2&#x27;, &#x27;W3&#x27;]",
+    "<b>#3 dict (3)<\/b> {&#x27;W1&#x27;: → list #4, &#x27;W2&#x27;: → list #5, &#x27;W3&#x27;: → list #6}",
+    "<b>#4 list (2)<\/b> [&#x27;part-1&#x27;, &#x27;part-4&#x27;]",
+    "<b>#5 list (1)<\/b> [&#x27;part-2&#x27;]",
+    "<b>#6 list (1)<\/b> [&#x27;part-3&#x27;]"
+   ]
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "<code>i<\/code> changes to 4. <code>f<\/code> changes to &#x27;part-5&#x27;.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "files",
+       "→ list #1"
+      ],
+      [
+       "workers",
+       "→ list #2"
+      ],
+      [
+       "plan",
+       "→ dict #3"
+      ],
+      [
+       "i",
+       "4"
+      ],
+      [
+       "f",
+       "'part-5'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (7)<\/b> [&#x27;part-1&#x27;, &#x27;part-2&#x27;, &#x27;part-3&#x27;, &#x27;part-4&#x27;, &#x27;part-5&#x27;, &#x27;part-6&#x27;, &#x27;part-7&#x27;]",
+    "<b>#2 list (3)<\/b> [&#x27;W1&#x27;, &#x27;W2&#x27;, &#x27;W3&#x27;]",
+    "<b>#3 dict (3)<\/b> {&#x27;W1&#x27;: → list #4, &#x27;W2&#x27;: → list #5, &#x27;W3&#x27;: → list #6}",
+    "<b>#4 list (2)<\/b> [&#x27;part-1&#x27;, &#x27;part-4&#x27;]",
+    "<b>#5 list (1)<\/b> [&#x27;part-2&#x27;]",
+    "<b>#6 list (1)<\/b> [&#x27;part-3&#x27;]"
+   ],
+   "newVar": "f"
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "Object #5 list now holds [&#x27;part-2&#x27;, &#x27;part-5&#x27;]",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "files",
+       "→ list #1"
+      ],
+      [
+       "workers",
+       "→ list #2"
+      ],
+      [
+       "plan",
+       "→ dict #3"
+      ],
+      [
+       "i",
+       "4"
+      ],
+      [
+       "f",
+       "'part-5'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (7)<\/b> [&#x27;part-1&#x27;, &#x27;part-2&#x27;, &#x27;part-3&#x27;, &#x27;part-4&#x27;, &#x27;part-5&#x27;, &#x27;part-6&#x27;, &#x27;part-7&#x27;]",
+    "<b>#2 list (3)<\/b> [&#x27;W1&#x27;, &#x27;W2&#x27;, &#x27;W3&#x27;]",
+    "<b>#3 dict (3)<\/b> {&#x27;W1&#x27;: → list #4, &#x27;W2&#x27;: → list #5, &#x27;W3&#x27;: → list #6}",
+    "<b>#4 list (2)<\/b> [&#x27;part-1&#x27;, &#x27;part-4&#x27;]",
+    "<b>#5 list (2)<\/b> [&#x27;part-2&#x27;, &#x27;part-5&#x27;]",
+    "<b>#6 list (1)<\/b> [&#x27;part-3&#x27;]"
+   ]
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "<code>i<\/code> changes to 5. <code>f<\/code> changes to &#x27;part-6&#x27;.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "files",
+       "→ list #1"
+      ],
+      [
+       "workers",
+       "→ list #2"
+      ],
+      [
+       "plan",
+       "→ dict #3"
+      ],
+      [
+       "i",
+       "5"
+      ],
+      [
+       "f",
+       "'part-6'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (7)<\/b> [&#x27;part-1&#x27;, &#x27;part-2&#x27;, &#x27;part-3&#x27;, &#x27;part-4&#x27;, &#x27;part-5&#x27;, &#x27;part-6&#x27;, &#x27;part-7&#x27;]",
+    "<b>#2 list (3)<\/b> [&#x27;W1&#x27;, &#x27;W2&#x27;, &#x27;W3&#x27;]",
+    "<b>#3 dict (3)<\/b> {&#x27;W1&#x27;: → list #4, &#x27;W2&#x27;: → list #5, &#x27;W3&#x27;: → list #6}",
+    "<b>#4 list (2)<\/b> [&#x27;part-1&#x27;, &#x27;part-4&#x27;]",
+    "<b>#5 list (2)<\/b> [&#x27;part-2&#x27;, &#x27;part-5&#x27;]",
+    "<b>#6 list (1)<\/b> [&#x27;part-3&#x27;]"
+   ],
+   "newVar": "f"
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "Object #6 list now holds [&#x27;part-3&#x27;, &#x27;part-6&#x27;]",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "files",
+       "→ list #1"
+      ],
+      [
+       "workers",
+       "→ list #2"
+      ],
+      [
+       "plan",
+       "→ dict #3"
+      ],
+      [
+       "i",
+       "5"
+      ],
+      [
+       "f",
+       "'part-6'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (7)<\/b> [&#x27;part-1&#x27;, &#x27;part-2&#x27;, &#x27;part-3&#x27;, &#x27;part-4&#x27;, &#x27;part-5&#x27;, &#x27;part-6&#x27;, &#x27;part-7&#x27;]",
+    "<b>#2 list (3)<\/b> [&#x27;W1&#x27;, &#x27;W2&#x27;, &#x27;W3&#x27;]",
+    "<b>#3 dict (3)<\/b> {&#x27;W1&#x27;: → list #4, &#x27;W2&#x27;: → list #5, &#x27;W3&#x27;: → list #6}",
+    "<b>#4 list (2)<\/b> [&#x27;part-1&#x27;, &#x27;part-4&#x27;]",
+    "<b>#5 list (2)<\/b> [&#x27;part-2&#x27;, &#x27;part-5&#x27;]",
+    "<b>#6 list (2)<\/b> [&#x27;part-3&#x27;, &#x27;part-6&#x27;]"
+   ]
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "<code>i<\/code> changes to 6. <code>f<\/code> changes to &#x27;part-7&#x27;.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "files",
+       "→ list #1"
+      ],
+      [
+       "workers",
+       "→ list #2"
+      ],
+      [
+       "plan",
+       "→ dict #3"
+      ],
+      [
+       "i",
+       "6"
+      ],
+      [
+       "f",
+       "'part-7'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (7)<\/b> [&#x27;part-1&#x27;, &#x27;part-2&#x27;, &#x27;part-3&#x27;, &#x27;part-4&#x27;, &#x27;part-5&#x27;, &#x27;part-6&#x27;, &#x27;part-7&#x27;]",
+    "<b>#2 list (3)<\/b> [&#x27;W1&#x27;, &#x27;W2&#x27;, &#x27;W3&#x27;]",
+    "<b>#3 dict (3)<\/b> {&#x27;W1&#x27;: → list #4, &#x27;W2&#x27;: → list #5, &#x27;W3&#x27;: → list #6}",
+    "<b>#4 list (2)<\/b> [&#x27;part-1&#x27;, &#x27;part-4&#x27;]",
+    "<b>#5 list (2)<\/b> [&#x27;part-2&#x27;, &#x27;part-5&#x27;]",
+    "<b>#6 list (2)<\/b> [&#x27;part-3&#x27;, &#x27;part-6&#x27;]"
+   ],
+   "newVar": "f"
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "Object #4 list now holds [&#x27;part-1&#x27;, &#x27;part-4&#x27;, &#x27;part-7&#x27;]",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "files",
+       "→ list #1"
+      ],
+      [
+       "workers",
+       "→ list #2"
+      ],
+      [
+       "plan",
+       "→ dict #3"
+      ],
+      [
+       "i",
+       "6"
+      ],
+      [
+       "f",
+       "'part-7'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (7)<\/b> [&#x27;part-1&#x27;, &#x27;part-2&#x27;, &#x27;part-3&#x27;, &#x27;part-4&#x27;, &#x27;part-5&#x27;, &#x27;part-6&#x27;, &#x27;part-7&#x27;]",
+    "<b>#2 list (3)<\/b> [&#x27;W1&#x27;, &#x27;W2&#x27;, &#x27;W3&#x27;]",
+    "<b>#3 dict (3)<\/b> {&#x27;W1&#x27;: → list #4, &#x27;W2&#x27;: → list #5, &#x27;W3&#x27;: → list #6}",
+    "<b>#4 list (3)<\/b> [&#x27;part-1&#x27;, &#x27;part-4&#x27;, &#x27;part-7&#x27;]",
+    "<b>#5 list (2)<\/b> [&#x27;part-2&#x27;, &#x27;part-5&#x27;]",
+    "<b>#6 list (2)<\/b> [&#x27;part-3&#x27;, &#x27;part-6&#x27;]"
+   ]
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "Nothing is left to loop over, so the loop ends and Python moves on.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "files",
+       "→ list #1"
+      ],
+      [
+       "workers",
+       "→ list #2"
+      ],
+      [
+       "plan",
+       "→ dict #3"
+      ],
+      [
+       "i",
+       "6"
+      ],
+      [
+       "f",
+       "'part-7'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (7)<\/b> [&#x27;part-1&#x27;, &#x27;part-2&#x27;, &#x27;part-3&#x27;, &#x27;part-4&#x27;, &#x27;part-5&#x27;, &#x27;part-6&#x27;, &#x27;part-7&#x27;]",
+    "<b>#2 list (3)<\/b> [&#x27;W1&#x27;, &#x27;W2&#x27;, &#x27;W3&#x27;]",
+    "<b>#3 dict (3)<\/b> {&#x27;W1&#x27;: → list #4, &#x27;W2&#x27;: → list #5, &#x27;W3&#x27;: → list #6}",
+    "<b>#4 list (3)<\/b> [&#x27;part-1&#x27;, &#x27;part-4&#x27;, &#x27;part-7&#x27;]",
+    "<b>#5 list (2)<\/b> [&#x27;part-2&#x27;, &#x27;part-5&#x27;]",
+    "<b>#6 list (2)<\/b> [&#x27;part-3&#x27;, &#x27;part-6&#x27;]"
+   ]
+  },
+  {
+   "line": 6,
+   "phase": "Python",
+   "note": "<code>w<\/code> is created: &#x27;W1&#x27;.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "files",
+       "→ list #1"
+      ],
+      [
+       "workers",
+       "→ list #2"
+      ],
+      [
+       "plan",
+       "→ dict #3"
+      ],
+      [
+       "i",
+       "6"
+      ],
+      [
+       "f",
+       "'part-7'"
+      ],
+      [
+       "w",
+       "'W1'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (7)<\/b> [&#x27;part-1&#x27;, &#x27;part-2&#x27;, &#x27;part-3&#x27;, &#x27;part-4&#x27;, &#x27;part-5&#x27;, &#x27;part-6&#x27;, &#x27;part-7&#x27;]",
+    "<b>#2 list (3)<\/b> [&#x27;W1&#x27;, &#x27;W2&#x27;, &#x27;W3&#x27;]",
+    "<b>#3 dict (3)<\/b> {&#x27;W1&#x27;: → list #4, &#x27;W2&#x27;: → list #5, &#x27;W3&#x27;: → list #6}",
+    "<b>#4 list (3)<\/b> [&#x27;part-1&#x27;, &#x27;part-4&#x27;, &#x27;part-7&#x27;]",
+    "<b>#5 list (2)<\/b> [&#x27;part-2&#x27;, &#x27;part-5&#x27;]",
+    "<b>#6 list (2)<\/b> [&#x27;part-3&#x27;, &#x27;part-6&#x27;]"
+   ],
+   "newVar": "w"
+  },
+  {
+   "line": 7,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "files",
+       "→ list #1"
+      ],
+      [
+       "workers",
+       "→ list #2"
+      ],
+      [
+       "plan",
+       "→ dict #3"
+      ],
+      [
+       "i",
+       "6"
+      ],
+      [
+       "f",
+       "'part-7'"
+      ],
+      [
+       "w",
+       "'W1'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (7)<\/b> [&#x27;part-1&#x27;, &#x27;part-2&#x27;, &#x27;part-3&#x27;, &#x27;part-4&#x27;, &#x27;part-5&#x27;, &#x27;part-6&#x27;, &#x27;part-7&#x27;]",
+    "<b>#2 list (3)<\/b> [&#x27;W1&#x27;, &#x27;W2&#x27;, &#x27;W3&#x27;]",
+    "<b>#3 dict (3)<\/b> {&#x27;W1&#x27;: → list #4, &#x27;W2&#x27;: → list #5, &#x27;W3&#x27;: → list #6}",
+    "<b>#4 list (3)<\/b> [&#x27;part-1&#x27;, &#x27;part-4&#x27;, &#x27;part-7&#x27;]",
+    "<b>#5 list (2)<\/b> [&#x27;part-2&#x27;, &#x27;part-5&#x27;]",
+    "<b>#6 list (2)<\/b> [&#x27;part-3&#x27;, &#x27;part-6&#x27;]"
+   ],
+   "out": "W1 ['part-1', 'part-4', 'part-7']\n"
+  },
+  {
+   "line": 6,
+   "phase": "Python",
+   "note": "<code>w<\/code> changes to &#x27;W2&#x27;.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "files",
+       "→ list #1"
+      ],
+      [
+       "workers",
+       "→ list #2"
+      ],
+      [
+       "plan",
+       "→ dict #3"
+      ],
+      [
+       "i",
+       "6"
+      ],
+      [
+       "f",
+       "'part-7'"
+      ],
+      [
+       "w",
+       "'W2'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (7)<\/b> [&#x27;part-1&#x27;, &#x27;part-2&#x27;, &#x27;part-3&#x27;, &#x27;part-4&#x27;, &#x27;part-5&#x27;, &#x27;part-6&#x27;, &#x27;part-7&#x27;]",
+    "<b>#2 list (3)<\/b> [&#x27;W1&#x27;, &#x27;W2&#x27;, &#x27;W3&#x27;]",
+    "<b>#3 dict (3)<\/b> {&#x27;W1&#x27;: → list #4, &#x27;W2&#x27;: → list #5, &#x27;W3&#x27;: → list #6}",
+    "<b>#4 list (3)<\/b> [&#x27;part-1&#x27;, &#x27;part-4&#x27;, &#x27;part-7&#x27;]",
+    "<b>#5 list (2)<\/b> [&#x27;part-2&#x27;, &#x27;part-5&#x27;]",
+    "<b>#6 list (2)<\/b> [&#x27;part-3&#x27;, &#x27;part-6&#x27;]"
+   ],
+   "newVar": "w"
+  },
+  {
+   "line": 7,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "files",
+       "→ list #1"
+      ],
+      [
+       "workers",
+       "→ list #2"
+      ],
+      [
+       "plan",
+       "→ dict #3"
+      ],
+      [
+       "i",
+       "6"
+      ],
+      [
+       "f",
+       "'part-7'"
+      ],
+      [
+       "w",
+       "'W2'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (7)<\/b> [&#x27;part-1&#x27;, &#x27;part-2&#x27;, &#x27;part-3&#x27;, &#x27;part-4&#x27;, &#x27;part-5&#x27;, &#x27;part-6&#x27;, &#x27;part-7&#x27;]",
+    "<b>#2 list (3)<\/b> [&#x27;W1&#x27;, &#x27;W2&#x27;, &#x27;W3&#x27;]",
+    "<b>#3 dict (3)<\/b> {&#x27;W1&#x27;: → list #4, &#x27;W2&#x27;: → list #5, &#x27;W3&#x27;: → list #6}",
+    "<b>#4 list (3)<\/b> [&#x27;part-1&#x27;, &#x27;part-4&#x27;, &#x27;part-7&#x27;]",
+    "<b>#5 list (2)<\/b> [&#x27;part-2&#x27;, &#x27;part-5&#x27;]",
+    "<b>#6 list (2)<\/b> [&#x27;part-3&#x27;, &#x27;part-6&#x27;]"
+   ],
+   "out": "W2 ['part-2', 'part-5']\n"
+  },
+  {
+   "line": 6,
+   "phase": "Python",
+   "note": "<code>w<\/code> changes to &#x27;W3&#x27;.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "files",
+       "→ list #1"
+      ],
+      [
+       "workers",
+       "→ list #2"
+      ],
+      [
+       "plan",
+       "→ dict #3"
+      ],
+      [
+       "i",
+       "6"
+      ],
+      [
+       "f",
+       "'part-7'"
+      ],
+      [
+       "w",
+       "'W3'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (7)<\/b> [&#x27;part-1&#x27;, &#x27;part-2&#x27;, &#x27;part-3&#x27;, &#x27;part-4&#x27;, &#x27;part-5&#x27;, &#x27;part-6&#x27;, &#x27;part-7&#x27;]",
+    "<b>#2 list (3)<\/b> [&#x27;W1&#x27;, &#x27;W2&#x27;, &#x27;W3&#x27;]",
+    "<b>#3 dict (3)<\/b> {&#x27;W1&#x27;: → list #4, &#x27;W2&#x27;: → list #5, &#x27;W3&#x27;: → list #6}",
+    "<b>#4 list (3)<\/b> [&#x27;part-1&#x27;, &#x27;part-4&#x27;, &#x27;part-7&#x27;]",
+    "<b>#5 list (2)<\/b> [&#x27;part-2&#x27;, &#x27;part-5&#x27;]",
+    "<b>#6 list (2)<\/b> [&#x27;part-3&#x27;, &#x27;part-6&#x27;]"
+   ],
+   "newVar": "w"
+  },
+  {
+   "line": 7,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "files",
+       "→ list #1"
+      ],
+      [
+       "workers",
+       "→ list #2"
+      ],
+      [
+       "plan",
+       "→ dict #3"
+      ],
+      [
+       "i",
+       "6"
+      ],
+      [
+       "f",
+       "'part-7'"
+      ],
+      [
+       "w",
+       "'W3'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (7)<\/b> [&#x27;part-1&#x27;, &#x27;part-2&#x27;, &#x27;part-3&#x27;, &#x27;part-4&#x27;, &#x27;part-5&#x27;, &#x27;part-6&#x27;, &#x27;part-7&#x27;]",
+    "<b>#2 list (3)<\/b> [&#x27;W1&#x27;, &#x27;W2&#x27;, &#x27;W3&#x27;]",
+    "<b>#3 dict (3)<\/b> {&#x27;W1&#x27;: → list #4, &#x27;W2&#x27;: → list #5, &#x27;W3&#x27;: → list #6}",
+    "<b>#4 list (3)<\/b> [&#x27;part-1&#x27;, &#x27;part-4&#x27;, &#x27;part-7&#x27;]",
+    "<b>#5 list (2)<\/b> [&#x27;part-2&#x27;, &#x27;part-5&#x27;]",
+    "<b>#6 list (2)<\/b> [&#x27;part-3&#x27;, &#x27;part-6&#x27;]"
+   ],
+   "out": "W3 ['part-3', 'part-6']\n"
+  },
+  {
+   "line": 6,
+   "phase": "Python",
+   "note": "Nothing is left to loop over, so the loop ends and Python moves on.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "files",
+       "→ list #1"
+      ],
+      [
+       "workers",
+       "→ list #2"
+      ],
+      [
+       "plan",
+       "→ dict #3"
+      ],
+      [
+       "i",
+       "6"
+      ],
+      [
+       "f",
+       "'part-7'"
+      ],
+      [
+       "w",
+       "'W3'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 list (7)<\/b> [&#x27;part-1&#x27;, &#x27;part-2&#x27;, &#x27;part-3&#x27;, &#x27;part-4&#x27;, &#x27;part-5&#x27;, &#x27;part-6&#x27;, &#x27;part-7&#x27;]",
+    "<b>#2 list (3)<\/b> [&#x27;W1&#x27;, &#x27;W2&#x27;, &#x27;W3&#x27;]",
+    "<b>#3 dict (3)<\/b> {&#x27;W1&#x27;: → list #4, &#x27;W2&#x27;: → list #5, &#x27;W3&#x27;: → list #6}",
+    "<b>#4 list (3)<\/b> [&#x27;part-1&#x27;, &#x27;part-4&#x27;, &#x27;part-7&#x27;]",
+    "<b>#5 list (2)<\/b> [&#x27;part-2&#x27;, &#x27;part-5&#x27;]",
+    "<b>#6 list (2)<\/b> [&#x27;part-3&#x27;, &#x27;part-6&#x27;]"
+   ]
+  }
+ ]
+}</script>
+    </div>
+  </article>
+  <article class="wx">
+    <div class="wx__head"><span class="wx__num">Example 2</span><span class="lvl lvl--i">Intermediate</span><span class="wx__tag">Cluster health · monitoring</span></div>
+    <h4>Which DataNodes are dead?</h4>
+    <div class="wx__problem"><p class="wx__label">Problem statement</p><p>HDFS declares a DataNode dead after <b>630 seconds</b> (10 min 30 s) without a heartbeat. Given the last heartbeat time of each node and the current time, print the dead nodes and how many are alive.</p></div>
+    <div class="prob__io"><div><small>Input</small><pre>now = 2000 s · dn1 1998, dn2 1200, dn3 1999, dn4 1500, dn5 1360</pre></div><div><small>Expected output</small><pre>Dead : [&#x27;dn2&#x27;, &#x27;dn5&#x27;]
+Alive: 3 of 5</pre></div></div>
+    <div class="wx__approach"><p class="wx__label">Approach</p><ol><li>Silence = now − last heartbeat.</li><li>Dead if silence > 630 seconds.</li><li>Count the rest as alive.</li></ol></div>
+    <p class="wx__label">Solution: run it live</p>
+    <div class="runner">
+    <script type="application/json">{
+ "lang": "python",
+ "file": "main.py",
+ "tasks": [
+  {
+   "label": "Solution",
+   "hint": "dn5 has been silent for 640 s and dn4 for 500 s. Why might an admin <i>not<\/i> want a much shorter timeout? (Think of a network switch rebooting for 2 minutes.)",
+   "code": "TIMEOUT = 630\nnow = 2000\nlast = {\"dn1\": 1998, \"dn2\": 1200, \"dn3\": 1999, \"dn4\": 1500, \"dn5\": 1360}\n\ndead = []\nfor node, t in last.items():\n    if now - t > TIMEOUT:\n        dead.append(node)\nprint(\"Dead :\", dead)\nprint(\"Alive:\", len(last) - len(dead), \"of\", len(last))\n"
+  }
+ ]
+}</script>
+    </div>
+    <p class="wx__label">What happens in memory, step by step</p>
+    <p class="wx__how">Recorded from a real Python run: press <b>Next</b> to execute one line at a time. Watch variables change in each frame, and lists and dictionaries (numbered #1, #2 …) fill up as objects.</p>
+    <div class="tracer">
+    <script type="application/json">{
+ "lang": "python",
+ "code": [
+  "TIMEOUT = 630",
+  "now = 2000",
+  "last = {\"dn1\": 1998, \"dn2\": 1200, \"dn3\": 1999, \"dn4\": 1500, \"dn5\": 1360}",
+  "",
+  "dead = []",
+  "for node, t in last.items():",
+  "    if now - t > TIMEOUT:",
+  "        dead.append(node)",
+  "print(\"Dead :\", dead)",
+  "print(\"Alive:\", len(last) - len(dead), \"of\", len(last))"
+ ],
+ "steps": [
+  {
+   "line": 1,
+   "phase": "Timeout",
+   "note": "2 × 5-minute recheck + 10 × 3-second heartbeat = 630 s, the HDFS default. <code>TIMEOUT<\/code> is created: 630.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "TIMEOUT",
+       "630"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "TIMEOUT"
+  },
+  {
+   "line": 2,
+   "phase": "Python",
+   "note": "<code>now<\/code> is created: 2000.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "TIMEOUT",
+       "630"
+      ],
+      [
+       "now",
+       "2000"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "now"
+  },
+  {
+   "line": 3,
+   "phase": "Python",
+   "note": "<code>last<\/code> is created: → dict #1. A new dict object (#1) is created: {&#x27;dn1&#x27;: 1998, &#x27;dn2&#x27;: 1200, &#x27;dn3&#x27;: 1999, &#x27;dn4&#x27;: 1500, &#x27;dn5&#x27;: 1360}",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "TIMEOUT",
+       "630"
+      ],
+      [
+       "now",
+       "2000"
+      ],
+      [
+       "last",
+       "→ dict #1"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (5)<\/b> {&#x27;dn1&#x27;: 1998, &#x27;dn2&#x27;: 1200, &#x27;dn3&#x27;: 1999, &#x27;dn4&#x27;: 1500, &#x27;dn5&#x27;: 1360}"
+   ],
+   "newVar": "last"
+  },
+  {
+   "line": 5,
+   "phase": "Python",
+   "note": "<code>dead<\/code> is created: → list #2. A new list object (#2) is created: []",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "TIMEOUT",
+       "630"
+      ],
+      [
+       "now",
+       "2000"
+      ],
+      [
+       "last",
+       "→ dict #1"
+      ],
+      [
+       "dead",
+       "→ list #2"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (5)<\/b> {&#x27;dn1&#x27;: 1998, &#x27;dn2&#x27;: 1200, &#x27;dn3&#x27;: 1999, &#x27;dn4&#x27;: 1500, &#x27;dn5&#x27;: 1360}",
+    "<b>#2 list (0)<\/b> []"
+   ],
+   "newVar": "dead"
+  },
+  {
+   "line": 6,
+   "phase": "Python",
+   "note": "<code>node<\/code> is created: &#x27;dn1&#x27;. <code>t<\/code> is created: 1998.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "TIMEOUT",
+       "630"
+      ],
+      [
+       "now",
+       "2000"
+      ],
+      [
+       "last",
+       "→ dict #1"
+      ],
+      [
+       "dead",
+       "→ list #2"
+      ],
+      [
+       "node",
+       "'dn1'"
+      ],
+      [
+       "t",
+       "1998"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (5)<\/b> {&#x27;dn1&#x27;: 1998, &#x27;dn2&#x27;: 1200, &#x27;dn3&#x27;: 1999, &#x27;dn4&#x27;: 1500, &#x27;dn5&#x27;: 1360}",
+    "<b>#2 list (0)<\/b> []"
+   ],
+   "newVar": "t"
+  },
+  {
+   "line": 7,
+   "phase": "Python",
+   "note": "The condition is <b>False<\/b>, so the indented block is skipped.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "TIMEOUT",
+       "630"
+      ],
+      [
+       "now",
+       "2000"
+      ],
+      [
+       "last",
+       "→ dict #1"
+      ],
+      [
+       "dead",
+       "→ list #2"
+      ],
+      [
+       "node",
+       "'dn1'"
+      ],
+      [
+       "t",
+       "1998"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (5)<\/b> {&#x27;dn1&#x27;: 1998, &#x27;dn2&#x27;: 1200, &#x27;dn3&#x27;: 1999, &#x27;dn4&#x27;: 1500, &#x27;dn5&#x27;: 1360}",
+    "<b>#2 list (0)<\/b> []"
+   ]
+  },
+  {
+   "line": 6,
+   "phase": "Python",
+   "note": "<code>node<\/code> changes to &#x27;dn2&#x27;. <code>t<\/code> changes to 1200.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "TIMEOUT",
+       "630"
+      ],
+      [
+       "now",
+       "2000"
+      ],
+      [
+       "last",
+       "→ dict #1"
+      ],
+      [
+       "dead",
+       "→ list #2"
+      ],
+      [
+       "node",
+       "'dn2'"
+      ],
+      [
+       "t",
+       "1200"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (5)<\/b> {&#x27;dn1&#x27;: 1998, &#x27;dn2&#x27;: 1200, &#x27;dn3&#x27;: 1999, &#x27;dn4&#x27;: 1500, &#x27;dn5&#x27;: 1360}",
+    "<b>#2 list (0)<\/b> []"
+   ],
+   "newVar": "t"
+  },
+  {
+   "line": 7,
+   "phase": "Python",
+   "note": "The condition is <b>True<\/b>, so the indented block runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "TIMEOUT",
+       "630"
+      ],
+      [
+       "now",
+       "2000"
+      ],
+      [
+       "last",
+       "→ dict #1"
+      ],
+      [
+       "dead",
+       "→ list #2"
+      ],
+      [
+       "node",
+       "'dn2'"
+      ],
+      [
+       "t",
+       "1200"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (5)<\/b> {&#x27;dn1&#x27;: 1998, &#x27;dn2&#x27;: 1200, &#x27;dn3&#x27;: 1999, &#x27;dn4&#x27;: 1500, &#x27;dn5&#x27;: 1360}",
+    "<b>#2 list (0)<\/b> []"
+   ]
+  },
+  {
+   "line": 8,
+   "phase": "Python",
+   "note": "Object #2 list now holds [&#x27;dn2&#x27;]",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "TIMEOUT",
+       "630"
+      ],
+      [
+       "now",
+       "2000"
+      ],
+      [
+       "last",
+       "→ dict #1"
+      ],
+      [
+       "dead",
+       "→ list #2"
+      ],
+      [
+       "node",
+       "'dn2'"
+      ],
+      [
+       "t",
+       "1200"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (5)<\/b> {&#x27;dn1&#x27;: 1998, &#x27;dn2&#x27;: 1200, &#x27;dn3&#x27;: 1999, &#x27;dn4&#x27;: 1500, &#x27;dn5&#x27;: 1360}",
+    "<b>#2 list (1)<\/b> [&#x27;dn2&#x27;]"
+   ]
+  },
+  {
+   "line": 6,
+   "phase": "Python",
+   "note": "<code>node<\/code> changes to &#x27;dn3&#x27;. <code>t<\/code> changes to 1999.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "TIMEOUT",
+       "630"
+      ],
+      [
+       "now",
+       "2000"
+      ],
+      [
+       "last",
+       "→ dict #1"
+      ],
+      [
+       "dead",
+       "→ list #2"
+      ],
+      [
+       "node",
+       "'dn3'"
+      ],
+      [
+       "t",
+       "1999"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (5)<\/b> {&#x27;dn1&#x27;: 1998, &#x27;dn2&#x27;: 1200, &#x27;dn3&#x27;: 1999, &#x27;dn4&#x27;: 1500, &#x27;dn5&#x27;: 1360}",
+    "<b>#2 list (1)<\/b> [&#x27;dn2&#x27;]"
+   ],
+   "newVar": "t"
+  },
+  {
+   "line": 7,
+   "phase": "Python",
+   "note": "The condition is <b>False<\/b>, so the indented block is skipped.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "TIMEOUT",
+       "630"
+      ],
+      [
+       "now",
+       "2000"
+      ],
+      [
+       "last",
+       "→ dict #1"
+      ],
+      [
+       "dead",
+       "→ list #2"
+      ],
+      [
+       "node",
+       "'dn3'"
+      ],
+      [
+       "t",
+       "1999"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (5)<\/b> {&#x27;dn1&#x27;: 1998, &#x27;dn2&#x27;: 1200, &#x27;dn3&#x27;: 1999, &#x27;dn4&#x27;: 1500, &#x27;dn5&#x27;: 1360}",
+    "<b>#2 list (1)<\/b> [&#x27;dn2&#x27;]"
+   ]
+  },
+  {
+   "line": 6,
+   "phase": "Python",
+   "note": "<code>node<\/code> changes to &#x27;dn4&#x27;. <code>t<\/code> changes to 1500.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "TIMEOUT",
+       "630"
+      ],
+      [
+       "now",
+       "2000"
+      ],
+      [
+       "last",
+       "→ dict #1"
+      ],
+      [
+       "dead",
+       "→ list #2"
+      ],
+      [
+       "node",
+       "'dn4'"
+      ],
+      [
+       "t",
+       "1500"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (5)<\/b> {&#x27;dn1&#x27;: 1998, &#x27;dn2&#x27;: 1200, &#x27;dn3&#x27;: 1999, &#x27;dn4&#x27;: 1500, &#x27;dn5&#x27;: 1360}",
+    "<b>#2 list (1)<\/b> [&#x27;dn2&#x27;]"
+   ],
+   "newVar": "t"
+  },
+  {
+   "line": 7,
+   "phase": "Python",
+   "note": "The condition is <b>False<\/b>, so the indented block is skipped.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "TIMEOUT",
+       "630"
+      ],
+      [
+       "now",
+       "2000"
+      ],
+      [
+       "last",
+       "→ dict #1"
+      ],
+      [
+       "dead",
+       "→ list #2"
+      ],
+      [
+       "node",
+       "'dn4'"
+      ],
+      [
+       "t",
+       "1500"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (5)<\/b> {&#x27;dn1&#x27;: 1998, &#x27;dn2&#x27;: 1200, &#x27;dn3&#x27;: 1999, &#x27;dn4&#x27;: 1500, &#x27;dn5&#x27;: 1360}",
+    "<b>#2 list (1)<\/b> [&#x27;dn2&#x27;]"
+   ]
+  },
+  {
+   "line": 6,
+   "phase": "Python",
+   "note": "<code>node<\/code> changes to &#x27;dn5&#x27;. <code>t<\/code> changes to 1360.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "TIMEOUT",
+       "630"
+      ],
+      [
+       "now",
+       "2000"
+      ],
+      [
+       "last",
+       "→ dict #1"
+      ],
+      [
+       "dead",
+       "→ list #2"
+      ],
+      [
+       "node",
+       "'dn5'"
+      ],
+      [
+       "t",
+       "1360"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (5)<\/b> {&#x27;dn1&#x27;: 1998, &#x27;dn2&#x27;: 1200, &#x27;dn3&#x27;: 1999, &#x27;dn4&#x27;: 1500, &#x27;dn5&#x27;: 1360}",
+    "<b>#2 list (1)<\/b> [&#x27;dn2&#x27;]"
+   ],
+   "newVar": "t"
+  },
+  {
+   "line": 7,
+   "phase": "Python",
+   "note": "The condition is <b>True<\/b>, so the indented block runs.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "TIMEOUT",
+       "630"
+      ],
+      [
+       "now",
+       "2000"
+      ],
+      [
+       "last",
+       "→ dict #1"
+      ],
+      [
+       "dead",
+       "→ list #2"
+      ],
+      [
+       "node",
+       "'dn5'"
+      ],
+      [
+       "t",
+       "1360"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (5)<\/b> {&#x27;dn1&#x27;: 1998, &#x27;dn2&#x27;: 1200, &#x27;dn3&#x27;: 1999, &#x27;dn4&#x27;: 1500, &#x27;dn5&#x27;: 1360}",
+    "<b>#2 list (1)<\/b> [&#x27;dn2&#x27;]"
+   ]
+  },
+  {
+   "line": 8,
+   "phase": "Python",
+   "note": "Object #2 list now holds [&#x27;dn2&#x27;, &#x27;dn5&#x27;]",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "TIMEOUT",
+       "630"
+      ],
+      [
+       "now",
+       "2000"
+      ],
+      [
+       "last",
+       "→ dict #1"
+      ],
+      [
+       "dead",
+       "→ list #2"
+      ],
+      [
+       "node",
+       "'dn5'"
+      ],
+      [
+       "t",
+       "1360"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (5)<\/b> {&#x27;dn1&#x27;: 1998, &#x27;dn2&#x27;: 1200, &#x27;dn3&#x27;: 1999, &#x27;dn4&#x27;: 1500, &#x27;dn5&#x27;: 1360}",
+    "<b>#2 list (2)<\/b> [&#x27;dn2&#x27;, &#x27;dn5&#x27;]"
+   ]
+  },
+  {
+   "line": 6,
+   "phase": "Python",
+   "note": "Nothing is left to loop over, so the loop ends and Python moves on.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "TIMEOUT",
+       "630"
+      ],
+      [
+       "now",
+       "2000"
+      ],
+      [
+       "last",
+       "→ dict #1"
+      ],
+      [
+       "dead",
+       "→ list #2"
+      ],
+      [
+       "node",
+       "'dn5'"
+      ],
+      [
+       "t",
+       "1360"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (5)<\/b> {&#x27;dn1&#x27;: 1998, &#x27;dn2&#x27;: 1200, &#x27;dn3&#x27;: 1999, &#x27;dn4&#x27;: 1500, &#x27;dn5&#x27;: 1360}",
+    "<b>#2 list (2)<\/b> [&#x27;dn2&#x27;, &#x27;dn5&#x27;]"
+   ]
+  },
+  {
+   "line": 9,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "TIMEOUT",
+       "630"
+      ],
+      [
+       "now",
+       "2000"
+      ],
+      [
+       "last",
+       "→ dict #1"
+      ],
+      [
+       "dead",
+       "→ list #2"
+      ],
+      [
+       "node",
+       "'dn5'"
+      ],
+      [
+       "t",
+       "1360"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (5)<\/b> {&#x27;dn1&#x27;: 1998, &#x27;dn2&#x27;: 1200, &#x27;dn3&#x27;: 1999, &#x27;dn4&#x27;: 1500, &#x27;dn5&#x27;: 1360}",
+    "<b>#2 list (2)<\/b> [&#x27;dn2&#x27;, &#x27;dn5&#x27;]"
+   ],
+   "out": "Dead : ['dn2', 'dn5']\n"
+  },
+  {
+   "line": 10,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "TIMEOUT",
+       "630"
+      ],
+      [
+       "now",
+       "2000"
+      ],
+      [
+       "last",
+       "→ dict #1"
+      ],
+      [
+       "dead",
+       "→ list #2"
+      ],
+      [
+       "node",
+       "'dn5'"
+      ],
+      [
+       "t",
+       "1360"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (5)<\/b> {&#x27;dn1&#x27;: 1998, &#x27;dn2&#x27;: 1200, &#x27;dn3&#x27;: 1999, &#x27;dn4&#x27;: 1500, &#x27;dn5&#x27;: 1360}",
+    "<b>#2 list (2)<\/b> [&#x27;dn2&#x27;, &#x27;dn5&#x27;]"
+   ],
+   "out": "Alive: 3 of 5\n"
+  }
+ ]
+}</script>
+    </div>
+  </article>
+  <article class="wx">
+    <div class="wx__head"><span class="wx__num">Example 3</span><span class="lvl lvl--a">Advanced</span><span class="wx__tag">Fault tolerance · recovery</span></div>
+    <h4>Re-run a dead worker's tasks on the least-loaded workers</h4>
+    <div class="wx__problem"><p class="wx__label">Problem statement</p><p>Workers report their running tasks. W2 has died. Move each of its tasks, one at a time, to whichever live worker currently has the fewest tasks, marking it as a new attempt.</p></div>
+    <div class="prob__io"><div><small>Input</small><pre>W1 [T1, T4] · W2 [T2, T5, T6] · W3 [T3] · dead W2</pre></div><div><small>Expected output</small><pre>{&#x27;W1&#x27;: [&#x27;T1&#x27;, &#x27;T4&#x27;, &quot;T5&#x27;&quot;], &#x27;W3&#x27;: [&#x27;T3&#x27;, &quot;T2&#x27;&quot;, &quot;T6&#x27;&quot;]}</pre></div></div>
+    <div class="wx__approach"><p class="wx__label">Approach</p><ol><li>Remove the dead worker from the table and keep its task list.</li><li>For each lost task, find the live worker with the fewest tasks using <code>min(…, key=…)</code>.</li><li>Add the task there as attempt 2 (written with ′).</li></ol></div>
+    <p class="wx__label">Solution: run it live</p>
+    <div class="runner">
+    <script type="application/json">{
+ "lang": "python",
+ "file": "main.py",
+ "tasks": [
+  {
+   "label": "Solution",
+   "hint": "Add a fourth worker <code>\"W4\": []<\/code> before the loop. Where do the lost tasks go now?",
+   "code": "def least_loaded(table):\n    return min(table, key=lambda w: len(table[w]))\n\nrunning = {\"W1\": [\"T1\", \"T4\"], \"W2\": [\"T2\", \"T5\", \"T6\"], \"W3\": [\"T3\"]}\nlost = running.pop(\"W2\")\nfor task in lost:\n    w = least_loaded(running)\n    running[w].append(task + \"'\")\nprint(running)\n"
+  }
+ ]
+}</script>
+    </div>
+    <p class="wx__label">What happens in memory, step by step</p>
+    <p class="wx__how">Recorded from a real Python run: press <b>Next</b> to execute one line at a time. Watch variables change in each frame, and lists and dictionaries (numbered #1, #2 …) fill up as objects.</p>
+    <div class="tracer">
+    <script type="application/json">{
+ "lang": "python",
+ "code": [
+  "def least_loaded(table):",
+  "    return min(table, key=lambda w: len(table[w]))",
+  "",
+  "running = {\"W1\": [\"T1\", \"T4\"], \"W2\": [\"T2\", \"T5\", \"T6\"], \"W3\": [\"T3\"]}",
+  "lost = running.pop(\"W2\")",
+  "for task in lost:",
+  "    w = least_loaded(running)",
+  "    running[w].append(task + \"'\")",
+  "print(running)"
+ ],
+ "steps": [
+  {
+   "line": 1,
+   "phase": "Python",
+   "note": "<code>least_loaded<\/code> is created: function least_loaded().",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "least_loaded",
+       "function least_loaded()"
+      ]
+     ]
+    }
+   ],
+   "heap": [],
+   "newVar": "least_loaded"
+  },
+  {
+   "line": 4,
+   "phase": "Python",
+   "note": "<code>running<\/code> is created: → dict #1. A new dict object (#1) is created: {&#x27;W1&#x27;: → list #2, &#x27;W2&#x27;: → list #3, &#x27;W3&#x27;: → list #4} A new list object (#2) is created: [&#x27;T1&#x27;, &#x27;T4&#x27;] A new list object (#3) is created: [&#x27;T2&#x27;, &#x27;T5&#x27;, &#x27;T6&#x27;] A new list object (#4) is created: [&#x27;T3&#x27;]",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "least_loaded",
+       "function least_loaded()"
+      ],
+      [
+       "running",
+       "→ dict #1"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (3)<\/b> {&#x27;W1&#x27;: → list #2, &#x27;W2&#x27;: → list #3, &#x27;W3&#x27;: → list #4}",
+    "<b>#2 list (2)<\/b> [&#x27;T1&#x27;, &#x27;T4&#x27;]",
+    "<b>#3 list (3)<\/b> [&#x27;T2&#x27;, &#x27;T5&#x27;, &#x27;T6&#x27;]",
+    "<b>#4 list (1)<\/b> [&#x27;T3&#x27;]"
+   ],
+   "newVar": "running"
+  },
+  {
+   "line": 5,
+   "phase": "Dead",
+   "note": "<code>pop<\/code> removes W2 and returns its tasks in one step. <code>lost<\/code> is created: → list #3. Object #1 dict now holds {&#x27;W1&#x27;: → list #2, &#x27;W3&#x27;: → list #4}",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "least_loaded",
+       "function least_loaded()"
+      ],
+      [
+       "running",
+       "→ dict #1"
+      ],
+      [
+       "lost",
+       "→ list #3"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (2)<\/b> {&#x27;W1&#x27;: → list #2, &#x27;W3&#x27;: → list #4}",
+    "<b>#2 list (2)<\/b> [&#x27;T1&#x27;, &#x27;T4&#x27;]",
+    "<b>#3 list (3)<\/b> [&#x27;T2&#x27;, &#x27;T5&#x27;, &#x27;T6&#x27;]",
+    "<b>#4 list (1)<\/b> [&#x27;T3&#x27;]"
+   ],
+   "newVar": "lost"
+  },
+  {
+   "line": 6,
+   "phase": "Python",
+   "note": "<code>task<\/code> is created: &#x27;T2&#x27;.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "least_loaded",
+       "function least_loaded()"
+      ],
+      [
+       "running",
+       "→ dict #1"
+      ],
+      [
+       "lost",
+       "→ list #3"
+      ],
+      [
+       "task",
+       "'T2'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (2)<\/b> {&#x27;W1&#x27;: → list #2, &#x27;W3&#x27;: → list #4}",
+    "<b>#2 list (2)<\/b> [&#x27;T1&#x27;, &#x27;T4&#x27;]",
+    "<b>#3 list (3)<\/b> [&#x27;T2&#x27;, &#x27;T5&#x27;, &#x27;T6&#x27;]",
+    "<b>#4 list (1)<\/b> [&#x27;T3&#x27;]"
+   ],
+   "newVar": "task"
+  },
+  {
+   "line": 7,
+   "phase": "Python",
+   "note": "<code>least_loaded()<\/code> is called: a new frame is pushed with <code>table<\/code> = → dict #1.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "least_loaded",
+       "function least_loaded()"
+      ],
+      [
+       "running",
+       "→ dict #1"
+      ],
+      [
+       "lost",
+       "→ list #3"
+      ],
+      [
+       "task",
+       "'T2'"
+      ]
+     ]
+    },
+    {
+     "frame": "least_loaded()",
+     "vars": [
+      [
+       "table",
+       "→ dict #1"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (2)<\/b> {&#x27;W1&#x27;: → list #2, &#x27;W3&#x27;: → list #4}",
+    "<b>#2 list (2)<\/b> [&#x27;T1&#x27;, &#x27;T4&#x27;]",
+    "<b>#3 list (3)<\/b> [&#x27;T2&#x27;, &#x27;T5&#x27;, &#x27;T6&#x27;]",
+    "<b>#4 list (1)<\/b> [&#x27;T3&#x27;]"
+   ],
+   "newVar": "table"
+  },
+  {
+   "line": 2,
+   "phase": "Python",
+   "note": "The return value is worked out and handed back to the caller.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "least_loaded",
+       "function least_loaded()"
+      ],
+      [
+       "running",
+       "→ dict #1"
+      ],
+      [
+       "lost",
+       "→ list #3"
+      ],
+      [
+       "task",
+       "'T2'"
+      ]
+     ]
+    },
+    {
+     "frame": "least_loaded()",
+     "vars": [
+      [
+       "table",
+       "→ dict #1"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (2)<\/b> {&#x27;W1&#x27;: → list #2, &#x27;W3&#x27;: → list #4}",
+    "<b>#2 list (2)<\/b> [&#x27;T1&#x27;, &#x27;T4&#x27;]",
+    "<b>#3 list (3)<\/b> [&#x27;T2&#x27;, &#x27;T5&#x27;, &#x27;T6&#x27;]",
+    "<b>#4 list (1)<\/b> [&#x27;T3&#x27;]"
+   ]
+  },
+  {
+   "line": 7,
+   "phase": "Return",
+   "note": "<code>least_loaded()<\/code> returns <b>&#x27;W3&#x27;<\/b> and its frame is popped. The caller continues on this line with that value.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "least_loaded",
+       "function least_loaded()"
+      ],
+      [
+       "running",
+       "→ dict #1"
+      ],
+      [
+       "lost",
+       "→ list #3"
+      ],
+      [
+       "task",
+       "'T2'"
+      ],
+      [
+       "w",
+       "'W3'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (2)<\/b> {&#x27;W1&#x27;: → list #2, &#x27;W3&#x27;: → list #4}",
+    "<b>#2 list (2)<\/b> [&#x27;T1&#x27;, &#x27;T4&#x27;]",
+    "<b>#3 list (3)<\/b> [&#x27;T2&#x27;, &#x27;T5&#x27;, &#x27;T6&#x27;]",
+    "<b>#4 list (1)<\/b> [&#x27;T3&#x27;]"
+   ]
+  },
+  {
+   "line": 8,
+   "phase": "Python",
+   "note": "Object #4 list now holds [&#x27;T3&#x27;, &quot;T2&#x27;&quot;]",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "least_loaded",
+       "function least_loaded()"
+      ],
+      [
+       "running",
+       "→ dict #1"
+      ],
+      [
+       "lost",
+       "→ list #3"
+      ],
+      [
+       "task",
+       "'T2'"
+      ],
+      [
+       "w",
+       "'W3'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (2)<\/b> {&#x27;W1&#x27;: → list #2, &#x27;W3&#x27;: → list #4}",
+    "<b>#2 list (2)<\/b> [&#x27;T1&#x27;, &#x27;T4&#x27;]",
+    "<b>#3 list (3)<\/b> [&#x27;T2&#x27;, &#x27;T5&#x27;, &#x27;T6&#x27;]",
+    "<b>#4 list (2)<\/b> [&#x27;T3&#x27;, &quot;T2&#x27;&quot;]"
+   ]
+  },
+  {
+   "line": 6,
+   "phase": "Python",
+   "note": "<code>task<\/code> changes to &#x27;T5&#x27;.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "least_loaded",
+       "function least_loaded()"
+      ],
+      [
+       "running",
+       "→ dict #1"
+      ],
+      [
+       "lost",
+       "→ list #3"
+      ],
+      [
+       "task",
+       "'T5'"
+      ],
+      [
+       "w",
+       "'W3'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (2)<\/b> {&#x27;W1&#x27;: → list #2, &#x27;W3&#x27;: → list #4}",
+    "<b>#2 list (2)<\/b> [&#x27;T1&#x27;, &#x27;T4&#x27;]",
+    "<b>#3 list (3)<\/b> [&#x27;T2&#x27;, &#x27;T5&#x27;, &#x27;T6&#x27;]",
+    "<b>#4 list (2)<\/b> [&#x27;T3&#x27;, &quot;T2&#x27;&quot;]"
+   ],
+   "newVar": "task"
+  },
+  {
+   "line": 7,
+   "phase": "Python",
+   "note": "<code>least_loaded()<\/code> is called: a new frame is pushed with <code>table<\/code> = → dict #1.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "least_loaded",
+       "function least_loaded()"
+      ],
+      [
+       "running",
+       "→ dict #1"
+      ],
+      [
+       "lost",
+       "→ list #3"
+      ],
+      [
+       "task",
+       "'T5'"
+      ],
+      [
+       "w",
+       "'W3'"
+      ]
+     ]
+    },
+    {
+     "frame": "least_loaded()",
+     "vars": [
+      [
+       "table",
+       "→ dict #1"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (2)<\/b> {&#x27;W1&#x27;: → list #2, &#x27;W3&#x27;: → list #4}",
+    "<b>#2 list (2)<\/b> [&#x27;T1&#x27;, &#x27;T4&#x27;]",
+    "<b>#3 list (3)<\/b> [&#x27;T2&#x27;, &#x27;T5&#x27;, &#x27;T6&#x27;]",
+    "<b>#4 list (2)<\/b> [&#x27;T3&#x27;, &quot;T2&#x27;&quot;]"
+   ],
+   "newVar": "table"
+  },
+  {
+   "line": 2,
+   "phase": "Python",
+   "note": "The return value is worked out and handed back to the caller.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "least_loaded",
+       "function least_loaded()"
+      ],
+      [
+       "running",
+       "→ dict #1"
+      ],
+      [
+       "lost",
+       "→ list #3"
+      ],
+      [
+       "task",
+       "'T5'"
+      ],
+      [
+       "w",
+       "'W3'"
+      ]
+     ]
+    },
+    {
+     "frame": "least_loaded()",
+     "vars": [
+      [
+       "table",
+       "→ dict #1"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (2)<\/b> {&#x27;W1&#x27;: → list #2, &#x27;W3&#x27;: → list #4}",
+    "<b>#2 list (2)<\/b> [&#x27;T1&#x27;, &#x27;T4&#x27;]",
+    "<b>#3 list (3)<\/b> [&#x27;T2&#x27;, &#x27;T5&#x27;, &#x27;T6&#x27;]",
+    "<b>#4 list (2)<\/b> [&#x27;T3&#x27;, &quot;T2&#x27;&quot;]"
+   ]
+  },
+  {
+   "line": 7,
+   "phase": "Return",
+   "note": "<code>least_loaded()<\/code> returns <b>&#x27;W1&#x27;<\/b> and its frame is popped. The caller continues on this line with that value.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "least_loaded",
+       "function least_loaded()"
+      ],
+      [
+       "running",
+       "→ dict #1"
+      ],
+      [
+       "lost",
+       "→ list #3"
+      ],
+      [
+       "task",
+       "'T5'"
+      ],
+      [
+       "w",
+       "'W1'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (2)<\/b> {&#x27;W1&#x27;: → list #2, &#x27;W3&#x27;: → list #4}",
+    "<b>#2 list (2)<\/b> [&#x27;T1&#x27;, &#x27;T4&#x27;]",
+    "<b>#3 list (3)<\/b> [&#x27;T2&#x27;, &#x27;T5&#x27;, &#x27;T6&#x27;]",
+    "<b>#4 list (2)<\/b> [&#x27;T3&#x27;, &quot;T2&#x27;&quot;]"
+   ]
+  },
+  {
+   "line": 8,
+   "phase": "Python",
+   "note": "Object #2 list now holds [&#x27;T1&#x27;, &#x27;T4&#x27;, &quot;T5&#x27;&quot;]",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "least_loaded",
+       "function least_loaded()"
+      ],
+      [
+       "running",
+       "→ dict #1"
+      ],
+      [
+       "lost",
+       "→ list #3"
+      ],
+      [
+       "task",
+       "'T5'"
+      ],
+      [
+       "w",
+       "'W1'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (2)<\/b> {&#x27;W1&#x27;: → list #2, &#x27;W3&#x27;: → list #4}",
+    "<b>#2 list (3)<\/b> [&#x27;T1&#x27;, &#x27;T4&#x27;, &quot;T5&#x27;&quot;]",
+    "<b>#3 list (3)<\/b> [&#x27;T2&#x27;, &#x27;T5&#x27;, &#x27;T6&#x27;]",
+    "<b>#4 list (2)<\/b> [&#x27;T3&#x27;, &quot;T2&#x27;&quot;]"
+   ]
+  },
+  {
+   "line": 6,
+   "phase": "Python",
+   "note": "<code>task<\/code> changes to &#x27;T6&#x27;.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "least_loaded",
+       "function least_loaded()"
+      ],
+      [
+       "running",
+       "→ dict #1"
+      ],
+      [
+       "lost",
+       "→ list #3"
+      ],
+      [
+       "task",
+       "'T6'"
+      ],
+      [
+       "w",
+       "'W1'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (2)<\/b> {&#x27;W1&#x27;: → list #2, &#x27;W3&#x27;: → list #4}",
+    "<b>#2 list (3)<\/b> [&#x27;T1&#x27;, &#x27;T4&#x27;, &quot;T5&#x27;&quot;]",
+    "<b>#3 list (3)<\/b> [&#x27;T2&#x27;, &#x27;T5&#x27;, &#x27;T6&#x27;]",
+    "<b>#4 list (2)<\/b> [&#x27;T3&#x27;, &quot;T2&#x27;&quot;]"
+   ],
+   "newVar": "task"
+  },
+  {
+   "line": 7,
+   "phase": "Python",
+   "note": "<code>least_loaded()<\/code> is called: a new frame is pushed with <code>table<\/code> = → dict #1.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "least_loaded",
+       "function least_loaded()"
+      ],
+      [
+       "running",
+       "→ dict #1"
+      ],
+      [
+       "lost",
+       "→ list #3"
+      ],
+      [
+       "task",
+       "'T6'"
+      ],
+      [
+       "w",
+       "'W1'"
+      ]
+     ]
+    },
+    {
+     "frame": "least_loaded()",
+     "vars": [
+      [
+       "table",
+       "→ dict #1"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (2)<\/b> {&#x27;W1&#x27;: → list #2, &#x27;W3&#x27;: → list #4}",
+    "<b>#2 list (3)<\/b> [&#x27;T1&#x27;, &#x27;T4&#x27;, &quot;T5&#x27;&quot;]",
+    "<b>#3 list (3)<\/b> [&#x27;T2&#x27;, &#x27;T5&#x27;, &#x27;T6&#x27;]",
+    "<b>#4 list (2)<\/b> [&#x27;T3&#x27;, &quot;T2&#x27;&quot;]"
+   ],
+   "newVar": "table"
+  },
+  {
+   "line": 2,
+   "phase": "Python",
+   "note": "The return value is worked out and handed back to the caller.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "least_loaded",
+       "function least_loaded()"
+      ],
+      [
+       "running",
+       "→ dict #1"
+      ],
+      [
+       "lost",
+       "→ list #3"
+      ],
+      [
+       "task",
+       "'T6'"
+      ],
+      [
+       "w",
+       "'W1'"
+      ]
+     ]
+    },
+    {
+     "frame": "least_loaded()",
+     "vars": [
+      [
+       "table",
+       "→ dict #1"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (2)<\/b> {&#x27;W1&#x27;: → list #2, &#x27;W3&#x27;: → list #4}",
+    "<b>#2 list (3)<\/b> [&#x27;T1&#x27;, &#x27;T4&#x27;, &quot;T5&#x27;&quot;]",
+    "<b>#3 list (3)<\/b> [&#x27;T2&#x27;, &#x27;T5&#x27;, &#x27;T6&#x27;]",
+    "<b>#4 list (2)<\/b> [&#x27;T3&#x27;, &quot;T2&#x27;&quot;]"
+   ]
+  },
+  {
+   "line": 7,
+   "phase": "Return",
+   "note": "<code>least_loaded()<\/code> returns <b>&#x27;W3&#x27;<\/b> and its frame is popped. The caller continues on this line with that value.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "least_loaded",
+       "function least_loaded()"
+      ],
+      [
+       "running",
+       "→ dict #1"
+      ],
+      [
+       "lost",
+       "→ list #3"
+      ],
+      [
+       "task",
+       "'T6'"
+      ],
+      [
+       "w",
+       "'W3'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (2)<\/b> {&#x27;W1&#x27;: → list #2, &#x27;W3&#x27;: → list #4}",
+    "<b>#2 list (3)<\/b> [&#x27;T1&#x27;, &#x27;T4&#x27;, &quot;T5&#x27;&quot;]",
+    "<b>#3 list (3)<\/b> [&#x27;T2&#x27;, &#x27;T5&#x27;, &#x27;T6&#x27;]",
+    "<b>#4 list (2)<\/b> [&#x27;T3&#x27;, &quot;T2&#x27;&quot;]"
+   ]
+  },
+  {
+   "line": 8,
+   "phase": "Python",
+   "note": "Object #4 list now holds [&#x27;T3&#x27;, &quot;T2&#x27;&quot;, &quot;T6&#x27;&quot;]",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "least_loaded",
+       "function least_loaded()"
+      ],
+      [
+       "running",
+       "→ dict #1"
+      ],
+      [
+       "lost",
+       "→ list #3"
+      ],
+      [
+       "task",
+       "'T6'"
+      ],
+      [
+       "w",
+       "'W3'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (2)<\/b> {&#x27;W1&#x27;: → list #2, &#x27;W3&#x27;: → list #4}",
+    "<b>#2 list (3)<\/b> [&#x27;T1&#x27;, &#x27;T4&#x27;, &quot;T5&#x27;&quot;]",
+    "<b>#3 list (3)<\/b> [&#x27;T2&#x27;, &#x27;T5&#x27;, &#x27;T6&#x27;]",
+    "<b>#4 list (3)<\/b> [&#x27;T3&#x27;, &quot;T2&#x27;&quot;, &quot;T6&#x27;&quot;]"
+   ]
+  },
+  {
+   "line": 6,
+   "phase": "Python",
+   "note": "Nothing is left to loop over, so the loop ends and Python moves on.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "least_loaded",
+       "function least_loaded()"
+      ],
+      [
+       "running",
+       "→ dict #1"
+      ],
+      [
+       "lost",
+       "→ list #3"
+      ],
+      [
+       "task",
+       "'T6'"
+      ],
+      [
+       "w",
+       "'W3'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (2)<\/b> {&#x27;W1&#x27;: → list #2, &#x27;W3&#x27;: → list #4}",
+    "<b>#2 list (3)<\/b> [&#x27;T1&#x27;, &#x27;T4&#x27;, &quot;T5&#x27;&quot;]",
+    "<b>#3 list (3)<\/b> [&#x27;T2&#x27;, &#x27;T5&#x27;, &#x27;T6&#x27;]",
+    "<b>#4 list (3)<\/b> [&#x27;T3&#x27;, &quot;T2&#x27;&quot;, &quot;T6&#x27;&quot;]"
+   ]
+  },
+  {
+   "line": 9,
+   "phase": "Python",
+   "note": "The text is printed to the console.",
+   "stack": [
+    {
+     "frame": "module (global)",
+     "vars": [
+      [
+       "least_loaded",
+       "function least_loaded()"
+      ],
+      [
+       "running",
+       "→ dict #1"
+      ],
+      [
+       "lost",
+       "→ list #3"
+      ],
+      [
+       "task",
+       "'T6'"
+      ],
+      [
+       "w",
+       "'W3'"
+      ]
+     ]
+    }
+   ],
+   "heap": [
+    "<b>#1 dict (2)<\/b> {&#x27;W1&#x27;: → list #2, &#x27;W3&#x27;: → list #4}",
+    "<b>#2 list (3)<\/b> [&#x27;T1&#x27;, &#x27;T4&#x27;, &quot;T5&#x27;&quot;]",
+    "<b>#3 list (3)<\/b> [&#x27;T2&#x27;, &#x27;T5&#x27;, &#x27;T6&#x27;]",
+    "<b>#4 list (3)<\/b> [&#x27;T3&#x27;, &quot;T2&#x27;&quot;, &quot;T6&#x27;&quot;]"
+   ],
+   "out": "{'W1': ['T1', 'T4', \"T5'\"], 'W3': ['T3', \"T2'\", \"T6'\"]}\n"
+  }
+ ]
+}</script>
+    </div>
+  </article>
+</section>
+
+<section class="part" id="quiz">
+  <span class="part-label"><b>9</b> Quiz and revision</span>
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <script type="application/json">[
+ {
+  "q": "In Hadoop HDFS, which node is the master?",
+  "options": [
+   "DataNode",
+   "NodeManager",
+   "NameNode",
+   "Edge node"
+  ],
+  "answer": 2,
+  "why": "The <b>NameNode<\/b> is the HDFS master: it holds the file-system metadata. DataNodes are the workers."
+ },
+ {
+  "q": "In YARN, which pair is master and worker?",
+  "options": [
+   "NameNode and DataNode",
+   "ResourceManager and NodeManager",
+   "Driver and executor",
+   "Client and server"
+  ],
+  "answer": 1,
+  "why": "The <b>ResourceManager<\/b> allocates resources for the whole cluster; <b>NodeManagers<\/b> run containers on each worker."
+ },
+ {
+  "q": "What is a heartbeat?",
+  "options": [
+   "A regular message from a worker to the master saying it is alive, often with status",
+   "A backup of the master",
+   "A failed task",
+   "The cluster's clock"
+  ],
+  "answer": 0,
+  "why": "Heartbeats let the master know who is alive. In HDFS they are sent every 3 seconds by default."
+ },
+ {
+  "q": "By default, roughly how long does the NameNode wait before declaring a silent DataNode dead?",
+  "options": [
+   "3 seconds",
+   "30 seconds",
+   "24 hours",
+   "About 10 minutes 30 seconds"
+  ],
+  "answer": 3,
+  "why": "About <b>10.5 minutes<\/b> (2 × 5-minute recheck interval + 10 × 3-second heartbeat interval), so short network hiccups do not cause false alarms."
+ },
+ {
+  "q": "Why is a big job split into many small tasks?",
+  "options": [
+   "Small tasks use less electricity",
+   "The master cannot read big files",
+   "Tasks run in parallel on many workers, and a failure only redoes one small piece",
+   "Tasks are easier to name"
+  ],
+  "answer": 2,
+  "why": "Parallelism and cheap recovery: only the failed piece is re-run, not the whole job."
+ },
+ {
+  "q": "What does “shared-nothing” mean for a Hadoop cluster?",
+  "options": [
+   "Nodes share one big disk",
+   "Each node has its own CPU, memory and disks; nodes share only the network",
+   "Users cannot share files",
+   "Only one job can run at a time"
+  ],
+  "answer": 1,
+  "why": "Shared-nothing nodes are independent, so the cluster grows by adding nodes."
+ },
+ {
+  "q": "A master with no backup is an example of a:",
+  "options": [
+   "Single point of failure",
+   "Heartbeat",
+   "Block report",
+   "Container"
+  ],
+  "answer": 0,
+  "why": "If the only master fails, the whole cluster stops. Hadoop 2 added NameNode High Availability to remove this SPOF."
+ },
+ {
+  "q": "Which system is peer-to-peer (no master), unlike HDFS?",
+  "options": [
+   "YARN",
+   "Spark",
+   "MapReduce",
+   "Apache Cassandra"
+  ],
+  "answer": 3,
+  "why": "Cassandra nodes are all equal and coordinate among themselves. HDFS, YARN and Spark use masters."
+ }
+]</script>
+  </div>
+
+  <h3>Quick revision</h3>
+  <div class="revision">
+    <h3>Lesson 1.2 in one screen</h3>
+    <ul><li><b>Cluster</b>: networked nodes that work together as one system.</li><li><b>Master</b> coordinates (metadata, health, assignment). <b>Workers</b> store data and run tasks.</li><li>HDFS: <b>NameNode</b> + DataNodes. YARN: <b>ResourceManager</b> + NodeManagers. Per job: ApplicationMaster.</li><li><b>Heartbeat</b>: worker → master every few seconds (HDFS: 3 s). The reply can carry instructions.</li><li>Dead after a <b>timeout</b> (HDFS default ≈ 10 min 30 s), not after one missed heartbeat.</li><li>Jobs → many small <b>tasks</b>: parallel, and a failure only redoes one piece.</li><li>Dead worker → its tasks are <b>re-run</b> elsewhere automatically.</li><li>Master can be a bottleneck and a <b>SPOF</b>: Hadoop 2+ uses an active and a standby NameNode.</li><li>Hadoop clusters are <b>shared-nothing</b>. Cassandra is a peer-to-peer contrast.</li></ul>
+  </div>
+
+  <h3>Interview and viva questions</h3>
+  <div class="faq">
+    <details><summary>Explain the master–slave (master–worker) architecture of Hadoop.</summary><p>Hadoop has two master–worker systems. In HDFS, the NameNode stores the namespace and the location of every block, and DataNodes store the blocks and send heartbeats and block reports. In YARN, the ResourceManager allocates cluster resources and NodeManagers launch and monitor containers on each worker; each application also gets an ApplicationMaster that manages its own tasks. A worker node normally runs both a DataNode and a NodeManager.</p></details>
+    <details><summary>What is a heartbeat and why is it needed?</summary><p>A small periodic message from a worker to the master. It tells the master the worker is alive and carries status such as free space or task progress. Without heartbeats the master could not detect failures and would keep sending work to dead nodes. The master replies with commands, for example to copy or delete blocks.</p></details>
+    <details><summary>What happens when a DataNode stops sending heartbeats?</summary><p>After the timeout (about 10.5 minutes by default) the NameNode marks it dead, stops sending it requests, and re-replicates every block that now has fewer copies than required, using the surviving replicas. Running tasks on that node fail and are rescheduled by the ApplicationMaster.</p></details>
+    <details><summary>Why not declare a node dead immediately after one missed heartbeat?</summary><p>Short pauses are common: garbage collection, a busy disk, a switch restarting. Declaring a node dead triggers heavy work (re-copying all its blocks over the network). A timeout avoids false alarms that would waste bandwidth.</p></details>
+    <details><summary>Is the master a single point of failure in Hadoop?</summary><p>In Hadoop 1, yes: one NameNode. Since Hadoop 2, HDFS High Availability runs an active and a standby NameNode sharing edits through JournalNodes, with ZooKeeper-based automatic failover. The ResourceManager can also run in HA mode.</p></details>
+    
+  </div>
+
+  <h3 id="practice">Practice problems</h3>
+  <p class="prob-intro">Small programs that do the master's job: count, check health, assign and recover. The business problems are taken from real cluster operations.</p>
+  <div class="probs">
+    <article class="prob"><div class="prob__head"><span class="prob__num">P1</span><span class="prob__tag prob__tag--easy">Easy</span><h4>Count workers and masters</h4></div>
+      <p>Given a list of (node, role), print how many nodes have each role.</p>
+      <div class="prob__io"><div><small>Input</small><pre>[(&quot;nn1&quot;,&quot;master&quot;),(&quot;rm1&quot;,&quot;master&quot;),(&quot;dn1&quot;,&quot;worker&quot;),(&quot;dn2&quot;,&quot;worker&quot;),(&quot;dn3&quot;,&quot;worker&quot;)]</pre></div><div><small>Expected output</small><pre>{&#x27;master&#x27;: 2, &#x27;worker&#x27;: 3}</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>nodes = [(&quot;nn1&quot;, &quot;master&quot;), (&quot;rm1&quot;, &quot;master&quot;), (&quot;dn1&quot;, &quot;worker&quot;), (&quot;dn2&quot;, &quot;worker&quot;), (&quot;dn3&quot;, &quot;worker&quot;)]
+count = {}
+for name, role in nodes:
+    count[role] = count.get(role, 0) + 1
+print(count)</code></pre><div class="output">{&#x27;master&#x27;: 2, &#x27;worker&#x27;: 3}</div></div>
+        <p><b>How it works:</b> <code>count.get(role, 0)</code> returns 0 the first time a role is seen. Real clusters have a handful of masters and many workers.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P2</span><span class="prob__tag prob__tag--easy">Easy</span><h4>Heartbeats per hour</h4></div>
+      <p>A DataNode sends a heartbeat every 3 seconds. How many does one node send per hour, and how many does the NameNode receive per hour from 500 nodes?</p>
+      <div class="prob__io"><div><small>Input</small><pre>3 s interval · 500 nodes</pre></div><div><small>Expected output</small><pre>One node: 1200
+500 nodes: 600000</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>per_node = 3600 // 3
+print(&quot;One node:&quot;, per_node)
+print(&quot;500 nodes:&quot;, per_node * 500)</code></pre><div class="output">One node: 1200
+500 nodes: 600000</div></div>
+        <p><b>How it works:</b> 1,200 per node per hour; 6 lakh per hour for 500 nodes. Heartbeats are tiny, but this is one reason the master must be efficient.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P3</span><span class="prob__tag prob__tag--easy">Easy</span><h4>The HDFS dead-node timeout</h4></div>
+      <p>The timeout is 2 × recheck interval + 10 × heartbeat interval. Calculate it in seconds for the defaults: recheck 300 s, heartbeat 3 s. Print it as minutes and seconds.</p>
+      <div class="prob__io"><div><small>Input</small><pre>recheck 300 s · heartbeat 3 s</pre></div><div><small>Expected output</small><pre>630 seconds = 10 min 30 s</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>t = 2 * 300 + 10 * 3
+print(t, &quot;seconds =&quot;, t // 60, &quot;min&quot;, t % 60, &quot;s&quot;)</code></pre><div class="output">630 seconds = 10 min 30 s</div></div>
+        <p><b>How it works:</b> 630 s = 10 min 30 s. Administrators can lower the recheck interval to detect failures faster.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P4</span><span class="prob__tag prob__tag--medium">Medium</span><h4>Rounds needed</h4></div>
+      <p>A job has N tasks and the cluster has W workers with S slots each. Each round, every slot runs one task. Print how many rounds (“waves”) are needed for N = 50, W = 6, S = 4.</p>
+      <div class="prob__io"><div><small>Input</small><pre>N = 50, W = 6, S = 4</pre></div><div><small>Expected output</small><pre>3 waves</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>import math
+N, W, S = 50, 6, 4
+print(math.ceil(N / (W * S)), &quot;waves&quot;)</code></pre><div class="output">3 waves</div></div>
+        <p><b>How it works:</b> 24 tasks run at once, so 50 tasks need 3 waves (24 + 24 + 2). Hadoop users call these map “waves”.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P5</span><span class="prob__tag prob__tag--medium">Medium</span><h4>Find the slow worker</h4></div>
+      <p>Given each worker's finished task times in seconds, print the worker whose average is more than 1.5 times the cluster average.</p>
+      <div class="prob__io"><div><small>Input</small><pre>W1 [30, 32, 31] · W2 [29, 30] · W3 [95, 90] · W4 [33]</pre></div><div><small>Expected output</small><pre>W3 is slow: 92 s vs cluster 46 s</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>times = {&quot;W1&quot;: [30, 32, 31], &quot;W2&quot;: [29, 30], &quot;W3&quot;: [95, 90], &quot;W4&quot;: [33]}
+all_t = [t for ts in times.values() for t in ts]
+avg = sum(all_t) / len(all_t)
+for w, ts in times.items():
+    a = sum(ts) / len(ts)
+    if a &gt; 1.5 * avg:
+        print(w, &quot;is slow:&quot;, round(a), &quot;s vs cluster&quot;, round(avg), &quot;s&quot;)</code></pre><div class="output">W3 is slow: 92 s vs cluster 46 s</div></div>
+        <p><b>How it works:</b> A worker that is alive but much slower is a <b>straggler</b> (bad disk, overheating). Hadoop can launch a backup copy of its tasks elsewhere: <b>speculative execution</b>.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P6</span><span class="prob__tag prob__tag--medium">Medium</span><h4>Blacklist a flaky node</h4></div>
+      <p>Tasks failed on these nodes in the last hour. Print the nodes with 3 or more failures, which the scheduler should stop using.</p>
+      <div class="prob__io"><div><small>Input</small><pre>[&quot;dn4&quot;,&quot;dn2&quot;,&quot;dn4&quot;,&quot;dn7&quot;,&quot;dn4&quot;,&quot;dn2&quot;,&quot;dn9&quot;,&quot;dn2&quot;,&quot;dn2&quot;]</pre></div><div><small>Expected output</small><pre>Stop using: [&#x27;dn2&#x27;, &#x27;dn4&#x27;] {&#x27;dn4&#x27;: 3, &#x27;dn2&#x27;: 4, &#x27;dn7&#x27;: 1, &#x27;dn9&#x27;: 1}</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>failures = [&quot;dn4&quot;, &quot;dn2&quot;, &quot;dn4&quot;, &quot;dn7&quot;, &quot;dn4&quot;, &quot;dn2&quot;, &quot;dn9&quot;, &quot;dn2&quot;, &quot;dn2&quot;]
+count = {}
+for n in failures:
+    count[n] = count.get(n, 0) + 1
+bad = sorted(n for n, c in count.items() if c &gt;= 3)
+print(&quot;Stop using:&quot;, bad, count)</code></pre><div class="output">Stop using: [&#x27;dn2&#x27;, &#x27;dn4&#x27;] {&#x27;dn4&#x27;: 3, &#x27;dn2&#x27;: 4, &#x27;dn7&#x27;: 1, &#x27;dn9&#x27;: 1}</div></div>
+        <p><b>How it works:</b> MapReduce does something similar: if many tasks of a job fail on one node, that node is blacklisted for the job.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P7</span><span class="prob__tag prob__tag--business">Business problem</span><h4>Will the job finish before 6 am?</h4></div>
+      <p>A nightly job has 400 tasks of about 6 minutes each. The cluster has 20 workers with 8 slots each. One worker usually fails during the night, losing 8 running tasks that must be redone. The job starts at 1 am. Print the estimated finish time.</p>
+      <div class="prob__io"><div><small>Input</small><pre>400 tasks × 6 min · 20 workers × 8 slots · 8 tasks redone</pre></div><div><small>Expected output</small><pre>Waves: 3 | minutes: 18
+Finish at about 1:18 am</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>import math
+tasks, minutes = 400 + 8, 6
+slots = 19 * 8                     # plan for one worker lost
+waves = math.ceil(tasks / slots)
+total = waves * minutes
+print(&quot;Waves:&quot;, waves, &quot;| minutes:&quot;, total)
+print(f&quot;Finish at about {1 + total // 60}:{total % 60:02d} am&quot;)</code></pre><div class="output">Waves: 3 | minutes: 18
+Finish at about 1:18 am</div></div>
+        <p><b>How it works:</b> Plan with one worker fewer and the redone tasks included. 408 tasks on 152 slots = 3 waves = 18 minutes, well before 6 am.</p>
+      </details>
+    </article>
+    <article class="prob"><div class="prob__head"><span class="prob__num">P8</span><span class="prob__tag prob__tag--business">Business problem</span><h4>How much does a dead node cost in re-copying?</h4></div>
+      <p>A dead DataNode held 60 TB of block replicas. The cluster can spend 2 GB/s in total on re-replication. How many hours until every block has its full number of copies again?</p>
+      <div class="prob__io"><div><small>Input</small><pre>60 TB lost · 2 GB/s</pre></div><div><small>Expected output</small><pre>8.5 hours</pre></div></div>
+      <details class="prob__sol"><summary>Show solution and explanation</summary>
+        <div class="code" data-lang="python" data-file="main.py"><pre><code>tb = 60
+gb_per_s = 2
+hours = tb * 1024 / gb_per_s / 3600
+print(round(hours, 1), &quot;hours&quot;)</code></pre><div class="output">8.5 hours</div></div>
+        <p><b>How it works:</b> About 8.5 hours of network and disk work. This is why the NameNode does not declare nodes dead too quickly, and why very large nodes make recovery slow.</p>
+      </details>
+    </article>
+  </div>
+
+  <h3 id="scenarios">Real-world scenario questions (asked in company interviews)</h3>
+  <p class="scn-intro">Interview situations about masters, workers and heartbeats. Think of your answer, then compare it with the model answer.</p>
+  <div class="scenarios">
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Telecom · operations</span><span class="scn__tag scn__tag--level">Fresher</span></div>
+      <h4>“The NameNode server crashed. Is our data gone?”</h4>
+      <p class="scn__situation">At 2 am the only NameNode of a 40-node cluster crashes. The DataNodes are all fine. A manager panics: “Have we lost all the data?”</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> do you know what the master stores, what the workers store, and why masters need protection?</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>The <b>file contents</b> are safe: the blocks are on the DataNodes' disks.</li>
+          <li>But without the NameNode, nobody knows which blocks form which file, so the file system is <b>unavailable</b> until it comes back.</li>
+          <li>The NameNode's metadata is saved on its own disk (the fsimage and edit log). Restart it on the same or a new machine from that saved metadata, and the DataNodes re-register with block reports.</li>
+          <li>Long-term fix: <b>NameNode High Availability</b> with a standby that takes over automatically, and backups of the metadata directories.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid saying:</b> “The Secondary NameNode will take over.” It doesn't. It only helps with checkpoints (Module 5).</p>
+      </div></details>
+    </article>
+
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">E-commerce · performance</span><span class="scn__tag scn__tag--level">1–3 years</span></div>
+      <h4>The job is stuck at 99% for 20 minutes</h4>
+      <p class="scn__situation">A sales job always reaches 99% in 10 minutes, then waits 20 more minutes for the last task. The node running that task is alive and sending heartbeats.</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> can you tell a slow worker (straggler) from a dead one, and do you know the remedies?</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ol>
+          <li>Check which task is slow and on which node. If <b>one node</b> is always slow (failing disk, overheating), it is a straggler: fix or remove it. <b>Speculative execution</b> runs a backup copy of the slow task on another node and uses whichever finishes first.</li>
+          <li>If it is always the <b>same piece of data</b>, it is <b>data skew</b>: one task gets far more data than others (for example one huge city or one product). Fix the partitioning or split the hot key.</li>
+        </ol>
+        <p class="scn__avoid"><b>Avoid:</b> “Add more nodes.” That doesn't help one big task.</p>
+      </div></details>
+    </article>
+
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Platform team · design</span><span class="scn__tag scn__tag--level">1–3 years</span></div>
+      <h4>Make the dead-node timeout 10 seconds?</h4>
+      <p class="scn__situation">A teammate wants failures detected faster, so he proposes changing HDFS to declare a DataNode dead after 10 seconds of silence instead of about 10 minutes.</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> do you understand the trade-off between fast detection and false alarms?</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>A 10-second timeout would mark nodes dead during harmless pauses: a long garbage-collection pause, a switch reboot, a busy disk.</li>
+          <li>Each false “death” makes the NameNode re-copy all of that node's blocks (often many TB), flooding the network. When the node returns, the extra copies must be deleted again.</li>
+          <li>Reading data is already protected: clients and tasks simply use another replica if one node does not respond. Re-replication can safely wait a few minutes.</li>
+          <li>If faster detection is truly needed, lower it moderately and test, and look at stale-node settings that avoid slow nodes without declaring them dead.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> treating faster as always better. Detection speed has a cost.</p>
+      </div></details>
+    </article>
+
+    <article class="scn">
+      <div class="scn__head"><span class="scn__tag">Any company · concepts</span><span class="scn__tag scn__tag--level">Fresher</span></div>
+      <h4>“Why does Hadoop need a master at all?”</h4>
+      <p class="scn__situation">The interviewer says: “Cassandra works without a master. Why didn't Hadoop do the same?”</p>
+      <p class="scn__look"><b>The interviewer is checking:</b> do you understand the trade-offs, not just the definitions?</p>
+      <details><summary>Show a strong answer</summary><div class="scn__answer">
+        <ul>
+          <li>HDFS must know exactly which blocks make up each file and where they are. One master gives a single, consistent answer and makes decisions (placement, re-replication) simple.</li>
+          <li>The master is also where scheduling decisions are easy: one place sees all free resources.</li>
+          <li>The costs: the master can become a bottleneck (memory for metadata) and a single point of failure. Hadoop answers with High Availability and federation.</li>
+          <li>Cassandra is built for a different job: always-on reads and writes of small records, where avoiding a master improves availability.</li>
+        </ul>
+        <p class="scn__avoid"><b>Avoid:</b> saying one design is simply “better”. Each fits a different problem.</p>
+      </div></details>
+    </article>
+  </div>
+</section>
+
+<nav class="lesson-nav" id="lesson-nav" aria-label="Lesson navigation"></nav>
+<div class="ad-slot" data-slot="bottom"></div>
+</article>
+
+<aside class="lesson-side">
+  <nav class="toc" aria-label="In this lesson">
+    <h4>In this lesson</h4>
+    <ol>
+      <li><a href="#story">The story</a></li>
+      <li><a href="#definition">Definition</a></li><li><a href="#levels">Beginner → Advanced</a></li>
+      <li><a href="#types">Types and ways to use it</a></li>
+      <li><a href="#steps">Step by step</a></li>
+      <li><a href="#animation">See it happen</a></li>
+      <li><a href="#real-world">Real-world use</a></li>
+      <li><a href="#run">Run the code</a></li><li><a href="#pc">Run on your PC</a></li>
+      <li><a href="#tracer">Line by line</a></li>
+      <li><a href="#worked">Worked examples</a></li>
+      <li><a href="#quiz">Quiz and revision</a></li>
+      <li><a href="#practice">Practice problems</a></li>
+      <li><a href="#scenarios">Industry scenarios</a></li>
+    </ol>
+  </nav>
+  <div class="ad-slot" data-slot="side"></div>
+  <div class="outline" id="outline"></div>
+</aside>
+</div>
+</main>
+
+<footer class="site-footer">
+  <div class="wrap">
+    <div><h4>MyPhatshala</h4><p>Free programming and IT lessons that show what happens behind the screen.</p></div>
+    <div><h4>Learn</h4><a href="../../../../#tracks">All courses</a><a href="../../">Apache Hadoop syllabus</a></div>
+    <div><h4>Site</h4><a href="../../../../about.html">About</a><a href="../../../../contact.html">Contact</a><a href="../../../../privacy.html">Privacy policy</a><a href="../../../../disclaimer.html">Disclaimer</a></div>
+    <div class="copyright">© MyPhatshala. All lesson content, diagrams and animations are original. Please do not copy without permission.</div>
+  </div>
+</footer>
+
+<script src="../../../../data/courses/hadoop.js"></script>
+<script src="../../../../assets/js/lesson.js"></script>
+<script src="../../../../assets/js/cluster-sim.js"></script>
+<script src="../../../../assets/js/ads.js"></script>
+<script src="../../../../assets/js/site.js"></script>
+</body>
+</html>

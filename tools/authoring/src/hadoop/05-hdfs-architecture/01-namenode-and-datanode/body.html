@@ -1,0 +1,363 @@
+<!-- ======================= PART 1: THE STORY ======================= -->
+<section class="part" id="story">
+  <span class="part-label"><b>1</b> The story</span>
+  <h2>“Where is my file, really?”</h2>
+  <div class="story">
+    <p class="narration">Riya uploaded <code>canteen_orders.csv</code> to HDFS yesterday. Today she asks a simple question nobody in the lab can answer: on which disk, of which machine, are those bytes? Kabir opens a shell on one DataNode, digs through folders, and finds a file called <code>blk_1073741825</code>. He runs <code>head</code> on it. Out come <code>order_id,item,amount</code> and Riya's orders, as plain text.</p>
+
+    <div class="scene">
+      <svg viewBox="0 0 640 190" role="img" aria-label="The NameNode holds the map: file name to blocks to DataNodes. The DataNodes hold the actual block files on their disks.">
+        <g font-size="10">
+          <rect x="20" y="20" width="250" height="140" rx="10" class="s-board"/>
+          <text x="145" y="42" text-anchor="middle" font-weight="700" class="s-chalk">NameNode: the map</text>
+          <g font-size="8.6" class="s-chalk"><text x="36" y="66">/user/hadoop/data/canteen_orders.csv</text><text x="36" y="84">  owner hadoop · replication 3</text><text x="36" y="102">  block blk_1073741825 (4.5 MB)</text><text x="36" y="120">  → datanode-1, datanode-2, datanode-4</text></g>
+          <text x="145" y="148" text-anchor="middle" font-size="8.6" style="fill:#F5C77E">no file contents here</text>
+          <g>
+            <rect x="330" y="20" width="90" height="62" rx="8" class="s-soft-green" style="stroke:var(--green)"/><text x="375" y="40" text-anchor="middle" font-size="8.6" font-weight="700" class="s-green">datanode-1</text><text x="375" y="58" text-anchor="middle" font-size="7.6" class="mono s-ink">blk_…825</text>
+            <rect x="430" y="20" width="90" height="62" rx="8" class="s-soft-green" style="stroke:var(--green)"/><text x="475" y="40" text-anchor="middle" font-size="8.6" font-weight="700" class="s-green">datanode-2</text><text x="475" y="58" text-anchor="middle" font-size="7.6" class="mono s-ink">blk_…825</text>
+            <rect x="530" y="20" width="90" height="62" rx="8" class="s-card2"/><text x="575" y="40" text-anchor="middle" font-size="8.6" font-weight="700" class="s-ink">datanode-3</text><text x="575" y="58" text-anchor="middle" font-size="7.6" class="s-ink2">(other blocks)</text>
+            <rect x="430" y="96" width="90" height="62" rx="8" class="s-soft-green" style="stroke:var(--green)"/><text x="475" y="116" text-anchor="middle" font-size="8.6" font-weight="700" class="s-green">datanode-4</text><text x="475" y="134" text-anchor="middle" font-size="7.6" class="mono s-ink">blk_…825</text>
+          </g>
+          <path d="M270 90h50" class="s-line"/><text x="295" y="84" text-anchor="middle" font-size="8" class="s-ink2">points to</text>
+        </g>
+        <text x="320" y="182" text-anchor="middle" font-size="10" class="s-ink2">One master knows where everything is. Many workers hold the bytes.</text>
+        <text x="632" y="182" text-anchor="end" class="s-wm">myphatshala.in</text>
+      </svg>
+    </div>
+
+R> So HDFS is just… files on ordinary Linux disks?
+A> Exactly. A DataNode stores each block as an ordinary file in its own folders. What makes it a <i>distributed file system</i> is the <b>NameNode</b>: it keeps the whole directory tree, who owns what, and which blocks make up each file. And it knows, from the DataNodes' own reports, which machines hold each block.
+K> And if I lose the NameNode?
+A> The bytes are still on the disks, but nobody knows which <code>blk_</code> file belongs to which file. That's why the NameNode's metadata is protected so carefully, and why HA exists. Today we open both: the NameNode's metadata folder and a DataNode's block folder, on a real cluster with four DataNodes in two racks.
+  </div>
+</section>
+
+<!-- ======================= PART 2: DEFINITION ======================= -->
+<section class="part" id="definition">
+  <span class="part-label"><b>2</b> Definition</span>
+  <h2>NameNode and DataNode</h2>
+  <div class="def">
+    <div class="def__formal"><small>Formal definition (write this in exams)</small>
+      <p>HDFS has a <b>master–worker architecture</b>. The <b>NameNode</b> manages the file system <b>namespace</b> (the tree of directories and files with their permissions, owners, replication factor and the ordered list of blocks of each file) and regulates client access. It persists the namespace in the <b>fsimage</b> and <b>edit log</b>, and keeps it in memory together with the <b>block map</b> (block → DataNodes holding a replica), which it rebuilds from DataNode <b>block reports</b>. <b>DataNodes</b>, usually one per worker machine, store blocks as files on their local disks (each with a <code>.meta</code> checksum file), serve read and write requests from clients directly, create, delete and copy replicas when the NameNode instructs, and send <b>heartbeats</b> and block reports to the NameNode. File data never passes through the NameNode.</p></div>
+    <div class="def__simple"><small>In simple words</small>
+      <p>The NameNode is the index of a huge library: it knows every book's title and on which shelves its pages are. DataNodes are the shelves that hold the pages. Readers ask the index where to go, then fetch pages straight from the shelves.</p></div>
+  </div>
+
+  <h3>Words you'll meet in this lesson</h3>
+  <div class="terms">
+    <div class="term"><b>Namespace</b><span>The directory tree: paths, owners, permissions, replication, and each file's list of blocks.</span></div>
+    <div class="term"><b>Block map</b><span>Which DataNodes hold each block. Kept in NameNode memory only, rebuilt from block reports.</span></div>
+    <div class="term"><b>blk_ file</b><span>A block replica on a DataNode's disk, e.g. <code>blk_1073741825</code>. Plain bytes of your file.</span></div>
+    <div class="term"><b>.meta file</b><span>Checksums for the block: 4 bytes for every 512 bytes of data.</span></div>
+    <div class="term"><b>Block pool</b><span>The set of blocks belonging to one namespace, e.g. <code>BP-1507681208-…</code>. A folder on each DataNode.</span></div>
+    <div class="term"><b>Cluster ID</b><span>Created when the NameNode is formatted; every DataNode stores it and must match.</span></div>
+    <div class="term"><b>dfsadmin -report</b><span>Capacity and status of the whole cluster and of each DataNode.</span></div>
+    <div class="term"><b>fsck</b><span>Checks files and lists their blocks and replica locations.</span></div>
+  </div>
+
+  <h3>Who keeps what (checked on Hadoop 3.5.0)</h3>
+  <table class="facts" style="table-layout:fixed;overflow-wrap:anywhere">
+    <tr><th>NameNode on disk</th><td><code>dfs.namenode.name.dir</code>: <code>fsimage_*</code>, <code>edits_*</code>, <code>seen_txid</code>, <code>VERSION</code></td></tr>
+    <tr><th>NameNode in memory</th><td>Whole namespace plus block map; a common rule of thumb is about 150 bytes per file, directory or block</td></tr>
+    <tr><th>DataNode on disk</th><td><code>dfs.datanode.data.dir</code>/current/BP-…/current/finalized/…/<code>blk_N</code> + <code>blk_N_genstamp.meta</code></td></tr>
+    <tr><th>Checksums</th><td><code>dfs.bytes-per-checksum</code> = 512; CRC, 4 bytes each</td></tr>
+    <tr><th>Ports</th><td>NameNode RPC 8020, web 9870 · DataNode data 9866, IPC 9867, web 9864</td></tr>
+    <tr><th>Per cluster</th><td>One active NameNode per namespace (Lesson 7.1 adds a standby); many DataNodes</td></tr>
+  </table>
+
+LEVELS> NameNode and DataNode at three levels
+L1> The library and its index
+      <ul>
+        <li>A big book is torn into chapters (blocks) and each chapter is photocopied three times onto different shelves (DataNodes).</li>
+        <li>The <b>index card</b> (NameNode) says: “Canteen orders: chapter 1 on shelves 1, 2 and 4.”</li>
+        <li>A reader reads the card, then walks to the shelf. The librarian at the index never carries pages.</li>
+      </ul>
+L2> What each daemon does
+      <ul>
+        <li><b>NameNode</b>: create/delete/rename files and folders, check permissions, choose DataNodes for new blocks, track replicas, order re-replication when one is lost.</li>
+        <li><b>DataNode</b>: store and checksum blocks, stream data to and from clients, forward blocks in the write pipeline, delete or copy blocks on command.</li>
+        <li><b>Client</b> (your <code>hdfs dfs</code>, Spark, Hive): asks the NameNode for metadata, then talks to DataNodes for data.</li>
+      </ul>
+L3> Details that matter in production
+      <ul>
+        <li>The block map is <b>not</b> saved in the fsimage. After a restart the NameNode waits for block reports (safe mode, Lesson 5.6).</li>
+        <li>NameNode heap grows with the number of <b>objects</b>, not bytes: 10 crore tiny files hurt far more than 1 PB in big files (the small-files problem, Lesson 7.5).</li>
+        <li>DataNodes spread blocks over all disks listed in <code>dfs.datanode.data.dir</code>; a failed disk can be tolerated (<code>dfs.datanode.failed.volumes.tolerated</code>).</li>
+        <li>Clusters with very large namespaces split it across several NameNodes with <b>federation</b>; each namespace gets its own block pool on the same DataNodes.</li>
+      </ul>
+/LEVELS
+EXAM> “Explain the roles of NameNode and DataNode”: NameNode = master, <b>namespace + metadata</b> (fsimage, edit log, block map), handles client metadata requests, directs replication; DataNode = worker, <b>stores blocks</b>, serves reads/writes, sends <b>heartbeats</b> (every 3 s) and <b>block reports</b>. Add: data flows client ↔ DataNode, never through the NameNode.
+</section>
+
+<!-- ======================= PART 3: TYPES AND WAYS TO USE IT ======================= -->
+<section class="part" id="types">
+  <span class="part-label"><b>3</b> Types and ways to use it</span>
+  <h2>NameNode vs DataNode, side by side</h2>
+  <div class="table-wrap">
+  <table class="compare" style="min-width:600px">
+    <thead><tr><th></th><th>NameNode</th><th>DataNode</th></tr></thead>
+    <tbody>
+      <tr><td><b>Role</b></td><td>Master: metadata</td><td>Worker: data</td></tr>
+      <tr><td><b>How many</b></td><td>1 active per namespace (+ standby in HA)</td><td>Tens to thousands</td></tr>
+      <tr><td><b>Stores</b></td><td>Namespace in memory; fsimage + edits on disk</td><td>Block files + checksums on local disks</td></tr>
+      <tr><td><b>Hardware</b></td><td>Lots of RAM, reliable disks (often RAID), redundant power</td><td>Many large disks (JBOD), moderate RAM</td></tr>
+      <tr><td><b>If it fails</b></td><td>Whole file system unavailable (without HA)</td><td>Routine: replicas elsewhere, re-replication</td></tr>
+      <tr><td><b>Talks to</b></td><td>Clients (metadata), DataNodes (commands)</td><td>Clients (data), NameNode (heartbeats, reports), other DataNodes (pipeline)</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <h3>Other HDFS daemons you'll see</h3>
+  <div class="cards">
+    <div class="card"><h4>SecondaryNameNode</h4><p>Merges the edit log into a new fsimage (checkpoint). Not a backup NameNode. Lesson 5.4.</p><span class="tag">Checkpoint</span></div>
+    <div class="card"><h4>Standby NameNode</h4><p>A hot spare in HA that takes over automatically. Lesson 7.1.</p><span class="tag">High availability</span></div>
+    <div class="card"><h4>JournalNodes</h4><p>Store the shared edit log for HA NameNodes (usually 3 or 5).</p><span class="tag">HA</span></div>
+    <div class="card"><h4>Router (RBF)</h4><p>Router-based federation: one view over several namespaces.</p><span class="tag">Federation</span></div>
+  </div>
+TIP> When something is wrong with HDFS, ask two questions first: is it a <b>metadata</b> problem (NameNode: permissions, safe mode, quota, heap) or a <b>data</b> problem (DataNodes: dead nodes, full disks, missing blocks)?
+</section>
+
+<!-- ======================= PART 4: STEP BY STEP ======================= -->
+<section class="part" id="steps">
+  <span class="part-label"><b>4</b> Step by step</span>
+  <h2>Open the NameNode and a DataNode on a real cluster</h2>
+  <p>Module 5 uses a slightly bigger practice cluster than Lesson 4.3: <b>4 DataNodes in 2 racks</b> plus a SecondaryNameNode. Every output on this page and in the rest of Module 5 comes from this cluster.</p>
+  <ol class="stepper">
+    <li><h4>Start the Module 5 lab cluster</h4>
+      <div class="code" data-lang="yaml" data-file="hdfs-lab/docker-compose.yaml"><pre><code>services:
+  namenode:
+    image: apache/hadoop:3.5.0
+    hostname: namenode
+    command: ["hdfs", "namenode"]
+    ports:
+      - 9870:9870
+    env_file:
+      - ./config
+    environment:
+      ENSURE_NAMENODE_DIR: "/tmp/hadoop-hadoop/dfs/name"
+    volumes:
+      - ./topology.sh:/opt/topology.sh:ro
+  secondarynamenode:
+    image: apache/hadoop:3.5.0
+    hostname: secondarynamenode
+    command: ["hdfs", "secondarynamenode"]
+    env_file:
+      - ./config
+  datanode:
+    image: apache/hadoop:3.5.0
+    command: ["hdfs", "datanode"]
+    env_file:
+      - ./config</code></pre></div>
+      <div class="code" data-lang="bash" data-file="hdfs-lab/config"><pre><code>CORE-SITE.XML_fs.defaultFS=hdfs://namenode
+CORE-SITE.XML_net.topology.script.file.name=/opt/topology.sh
+HDFS-SITE.XML_dfs.namenode.rpc-address=namenode:8020
+HDFS-SITE.XML_dfs.replication=3
+HDFS-SITE.XML_dfs.namenode.secondary.http-address=secondarynamenode:9868
+HDFS-SITE.XML_dfs.namenode.checkpoint.period=120
+HDFS-SITE.XML_dfs.namenode.heartbeat.recheck-interval=15000</code></pre></div>
+      <div class="code" data-lang="bash" data-file="hdfs-lab/topology.sh"><pre><code>#!/bin/bash
+# Rack topology script: Hadoop passes IP addresses, we print one rack per argument.
+for host in "$@"; do
+  name=$(getent hosts "$host" | awk '{print $2}')
+  n=$(echo "$name" | grep -o 'datanode-[0-9]*' | grep -o '[0-9]*$')
+  if [ -z "$n" ]; then echo "/default-rack"
+  elif [ "$n" -le 2 ]; then echo "/rack1"
+  else echo "/rack2"; fi
+done</code></pre></div>
+      <div class="code" data-lang="bash" data-file="Terminal (in hdfs-lab)"><pre><code>chmod +x topology.sh
+docker compose up -d --scale datanode=4
+docker compose exec namenode hdfs dfsadmin -printTopology</code></pre><div class="output">Rack: /rack1
+   172.19.0.4:9866 (lab5-datanode-2.lab5_default) In Service
+   172.19.0.5:9866 (lab5-datanode-1.lab5_default) In Service
+
+Rack: /rack2
+   172.19.0.7:9866 (lab5-datanode-4.lab5_default) In Service
+   172.19.0.6:9866 (lab5-datanode-3.lab5_default) In Service</div></div>
+      <span class="behind">Two settings are deliberately shortened so you can watch things happen: checkpoints every <b>2 minutes</b> (default 1 hour, Lesson 5.4) and the dead-node check every <b>15 s</b> (default 5 minutes, Lesson 5.5). Stop the Lesson 4.3 cluster first; both use port 9870.</span></li>
+    <li><h4>Store a file twice: normal blocks and 1 MB blocks</h4>
+      <div class="code" data-lang="bash" data-file="Terminal"><pre><code>docker compose cp canteen_orders.csv namenode:/tmp/canteen_orders.csv
+docker compose exec namenode hdfs dfs -mkdir -p /user/hadoop/data
+docker compose exec namenode hdfs dfs -put /tmp/canteen_orders.csv data/
+docker compose exec namenode hdfs dfs -D dfs.blocksize=1048576 -put /tmp/canteen_orders.csv data/canteen_1mb.csv
+docker compose exec namenode hdfs dfs -ls data</code></pre><div class="output">Found 2 items
+-rw-r--r--   3 hadoop supergroup    4692009 2026-10-21 06:49 data/canteen_1mb.csv
+-rw-r--r--   3 hadoop supergroup    4692009 2026-10-21 06:49 data/canteen_orders.csv</div></div>
+      <span class="behind">Same 4.5 MB file (from <code>make_canteen.py</code>, Lesson 4.3), stored as 1 block and as 5 blocks. The <code>3</code> in the listing is the replication factor.</span></li>
+    <li><h4>Ask the NameNode about the cluster</h4>
+      <div class="code" data-lang="bash" data-file="Terminal"><pre><code>docker compose exec namenode hdfs dfsadmin -report</code></pre><div class="output">Configured Capacity: 1082212696064 (1007.89 GB)
+Present Capacity: 86452563116 (80.52 GB)
+DFS Remaining: 86424092672 (80.49 GB)
+DFS Used: 28470444 (27.15 MB)
+DFS Used%: 0.03%
+Replicated Blocks:
+	Under replicated blocks: 0
+	Blocks with corrupt replicas: 0
+	Missing blocks: 0
+…
+Live datanodes (4):
+
+Name: 172.19.0.5:9866 (lab5-datanode-1.lab5_default)
+Hostname: ab3b1bedf98a
+Rack: /rack1
+Decommission Status : Normal
+Configured Capacity: 270553174016 (251.97 GB)
+DFS Used: 9481956 (9.04 MB)
+Non DFS Used: 24661946652 (22.97 GB)
+DFS Remaining: 21606023168 (20.12 GB)
+…
+Last contact: Wed Oct 21 06:49:41 UTC 2026
+Last Block Report: Wed Oct 21 06:49:03 UTC 2026
+Num of Blocks: 6</div></div>
+      <span class="behind">The NameNode knows every DataNode's rack, capacity, last heartbeat (“Last contact”) and how many blocks it holds. All four containers share one physical disk here, so “capacity” is counted four times; on real servers each DataNode reports its own disks.</span></li>
+    <li><h4>Ask where a file's blocks are</h4>
+      <div class="code" data-lang="bash" data-file="Terminal"><pre><code>docker compose exec namenode hdfs fsck /user/hadoop/data/canteen_1mb.csv -files -blocks -locations -racks</code></pre><div class="output">/user/hadoop/data/canteen_1mb.csv 4692009 bytes, replicated: replication=3, 5 block(s):  OK
+0. BP-1507681208-172.19.0.3-1792565333483:blk_1073741826_1002 len=1048576 Live_repl=3  [/rack1/172.19.0.5:9866, /rack2/172.19.0.6:9866, /rack2/172.19.0.7:9866]
+1. BP-1507681208-172.19.0.3-1792565333483:blk_1073741827_1003 len=1048576 Live_repl=3  [/rack1/172.19.0.5:9866, /rack1/172.19.0.4:9866, /rack2/172.19.0.7:9866]
+2. BP-1507681208-172.19.0.3-1792565333483:blk_1073741828_1004 len=1048576 Live_repl=3  [/rack2/172.19.0.6:9866, /rack2/172.19.0.7:9866, /rack1/172.19.0.5:9866]
+3. BP-1507681208-172.19.0.3-1792565333483:blk_1073741829_1005 len=1048576 Live_repl=3  [/rack2/172.19.0.6:9866, /rack2/172.19.0.7:9866, /rack1/172.19.0.5:9866]
+4. BP-1507681208-172.19.0.3-1792565333483:blk_1073741830_1006 len=497705 Live_repl=3  [/rack1/172.19.0.5:9866, /rack1/172.19.0.4:9866, /rack2/172.19.0.6:9866]
+
+Status: HEALTHY
+ Number of data-nodes:	4
+ Number of racks:		2</div></div>
+      <span class="behind">This is the NameNode's map for one file: block ID, length, and the three DataNodes (with racks) holding each replica. <code>BP-…</code> is the block pool, <code>_1002</code> the generation stamp.</span></li>
+    <li><h4>Look inside the NameNode's folder</h4>
+      <div class="code" data-lang="bash" data-file="Terminal"><pre><code>docker compose exec namenode ls -l /tmp/hadoop-hadoop/dfs/name/current
+docker compose exec namenode cat /tmp/hadoop-hadoop/dfs/name/current/VERSION</code></pre><div class="output">-rw-r--r-- 1 hadoop users 1048576 Oct 21 06:49 edits_inprogress_0000000000000000001
+-rw-r--r-- 1 hadoop users     401 Oct 21 06:48 fsimage_0000000000000000000
+-rw-r--r-- 1 hadoop users      62 Oct 21 06:48 fsimage_0000000000000000000.md5
+-rw-r--r-- 1 hadoop users       2 Oct 21 06:49 seen_txid
+-rw-r--r-- 1 hadoop users     215 Oct 21 06:48 VERSION
+#Wed Oct 21 06:48:53 UTC 2026
+namespaceID=1092532876
+blockpoolID=BP-1507681208-172.19.0.3-1792565333483
+storageType=NAME_NODE
+cTime=1792565333485
+clusterID=CID-570b3f1b-005e-4977-a8e0-3476c40d28cc
+layoutVersion=-67</div></div>
+      <span class="behind">No file contents at all: a 401-byte empty fsimage from the format, and the edit log recording every change since (Lesson 5.4). The metadata of all our files fits in a few kilobytes.</span></li>
+    <li><h4>Look inside a DataNode's folder</h4>
+      <div class="code" data-lang="bash" data-file="Terminal"><pre><code>docker compose exec --index 1 datanode bash -c 'find /tmp/hadoop-hadoop/dfs/data -name "blk_*" | sort | xargs ls -l'
+docker compose exec --index 1 datanode cat /tmp/hadoop-hadoop/dfs/data/current/VERSION</code></pre><div class="output">-rw-r--r-- 1 hadoop users 4692009 … /current/BP-1507681208-172.19.0.3-1792565333483/current/finalized/subdir0/subdir0/blk_1073741825
+-rw-r--r-- 1 hadoop users   36667 … /subdir0/subdir0/blk_1073741825_1001.meta
+-rw-r--r-- 1 hadoop users 1048576 … /subdir0/subdir0/blk_1073741826
+-rw-r--r-- 1 hadoop users    8199 … /subdir0/subdir0/blk_1073741826_1002.meta
+…
+-rw-r--r-- 1 hadoop users  497705 … /subdir0/subdir0/blk_1073741830
+-rw-r--r-- 1 hadoop users    3899 … /subdir0/subdir0/blk_1073741830_1006.meta
+#Wed Oct 21 06:49:01 UTC 2026
+datanodeUuid=8c5d6579-638f-40fd-b59a-17ed6563d848
+storageType=DATA_NODE
+cTime=0
+clusterID=CID-570b3f1b-005e-4977-a8e0-3476c40d28cc
+layoutVersion=-57
+storageID=DS-291fa99b-6a48-43ad-9769-bad688411060</div></div>
+      <span class="behind">Each replica is two ordinary files: the data and its checksums. Same <code>clusterID</code> as the NameNode, or the DataNode would refuse to start (Lesson 4.3). Paths shortened with “…”.</span></li>
+    <li><h4>Read a block file directly</h4>
+      <div class="code" data-lang="bash" data-file="Terminal (on datanode-1)"><pre><code>head -3 blk_1073741826</code></pre><div class="output">order_id,item,amount
+1001,samosa,18
+1002,vada pav,20</div></div>
+      <span class="behind">The first block of the 1 MB-block copy starts with the CSV header. HDFS doesn't encode or compress your data: a block is a slice of your file's bytes.</span></li>
+  </ol>
+WARN> Never edit, move or delete files inside DataNode or NameNode folders by hand. Use HDFS commands; otherwise checksums, the block map and the metadata disagree, and HDFS reports corrupt or missing blocks.
+</section>
+
+<!-- ======================= PART 5: SEE IT HAPPEN ======================= -->
+<section class="part" id="animation">
+  <span class="part-label"><b>5</b> See it happen</span>
+  <h2>Following one file from its name to the disk</h2>
+  <p>On the left, the commands from Part 4. On the right, which daemon answers and what it holds.</p>
+  <div class="anim" data-frames="6">
+    <div class="anim__title">From path to bytes <span>6 steps</span></div>
+    <div class="anim__views">
+      <div class="view view--see">
+        <span class="view__tag">What you see</span>
+        <svg viewBox="0 0 360 250" role="img" aria-label="Terminal commands">
+          <rect x="14" y="14" width="332" height="206" rx="8" class="s-board"/>
+          <text x="26" y="32" font-size="9" class="mono" style="fill:#7F8C86">riya@edge : ~</text>
+          <g data-on="1"><text x="26" y="56" font-size="8.6" class="mono" style="fill:#7F8C86">$ hdfs dfs -ls data</text><text x="26" y="72" font-size="8.6" class="mono" style="fill:#9FD3B8">-rw-r--r-- 3 hadoop supergroup 4692009</text><text x="26" y="86" font-size="8.6" class="mono" style="fill:#9FD3B8">    … data/canteen_orders.csv</text></g>
+          <g data-on="2"><text x="26" y="56" font-size="8.6" class="mono" style="fill:#7F8C86">$ hdfs fsck …/canteen_orders.csv \</text><text x="26" y="70" font-size="8.6" class="mono" style="fill:#7F8C86">    -files -blocks -locations</text><text x="26" y="88" font-size="8.6" class="mono" style="fill:#9FD3B8">blk_1073741825_1001 len=4692009</text><text x="26" y="102" font-size="8.6" class="mono" style="fill:#9FD3B8">Live_repl=3 [dn-1, dn-2, dn-4]</text></g>
+          <g data-on="3"><text x="26" y="56" font-size="8.6" class="mono" style="fill:#7F8C86">$ ls name/current   (on the NameNode)</text><text x="26" y="72" font-size="8.6" class="mono" style="fill:#9FD3B8">edits_inprogress_…001</text><text x="26" y="86" font-size="8.6" class="mono" style="fill:#9FD3B8">fsimage_…000   seen_txid   VERSION</text><text x="180" y="190" text-anchor="middle" font-size="10" class="s-chalk">Metadata only, a few KB.</text></g>
+          <g data-on="4"><text x="26" y="56" font-size="8.6" class="mono" style="fill:#7F8C86">$ find data -name "blk_*"   (on dn-1)</text><text x="26" y="72" font-size="8.6" class="mono" style="fill:#9FD3B8">4692009  blk_1073741825</text><text x="26" y="86" font-size="8.6" class="mono" style="fill:#9FD3B8">  36667  blk_1073741825_1001.meta</text></g>
+          <g data-on="5"><text x="26" y="56" font-size="8.6" class="mono" style="fill:#7F8C86">$ head -3 blk_1073741826</text><text x="26" y="72" font-size="8.6" class="mono" style="fill:#9FD3B8">order_id,item,amount</text><text x="26" y="86" font-size="8.6" class="mono" style="fill:#9FD3B8">1001,samosa,18</text><text x="26" y="100" font-size="8.6" class="mono" style="fill:#9FD3B8">1002,vada pav,20</text></g>
+          <g data-on="6"><text x="26" y="56" font-size="8.6" class="mono" style="fill:#7F8C86">$ hdfs dfsadmin -report</text><text x="26" y="72" font-size="8.6" class="mono" style="fill:#9FD3B8">Live datanodes (4):</text><text x="26" y="86" font-size="8.6" class="mono" style="fill:#9FD3B8">Rack: /rack1 … Num of Blocks: 6</text><text x="26" y="100" font-size="8.6" class="mono" style="fill:#9FD3B8">Last contact: … 06:49:41</text></g>
+          <text x="352" y="244" text-anchor="end" class="s-wm">myphatshala.in</text>
+        </svg>
+        <ol class="caps" hidden>
+          <li><code>-ls</code> shows a normal-looking file: owner, size, replication 3. This answer comes only from the NameNode.</li>
+          <li><code>fsck</code> asks the NameNode for the file's blocks and where each replica is.</li>
+          <li>On the NameNode's disk there is no data: just the fsimage, the edit log and identity files.</li>
+          <li>On a DataNode's disk: the block as a plain file, plus its checksum file.</li>
+          <li>The block's bytes are literally the CSV text Riya uploaded.</li>
+          <li>The NameNode also tracks every DataNode: rack, capacity, last heartbeat and number of blocks.</li>
+        </ol>
+      </div>
+
+      <div class="view view--behind">
+        <span class="view__tag">Behind the screen</span>
+        <svg viewBox="0 0 360 250" role="img" aria-label="NameNode memory and DataNode disks">
+          <rect x="16" y="16" width="160" height="110" rx="8" class="s-board"/><text x="96" y="34" text-anchor="middle" font-size="9" font-weight="700" class="s-chalk">NameNode (memory)</text>
+          <g data-on="1-"><text x="26" y="54" font-size="8" class="s-chalk">namespace:</text><text x="26" y="68" font-size="8" class="mono" style="fill:#F5C77E">…/canteen_orders.csv r3</text></g>
+          <g data-on="2-"><text x="26" y="86" font-size="8" class="s-chalk">blocks: blk_…825</text><text x="26" y="100" font-size="8" class="s-chalk">block map: …825 → 1, 2, 4</text></g>
+          <g data-on="3-"><rect x="16" y="136" width="160" height="40" rx="6" class="s-soft-blue" style="stroke:var(--blue)"/><text x="96" y="152" text-anchor="middle" font-size="8" font-weight="700" class="s-blue">disk: fsimage + edits</text><text x="96" y="166" text-anchor="middle" font-size="7.6" class="s-ink">namespace saved, block map NOT saved</text></g>
+          <rect x="196" y="16" width="148" height="44" rx="6" class="s-soft-green" style="stroke:var(--green)"/><text x="270" y="34" text-anchor="middle" font-size="8.6" font-weight="700" class="s-green">datanode-1</text>
+          <rect x="196" y="68" width="148" height="44" rx="6" class="s-soft-green" style="stroke:var(--green)"/><text x="270" y="86" text-anchor="middle" font-size="8.6" font-weight="700" class="s-green">datanode-2</text>
+          <rect x="196" y="120" width="148" height="44" rx="6" class="s-card2"/><text x="270" y="138" text-anchor="middle" font-size="8.6" font-weight="700" class="s-ink">datanode-3</text>
+          <rect x="196" y="172" width="148" height="44" rx="6" class="s-soft-green" style="stroke:var(--green)"/><text x="270" y="190" text-anchor="middle" font-size="8.6" font-weight="700" class="s-green">datanode-4</text>
+          <g data-on="2-"><g font-size="7.6" class="mono s-ink"><text x="270" y="50" text-anchor="middle">blk_…825</text><text x="270" y="102" text-anchor="middle">blk_…825</text><text x="270" y="206" text-anchor="middle">blk_…825</text></g></g>
+          <g data-on="4"><rect x="200" y="40" width="140" height="16" rx="3" style="fill:none;stroke:var(--track);stroke-width:2"/><text x="96" y="200" text-anchor="middle" font-size="8.6" class="s-ink2">replica = data file + .meta</text></g>
+          <g data-on="5"><text x="96" y="200" text-anchor="middle" font-size="8.6" class="s-ink2">bytes go client ↔ DataNode</text><text x="96" y="214" text-anchor="middle" font-size="8.6" class="s-ink2">never through the NameNode</text></g>
+          <g data-on="6"><path d="M196 38h-20M196 90h-20M196 142h-20M196 194h-20" style="stroke:var(--green);stroke-width:1.6;stroke-dasharray:3 3"/><text x="96" y="200" text-anchor="middle" font-size="8.6" font-weight="700" class="s-green">heartbeats every 3 s</text><text x="96" y="214" text-anchor="middle" font-size="8.6" class="s-ink2">+ block reports fill the block map</text></g>
+          <text x="352" y="246" text-anchor="end" class="s-wm">myphatshala.in</text>
+        </svg>
+        <ol class="caps" hidden>
+          <li>The NameNode answers from its in-memory namespace: path, owner, size, replication.</li>
+          <li>It also knows the file's blocks and, from the block map, which DataNodes hold each replica.</li>
+          <li>Only the namespace is saved to disk (fsimage + edit log). The block map lives in memory only.</li>
+          <li>On each chosen DataNode, the replica is a data file and a checksum file.</li>
+          <li>When you read, the client gets locations from the NameNode and the bytes straight from a DataNode.</li>
+          <li>DataNodes keep the NameNode up to date with heartbeats and block reports, which is how the block map is (re)built.</li>
+        </ol>
+      </div>
+    </div>
+  </div>
+
+  <h3 id="playground">Try it yourself: the NameNode's view</h3>
+  <p>Open the <b>NameNode metadata</b> tab under the cluster: it is the playground's version of <code>fsck -files -blocks -locations</code>.</p>
+  {{PLAYGROUND}}
+</section>
+
+<!-- ======================= PART 6: REAL-WORLD USE ======================= -->
+<section class="part" id="real-world">
+  <span class="part-label"><b>6</b> Real-world use</span>
+  <h2>NameNodes and DataNodes in production</h2>
+
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="20" y="16" width="80" height="58" rx="6" class="s-board"/><text x="60" y="38" text-anchor="middle" font-size="8.6" class="mono" style="fill:#F5C77E">heap 128 GB</text><text x="60" y="56" text-anchor="middle" font-size="8.6" class="mono" style="fill:#9FD3B8">50 cr objects</text></svg></div>
+    <div><h4>1. NameNode sizing is about objects</h4>
+      <p>Large companies size NameNode memory by the number of files, directories and blocks, not by petabytes. Teams that create millions of tiny files are asked to compact them because they cost NameNode heap.</p>
+      <div class="uc-flow"><span>Objects</span><i>→</i><span class="java">Heap needed</span><i>→</i><span>Server size</span></div></div>
+  </div>
+
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="16" y="20" width="88" height="50" rx="6" class="s-soft-green" style="stroke:var(--green)"/><text x="60" y="42" text-anchor="middle" font-size="8.6" font-weight="700" class="s-green">12 × 16 TB</text><text x="60" y="58" text-anchor="middle" font-size="8.6" class="s-ink">per worker</text></svg></div>
+    <div><h4>2. Workers packed with disks</h4>
+      <p>DataNode servers commonly hold 12 or more large disks, each listed in <code>dfs.datanode.data.dir</code>. A dead disk is swapped while the node keeps serving from the others.</p>
+      <div class="uc-flow"><span>Disk fails</span><i>→</i><span class="java">Node keeps running</span><i>→</i><span>Hot-swap</span></div></div>
+  </div>
+
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="20" y="20" width="80" height="50" rx="6" class="s-soft-blue" style="stroke:var(--blue)"/><text x="60" y="42" text-anchor="middle" font-size="8.6" font-weight="700" class="s-blue">metadata</text><text x="60" y="58" text-anchor="middle" font-size="8.6" class="s-ink">2+ disks + backup</text></svg></div>
+    <div><h4>3. Protecting the metadata</h4>
+      <p>Admins write the NameNode metadata to more than one disk (a comma-separated <code>dfs.namenode.name.dir</code>), run HA, and back up the fsimage regularly. Losing it means losing the meaning of every block.</p>
+      <div class="uc-flow"><span>fsimage + edits</span><i>→</i><span class="java">Several copies</span><i>→</i><span>Backups</span></div></div>
+  </div>
+
+  <div class="usecase">
+    <div class="uc-art"><svg viewBox="0 0 120 90"><rect x="20" y="20" width="80" height="50" rx="6" class="s-card2"/><text x="60" y="42" text-anchor="middle" font-size="8.6" font-weight="700" class="s-ink">dfsadmin</text><text x="60" y="58" text-anchor="middle" font-size="8.6" class="s-ink2">-report daily</text></svg></div>
+    <div><h4>4. Daily health checks</h4>
+      <p>On-call engineers start the day with the NameNode UI or <code>hdfs dfsadmin -report</code>: live and dead DataNodes, remaining capacity, missing and under-replicated blocks.</p>
+      <div class="uc-flow"><span>Report</span><i>→</i><span class="java">Spot problems</span><i>→</i><span>Act before users notice</span></div></div>
+  </div>
+  <p class="muted">Simplified; organisations differ in tools and policies.</p>
+</section>
